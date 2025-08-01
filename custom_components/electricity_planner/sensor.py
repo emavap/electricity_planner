@@ -120,7 +120,6 @@ class BatteryAnalysisSensor(ElectricityPlannerSensorBase):
             "min_soc": battery_analysis.get("min_soc"),
             "max_soc": battery_analysis.get("max_soc"),
             "batteries_count": battery_analysis.get("batteries_count"),
-            "total_capacity": battery_analysis.get("total_capacity"),
             "batteries_full": battery_analysis.get("batteries_full"),
             "min_soc_threshold": battery_analysis.get("min_soc_threshold"),
             "max_soc_threshold": battery_analysis.get("max_soc_threshold"),
@@ -183,11 +182,11 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
 
     @property
     def native_value(self) -> float | None:
-        """Return the current house consumption."""
+        """Return the solar surplus."""
         if not self.coordinator.data or "power_analysis" not in self.coordinator.data:
             return None
         
-        return self.coordinator.data["power_analysis"].get("house_consumption")
+        return self.coordinator.data["power_analysis"].get("solar_surplus")
 
     @property
     def extra_state_attributes(self) -> dict[str, any]:

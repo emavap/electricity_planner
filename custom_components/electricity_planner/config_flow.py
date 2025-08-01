@@ -15,20 +15,14 @@ from .const import (
     CONF_LOWEST_PRICE_ENTITY,
     CONF_NEXT_PRICE_ENTITY,
     CONF_BATTERY_SOC_ENTITIES,
-    CONF_BATTERY_CAPACITY_ENTITIES,
-    CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_SOLAR_SURPLUS_ENTITY,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
-    CONF_SOLAR_FORECAST_HOURS,
-    CONF_CAR_CHARGING_HOURS,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
-    DEFAULT_SOLAR_FORECAST_HOURS,
-    DEFAULT_CAR_CHARGING_HOURS,
 )
 
 
@@ -69,15 +63,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     multiple=True
                 )
             ),
-            vol.Required(CONF_BATTERY_CAPACITY_ENTITIES): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="sensor",
-                    multiple=True
-                )
-            ),
-            vol.Required(CONF_HOUSE_CONSUMPTION_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
             vol.Required(CONF_SOLAR_SURPLUS_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
@@ -95,8 +80,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "lowest_price": "Lowest price today from Nord Pool",
                 "next_price": "Next hour price from Nord Pool",
                 "battery_soc": "Battery State of Charge entities",
-                "battery_capacity": "Battery capacity entities",
-                "house_consumption": "Current house power consumption in W",
                 "solar_surplus": "Current solar surplus (production - consumption) in W",
                 "car_charging": "Car charging power in W (optional)",
             },
@@ -138,22 +121,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     min=0, max=1, step=0.01, unit_of_measurement="€/kWh"
                 )
             ),
-            vol.Optional(
-                CONF_SOLAR_FORECAST_HOURS, 
-                default=DEFAULT_SOLAR_FORECAST_HOURS
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1, max=48, unit_of_measurement="hours"
-                )
-            ),
-            vol.Optional(
-                CONF_CAR_CHARGING_HOURS, 
-                default=DEFAULT_CAR_CHARGING_HOURS
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1, max=12, unit_of_measurement="hours"
-                )
-            ),
         })
 
         return self.async_show_form(
@@ -163,8 +130,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "min_soc": "Minimum battery charge level to maintain",
                 "max_soc": "Maximum battery charge level target", 
                 "price_threshold": "Price threshold for charging decisions",
-                "solar_hours": "Hours ahead to consider solar forecast",
-                "car_hours": "Preferred car charging duration",
             },
         )
 

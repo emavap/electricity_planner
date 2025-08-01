@@ -19,20 +19,14 @@ from .const import (
     CONF_LOWEST_PRICE_ENTITY,
     CONF_NEXT_PRICE_ENTITY,
     CONF_BATTERY_SOC_ENTITIES,
-    CONF_BATTERY_CAPACITY_ENTITIES,
-    CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_SOLAR_SURPLUS_ENTITY,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
-    CONF_SOLAR_FORECAST_HOURS,
-    CONF_CAR_CHARGING_HOURS,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
-    DEFAULT_SOLAR_FORECAST_HOURS,
-    DEFAULT_CAR_CHARGING_HOURS,
 )
 from .decision_engine import ChargingDecisionEngine
 
@@ -73,12 +67,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         if self.config.get(CONF_BATTERY_SOC_ENTITIES):
             entities_to_track.extend(self.config[CONF_BATTERY_SOC_ENTITIES])
         
-        if self.config.get(CONF_BATTERY_CAPACITY_ENTITIES):
-            entities_to_track.extend(self.config[CONF_BATTERY_CAPACITY_ENTITIES])
-        
         # Power entities
-        for entity_key in [CONF_HOUSE_CONSUMPTION_ENTITY, CONF_SOLAR_SURPLUS_ENTITY, 
-                          CONF_CAR_CHARGING_POWER_ENTITY]:
+        for entity_key in [CONF_SOLAR_SURPLUS_ENTITY, CONF_CAR_CHARGING_POWER_ENTITY]:
             if self.config.get(entity_key):
                 entities_to_track.append(self.config[entity_key])
 
@@ -134,19 +124,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 battery_soc_values.append({"entity_id": entity_id, "soc": soc})
         data["battery_soc"] = battery_soc_values
         
-        # Battery capacity data
-        battery_capacity_entities = self.config.get(CONF_BATTERY_CAPACITY_ENTITIES, [])
-        battery_capacity_values = []
-        for entity_id in battery_capacity_entities:
-            capacity = await self._get_state_value(entity_id)
-            if capacity is not None:
-                battery_capacity_values.append({"entity_id": entity_id, "capacity": capacity})
-        data["battery_capacity"] = battery_capacity_values
-        
-        # Power consumption and production data
-        data["house_consumption"] = await self._get_state_value(
-            self.config.get(CONF_HOUSE_CONSUMPTION_ENTITY)
-        )
+        # Power data
         data["solar_surplus"] = await self._get_state_value(
             self.config.get(CONF_SOLAR_SURPLUS_ENTITY)
         )
@@ -187,12 +165,3 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         """Get price threshold."""
         return self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
 
-    @property
-    def solar_forecast_hours(self) -> int:
-        """Get solar forecast hours."""
-        return self.config.get(CONF_SOLAR_FORECAST_HOURS, DEFAULT_SOLAR_FORECAST_HOURS)
-
-    @property
-    def car_charging_hours(self) -> int:
-        """Get car charging hours."""
-        return self.config.get(CONF_CAR_CHARGING_HOURS, DEFAULT_CAR_CHARGING_HOURS)

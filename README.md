@@ -182,13 +182,14 @@ Decision:
 ```
 Current Price: 0.14 €/kWh (threshold: 0.15)
 Next Hour Price: 0.10 €/kWh
+Price Position: 57% (middle of daily range, assuming low: 0.05, high: 0.25)
 Battery SOC: 65% (above 30% threshold)
 Solar Surplus: 200W
 Time: 15:00
 
 Decision:
-❌ Battery Grid Charging: FALSE ("Batteries above 30% and price not very low")
-❌ Car Grid Charging: FALSE ("Price improving next hour - wait for better price")
+❌ Battery Grid Charging: FALSE ("Price OK but not optimal - current: 0.140€/kWh, position: 57%")
+❌ Car Grid Charging: FALSE ("Price improving next hour (0.100€/kWh) - wait for better price")
 ```
 
 ### Scenario 4: High Price Period

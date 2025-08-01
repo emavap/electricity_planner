@@ -7,22 +7,16 @@ CONF_HIGHEST_PRICE_ENTITY = "highest_price_entity"
 CONF_LOWEST_PRICE_ENTITY = "lowest_price_entity"
 CONF_NEXT_PRICE_ENTITY = "next_price_entity"
 CONF_BATTERY_SOC_ENTITIES = "battery_soc_entities"
-CONF_BATTERY_CAPACITY_ENTITIES = "battery_capacity_entities"
-CONF_HOUSE_CONSUMPTION_ENTITY = "house_consumption_entity"
 CONF_SOLAR_SURPLUS_ENTITY = "solar_surplus_entity"
 CONF_CAR_CHARGING_POWER_ENTITY = "car_charging_power_entity"
 
 CONF_MIN_SOC_THRESHOLD = "min_soc_threshold"
 CONF_MAX_SOC_THRESHOLD = "max_soc_threshold"
 CONF_PRICE_THRESHOLD = "price_threshold"
-CONF_SOLAR_FORECAST_HOURS = "solar_forecast_hours"
-CONF_CAR_CHARGING_HOURS = "car_charging_hours"
 
 DEFAULT_MIN_SOC = 20
 DEFAULT_MAX_SOC = 90
 DEFAULT_PRICE_THRESHOLD = 0.15
-DEFAULT_SOLAR_FORECAST_HOURS = 12
-DEFAULT_CAR_CHARGING_HOURS = 8
 
 ATTR_BATTERY_GRID_CHARGING = "battery_grid_charging"
 ATTR_CAR_GRID_CHARGING = "car_grid_charging"
