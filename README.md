@@ -396,6 +396,84 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## 🎨 Lovelace Dashboard Card
+
+A beautiful, comprehensive dashboard card is provided to visualize the decision making and current situation.
+
+### Card Features
+
+- **🎯 Main Decision Display**: Shows current charging recommendations with color-coded status
+- **💰 Price Analysis**: Current price with daily positioning (0-100%)
+- **📊 Daily Price Range**: Visual bar showing where current price sits in daily range
+- **🔋 Battery Status**: SOC levels, battery count, min/max values
+- **⚡ Power Flow**: House consumption, solar surplus, car charging power
+- **📈 Price Trends**: Next hour price and trend direction
+- **✅ Decision Details**: Detailed reasoning for each recommendation
+
+### Prerequisites
+
+Install these custom cards via HACS:
+- [Mushroom Cards](https://github.com/piitaya/lovelace-mushroom)
+- [Bar Card](https://github.com/custom-cards/bar-card)
+
+### Installation
+
+1. **Install Prerequisites**:
+   - Install "Mushroom" via HACS Frontend
+   - Install "Bar Card" via HACS Frontend
+
+2. **Add the Card**:
+   - Copy the contents of [`lovelace-card.yaml`](lovelace-card.yaml)
+   - In Home Assistant, go to your dashboard
+   - Click "Edit Dashboard" → "Add Card" → "Manual"
+   - Paste the YAML content
+
+3. **Customize** (optional):
+   - Adjust colors in the `severity` sections
+   - Modify price thresholds for color coding
+   - Change card arrangement as needed
+
+### Card Preview
+
+The card displays:
+
+```
+┌─────────────────────────────────────┐
+│ ⚡ Electricity Planner              │
+│ 🔋⚡ Charge Both from Grid          │
+├─────────────────────────────────────┤
+│ 💰 0.087€/kWh    📈 Improving      │
+│ Position: 15% of daily range        │
+├─────────────────────────────────────┤
+│ ████░░░░░░░░░░░░░░░░░ 15%           │
+│ Low: 0.05€ | Current: 0.087€ | High: 0.25€
+├─────────────────────────────────────┤
+│ 🟢 Battery Grid  │  🟢 Car Grid    │
+│ Very low price   │  Very low price │
+├─────────────────────────────────────┤
+│ 🔋 Battery: 67%  │  ⚡ House: 2.1kW │
+│ 3 batteries      │  Solar: 500W    │
+├─────────────────────────────────────┤
+│ 🟢 Very Low Price │ 🟢 Price OK    │
+│ Threshold: 0.15€  │ Below threshold │
+└─────────────────────────────────────┘
+```
+
+### Color Coding
+
+- 🟢 **Green**: Favorable conditions (charge recommended, very low price)
+- 🟠 **Orange**: Moderate conditions (low price, medium battery)
+- 🔴 **Red**: Unfavorable conditions (high price, low battery, don't charge)
+
+### Real-time Updates
+
+The card automatically updates as the integration's sensors change, providing real-time visibility into:
+- Current charging decisions and reasoning
+- Price positioning within daily range
+- Battery status across all configured batteries
+- Power consumption and solar surplus
+- Price trends and next hour forecasts
+
 ## ⭐ Support
 
 If you find this integration useful, please consider starring the repository!

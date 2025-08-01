@@ -1,0 +1,252 @@
+# Electricity Planner Dashboard Card
+# Copy this YAML into your Lovelace dashboard
+
+type: vertical-stack
+cards:
+  # Main Decision Card
+  - type: custom:mushroom-template-card
+    primary: Electricity Planner
+    secondary: >-
+      {% if is_state('binary_sensor.electricity_planner_battery_grid_charging', 'on') and is_state('binary_sensor.electricity_planner_car_grid_charging', 'on') %}
+        🔋⚡ Charge Both from Grid
+      {% elif is_state('binary_sensor.electricity_planner_battery_grid_charging', 'on') %}
+        🔋 Charge Battery from Grid
+      {% elif is_state('binary_sensor.electricity_planner_car_grid_charging', 'on') %}
+        ⚡ Charge Car from Grid
+      {% else %}
+        ⏳ Wait - No Grid Charging
+      {% endif %}
+    icon: >-
+      {% if is_state('binary_sensor.electricity_planner_battery_grid_charging', 'on') or is_state('binary_sensor.electricity_planner_car_grid_charging', 'on') %}
+        mdi:flash
+      {% else %}
+        mdi:flash-off
+      {% endif %}
+    icon_color: >-
+      {% if is_state('binary_sensor.electricity_planner_battery_grid_charging', 'on') or is_state('binary_sensor.electricity_planner_car_grid_charging', 'on') %}
+        green
+      {% else %}
+        red
+      {% endif %}
+    badge_icon: mdi:currency-eur
+    badge_color: >-
+      {% set price = states('sensor.electricity_planner_price_analysis') | float(0) %}
+      {% if price < 0.10 %}
+        green
+      {% elif price < 0.20 %}
+        orange
+      {% else %}
+        red
+      {% endif %}
+
+  # Price Analysis Card
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-entity-card
+        entity: sensor.electricity_planner_price_analysis
+        name: Current Price
+        icon: mdi:currency-eur
+        secondary_info: >-
+          {% set attrs = state_attr('sensor.electricity_planner_price_analysis', '') %}
+          {% if attrs %}
+            Position: {{ (attrs.price_position * 100) | round(0) }}% of daily range
+          {% endif %}
+        icon_color: >-
+          {% set attrs = state_attr('sensor.electricity_planner_price_analysis', '') %}
+          {% if attrs and attrs.very_low_price %}
+            green
+          {% elif attrs and attrs.is_low_price %}
+            orange
+          {% else %}
+            red
+          {% endif %}
+
+      - type: custom:mushroom-template-card
+        primary: "{{ states('sensor.electricity_planner_price_analysis') | round(3) }} €/kWh"
+        secondary: >-
+          {% set attrs = state_attr('sensor.electricity_planner_price_analysis', '') %}
+          {% if attrs %}
+            {% if attrs.price_trend_improving %}
+              📈 Improving ({{ attrs.next_price | round(3) }} €/kWh next)
+            {% else %}
+              📉 Worsening ({{ attrs.next_price | round(3) }} €/kWh next)
+            {% endif %}
+          {% endif %}
+        icon: mdi:trending-up
+        icon_color: >-
+          {% set attrs = state_attr('sensor.electricity_planner_price_analysis', '') %}
+          {% if attrs and attrs.price_trend_improving %}
+            green
+          {% else %}
+            red
+          {% endif %}
+
+  # Daily Price Range Visualization
+  - type: custom:bar-card
+    entities:
+      - entity: sensor.electricity_planner_price_analysis
+        name: "Daily Price Range"
+    positions:
+      icon: inside
+      indicator: inside
+      name: inside
+    severity:
+      - color: '#4CAF50'
+        from: 0
+        to: 0.3
+      - color: '#FF9800'
+        from: 0.3
+        to: 0.7
+      - color: '#F44336'
+        from: 0.7
+        to: 1
+    min: 0
+    max: 1
+    height: 40px
+    unit_of_measurement: ''
+    entity_row: true
+    title: >-
+      {% set attrs = state_attr('sensor.electricity_planner_price_analysis', '') %}
+      {% if attrs %}
+        Current: {{ states('sensor.electricity_planner_price_analysis') | round(3) }}€ | 
+        Low: {{ attrs.lowest_price | round(3) }}€ | 
+        High: {{ attrs.highest_price | round(3) }}€
+      {% endif %}
+    value: >-
+      {% set attrs = state_attr('sensor.electricity_planner_price_analysis', '') %}
+      {% if attrs %}
+        {{ (attrs.price_position * 100) | round(0) }}%
+      {% else %}
+        0
+      {% endif %}
+
+  # Decision Details
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-entity-card
+        entity: binary_sensor.electricity_planner_battery_grid_charging
+        name: Battery Grid
+        icon: mdi:battery-charging
+        tap_action:
+          action: more-info
+        secondary_info: >-
+          {{ state_attr('binary_sensor.electricity_planner_battery_grid_charging', 'reason') }}
+        icon_color: >-
+          {% if is_state('binary_sensor.electricity_planner_battery_grid_charging', 'on') %}
+            green
+          {% else %}
+            red
+          {% endif %}
+
+      - type: custom:mushroom-entity-card
+        entity: binary_sensor.electricity_planner_car_grid_charging
+        name: Car Grid
+        icon: mdi:car-electric
+        tap_action:
+          action: more-info
+        secondary_info: >-
+          {{ state_attr('binary_sensor.electricity_planner_car_grid_charging', 'reason') }}
+        icon_color: >-
+          {% if is_state('binary_sensor.electricity_planner_car_grid_charging', 'on') %}
+            green
+          {% else %}
+            red
+          {% endif %}
+
+  # Battery & Power Status
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-entity-card
+        entity: sensor.electricity_planner_battery_analysis
+        name: Battery SOC
+        icon: mdi:battery
+        unit: "%"
+        secondary_info: >-
+          {% set attrs = state_attr('sensor.electricity_planner_battery_analysis', '') %}
+          {% if attrs %}
+            {{ attrs.batteries_count }} batteries | 
+            Min: {{ attrs.min_soc | round(0) }}% | 
+            Max: {{ attrs.max_soc | round(0) }}%
+          {% endif %}
+        icon_color: >-
+          {% set soc = states('sensor.electricity_planner_battery_analysis') | float(0) %}
+          {% if soc >= 80 %}
+            green
+          {% elif soc >= 40 %}
+            orange
+          {% else %}
+            red
+          {% endif %}
+
+      - type: custom:mushroom-entity-card
+        entity: sensor.electricity_planner_power_analysis
+        name: House Power
+        icon: mdi:home-lightning-bolt
+        unit: "W"
+        secondary_info: >-
+          {% set attrs = state_attr('sensor.electricity_planner_power_analysis', '') %}
+          {% if attrs %}
+            Solar: {{ attrs.solar_surplus }}W | 
+            Car: {{ attrs.car_charging_power }}W
+          {% endif %}
+        icon_color: >-
+          {% set attrs = state_attr('sensor.electricity_planner_power_analysis', '') %}
+          {% if attrs and attrs.has_solar_surplus %}
+            green
+          {% else %}
+            blue
+          {% endif %}
+
+  # Price Indicators
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-template-card
+        primary: >-
+          {% set attrs = state_attr('sensor.electricity_planner_price_analysis', '') %}
+          {% if attrs and attrs.very_low_price %}
+            Very Low Price
+          {% elif attrs and attrs.is_low_price %}
+            Low Price
+          {% else %}
+            High Price
+          {% endif %}
+        secondary: >-
+          {% set attrs = state_attr('sensor.electricity_planner_price_analysis', '') %}
+          {% if attrs %}
+            Threshold: {{ attrs.price_threshold | round(3) }}€/kWh
+          {% endif %}
+        icon: >-
+          {% set attrs = state_attr('sensor.electricity_planner_price_analysis', '') %}
+          {% if attrs and attrs.very_low_price %}
+            mdi:currency-eur-off
+          {% elif attrs and attrs.is_low_price %}
+            mdi:currency-eur
+          {% else %}
+            mdi:alert-circle
+          {% endif %}
+        icon_color: >-
+          {% set attrs = state_attr('sensor.electricity_planner_price_analysis', '') %}
+          {% if attrs and attrs.very_low_price %}
+            green
+          {% elif attrs and attrs.is_low_price %}
+            orange
+          {% else %}
+            red
+          {% endif %}
+
+      - type: custom:mushroom-entity-card
+        entity: binary_sensor.electricity_planner_low_electricity_price
+        name: Price OK
+        icon: mdi:check-circle
+        secondary_info: >-
+          {% if is_state('binary_sensor.electricity_planner_low_electricity_price', 'on') %}
+            Below threshold
+          {% else %}
+            Above threshold
+          {% endif %}
+        icon_color: >-
+          {% if is_state('binary_sensor.electricity_planner_low_electricity_price', 'on') %}
+            green
+          {% else %}
+            red
+          {% endif %}
