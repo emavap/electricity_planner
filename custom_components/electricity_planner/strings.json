@@ -1,0 +1,67 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Entity Selection",
+        "description": "Select the entities that provide data for the electricity planner.",
+        "data": {
+          "electricity_price_entity": "Electricity Price Entity",
+          "battery_soc_entities": "Battery SOC Entities",
+          "battery_capacity_entities": "Battery Capacity Entities (Optional)",
+          "solar_forecast_entity": "Solar Forecast Entity (Optional)",
+          "solar_production_entity": "Solar Production Entity (Optional)",
+          "car_charger_entity": "Car Charger Entity (Optional)",
+          "grid_power_entity": "Grid Power Entity (Optional)"
+        },
+        "data_description": {
+          "electricity_price_entity": "Entity providing current electricity price (e.g., from Nord Pool integration)",
+          "battery_soc_entities": "Entities providing battery state of charge for Huawei Luna, Victron, etc.",
+          "battery_capacity_entities": "Entities providing battery capacity information",
+          "solar_forecast_entity": "Entity providing solar production forecast",
+          "solar_production_entity": "Entity providing current solar production",
+          "car_charger_entity": "Switch entity for controlling car charger (Huawei charger)",
+          "grid_power_entity": "Entity providing grid power consumption/production"
+        }
+      },
+      "settings": {
+        "title": "Settings & Thresholds",
+        "description": "Configure charging thresholds and preferences.",
+        "data": {
+          "min_soc_threshold": "Minimum SOC Threshold",
+          "max_soc_threshold": "Maximum SOC Threshold",
+          "price_threshold": "Price Threshold",
+          "solar_forecast_hours": "Solar Forecast Hours",
+          "car_charging_hours": "Car Charging Hours"
+        },
+        "data_description": {
+          "min_soc_threshold": "Minimum battery charge level to maintain (%)",
+          "max_soc_threshold": "Maximum battery charge level target (%)",
+          "price_threshold": "Price threshold for charging decisions (€/kWh)",
+          "solar_forecast_hours": "Hours ahead to consider for solar forecast",
+          "car_charging_hours": "Preferred duration for car charging"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_config": "Invalid configuration",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Update Settings",
+        "description": "Update charging thresholds and preferences.",
+        "data": {
+          "min_soc_threshold": "Minimum SOC Threshold",
+          "max_soc_threshold": "Maximum SOC Threshold",
+          "price_threshold": "Price Threshold"
+        }
+      }
+    }
+  }
+}
