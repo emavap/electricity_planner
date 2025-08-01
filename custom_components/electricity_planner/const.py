@@ -7,7 +7,6 @@ CONF_BATTERY_SOC_ENTITIES = "battery_soc_entities"
 CONF_BATTERY_CAPACITY_ENTITIES = "battery_capacity_entities"
 CONF_SOLAR_FORECAST_ENTITY = "solar_forecast_entity"
 CONF_SOLAR_PRODUCTION_ENTITY = "solar_production_entity"
-CONF_CAR_CHARGER_ENTITY = "car_charger_entity"
 CONF_GRID_POWER_ENTITY = "grid_power_entity"
 
 CONF_MIN_SOC_THRESHOLD = "min_soc_threshold"
@@ -22,9 +21,10 @@ DEFAULT_PRICE_THRESHOLD = 0.15
 DEFAULT_SOLAR_FORECAST_HOURS = 12
 DEFAULT_CAR_CHARGING_HOURS = 8
 
-ATTR_CHARGING_DECISION = "charging_decision"
-ATTR_REASON = "reason"
+ATTR_BATTERY_GRID_CHARGING = "battery_grid_charging"
+ATTR_CAR_GRID_CHARGING = "car_grid_charging"
+ATTR_BATTERY_REASON = "battery_reason"
+ATTR_CAR_REASON = "car_reason"
 ATTR_NEXT_EVALUATION = "next_evaluation"
 ATTR_CURRENT_PRICE = "current_price"
-ATTR_AVERAGE_PRICE = "average_price"
 ATTR_SOLAR_FORECAST = "solar_forecast"

@@ -47,14 +47,14 @@ class ElectricityPlannerSensorBase(CoordinatorEntity, SensorEntity):
 
 
 class ChargingDecisionSensor(ElectricityPlannerSensorBase):
-    """Sensor for charging decision status."""
+    """Sensor for grid charging decision status."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the charging decision sensor."""
         super().__init__(coordinator, entry)
-        self._attr_name = "Charging Decision"
-        self._attr_unique_id = f"{entry.entry_id}_charging_decision"
-        self._attr_icon = "mdi:battery-charging"
+        self._attr_name = "Grid Charging Decision"
+        self._attr_unique_id = f"{entry.entry_id}_grid_charging_decision"
+        self._attr_icon = "mdi:transmission-tower"
 
     @property
     def native_value(self) -> str:
@@ -62,17 +62,17 @@ class ChargingDecisionSensor(ElectricityPlannerSensorBase):
         if not self.coordinator.data:
             return "unknown"
         
-        battery_recommended = self.coordinator.data.get("battery_charging_recommended", False)
-        car_recommended = self.coordinator.data.get("car_charging_recommended", False)
+        battery_grid = self.coordinator.data.get("battery_grid_charging", False)
+        car_grid = self.coordinator.data.get("car_grid_charging", False)
         
-        if battery_recommended and car_recommended:
-            return "charge_both"
-        elif battery_recommended:
-            return "charge_battery"
-        elif car_recommended:
-            return "charge_car"
+        if battery_grid and car_grid:
+            return "charge_both_from_grid"
+        elif battery_grid:
+            return "charge_battery_from_grid"
+        elif car_grid:
+            return "charge_car_from_grid"
         else:
-            return "wait"
+            return "no_grid_charging"
 
     @property
     def extra_state_attributes(self) -> dict[str, any]:
@@ -81,10 +81,10 @@ class ChargingDecisionSensor(ElectricityPlannerSensorBase):
             return {}
         
         return {
-            "battery_charging_recommended": self.coordinator.data.get("battery_charging_recommended"),
-            "car_charging_recommended": self.coordinator.data.get("car_charging_recommended"),
-            "battery_charging_reason": self.coordinator.data.get("battery_charging_reason"),
-            "car_charging_reason": self.coordinator.data.get("car_charging_reason"),
+            "battery_grid_charging": self.coordinator.data.get("battery_grid_charging"),
+            "car_grid_charging": self.coordinator.data.get("car_grid_charging"),
+            "battery_grid_charging_reason": self.coordinator.data.get("battery_grid_charging_reason"),
+            "car_grid_charging_reason": self.coordinator.data.get("car_grid_charging_reason"),
             "next_evaluation": self.coordinator.data.get("next_evaluation"),
         }
 

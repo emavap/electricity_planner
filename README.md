@@ -4,7 +4,7 @@
 [![GitHub release](https://img.shields.io/github/release/emavap/electricity_planner.svg)](https://github.com/emavap/electricity_planner/releases/)
 [![License](https://img.shields.io/github/license/emavap/electricity_planner.svg)](LICENSE)
 
-A Home Assistant integration that provides intelligent electricity usage planning, specifically designed for Belgian electricity markets with support for multiple battery systems and solar installations.
+A Home Assistant integration that provides intelligent electricity usage planning decisions, specifically designed for Belgian electricity markets. The integration analyzes battery status, solar forecasts, and electricity prices to provide **boolean recommendations** for when to charge batteries and cars from the grid. **Power control is handled by external systems.**
 
 ## ✨ Features
 
@@ -13,16 +13,18 @@ A Home Assistant integration that provides intelligent electricity usage plannin
 - Multiple battery monitoring simultaneously
 - Configurable SOC thresholds per setup
 
-### ⚡ Smart Charging Decisions
-- **Price-based charging** using real-time electricity prices
-- **Solar-aware charging** that considers production forecasts
-- **Emergency charging** when batteries drop below critical levels
+### ⚡ Smart Grid Charging Decisions
+- **Price-based analysis** using real-time electricity prices
+- **Solar-aware decisions** that consider production forecasts
+- **Emergency charging** recommendations when batteries are critical
 - **Multi-factor algorithm** combining price, solar, and battery data
+- **Boolean outputs** for external charging control systems
 
-### 🚗 Car Charging Control
-- **Huawei car charger** integration
-- **Intelligent scheduling** during low-price or high-solar periods
+### 🚗 Car Grid Charging Recommendations
+- **Intelligent scheduling** recommendations during low-price periods
+- **Solar preference** - avoids grid charging when solar is available
 - **Battery priority** ensures home batteries are maintained first
+- **Time-based logic** for optimal night charging
 
 ### 🌞 Solar Optimization
 - **Real-time production monitoring**
@@ -33,21 +35,25 @@ A Home Assistant integration that provides intelligent electricity usage plannin
 
 ### Core Components
 1. **Entity-Based Configuration**: Select any compatible entities during setup
-2. **Decision Engine**: Multi-factor algorithm for optimal charging decisions  
+2. **Decision Engine**: Multi-factor algorithm for optimal grid charging decisions  
 3. **Coordinator**: Real-time data coordination and state management
-4. **Control Interface**: Switches and sensors for monitoring and control
+4. **Boolean Outputs**: Binary sensors indicating when to charge from grid
 
 ### Decision Algorithm Flow
 ```
-Price Analysis + Battery Status + Solar Forecast → Charging Decision
+Price Analysis + Battery Status + Solar Forecast → Grid Charging Decisions
 ```
 
-The algorithm considers:
+The algorithm provides **two key boolean outputs**:
+- **`binary_sensor.battery_grid_charging`** - True when batteries should be charged from grid
+- **`binary_sensor.car_grid_charging`** - True when car should be charged from grid
+
+Decision factors:
 - Current vs. forecasted electricity prices
 - Individual battery SOC levels and capacity
 - Solar production forecast and current output
 - User-defined thresholds and preferences
-- Grid feed-in compensation rates
+- Time-of-day considerations
 
 ## 📦 Installation
 
@@ -80,7 +86,6 @@ The algorithm considers:
 - **Battery Capacity Entities**: Battery capacity information
 - **Solar Forecast Entity**: Solar production forecast data
 - **Solar Production Entity**: Current solar production (kW)
-- **Car Charger Entity**: Switch for car charger control
 - **Grid Power Entity**: Grid power consumption/production
 
 ### Settings
@@ -95,28 +100,68 @@ The algorithm considers:
 ## 📊 Created Entities
 
 ### Sensors
-- `sensor.electricity_planner_charging_decision` - Overall charging status
+- `sensor.electricity_planner_grid_charging_decision` - Overall grid charging status
 - `sensor.electricity_planner_battery_analysis` - Battery status and SOC data
 - `sensor.electricity_planner_price_analysis` - Price analysis and thresholds
 - `sensor.electricity_planner_solar_analysis` - Solar production and forecast
 
-### Binary Sensors
-- `binary_sensor.electricity_planner_battery_charging_recommended`
-- `binary_sensor.electricity_planner_car_charging_recommended`
-- `binary_sensor.electricity_planner_low_electricity_price`
-- `binary_sensor.electricity_planner_solar_production_active`
-- `binary_sensor.electricity_planner_battery_needs_charging`
+### Binary Sensors (Key Outputs)
+- **`binary_sensor.electricity_planner_battery_grid_charging`** - ✅ **Charge batteries from grid**
+- **`binary_sensor.electricity_planner_car_grid_charging`** - ✅ **Charge car from grid**
+- `binary_sensor.electricity_planner_low_electricity_price` - Price below threshold
+- `binary_sensor.electricity_planner_solar_production_active` - Solar currently producing
+- `binary_sensor.electricity_planner_battery_needs_charging` - Battery below minimum SOC
 
-### Switches
-- `switch.electricity_planner_car_charger_control` - Manual car charger control
-- `switch.electricity_planner_auto_charging_mode` - Enable/disable automatic mode
+## 🔧 Integration with External Systems
 
-## 🔧 Automation Examples
+The integration provides **boolean decision outputs** that can be used by other systems to control actual charging hardware.
 
-### Emergency Battery Charging
+### Battery Grid Charging Control
 ```yaml
 automation:
-  - alias: "Emergency Battery Charging Alert"
+  - alias: "Control Battery Charging from Grid"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.electricity_planner_battery_grid_charging
+    action:
+      - service: >
+          {% if trigger.to_state.state == 'on' %}
+            your_battery_system.start_grid_charging
+          {% else %}
+            your_battery_system.stop_grid_charging
+          {% endif %}
+        data:
+          entity_id: your.battery_charger_entity
+      - service: notify.mobile_app_your_device
+        data:
+          message: "Battery grid charging {{ 'started' if trigger.to_state.state == 'on' else 'stopped' }} - {{ state_attr('binary_sensor.electricity_planner_battery_grid_charging', 'reason') }}"
+```
+
+### Car Grid Charging Control
+```yaml
+automation:
+  - alias: "Control Car Charging from Grid"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.electricity_planner_car_grid_charging
+    action:
+      - service: >
+          {% if trigger.to_state.state == 'on' %}
+            switch.turn_on
+          {% else %}
+            switch.turn_off
+          {% endif %}
+        data:
+          entity_id: switch.your_car_charger
+      - service: notify.mobile_app_your_device
+        data:
+          message: "Car grid charging {{ 'started' if trigger.to_state.state == 'on' else 'stopped' }} - {{ state_attr('binary_sensor.electricity_planner_car_grid_charging', 'reason') }}"
+```
+
+### Emergency Battery Alert
+```yaml
+automation:
+  - alias: "Emergency Battery Alert"
     trigger:
       - platform: state
         entity_id: binary_sensor.electricity_planner_battery_needs_charging
@@ -124,28 +169,8 @@ automation:
     action:
       - service: notify.mobile_app_your_device
         data:
-          title: "Battery Alert"
-          message: "Emergency charging activated - battery below {{ states('sensor.electricity_planner_battery_analysis') }}%"
-```
-
-### Automatic Car Charging
-```yaml
-automation:
-  - alias: "Auto Car Charging"
-    trigger:
-      - platform: state
-        entity_id: binary_sensor.electricity_planner_car_charging_recommended
-        to: "on"
-    condition:
-      - condition: state
-        entity_id: switch.electricity_planner_auto_charging_mode
-        state: "on"
-    action:
-      - service: switch.turn_on
-        entity_id: switch.electricity_planner_car_charger_control
-      - service: notify.mobile_app_your_device
-        data:
-          message: "Car charging started - {{ state_attr('binary_sensor.electricity_planner_car_charging_recommended', 'reason') }}"
+          title: "Battery Emergency"
+          message: "Battery below minimum threshold - emergency charging may be needed!"
 ```
 
 ## 🇧🇪 Belgium Specific Features
@@ -173,16 +198,18 @@ This integration is optimized for the Belgian electricity market:
 - SolarEdge systems
 - Any system providing production sensors
 
-### Car Chargers
-- Huawei car chargers
-- Any Home Assistant compatible charger switch
+### External Charging Control Systems
+- Any battery management system with HA integration
+- Car chargers with Home Assistant switch entities
+- Custom charging controllers via automations
 
 ## 🐛 Troubleshooting
 
 ### Common Issues
-1. **No charging decisions**: Verify electricity price entity is providing valid data
-2. **Car charger not responding**: Check that the car charger entity is a switch type
-3. **Solar data missing**: Ensure solar entities are correctly configured and providing data
+1. **No grid charging decisions**: Verify electricity price entity is providing valid data
+2. **Binary sensors always off**: Check that battery SOC entities are configured and providing data
+3. **Solar data missing**: Ensure solar entities are correctly configured and providing numeric data
+4. **Decisions seem incorrect**: Check the price threshold and SOC threshold settings in the integration configuration
 
 ### Debug Logging
 Add this to your `configuration.yaml`:

@@ -15,7 +15,6 @@ from .const import (
     CONF_BATTERY_CAPACITY_ENTITIES,
     CONF_SOLAR_FORECAST_ENTITY,
     CONF_SOLAR_PRODUCTION_ENTITY,
-    CONF_CAR_CHARGER_ENTITY,
     CONF_GRID_POWER_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
@@ -47,19 +46,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.data.update(user_input)
             return await self.async_step_settings()
 
-        entity_registry = async_get_entity_registry(self.hass)
-        
-        sensor_entities = [
-            entity.entity_id
-            for entity in entity_registry.entities.values()
-            if entity.domain == "sensor"
-        ]
-        
-        switch_entities = [
-            entity.entity_id
-            for entity in entity_registry.entities.values()
-            if entity.domain == "switch"
-        ]
 
         schema = vol.Schema({
             vol.Required(CONF_ELECTRICITY_PRICE_ENTITY): selector.EntitySelector(
@@ -83,9 +69,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_SOLAR_PRODUCTION_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
-            vol.Optional(CONF_CAR_CHARGER_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="switch")
-            ),
             vol.Optional(CONF_GRID_POWER_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
@@ -98,7 +81,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "electricity_price": "Entity providing current electricity price",
                 "battery_soc": "Battery State of Charge entities (Huawei Luna, Victron)",
                 "solar_forecast": "Solar production forecast entity",
-                "car_charger": "Car charger switch entity (Huawei charger)",
             },
         )
 

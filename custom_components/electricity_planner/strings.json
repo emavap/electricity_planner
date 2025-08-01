@@ -10,7 +10,6 @@
           "battery_capacity_entities": "Battery Capacity Entities (Optional)",
           "solar_forecast_entity": "Solar Forecast Entity (Optional)",
           "solar_production_entity": "Solar Production Entity (Optional)",
-          "car_charger_entity": "Car Charger Entity (Optional)",
           "grid_power_entity": "Grid Power Entity (Optional)"
         },
         "data_description": {
@@ -19,7 +18,6 @@
           "battery_capacity_entities": "Entities providing battery capacity information",
           "solar_forecast_entity": "Entity providing solar production forecast",
           "solar_production_entity": "Entity providing current solar production",
-          "car_charger_entity": "Switch entity for controlling car charger (Huawei charger)",
           "grid_power_entity": "Entity providing grid power consumption/production"
         }
       },

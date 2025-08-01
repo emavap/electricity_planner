@@ -1,6 +1,6 @@
 # Electricity Planner Integration
 
-This integration provides intelligent electricity usage planning for Home Assistant, specifically designed for Belgian electricity markets and compatible with various battery systems and solar installations.
+This integration provides intelligent electricity usage planning **decisions** for Home Assistant, specifically designed for Belgian electricity markets. It analyzes battery status, solar forecasts, and electricity prices to provide **boolean recommendations** for when to charge from the grid. **The integration does not control hardware directly** - it provides decision outputs for external charging control systems.
 
 ## Key Features
 
@@ -9,16 +9,16 @@ This integration provides intelligent electricity usage planning for Home Assist
 - **Victron**: Compatible with Victron battery systems
 - **Flexible Configuration**: Add any battery entity via the GUI setup
 
-### ⚡ Smart Charging Decisions
-- **Price-Based Charging**: Uses electricity price data to determine optimal charging times
-- **Solar Integration**: Considers solar production and forecasts to minimize grid usage
-- **Emergency Charging**: Ensures batteries never fall below critical levels
+### ⚡ Smart Grid Charging Decisions
+- **Price-Based Analysis**: Uses electricity price data to determine optimal grid charging times
+- **Solar Integration**: Considers solar production and forecasts to minimize unnecessary grid usage
+- **Emergency Logic**: Provides emergency charging recommendations when batteries are critical
 - **Multi-Factor Algorithm**: Combines price, solar forecast, and battery status
 
-### 🚗 Car Charging Control
-- **Huawei Charger Support**: Direct control of Huawei car chargers
-- **Intelligent Scheduling**: Charges during low-price periods or high solar production
-- **Battery Priority**: Ensures home batteries are maintained before car charging
+### 🚗 Car Grid Charging Recommendations
+- **Boolean Outputs**: Provides true/false recommendations for car grid charging
+- **Intelligent Scheduling**: Recommends charging during low-price periods when solar isn't available
+- **Battery Priority**: Ensures home batteries are maintained before recommending car charging
 
 ### 🌞 Solar Optimization
 - **Production Monitoring**: Tracks current solar panel output
@@ -35,7 +35,6 @@ This integration provides intelligent electricity usage planning for Home Assist
 - **Battery Capacity Entities**: Sensors providing battery capacity information
 - **Solar Forecast Entity**: Sensor providing solar production forecast
 - **Solar Production Entity**: Sensor providing current solar production (kW)
-- **Car Charger Entity**: Switch entity for car charger control
 - **Grid Power Entity**: Sensor providing grid power usage
 
 ### Settings
@@ -48,21 +47,17 @@ This integration provides intelligent electricity usage planning for Home Assist
 ## Created Entities
 
 ### Sensors
-- **Charging Decision**: Overall charging recommendation status
+- **Grid Charging Decision**: Overall grid charging recommendation status
 - **Battery Analysis**: Battery status with average SOC and individual battery data
 - **Price Analysis**: Current price analysis and recommendations
 - **Solar Analysis**: Solar production and forecast information
 
-### Binary Sensors
-- **Battery Charging Recommended**: True when battery charging is recommended
-- **Car Charging Recommended**: True when car charging is recommended
+### Binary Sensors (Key Outputs)
+- **Battery Grid Charging**: ✅ **True when batteries should be charged from grid**
+- **Car Grid Charging**: ✅ **True when car should be charged from grid**
 - **Low Electricity Price**: True when price is below threshold
 - **Solar Production Active**: True when solar panels are producing
 - **Battery Needs Charging**: True when battery is below minimum threshold
-
-### Switches
-- **Car Charger Control**: Manual control of car charger
-- **Auto Charging Mode**: Enable/disable automatic charging decisions
 
 ## Decision Algorithm
 

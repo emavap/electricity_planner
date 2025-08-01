@@ -1,7 +1,7 @@
 {
   "name": "Electricity Planner",
   "render_readme": true,
-  "domains": ["sensor", "switch", "binary_sensor"],
+  "domains": ["sensor", "binary_sensor"],
   "country": ["BE"],
   "homeassistant": "2024.4.0"
 }

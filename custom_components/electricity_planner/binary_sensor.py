@@ -23,8 +23,8 @@ async def async_setup_entry(
     coordinator = hass.data[DOMAIN][entry.entry_id]
     
     entities = [
-        BatteryChargingRecommendedBinarySensor(coordinator, entry),
-        CarChargingRecommendedBinarySensor(coordinator, entry),
+        BatteryGridChargingBinarySensor(coordinator, entry),
+        CarGridChargingBinarySensor(coordinator, entry),
         LowPriceBinarySensor(coordinator, entry),
         SolarProductionBinarySensor(coordinator, entry),
         BatteryNeedsChargingBinarySensor(coordinator, entry),
@@ -50,23 +50,23 @@ class ElectricityPlannerBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
         }
 
 
-class BatteryChargingRecommendedBinarySensor(ElectricityPlannerBinarySensorBase):
-    """Binary sensor for battery charging recommendation."""
+class BatteryGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
+    """Binary sensor for battery grid charging recommendation."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
-        """Initialize the battery charging recommended binary sensor."""
+        """Initialize the battery grid charging binary sensor."""
         super().__init__(coordinator, entry)
-        self._attr_name = "Battery Charging Recommended"
-        self._attr_unique_id = f"{entry.entry_id}_battery_charging_recommended"
+        self._attr_name = "Battery Grid Charging"
+        self._attr_unique_id = f"{entry.entry_id}_battery_grid_charging"
         self._attr_icon = "mdi:battery-charging"
         self._attr_device_class = BinarySensorDeviceClass.POWER
 
     @property
     def is_on(self) -> bool | None:
-        """Return true if battery charging is recommended."""
+        """Return true if battery should be charged from grid."""
         if not self.coordinator.data:
             return None
-        return self.coordinator.data.get("battery_charging_recommended", False)
+        return self.coordinator.data.get("battery_grid_charging", False)
 
     @property
     def extra_state_attributes(self) -> dict[str, any]:
@@ -74,27 +74,27 @@ class BatteryChargingRecommendedBinarySensor(ElectricityPlannerBinarySensorBase)
         if not self.coordinator.data:
             return {}
         return {
-            "reason": self.coordinator.data.get("battery_charging_reason"),
+            "reason": self.coordinator.data.get("battery_grid_charging_reason"),
         }
 
 
-class CarChargingRecommendedBinarySensor(ElectricityPlannerBinarySensorBase):
-    """Binary sensor for car charging recommendation."""
+class CarGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
+    """Binary sensor for car grid charging recommendation."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
-        """Initialize the car charging recommended binary sensor."""
+        """Initialize the car grid charging binary sensor."""
         super().__init__(coordinator, entry)
-        self._attr_name = "Car Charging Recommended"
-        self._attr_unique_id = f"{entry.entry_id}_car_charging_recommended"
+        self._attr_name = "Car Grid Charging"
+        self._attr_unique_id = f"{entry.entry_id}_car_grid_charging"
         self._attr_icon = "mdi:car-electric"
         self._attr_device_class = BinarySensorDeviceClass.POWER
 
     @property
     def is_on(self) -> bool | None:
-        """Return true if car charging is recommended."""
+        """Return true if car should be charged from grid."""
         if not self.coordinator.data:
             return None
-        return self.coordinator.data.get("car_charging_recommended", False)
+        return self.coordinator.data.get("car_grid_charging", False)
 
     @property
     def extra_state_attributes(self) -> dict[str, any]:
@@ -102,7 +102,7 @@ class CarChargingRecommendedBinarySensor(ElectricityPlannerBinarySensorBase):
         if not self.coordinator.data:
             return {}
         return {
-            "reason": self.coordinator.data.get("car_charging_reason"),
+            "reason": self.coordinator.data.get("car_grid_charging_reason"),
         }
 
 

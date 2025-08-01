@@ -19,7 +19,6 @@ from .const import (
     CONF_BATTERY_CAPACITY_ENTITIES,
     CONF_SOLAR_FORECAST_ENTITY,
     CONF_SOLAR_PRODUCTION_ENTITY,
-    CONF_CAR_CHARGER_ENTITY,
     CONF_GRID_POWER_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
@@ -155,26 +154,6 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("Could not convert state to float: %s = %s", entity_id, state.state)
             return None
 
-    async def set_car_charger_state(self, state: bool) -> bool:
-        """Control car charger state."""
-        car_charger_entity = self.config.get(CONF_CAR_CHARGER_ENTITY)
-        if not car_charger_entity:
-            _LOGGER.warning("No car charger entity configured")
-            return False
-        
-        service = "switch.turn_on" if state else "switch.turn_off"
-        try:
-            await self.hass.services.async_call(
-                "switch",
-                "turn_on" if state else "turn_off",
-                {"entity_id": car_charger_entity},
-                blocking=True
-            )
-            _LOGGER.info("Car charger %s: %s", "enabled" if state else "disabled", car_charger_entity)
-            return True
-        except Exception as err:
-            _LOGGER.error("Failed to control car charger %s: %s", car_charger_entity, err)
-            return False
 
     @property
     def min_soc_threshold(self) -> float:
