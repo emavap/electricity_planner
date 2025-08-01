@@ -14,12 +14,15 @@ from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 
 from .const import (
     DOMAIN,
-    CONF_ELECTRICITY_PRICE_ENTITY,
+    CONF_CURRENT_PRICE_ENTITY,
+    CONF_HIGHEST_PRICE_ENTITY,
+    CONF_LOWEST_PRICE_ENTITY,
+    CONF_NEXT_PRICE_ENTITY,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_BATTERY_CAPACITY_ENTITIES,
-    CONF_SOLAR_FORECAST_ENTITY,
-    CONF_SOLAR_PRODUCTION_ENTITY,
-    CONF_GRID_POWER_ENTITY,
+    CONF_HOUSE_CONSUMPTION_ENTITY,
+    CONF_SOLAR_SURPLUS_ENTITY,
+    CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
@@ -60,17 +63,24 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         """Set up listeners for entity state changes."""
         entities_to_track = []
         
-        if self.config.get(CONF_ELECTRICITY_PRICE_ENTITY):
-            entities_to_track.append(self.config[CONF_ELECTRICITY_PRICE_ENTITY])
+        # Price entities
+        for entity_key in [CONF_CURRENT_PRICE_ENTITY, CONF_HIGHEST_PRICE_ENTITY, 
+                          CONF_LOWEST_PRICE_ENTITY, CONF_NEXT_PRICE_ENTITY]:
+            if self.config.get(entity_key):
+                entities_to_track.append(self.config[entity_key])
         
+        # Battery entities
         if self.config.get(CONF_BATTERY_SOC_ENTITIES):
             entities_to_track.extend(self.config[CONF_BATTERY_SOC_ENTITIES])
         
-        if self.config.get(CONF_SOLAR_PRODUCTION_ENTITY):
-            entities_to_track.append(self.config[CONF_SOLAR_PRODUCTION_ENTITY])
+        if self.config.get(CONF_BATTERY_CAPACITY_ENTITIES):
+            entities_to_track.extend(self.config[CONF_BATTERY_CAPACITY_ENTITIES])
         
-        if self.config.get(CONF_GRID_POWER_ENTITY):
-            entities_to_track.append(self.config[CONF_GRID_POWER_ENTITY])
+        # Power entities
+        for entity_key in [CONF_HOUSE_CONSUMPTION_ENTITY, CONF_SOLAR_SURPLUS_ENTITY, 
+                          CONF_CAR_CHARGING_POWER_ENTITY]:
+            if self.config.get(entity_key):
+                entities_to_track.append(self.config[entity_key])
 
         if entities_to_track:
             async_track_state_change_event(
@@ -101,11 +111,21 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         """Fetch data from all configured entities."""
         data = {}
         
-        electricity_price = await self._get_state_value(
-            self.config.get(CONF_ELECTRICITY_PRICE_ENTITY)
+        # Price data
+        data["current_price"] = await self._get_state_value(
+            self.config.get(CONF_CURRENT_PRICE_ENTITY)
         )
-        data["electricity_price"] = electricity_price
+        data["highest_price"] = await self._get_state_value(
+            self.config.get(CONF_HIGHEST_PRICE_ENTITY)
+        )
+        data["lowest_price"] = await self._get_state_value(
+            self.config.get(CONF_LOWEST_PRICE_ENTITY)
+        )
+        data["next_price"] = await self._get_state_value(
+            self.config.get(CONF_NEXT_PRICE_ENTITY)
+        )
         
+        # Battery SOC data
         battery_soc_entities = self.config.get(CONF_BATTERY_SOC_ENTITIES, [])
         battery_soc_values = []
         for entity_id in battery_soc_entities:
@@ -114,6 +134,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 battery_soc_values.append({"entity_id": entity_id, "soc": soc})
         data["battery_soc"] = battery_soc_values
         
+        # Battery capacity data
         battery_capacity_entities = self.config.get(CONF_BATTERY_CAPACITY_ENTITIES, [])
         battery_capacity_values = []
         for entity_id in battery_capacity_entities:
@@ -122,20 +143,16 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 battery_capacity_values.append({"entity_id": entity_id, "capacity": capacity})
         data["battery_capacity"] = battery_capacity_values
         
-        solar_forecast = await self._get_state_value(
-            self.config.get(CONF_SOLAR_FORECAST_ENTITY)
+        # Power consumption and production data
+        data["house_consumption"] = await self._get_state_value(
+            self.config.get(CONF_HOUSE_CONSUMPTION_ENTITY)
         )
-        data["solar_forecast"] = solar_forecast
-        
-        solar_production = await self._get_state_value(
-            self.config.get(CONF_SOLAR_PRODUCTION_ENTITY)
+        data["solar_surplus"] = await self._get_state_value(
+            self.config.get(CONF_SOLAR_SURPLUS_ENTITY)
         )
-        data["solar_production"] = solar_production
-        
-        grid_power = await self._get_state_value(
-            self.config.get(CONF_GRID_POWER_ENTITY)
+        data["car_charging_power"] = await self._get_state_value(
+            self.config.get(CONF_CAR_CHARGING_POWER_ENTITY)
         )
-        data["grid_power"] = grid_power
         
         return data
 

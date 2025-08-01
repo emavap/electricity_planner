@@ -44,16 +44,17 @@ A Home Assistant integration that provides intelligent electricity usage plannin
 Price Analysis + Battery Status + Solar Forecast → Grid Charging Decisions
 ```
 
-The algorithm provides **two key boolean outputs**:
+The algorithm uses **comprehensive Nord Pool data** and provides **two key boolean outputs**:
 - **`binary_sensor.battery_grid_charging`** - True when batteries should be charged from grid
 - **`binary_sensor.car_grid_charging`** - True when car should be charged from grid
 
 Decision factors:
-- Current vs. forecasted electricity prices
-- Individual battery SOC levels and capacity
-- Solar production forecast and current output
-- User-defined thresholds and preferences
-- Time-of-day considerations
+- **Nord Pool pricing**: Current vs. highest/lowest prices, next hour trends
+- **Price positioning**: Where current price sits in daily range (0-100%)
+- **Battery status**: SOC levels, total capacity, remaining capacity needs
+- **Power flow**: House consumption, solar surplus, car charging power
+- **Smart logic**: Very low prices (bottom 30%), price trend improvements
+- **Solar preference**: Uses solar surplus instead of grid when available
 
 ## 📦 Installation
 
@@ -79,14 +80,23 @@ Decision factors:
 ## ⚙️ Configuration
 
 ### Required Entities
-- **Electricity Price Entity**: Sensor providing current price (€/kWh)
+
+#### Nord Pool Price Entities
+- **Current Price Entity**: Current electricity price (€/kWh) 
+- **Highest Price Entity**: Highest price today (€/kWh)
+- **Lowest Price Entity**: Lowest price today (€/kWh)
+- **Next Price Entity**: Next hour price (€/kWh)
+
+#### Battery Entities
 - **Battery SOC Entities**: One or more battery state-of-charge sensors (%)
+- **Battery Capacity Entities**: Battery capacity sensors (kWh)
+
+#### Power Flow Entities
+- **House Consumption Entity**: Current house power consumption (W)
+- **Solar Surplus Entity**: Current solar surplus = production - consumption (W)
 
 ### Optional Entities  
-- **Battery Capacity Entities**: Battery capacity information
-- **Solar Forecast Entity**: Solar production forecast data
-- **Solar Production Entity**: Current solar production (kW)
-- **Grid Power Entity**: Grid power consumption/production
+- **Car Charging Power Entity**: Current car charging power (W)
 
 ### Settings
 | Setting | Default | Description |
@@ -101,9 +111,9 @@ Decision factors:
 
 ### Sensors
 - `sensor.electricity_planner_grid_charging_decision` - Overall grid charging status
-- `sensor.electricity_planner_battery_analysis` - Battery status and SOC data
-- `sensor.electricity_planner_price_analysis` - Price analysis and thresholds
-- `sensor.electricity_planner_solar_analysis` - Solar production and forecast
+- `sensor.electricity_planner_battery_analysis` - Battery status, SOC and capacity data
+- `sensor.electricity_planner_price_analysis` - Comprehensive Nord Pool price analysis
+- `sensor.electricity_planner_power_analysis` - House consumption, solar surplus, car charging power
 
 ### Binary Sensors (Key Outputs)
 - **`binary_sensor.electricity_planner_battery_grid_charging`** - ✅ **Charge batteries from grid** (True only when price favorable)
@@ -183,9 +193,10 @@ This integration is optimized for the Belgian electricity market:
 ## 🔗 Compatibility
 
 ### Electricity Price Sources
-- [Nord Pool](https://github.com/custom-components/nordpool) integration
-- [Entsoe-e](https://github.com/JaccoR/hass-entso-e) integration
-- Any sensor providing price in €/kWh
+- **[Nord Pool](https://github.com/custom-components/nordpool) integration** (recommended)
+  - Provides current, highest, lowest, and next hour prices
+  - Essential for comprehensive price analysis and positioning
+- Any integration providing the 4 required price entities in €/kWh
 
 ### Battery Systems
 - Huawei Luna (via [Huawei Solar](https://github.com/wlcrs/huawei_solar) integration)
@@ -205,10 +216,11 @@ This integration is optimized for the Belgian electricity market:
 ## 🐛 Troubleshooting
 
 ### Common Issues
-1. **Binary sensors always False**: Check that electricity price is below your configured threshold
-2. **No price data**: Verify electricity price entity is providing valid numeric data
-3. **Solar data missing**: Ensure solar entities are correctly configured and providing numeric data
-4. **Unexpected recommendations**: Verify price threshold setting - integration only recommends grid charging when price is below threshold
+1. **Binary sensors always False**: Check that electricity price is below your configured threshold and verify all required Nord Pool entities are configured
+2. **Missing Nord Pool data**: Ensure all 4 price entities (current, highest, lowest, next) are available and providing numeric data
+3. **Power flow issues**: Verify house consumption and solar surplus entities are providing valid data in Watts
+4. **Battery analysis errors**: Check that battery SOC and capacity entities are configured and providing numeric data
+5. **Unexpected recommendations**: Integration uses comprehensive price positioning - check price analysis sensor for detailed reasoning
 
 ### Debug Logging
 Add this to your `configuration.yaml`:

@@ -10,12 +10,15 @@ from homeassistant.helpers.entity_registry import async_get as async_get_entity_
 
 from .const import (
     DOMAIN,
-    CONF_ELECTRICITY_PRICE_ENTITY,
+    CONF_CURRENT_PRICE_ENTITY,
+    CONF_HIGHEST_PRICE_ENTITY,
+    CONF_LOWEST_PRICE_ENTITY,
+    CONF_NEXT_PRICE_ENTITY,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_BATTERY_CAPACITY_ENTITIES,
-    CONF_SOLAR_FORECAST_ENTITY,
-    CONF_SOLAR_PRODUCTION_ENTITY,
-    CONF_GRID_POWER_ENTITY,
+    CONF_HOUSE_CONSUMPTION_ENTITY,
+    CONF_SOLAR_SURPLUS_ENTITY,
+    CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
@@ -48,7 +51,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
         schema = vol.Schema({
-            vol.Required(CONF_ELECTRICITY_PRICE_ENTITY): selector.EntitySelector(
+            vol.Required(CONF_CURRENT_PRICE_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(CONF_HIGHEST_PRICE_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(CONF_LOWEST_PRICE_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(CONF_NEXT_PRICE_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Required(CONF_BATTERY_SOC_ENTITIES): selector.EntitySelector(
@@ -57,19 +69,19 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     multiple=True
                 )
             ),
-            vol.Optional(CONF_BATTERY_CAPACITY_ENTITIES): selector.EntitySelector(
+            vol.Required(CONF_BATTERY_CAPACITY_ENTITIES): selector.EntitySelector(
                 selector.EntitySelectorConfig(
                     domain="sensor",
                     multiple=True
                 )
             ),
-            vol.Optional(CONF_SOLAR_FORECAST_ENTITY): selector.EntitySelector(
+            vol.Required(CONF_HOUSE_CONSUMPTION_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
-            vol.Optional(CONF_SOLAR_PRODUCTION_ENTITY): selector.EntitySelector(
+            vol.Required(CONF_SOLAR_SURPLUS_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
-            vol.Optional(CONF_GRID_POWER_ENTITY): selector.EntitySelector(
+            vol.Optional(CONF_CAR_CHARGING_POWER_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
         })
@@ -78,9 +90,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=schema,
             description_placeholders={
-                "electricity_price": "Entity providing current electricity price",
-                "battery_soc": "Battery State of Charge entities (Huawei Luna, Victron)",
-                "solar_forecast": "Solar production forecast entity",
+                "current_price": "Current electricity price from Nord Pool",
+                "highest_price": "Highest price today from Nord Pool", 
+                "lowest_price": "Lowest price today from Nord Pool",
+                "next_price": "Next hour price from Nord Pool",
+                "battery_soc": "Battery State of Charge entities",
+                "battery_capacity": "Battery capacity entities",
+                "house_consumption": "Current house power consumption in W",
+                "solar_surplus": "Current solar surplus (production - consumption) in W",
+                "car_charging": "Car charging power in W (optional)",
             },
         )
 

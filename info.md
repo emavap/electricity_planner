@@ -28,14 +28,23 @@ This integration provides intelligent electricity usage planning **decisions** f
 ## Configuration
 
 ### Required Entities
-1. **Electricity Price Entity**: Sensor providing current electricity price (€/kWh)
-2. **Battery SOC Entities**: One or more sensors providing battery state of charge (%)
+
+#### Nord Pool Price Entities (Required)
+1. **Current Price Entity**: Current electricity price (€/kWh)
+2. **Highest Price Entity**: Highest price today (€/kWh) 
+3. **Lowest Price Entity**: Lowest price today (€/kWh)
+4. **Next Price Entity**: Next hour price (€/kWh)
+
+#### Battery Entities (Required)
+5. **Battery SOC Entities**: One or more battery state-of-charge sensors (%)
+6. **Battery Capacity Entities**: Battery capacity sensors (kWh)
+
+#### Power Flow Entities (Required)  
+7. **House Consumption Entity**: Current house power consumption (W)
+8. **Solar Surplus Entity**: Current solar surplus = production - consumption (W)
 
 ### Optional Entities
-- **Battery Capacity Entities**: Sensors providing battery capacity information
-- **Solar Forecast Entity**: Sensor providing solar production forecast
-- **Solar Production Entity**: Sensor providing current solar production (kW)
-- **Grid Power Entity**: Sensor providing grid power usage
+- **Car Charging Power Entity**: Current car charging power (W)
 
 ### Settings
 - **Min SOC Threshold**: Minimum battery level to maintain (default: 20%)
@@ -48,9 +57,9 @@ This integration provides intelligent electricity usage planning **decisions** f
 
 ### Sensors
 - **Grid Charging Decision**: Overall grid charging recommendation status
-- **Battery Analysis**: Battery status with average SOC and individual battery data
-- **Price Analysis**: Current price analysis and recommendations
-- **Solar Analysis**: Solar production and forecast information
+- **Battery Analysis**: Battery status with SOC, capacity, and remaining capacity data
+- **Price Analysis**: Comprehensive Nord Pool price analysis with positioning and trends
+- **Power Analysis**: House consumption, solar surplus, and car charging power flow
 
 ### Binary Sensors (Key Outputs)
 - **Battery Grid Charging**: ✅ **True when batteries should be charged from grid** (only when price favorable)

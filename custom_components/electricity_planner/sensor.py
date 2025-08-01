@@ -23,7 +23,7 @@ async def async_setup_entry(
         ChargingDecisionSensor(coordinator, entry),
         BatteryAnalysisSensor(coordinator, entry),
         PriceAnalysisSensor(coordinator, entry),
-        SolarAnalysisSensor(coordinator, entry),
+        PowerAnalysisSensor(coordinator, entry),
     ]
     
     async_add_entities(entities, False)
@@ -120,9 +120,11 @@ class BatteryAnalysisSensor(ElectricityPlannerSensorBase):
             "min_soc": battery_analysis.get("min_soc"),
             "max_soc": battery_analysis.get("max_soc"),
             "batteries_count": battery_analysis.get("batteries_count"),
+            "total_capacity": battery_analysis.get("total_capacity"),
             "batteries_full": battery_analysis.get("batteries_full"),
             "min_soc_threshold": battery_analysis.get("min_soc_threshold"),
             "max_soc_threshold": battery_analysis.get("max_soc_threshold"),
+            "remaining_capacity_percent": battery_analysis.get("remaining_capacity_percent"),
         }
 
 
@@ -154,44 +156,51 @@ class PriceAnalysisSensor(ElectricityPlannerSensorBase):
         
         price_analysis = self.coordinator.data["price_analysis"]
         return {
+            "highest_price": price_analysis.get("highest_price"),
+            "lowest_price": price_analysis.get("lowest_price"),
+            "next_price": price_analysis.get("next_price"),
             "price_threshold": price_analysis.get("price_threshold"),
             "is_low_price": price_analysis.get("is_low_price"),
-            "price_ratio": price_analysis.get("price_ratio"),
-            "recommendation": price_analysis.get("recommendation"),
+            "is_lowest_price": price_analysis.get("is_lowest_price"),
+            "price_position": price_analysis.get("price_position"),
+            "next_price_higher": price_analysis.get("next_price_higher"),
+            "price_trend_improving": price_analysis.get("price_trend_improving"),
+            "very_low_price": price_analysis.get("very_low_price"),
         }
 
 
-class SolarAnalysisSensor(ElectricityPlannerSensorBase):
-    """Sensor for solar analysis."""
+class PowerAnalysisSensor(ElectricityPlannerSensorBase):
+    """Sensor for power flow analysis."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
-        """Initialize the solar analysis sensor.""" 
+        """Initialize the power analysis sensor.""" 
         super().__init__(coordinator, entry)
-        self._attr_name = "Solar Analysis"
-        self._attr_unique_id = f"{entry.entry_id}_solar_analysis"
-        self._attr_icon = "mdi:solar-power"
-        self._attr_native_unit_of_measurement = "kW"
+        self._attr_name = "Power Analysis"
+        self._attr_unique_id = f"{entry.entry_id}_power_analysis"
+        self._attr_icon = "mdi:transmission-tower"
+        self._attr_native_unit_of_measurement = "W"
         self._attr_device_class = SensorDeviceClass.POWER
 
     @property
     def native_value(self) -> float | None:
-        """Return the current solar production."""
-        if not self.coordinator.data or "solar_analysis" not in self.coordinator.data:
+        """Return the current house consumption."""
+        if not self.coordinator.data or "power_analysis" not in self.coordinator.data:
             return None
         
-        return self.coordinator.data["solar_analysis"].get("current_production")
+        return self.coordinator.data["power_analysis"].get("house_consumption")
 
     @property
     def extra_state_attributes(self) -> dict[str, any]:
         """Return the state attributes."""
-        if not self.coordinator.data or "solar_analysis" not in self.coordinator.data:
+        if not self.coordinator.data or "power_analysis" not in self.coordinator.data:
             return {}
         
-        solar_analysis = self.coordinator.data["solar_analysis"]
+        power_analysis = self.coordinator.data["power_analysis"]
         return {
-            "forecast": solar_analysis.get("forecast"),
-            "forecast_hours": solar_analysis.get("forecast_hours"),
-            "is_producing": solar_analysis.get("is_producing"),
-            "has_good_forecast": solar_analysis.get("has_good_forecast"),
-            "recommendation": solar_analysis.get("recommendation"),
+            "solar_surplus": power_analysis.get("solar_surplus"),
+            "car_charging_power": power_analysis.get("car_charging_power"),
+            "has_solar_surplus": power_analysis.get("has_solar_surplus"),
+            "significant_solar_surplus": power_analysis.get("significant_solar_surplus"),
+            "car_currently_charging": power_analysis.get("car_currently_charging"),
+            "available_surplus_for_batteries": power_analysis.get("available_surplus_for_batteries"),
         }

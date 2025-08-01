@@ -5,20 +5,26 @@
         "title": "Entity Selection",
         "description": "Select the entities that provide data for the electricity planner.",
         "data": {
-          "electricity_price_entity": "Electricity Price Entity",
+          "current_price_entity": "Current Price Entity",
+          "highest_price_entity": "Highest Price Entity", 
+          "lowest_price_entity": "Lowest Price Entity",
+          "next_price_entity": "Next Price Entity",
           "battery_soc_entities": "Battery SOC Entities",
-          "battery_capacity_entities": "Battery Capacity Entities (Optional)",
-          "solar_forecast_entity": "Solar Forecast Entity (Optional)",
-          "solar_production_entity": "Solar Production Entity (Optional)",
-          "grid_power_entity": "Grid Power Entity (Optional)"
+          "battery_capacity_entities": "Battery Capacity Entities",
+          "house_consumption_entity": "House Consumption Entity",
+          "solar_surplus_entity": "Solar Surplus Entity",
+          "car_charging_power_entity": "Car Charging Power Entity (Optional)"
         },
         "data_description": {
-          "electricity_price_entity": "Entity providing current electricity price (e.g., from Nord Pool integration)",
-          "battery_soc_entities": "Entities providing battery state of charge for Huawei Luna, Victron, etc.",
+          "current_price_entity": "Current electricity price from Nord Pool integration",
+          "highest_price_entity": "Highest electricity price today from Nord Pool",
+          "lowest_price_entity": "Lowest electricity price today from Nord Pool", 
+          "next_price_entity": "Next hour electricity price from Nord Pool",
+          "battery_soc_entities": "Entities providing battery state of charge (%)",
           "battery_capacity_entities": "Entities providing battery capacity information",
-          "solar_forecast_entity": "Entity providing solar production forecast",
-          "solar_production_entity": "Entity providing current solar production",
-          "grid_power_entity": "Entity providing grid power consumption/production"
+          "house_consumption_entity": "Current house power consumption in W",
+          "solar_surplus_entity": "Current solar surplus (production - consumption) in W",
+          "car_charging_power_entity": "Car charging power in W"
         }
       },
       "settings": {
