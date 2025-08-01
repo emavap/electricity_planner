@@ -9,9 +9,9 @@ A Home Assistant integration that provides intelligent electricity usage plannin
 ## ✨ Features
 
 ### 🔋 Multi-Battery Support
-- **Huawei Luna** and **Victron** battery systems
+- **Any battery system** with SOC and capacity sensors
 - Multiple battery monitoring simultaneously
-- Configurable SOC thresholds per setup
+- Brand-independent - works with any Home Assistant battery integration
 
 ### ⚡ Smart Grid Charging Decisions
 - **Price-threshold based** - Only recommends grid charging when rates are below threshold
@@ -98,19 +98,15 @@ The integration evaluates car grid charging in this specific order:
    ✅ Price below threshold → Continue
    ```
 
-2. **☀️ Available Solar Surplus Check**
+2. **📊 Price-Only Analysis**
    ```
-   ❌ Solar surplus available for car (>2kW after batteries) → FALSE ("Use solar instead")
-   ✅ No significant surplus → Continue
+   ✅ Very low price (bottom 30% daily range) → TRUE
+   ✅ Price improving next hour → TRUE ("Charge now")
+   ✅ Any low price (below threshold) → TRUE
+   ❌ Otherwise → FALSE ("Price not favorable")
    ```
 
-3. **📊 Optimal Charging Conditions**
-   ```
-   ✅ Very low price (bottom 30% daily range) → TRUE (anytime)
-   ✅ Low price + night time (22:00-06:00) → TRUE
-   ✅ Price improving next hour → TRUE ("Charge now")
-   ❌ Otherwise → FALSE ("Price OK but not optimal")
-   ```
+**Note**: Car charging is purely price-based. Solar surplus is not considered as it's typically insufficient for car charging needs.
 
 ## 📈 Price Analysis Logic
 
@@ -127,12 +123,19 @@ price_position = (current_price - lowest_price) / (highest_price - lowest_price)
 - **Price Worsening**: Next hour price > current price
 
 ### Decision Priority
+
+#### Battery Charging:
 1. **🚫 Hard Stop**: Price above threshold → Always FALSE
 2. **🌞 Solar First**: Use available solar surplus before grid
 3. **💎 Very Low Prices**: Bottom 30% of daily range → TRUE
-4. **📈 Trend Analysis**: Price improving next hour → Consider TRUE
-5. **⏰ Time-based**: Night hours for car charging
-6. **📊 Position-based**: Reject if price position not optimal
+4. **📈 Trend Analysis**: Price improving next hour + capacity needed → TRUE
+5. **📊 Position-based**: Reject if price position not optimal
+
+#### Car Charging:
+1. **🚫 Hard Stop**: Price above threshold → Always FALSE
+2. **💎 Very Low Prices**: Bottom 30% of daily range → TRUE
+3. **📈 Trend Analysis**: Price improving next hour → TRUE
+4. **💰 Low Price**: Any price below threshold → TRUE
 
 ## 🔄 Real-time Updates
 
@@ -161,17 +164,16 @@ Decision:
 ✅ Car Grid Charging: TRUE ("Very low price - bottom 30% of daily range")
 ```
 
-### Scenario 2: Solar Surplus Available
+### Scenario 2: Solar Surplus Available (Battery Only)
 ```
 Current Price: 0.12 €/kWh (threshold: 0.15)
 Solar Surplus: 3000W
-Available after car charging: 2500W
 Battery SOC: 70%
 Time: 12:00
 
 Decision:
 ❌ Battery Grid Charging: FALSE ("Solar surplus available - use solar instead")
-❌ Car Grid Charging: FALSE ("Solar surplus available - use solar instead")
+✅ Car Grid Charging: TRUE ("Low price - below threshold")
 ```
 
 ### Scenario 3: Price Improving Next Hour
@@ -199,16 +201,16 @@ Decision:
 ❌ Car Grid Charging: FALSE ("Price too high - 0.220€/kWh > threshold 0.150€/kWh")
 ```
 
-### Scenario 5: Night Charging
+### Scenario 5: Standard Low Price
 ```
 Current Price: 0.13 €/kWh (threshold: 0.15)
 Price Position: 40% (middle range)
-Solar Surplus: 0W (night)
-Time: 23:00
+Solar Surplus: 0W
+Battery SOC: 80%
 
 Decision:
 ❌ Battery Grid Charging: FALSE ("Price OK but not optimal - position: 40%")
-✅ Car Grid Charging: TRUE ("Low price during night hours")
+✅ Car Grid Charging: TRUE ("Low price - below threshold")
 ```
 
 ## 📦 Installation
@@ -354,9 +356,9 @@ This integration is optimized for the Belgian electricity market:
 - Any integration providing the 4 required price entities in €/kWh
 
 ### Battery Systems
-- Huawei Luna (via [Huawei Solar](https://github.com/wlcrs/huawei_solar) integration)
-- Victron (via [Victron](https://github.com/Marty56/Home-Assistant-Victron) integration)
-- Any battery system with SOC sensor
+- **Any battery system** providing SOC (%) and capacity (kWh) sensors
+- Examples: Huawei Luna, Victron, Tesla Powerwall, LG Chem, BYD, etc.
+- Works with any Home Assistant battery integration
 
 ### Solar Systems
 - Huawei Solar inverters

@@ -5,9 +5,9 @@ This integration provides intelligent electricity usage planning **decisions** f
 ## Key Features
 
 ### 🔋 Multi-Battery Support
-- **Huawei Luna**: Full support for SOC monitoring and charging control
-- **Victron**: Compatible with Victron battery systems
-- **Flexible Configuration**: Add any battery entity via the GUI setup
+- **Any battery system** with SOC and capacity sensors
+- **Brand independent**: Works with any Home Assistant battery integration
+- **Multiple batteries**: Monitor several battery systems simultaneously
 
 ### ⚡ Smart Grid Charging Decisions
 - **Price-Threshold Based**: Only recommends grid charging when electricity rates are below threshold
@@ -16,9 +16,9 @@ This integration provides intelligent electricity usage planning **decisions** f
 - **Rate-Focused Logic**: Returns False when rates are too high, letting Home Assistant know it's not convenient
 
 ### 🚗 Car Grid Charging Recommendations
-- **Boolean Outputs**: Provides true/false recommendations for car grid charging
-- **Intelligent Scheduling**: Recommends charging during low-price periods when solar isn't available
-- **Battery Priority**: Ensures home batteries are maintained before recommending car charging
+- **Price-only logic**: Simple low-price based recommendations
+- **No time restrictions**: Charges anytime when price is favorable
+- **No solar consideration**: Solar surplus typically insufficient for car charging
 
 ### 🌞 Solar Optimization
 - **Production Monitoring**: Tracks current solar panel output

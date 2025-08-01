@@ -245,9 +245,7 @@ class ChargingDecisionEngine:
         battery_analysis: dict[str, Any],
         power_analysis: dict[str, Any],
     ) -> dict[str, Any]:
-        """Decide whether to charge car from grid based on comprehensive analysis."""
-        is_night_time = datetime.now().hour >= 22 or datetime.now().hour <= 6
-
+        """Decide whether to charge car from grid based on price analysis only."""
         # If price is too high, never recommend grid charging
         if not price_analysis["is_low_price"]:
             return {
@@ -255,25 +253,11 @@ class ChargingDecisionEngine:
                 "car_grid_charging_reason": f"Price too high ({price_analysis['current_price']:.3f}€/kWh) - threshold: {price_analysis['price_threshold']:.3f}€/kWh",
             }
 
-        # If there's solar surplus after accounting for car's current consumption, use solar instead
-        if power_analysis["has_solar_surplus"] and power_analysis["available_surplus_for_batteries"] > 2000:  # >2kW available
-            return {
-                "car_grid_charging": False,
-                "car_grid_charging_reason": f"Solar surplus available ({power_analysis['available_surplus_for_batteries']}W) - use solar instead of grid",
-            }
-
-        # Very low price (bottom 30% of daily range) - charge from grid regardless of time
+        # Very low price (bottom 30% of daily range) - charge from grid
         if price_analysis["very_low_price"]:
             return {
                 "car_grid_charging": True,
                 "car_grid_charging_reason": f"Very low price ({price_analysis['current_price']:.3f}€/kWh) - bottom 30% of daily range",
-            }
-
-        # Low price during night hours - good time to charge from grid
-        if price_analysis["is_low_price"] and is_night_time:
-            return {
-                "car_grid_charging": True,
-                "car_grid_charging_reason": f"Low price ({price_analysis['current_price']:.3f}€/kWh) during night hours",
             }
 
         # Price improving next hour - good time to charge now
@@ -283,7 +267,14 @@ class ChargingDecisionEngine:
                 "car_grid_charging_reason": f"Price improving next hour ({price_analysis['next_price']:.3f}€/kWh) - charge now",
             }
 
+        # Just low price (below threshold) - charge from grid
+        if price_analysis["is_low_price"]:
+            return {
+                "car_grid_charging": True,
+                "car_grid_charging_reason": f"Low price ({price_analysis['current_price']:.3f}€/kWh) - below threshold",
+            }
+
         return {
             "car_grid_charging": False,
-            "car_grid_charging_reason": f"Price OK but not optimal - current: {price_analysis['current_price']:.3f}€/kWh, position: {price_analysis['price_position']:.0%}",
+            "car_grid_charging_reason": f"Price not favorable - current: {price_analysis['current_price']:.3f}€/kWh, position: {price_analysis['price_position']:.0%}",
         }
