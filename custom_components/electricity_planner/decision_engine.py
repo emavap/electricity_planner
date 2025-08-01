@@ -110,7 +110,6 @@ class ChargingDecisionEngine:
             "min_soc": min_soc,
             "max_soc": max_soc,
             "batteries_count": len(battery_soc_data),
-            "needs_charging": min_soc < min_soc_threshold,
             "batteries_full": min_soc >= max_soc_threshold,
             "min_soc_threshold": min_soc_threshold,
             "max_soc_threshold": max_soc_threshold,
@@ -142,7 +141,7 @@ class ChargingDecisionEngine:
         battery_analysis: dict[str, Any],
         solar_analysis: dict[str, Any],
     ) -> dict[str, Any]:
-        """Decide whether to charge batteries from grid."""
+        """Decide whether to charge batteries from grid based only on price and solar conditions."""
         if battery_analysis["batteries_count"] == 0:
             return {
                 "battery_grid_charging": False,
@@ -155,30 +154,29 @@ class ChargingDecisionEngine:
                 "battery_grid_charging_reason": f"Batteries above {battery_analysis['max_soc_threshold']}% SOC",
             }
 
-        is_emergency = battery_analysis["needs_charging"]
         is_low_price = price_analysis["is_low_price"]
         has_good_solar_forecast = solar_analysis["has_good_forecast"]
         is_currently_producing = solar_analysis["is_producing"]
 
-        # Emergency charging from grid regardless of price or solar
-        if is_emergency:
+        # If price is too high, never recommend grid charging
+        if not is_low_price:
             return {
-                "battery_grid_charging": True,
-                "battery_grid_charging_reason": f"Emergency grid charging - battery below {battery_analysis['min_soc_threshold']}%",
+                "battery_grid_charging": False,
+                "battery_grid_charging_reason": f"Price too high ({price_analysis['current_price']:.3f}€/kWh) - threshold: {price_analysis['price_threshold']:.3f}€/kWh",
             }
 
-        # If solar is producing well, don't charge from grid
+        # If solar is producing well, don't charge from grid even if price is low
         if is_currently_producing and solar_analysis["current_production"] > 1.0:  # >1kW production
             return {
                 "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"Solar producing {solar_analysis['current_production']:.1f}kW - no grid charging needed",
+                "battery_grid_charging_reason": f"Solar producing {solar_analysis['current_production']:.1f}kW - use solar instead of grid",
             }
 
         # Low price and poor/no solar forecast - charge from grid
         if is_low_price and not has_good_solar_forecast:
             return {
                 "battery_grid_charging": True,
-                "battery_grid_charging_reason": f"Low price ({price_analysis['current_price']:.3f}€/kWh) and poor solar forecast - charge from grid",
+                "battery_grid_charging_reason": f"Low price ({price_analysis['current_price']:.3f}€/kWh) and poor solar forecast",
             }
 
         # Low price with good solar forecast - only charge if significant capacity needed
@@ -187,12 +185,12 @@ class ChargingDecisionEngine:
             if needed_charge > 30:  # If we need more than 30% charge
                 return {
                     "battery_grid_charging": True,
-                    "battery_grid_charging_reason": f"Low price and significant charge needed ({needed_charge:.1f}%) - supplement with grid",
+                    "battery_grid_charging_reason": f"Low price ({price_analysis['current_price']:.3f}€/kWh) and significant charge needed ({needed_charge:.1f}%)",
                 }
 
         return {
             "battery_grid_charging": False,
-            "battery_grid_charging_reason": f"No grid charging - price: {price_analysis['current_price']:.3f}€/kWh, solar forecast: {solar_analysis.get('forecast', 0):.1f}kW",
+            "battery_grid_charging_reason": f"Low price but good solar forecast expected - wait for solar",
         }
 
     def _decide_car_grid_charging(
@@ -201,41 +199,40 @@ class ChargingDecisionEngine:
         battery_analysis: dict[str, Any],
         solar_analysis: dict[str, Any],
     ) -> dict[str, Any]:
-        """Decide whether to charge car from grid."""
+        """Decide whether to charge car from grid based only on price and solar conditions."""
         is_low_price = price_analysis["is_low_price"]
-        batteries_ok = not battery_analysis["needs_charging"] if battery_analysis["batteries_count"] > 0 else True
         is_night_time = datetime.now().hour >= 22 or datetime.now().hour <= 6
         is_currently_producing = solar_analysis["is_producing"]
 
-        # Don't charge car from grid if batteries need attention
-        if not batteries_ok:
+        # If price is too high, never recommend grid charging
+        if not is_low_price:
             return {
                 "car_grid_charging": False,
-                "car_grid_charging_reason": "Batteries need charging first - no car grid charging",
+                "car_grid_charging_reason": f"Price too high ({price_analysis['current_price']:.3f}€/kWh) - threshold: {price_analysis['price_threshold']:.3f}€/kWh",
             }
 
         # If solar is producing well, prefer solar over grid for car charging
         if is_currently_producing and solar_analysis["current_production"] > 2.0:  # >2kW for car
             return {
                 "car_grid_charging": False,
-                "car_grid_charging_reason": f"Solar producing {solar_analysis['current_production']:.1f}kW - use solar for car charging instead of grid",
+                "car_grid_charging_reason": f"Solar producing {solar_analysis['current_production']:.1f}kW - use solar instead of grid",
             }
 
         # Low price during night hours - good time to charge from grid
         if is_low_price and is_night_time:
             return {
                 "car_grid_charging": True,
-                "car_grid_charging_reason": f"Low price ({price_analysis['current_price']:.3f}€/kWh) during night hours - charge car from grid",
+                "car_grid_charging_reason": f"Low price ({price_analysis['current_price']:.3f}€/kWh) during night hours",
             }
 
         # Low price during day but poor solar - charge from grid
         if is_low_price and not solar_analysis["has_good_forecast"]:
             return {
                 "car_grid_charging": True,
-                "car_grid_charging_reason": f"Low price ({price_analysis['current_price']:.3f}€/kWh) and poor solar forecast - charge car from grid",
+                "car_grid_charging_reason": f"Low price ({price_analysis['current_price']:.3f}€/kWh) and poor solar forecast",
             }
 
         return {
             "car_grid_charging": False,
-            "car_grid_charging_reason": f"No car grid charging - price: {price_analysis['current_price']:.3f}€/kWh, wait for solar or lower prices",
+            "car_grid_charging_reason": f"Low price but solar expected - wait for solar",
         }

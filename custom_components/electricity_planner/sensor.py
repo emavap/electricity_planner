@@ -120,7 +120,6 @@ class BatteryAnalysisSensor(ElectricityPlannerSensorBase):
             "min_soc": battery_analysis.get("min_soc"),
             "max_soc": battery_analysis.get("max_soc"),
             "batteries_count": battery_analysis.get("batteries_count"),
-            "needs_charging": battery_analysis.get("needs_charging"),
             "batteries_full": battery_analysis.get("batteries_full"),
             "min_soc_threshold": battery_analysis.get("min_soc_threshold"),
             "max_soc_threshold": battery_analysis.get("max_soc_threshold"),

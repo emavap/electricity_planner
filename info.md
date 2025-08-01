@@ -10,10 +10,10 @@ This integration provides intelligent electricity usage planning **decisions** f
 - **Flexible Configuration**: Add any battery entity via the GUI setup
 
 ### ⚡ Smart Grid Charging Decisions
-- **Price-Based Analysis**: Uses electricity price data to determine optimal grid charging times
-- **Solar Integration**: Considers solar production and forecasts to minimize unnecessary grid usage
-- **Emergency Logic**: Provides emergency charging recommendations when batteries are critical
-- **Multi-Factor Algorithm**: Combines price, solar forecast, and battery status
+- **Price-Threshold Based**: Only recommends grid charging when electricity rates are below threshold
+- **Solar Integration**: Prefers solar over grid power when available
+- **No Emergency Overrides**: External systems handle emergency situations
+- **Rate-Focused Logic**: Returns False when rates are too high, letting Home Assistant know it's not convenient
 
 ### 🚗 Car Grid Charging Recommendations
 - **Boolean Outputs**: Provides true/false recommendations for car grid charging
@@ -53,11 +53,10 @@ This integration provides intelligent electricity usage planning **decisions** f
 - **Solar Analysis**: Solar production and forecast information
 
 ### Binary Sensors (Key Outputs)
-- **Battery Grid Charging**: ✅ **True when batteries should be charged from grid**
-- **Car Grid Charging**: ✅ **True when car should be charged from grid**
+- **Battery Grid Charging**: ✅ **True when batteries should be charged from grid** (only when price favorable)
+- **Car Grid Charging**: ✅ **True when car should be charged from grid** (only when price favorable)
 - **Low Electricity Price**: True when price is below threshold
 - **Solar Production Active**: True when solar panels are producing
-- **Battery Needs Charging**: True when battery is below minimum threshold
 
 ## Decision Algorithm
 

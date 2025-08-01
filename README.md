@@ -14,11 +14,11 @@ A Home Assistant integration that provides intelligent electricity usage plannin
 - Configurable SOC thresholds per setup
 
 ### ⚡ Smart Grid Charging Decisions
-- **Price-based analysis** using real-time electricity prices
-- **Solar-aware decisions** that consider production forecasts
-- **Emergency charging** recommendations when batteries are critical
-- **Multi-factor algorithm** combining price, solar, and battery data
-- **Boolean outputs** for external charging control systems
+- **Price-threshold based** - Only recommends grid charging when rates are below threshold
+- **Solar-aware decisions** that prefer solar over grid power
+- **Simple boolean outputs** - True only when grid charging is economically favorable
+- **No emergency overrides** - External systems handle emergency situations
+- **Rate-focused logic** - Returns False (0) when rates are too high
 
 ### 🚗 Car Grid Charging Recommendations
 - **Intelligent scheduling** recommendations during low-price periods
@@ -106,11 +106,10 @@ Decision factors:
 - `sensor.electricity_planner_solar_analysis` - Solar production and forecast
 
 ### Binary Sensors (Key Outputs)
-- **`binary_sensor.electricity_planner_battery_grid_charging`** - ✅ **Charge batteries from grid**
-- **`binary_sensor.electricity_planner_car_grid_charging`** - ✅ **Charge car from grid**
+- **`binary_sensor.electricity_planner_battery_grid_charging`** - ✅ **Charge batteries from grid** (True only when price favorable)
+- **`binary_sensor.electricity_planner_car_grid_charging`** - ✅ **Charge car from grid** (True only when price favorable)
 - `binary_sensor.electricity_planner_low_electricity_price` - Price below threshold
 - `binary_sensor.electricity_planner_solar_production_active` - Solar currently producing
-- `binary_sensor.electricity_planner_battery_needs_charging` - Battery below minimum SOC
 
 ## 🔧 Integration with External Systems
 
@@ -158,19 +157,19 @@ automation:
           message: "Car grid charging {{ 'started' if trigger.to_state.state == 'on' else 'stopped' }} - {{ state_attr('binary_sensor.electricity_planner_car_grid_charging', 'reason') }}"
 ```
 
-### Emergency Battery Alert
+### Price Alert Notification
 ```yaml
 automation:
-  - alias: "Emergency Battery Alert"
+  - alias: "Low Price Alert"
     trigger:
       - platform: state
-        entity_id: binary_sensor.electricity_planner_battery_needs_charging
+        entity_id: binary_sensor.electricity_planner_low_electricity_price
         to: "on"
     action:
       - service: notify.mobile_app_your_device
         data:
-          title: "Battery Emergency"
-          message: "Battery below minimum threshold - emergency charging may be needed!"
+          title: "Low Electricity Price"
+          message: "Electricity price is now {{ states('sensor.electricity_planner_price_analysis') }}€/kWh - good time to charge!"
 ```
 
 ## 🇧🇪 Belgium Specific Features
@@ -206,10 +205,10 @@ This integration is optimized for the Belgian electricity market:
 ## 🐛 Troubleshooting
 
 ### Common Issues
-1. **No grid charging decisions**: Verify electricity price entity is providing valid data
-2. **Binary sensors always off**: Check that battery SOC entities are configured and providing data
+1. **Binary sensors always False**: Check that electricity price is below your configured threshold
+2. **No price data**: Verify electricity price entity is providing valid numeric data
 3. **Solar data missing**: Ensure solar entities are correctly configured and providing numeric data
-4. **Decisions seem incorrect**: Check the price threshold and SOC threshold settings in the integration configuration
+4. **Unexpected recommendations**: Verify price threshold setting - integration only recommends grid charging when price is below threshold
 
 ### Debug Logging
 Add this to your `configuration.yaml`:

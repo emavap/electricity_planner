@@ -27,7 +27,6 @@ async def async_setup_entry(
         CarGridChargingBinarySensor(coordinator, entry),
         LowPriceBinarySensor(coordinator, entry),
         SolarProductionBinarySensor(coordinator, entry),
-        BatteryNeedsChargingBinarySensor(coordinator, entry),
     ]
     
     async_add_entities(entities, False)
@@ -170,33 +169,3 @@ class SolarProductionBinarySensor(ElectricityPlannerBinarySensorBase):
         }
 
 
-class BatteryNeedsChargingBinarySensor(ElectricityPlannerBinarySensorBase):
-    """Binary sensor for battery needs charging status."""
-
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
-        """Initialize the battery needs charging binary sensor."""
-        super().__init__(coordinator, entry)
-        self._attr_name = "Battery Needs Charging"
-        self._attr_unique_id = f"{entry.entry_id}_battery_needs_charging"
-        self._attr_icon = "mdi:battery-alert"
-        self._attr_device_class = BinarySensorDeviceClass.BATTERY
-
-    @property
-    def is_on(self) -> bool | None:
-        """Return true if battery needs charging."""
-        if not self.coordinator.data or "battery_analysis" not in self.coordinator.data:
-            return None
-        return self.coordinator.data["battery_analysis"].get("needs_charging", False)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, any]:
-        """Return the state attributes."""
-        if not self.coordinator.data or "battery_analysis" not in self.coordinator.data:
-            return {}
-        
-        battery_analysis = self.coordinator.data["battery_analysis"]
-        return {
-            "min_soc": battery_analysis.get("min_soc"),
-            "min_soc_threshold": battery_analysis.get("min_soc_threshold"),
-            "average_soc": battery_analysis.get("average_soc"),
-        }
