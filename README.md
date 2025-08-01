@@ -84,9 +84,11 @@ The integration evaluates battery grid charging in this specific order:
 4. **📊 Smart Price Analysis**
    ```
    ✅ Very low price (bottom 30% of daily range) → TRUE
-   ✅ Price improving next hour + capacity needed (>20%) → TRUE
+   ❌ Batteries >30% SOC and price not very low → FALSE ("No need to charge")
    ❌ Otherwise → FALSE ("Price OK but not optimal")
    ```
+
+**Important**: Battery charging only occurs if batteries are below 30% combined SOC OR it's a very low price day (bottom 30% of daily range).
 
 ### Car Grid Charging Decision Sequence
 
@@ -101,7 +103,7 @@ The integration evaluates car grid charging in this specific order:
 2. **📊 Price-Only Analysis**
    ```
    ✅ Very low price (bottom 30% daily range) → TRUE
-   ✅ Price improving next hour → TRUE ("Charge now")
+   ❌ Price improving next hour → FALSE ("Wait for better price")
    ✅ Any low price (below threshold) → TRUE
    ❌ Otherwise → FALSE ("Price not favorable")
    ```
@@ -128,13 +130,13 @@ price_position = (current_price - lowest_price) / (highest_price - lowest_price)
 1. **🚫 Hard Stop**: Price above threshold → Always FALSE
 2. **🌞 Solar First**: Use available solar surplus before grid
 3. **💎 Very Low Prices**: Bottom 30% of daily range → TRUE
-4. **📈 Trend Analysis**: Price improving next hour + capacity needed → TRUE
+4. **🔋 SOC Check**: Batteries >30% + not very low price → FALSE
 5. **📊 Position-based**: Reject if price position not optimal
 
 #### Car Charging:
 1. **🚫 Hard Stop**: Price above threshold → Always FALSE
 2. **💎 Very Low Prices**: Bottom 30% of daily range → TRUE
-3. **📈 Trend Analysis**: Price improving next hour → TRUE
+3. **⏰ Wait for Better**: Price improving next hour → FALSE (wait)
 4. **💰 Low Price**: Any price below threshold → TRUE
 
 ## 🔄 Real-time Updates
@@ -180,13 +182,13 @@ Decision:
 ```
 Current Price: 0.14 €/kWh (threshold: 0.15)
 Next Hour Price: 0.10 €/kWh
-Battery SOC: 65% (needs 25% to reach 90%)
+Battery SOC: 65% (above 30% threshold)
 Solar Surplus: 200W
 Time: 15:00
 
 Decision:
-✅ Battery Grid Charging: TRUE ("Price improving next hour and capacity needed")
-✅ Car Grid Charging: TRUE ("Price improving next hour - charge now")
+❌ Battery Grid Charging: FALSE ("Batteries above 30% and price not very low")
+❌ Car Grid Charging: FALSE ("Price improving next hour - wait for better price")
 ```
 
 ### Scenario 4: High Price Period
@@ -201,15 +203,27 @@ Decision:
 ❌ Car Grid Charging: FALSE ("Price too high - 0.220€/kWh > threshold 0.150€/kWh")
 ```
 
-### Scenario 5: Standard Low Price
+### Scenario 5: Low Battery Level
 ```
 Current Price: 0.13 €/kWh (threshold: 0.15)
 Price Position: 40% (middle range)
 Solar Surplus: 0W
-Battery SOC: 80%
+Battery SOC: 25% (below 30% threshold)
 
 Decision:
 ❌ Battery Grid Charging: FALSE ("Price OK but not optimal - position: 40%")
+✅ Car Grid Charging: TRUE ("Low price - below threshold")
+```
+
+### Scenario 6: Standard Low Price with Good Batteries
+```
+Current Price: 0.13 €/kWh (threshold: 0.15)
+Price Position: 40% (middle range)
+Solar Surplus: 0W
+Battery SOC: 80% (above 30% threshold)
+
+Decision:
+❌ Battery Grid Charging: FALSE ("Batteries above 30% and price not very low")
 ✅ Car Grid Charging: TRUE ("Low price - below threshold")
 ```
 

@@ -227,11 +227,11 @@ class ChargingDecisionEngine:
                 "battery_grid_charging_reason": f"Very low price ({price_analysis['current_price']:.3f}€/kWh) - bottom 30% of daily range",
             }
 
-        # Price improving next hour and we have capacity needs
-        if price_analysis["price_trend_improving"] and battery_analysis["remaining_capacity_percent"] > 20:
+        # Only charge if batteries are below 30% combined OR it's a very low price day
+        if battery_analysis["average_soc"] > 30 and not price_analysis["very_low_price"]:
             return {
-                "battery_grid_charging": True,
-                "battery_grid_charging_reason": f"Price improving next hour ({price_analysis['next_price']:.3f}€/kWh) and capacity needed",
+                "battery_grid_charging": False,
+                "battery_grid_charging_reason": f"Batteries above 30% ({battery_analysis['average_soc']:.0f}%) and price not very low - no need to charge",
             }
 
         return {
@@ -260,11 +260,11 @@ class ChargingDecisionEngine:
                 "car_grid_charging_reason": f"Very low price ({price_analysis['current_price']:.3f}€/kWh) - bottom 30% of daily range",
             }
 
-        # Price improving next hour - good time to charge now
+        # Don't charge now if price is improving - wait for the better price
         if price_analysis["price_trend_improving"]:
             return {
-                "car_grid_charging": True,
-                "car_grid_charging_reason": f"Price improving next hour ({price_analysis['next_price']:.3f}€/kWh) - charge now",
+                "car_grid_charging": False,
+                "car_grid_charging_reason": f"Price improving next hour ({price_analysis['next_price']:.3f}€/kWh) - wait for better price",
             }
 
         # Just low price (below threshold) - charge from grid
