@@ -48,7 +48,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(minutes=5),  # Reduced frequency to avoid conflicts
+            update_interval=timedelta(seconds=30),  # Keep responsive 30s updates
         )
 
         self._setup_entity_listeners()
