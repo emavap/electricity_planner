@@ -10,8 +10,6 @@
           "lowest_price_entity": "Lowest Price Entity",
           "next_price_entity": "Next Price Entity",
           "battery_soc_entities": "Battery SOC Entities",
-          "battery_capacity_entities": "Battery Capacity Entities",
-          "house_consumption_entity": "House Consumption Entity",
           "solar_surplus_entity": "Solar Surplus Entity",
           "car_charging_power_entity": "Car Charging Power Entity (Optional)"
         },
@@ -21,8 +19,6 @@
           "lowest_price_entity": "Lowest electricity price today from Nord Pool", 
           "next_price_entity": "Next hour electricity price from Nord Pool",
           "battery_soc_entities": "Entities providing battery state of charge (%)",
-          "battery_capacity_entities": "Entities providing battery capacity information",
-          "house_consumption_entity": "Current house power consumption in W",
           "solar_surplus_entity": "Current solar surplus (production - consumption) in W",
           "car_charging_power_entity": "Car charging power in W"
         }
@@ -33,16 +29,12 @@
         "data": {
           "min_soc_threshold": "Minimum SOC Threshold",
           "max_soc_threshold": "Maximum SOC Threshold",
-          "price_threshold": "Price Threshold",
-          "solar_forecast_hours": "Solar Forecast Hours",
-          "car_charging_hours": "Car Charging Hours"
+          "price_threshold": "Price Threshold"
         },
         "data_description": {
           "min_soc_threshold": "Minimum battery charge level to maintain (%)",
           "max_soc_threshold": "Maximum battery charge level target (%)",
-          "price_threshold": "Price threshold for charging decisions (€/kWh)",
-          "solar_forecast_hours": "Hours ahead to consider for solar forecast",
-          "car_charging_hours": "Preferred duration for car charging"
+          "price_threshold": "Price threshold for charging decisions (€/kWh)"
         }
       }
     },

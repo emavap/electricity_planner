@@ -29,7 +29,7 @@ class ChargingDecisionEngine:
 
     async def evaluate_charging_decision(self, data: dict[str, Any]) -> dict[str, Any]:
         """Evaluate whether to charge batteries and car from grid based on comprehensive data."""
-        decision_data = {
+        decision_data: dict[str, Any] = {
             "battery_grid_charging": False,
             "car_grid_charging": False,
             "battery_grid_charging_reason": "No decision made",
@@ -41,9 +41,10 @@ class ChargingDecisionEngine:
         }
 
         current_price = data.get("current_price")
-        if not current_price:
-            decision_data["battery_grid_charging_reason"] = "No current price data available"
-            decision_data["car_grid_charging_reason"] = "No current price data available"
+        if current_price is None:
+            reason = "No current price data available"
+            decision_data["battery_grid_charging_reason"] = reason
+            decision_data["car_grid_charging_reason"] = reason
             return decision_data
 
         price_analysis = self._analyze_comprehensive_pricing(data)
@@ -75,10 +76,10 @@ class ChargingDecisionEngine:
         highest_price = data.get("highest_price")
         lowest_price = data.get("lowest_price")
         next_price = data.get("next_price")
-        
+
         price_threshold = self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
-        
-        # Handle None values
+
+        # Handle missing current price
         if current_price is None:
             return {
                 "current_price": None,
@@ -94,13 +95,21 @@ class ChargingDecisionEngine:
                 "very_low_price": False,
                 "data_available": False,
             }
-        
+
         # Calculate price position relative to daily range
-        if highest_price is not None and lowest_price is not None and highest_price > lowest_price:
+        if (
+            highest_price is not None
+            and lowest_price is not None
+            and highest_price > lowest_price
+        ):
             price_position = (current_price - lowest_price) / (highest_price - lowest_price)
         else:
-            price_position = 0.5  # Neutral if no price range
-        
+            price_position = 0.5  # Neutral if no valid range
+
+        # Next price higher means worse for charging now; trend improving means next price is lower
+        next_price_higher = next_price is not None and next_price > current_price
+        price_trend_improving = next_price is not None and next_price < current_price
+
         return {
             "current_price": current_price,
             "highest_price": highest_price,
@@ -110,9 +119,9 @@ class ChargingDecisionEngine:
             "is_low_price": current_price <= price_threshold,
             "is_lowest_price": lowest_price is not None and current_price == lowest_price,
             "price_position": price_position,  # 0=lowest, 1=highest
-            "next_price_higher": next_price is not None and next_price > current_price,
-            "price_trend_improving": next_price is not None and next_price < current_price,
-            "very_low_price": price_position < 0.3,  # Bottom 30% of daily range
+            "next_price_higher": next_price_higher,
+            "price_trend_improving": price_trend_improving,
+            "very_low_price": price_position <= 0.3,  # Bottom 30% of daily range
             "data_available": True,
         }
 
@@ -120,7 +129,7 @@ class ChargingDecisionEngine:
         """Analyze current power flow and consumption."""
         solar_surplus = data.get("solar_surplus") or 0
         car_charging_power = data.get("car_charging_power") or 0
-        
+
         return {
             "solar_surplus": solar_surplus,
             "car_charging_power": car_charging_power,
@@ -129,7 +138,6 @@ class ChargingDecisionEngine:
             "car_currently_charging": car_charging_power > 0,
             "available_surplus_for_batteries": max(0, solar_surplus - car_charging_power),
         }
-
 
     def _analyze_battery_status(self, battery_soc_data: list[dict[str, Any]]) -> dict[str, Any]:
         """Analyze battery status for all configured batteries."""
@@ -142,14 +150,15 @@ class ChargingDecisionEngine:
                 "batteries_full": False,
             }
 
-        soc_values = [battery["soc"] for battery in battery_soc_data]
+        # Defensive: if a battery dict lacks 'soc', default to 0 (adjust if undesired)
+        soc_values = [battery.get("soc", 0) for battery in battery_soc_data]
         min_soc_threshold = self.config.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)
         max_soc_threshold = self.config.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
 
         average_soc = sum(soc_values) / len(soc_values)
         min_soc = min(soc_values)
         max_soc = max(soc_values)
-        
+
         return {
             "average_soc": average_soc,
             "min_soc": min_soc,
@@ -161,7 +170,6 @@ class ChargingDecisionEngine:
             "remaining_capacity_percent": max_soc_threshold - average_soc,
         }
 
-
     def _decide_battery_grid_charging(
         self,
         price_analysis: dict[str, Any],
@@ -169,57 +177,57 @@ class ChargingDecisionEngine:
         power_analysis: dict[str, Any],
     ) -> dict[str, Any]:
         """Decide whether to charge batteries from grid based on comprehensive analysis."""
-        if battery_analysis["batteries_count"] == 0:
+        if battery_analysis.get("batteries_count", 0) == 0:
             return {
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": "No battery entities configured",
             }
 
-        if battery_analysis["batteries_full"]:
+        if battery_analysis.get("batteries_full"):
             return {
                 "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"Batteries above {battery_analysis['max_soc_threshold']}% SOC",
+                "battery_grid_charging_reason": f"Batteries above {battery_analysis.get('max_soc_threshold', '?')}% SOC",
             }
 
-        # Check if price data is available
         if not price_analysis.get("data_available", True):
             return {
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": "No price data available",
             }
-        
-        # If price is too high, never recommend grid charging
-        if not price_analysis["is_low_price"]:
+
+        if not price_analysis.get("is_low_price", False):
+            current = price_analysis.get("current_price")
+            threshold = price_analysis.get("price_threshold")
             return {
                 "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"Price too high ({price_analysis['current_price']:.3f}€/kWh) - threshold: {price_analysis['price_threshold']:.3f}€/kWh",
+                "battery_grid_charging_reason": f"Price too high ({current:.3f}€/kWh) - threshold: {threshold:.3f}€/kWh",
             }
 
-        # If there's significant solar surplus, use that instead of grid
-        if power_analysis["significant_solar_surplus"]:
+        if power_analysis.get("significant_solar_surplus"):
             return {
                 "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"Solar surplus available ({power_analysis['solar_surplus']}W) - use solar instead of grid",
+                "battery_grid_charging_reason": f"Solar surplus available ({power_analysis.get('solar_surplus')}W) - use solar instead of grid",
             }
 
-        # Very low price (bottom 30% of daily range) - charge from grid
-        if price_analysis["very_low_price"]:
+        if price_analysis.get("very_low_price"):
+            current = price_analysis.get("current_price")
             return {
                 "battery_grid_charging": True,
-                "battery_grid_charging_reason": f"Very low price ({price_analysis['current_price']:.3f}€/kWh) - bottom 30% of daily range",
+                "battery_grid_charging_reason": f"Very low price ({current:.3f}€/kWh) - bottom 30% of daily range",
             }
 
-        # Only charge if batteries are below 30% combined OR it's a very low price day
         average_soc = battery_analysis.get("average_soc")
-        if average_soc is not None and average_soc  3e 30 and not price_analysis["very_low_price"]:
+        if average_soc is not None and average_soc >= 30 and not price_analysis.get("very_low_price"):
             return {
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": f"Batteries above 30% ({average_soc:.0f}%) and price not very low - no need to charge",
             }
 
+        current = price_analysis.get("current_price")
+        position = price_analysis.get("price_position", 0.5)
         return {
             "battery_grid_charging": False,
-            "battery_grid_charging_reason": f"Price OK but not optimal - current: {price_analysis['current_price']:.3f}€/kWh, position: {price_analysis['price_position']:.0%}",
+            "battery_grid_charging_reason": f"Price OK but not optimal - current: {current:.3f}€/kWh, position: {position:.0%}",
         }
 
     def _decide_car_grid_charging(
@@ -229,42 +237,44 @@ class ChargingDecisionEngine:
         power_analysis: dict[str, Any],
     ) -> dict[str, Any]:
         """Decide whether to charge car from grid based on price analysis only."""
-        # Check if price data is available
         if not price_analysis.get("data_available", True):
             return {
                 "car_grid_charging": False,
                 "car_grid_charging_reason": "No price data available",
             }
-        
-        # If price is too high, never recommend grid charging
-        if not price_analysis["is_low_price"]:
+
+        if not price_analysis.get("is_low_price", False):
+            current = price_analysis.get("current_price")
+            threshold = price_analysis.get("price_threshold")
             return {
                 "car_grid_charging": False,
-                "car_grid_charging_reason": f"Price too high ({price_analysis['current_price']:.3f}€/kWh) - threshold: {price_analysis['price_threshold']:.3f}€/kWh",
+                "car_grid_charging_reason": f"Price too high ({current:.3f}€/kWh) - threshold: {threshold:.3f}€/kWh",
             }
 
-        # Very low price (bottom 30% of daily range) - charge from grid
-        if price_analysis["very_low_price"]:
+        if price_analysis.get("very_low_price"):
+            current = price_analysis.get("current_price")
             return {
                 "car_grid_charging": True,
-                "car_grid_charging_reason": f"Very low price ({price_analysis['current_price']:.3f}€/kWh) - bottom 30% of daily range",
+                "car_grid_charging_reason": f"Very low price ({current:.3f}€/kWh) - bottom 30% of daily range",
             }
 
-        # Don't charge now if price is improving - wait for the better price
-        if price_analysis["price_trend_improving"]:
+        if price_analysis.get("price_trend_improving"):
+            next_price = price_analysis.get("next_price")
             return {
                 "car_grid_charging": False,
-                "car_grid_charging_reason": f"Price improving next hour ({price_analysis['next_price']:.3f}€/kWh) - wait for better price",
+                "car_grid_charging_reason": f"Price improving next hour ({next_price:.3f}€/kWh) - wait for better price",
             }
 
-        # Just low price (below threshold) - charge from grid
-        if price_analysis["is_low_price"]:
+        if price_analysis.get("is_low_price"):
+            current = price_analysis.get("current_price")
             return {
                 "car_grid_charging": True,
-                "car_grid_charging_reason": f"Low price ({price_analysis['current_price']:.3f}€/kWh) - below threshold",
+                "car_grid_charging_reason": f"Low price ({current:.3f}€/kWh) - below threshold",
             }
 
+        current = price_analysis.get("current_price")
+        position = price_analysis.get("price_position", 0.5)
         return {
             "car_grid_charging": False,
-            "car_grid_charging_reason": f"Price not favorable - current: {price_analysis['current_price']:.3f}€/kWh, position: {price_analysis['price_position']:.0%}",
+            "car_grid_charging_reason": f"Price not favorable - current: {current:.3f}€/kWh, position: {position:.0%}",
         }
