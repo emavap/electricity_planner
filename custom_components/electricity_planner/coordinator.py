@@ -48,7 +48,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=30),  # Fast updates for responsive behavior
+            update_interval=timedelta(minutes=5),  # Reduced frequency to avoid conflicts
         )
 
         self._setup_entity_listeners()
@@ -81,8 +81,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
     def _handle_entity_change(self, event):
         """Handle entity state changes."""
         _LOGGER.debug("Entity changed: %s", event.data.get("entity_id"))
-        # Trigger a fresh data update when any tracked entity changes
-        self.async_create_task(self.async_request_refresh())
+        # Reduced aggressive updating - only refresh price changes
+        entity_id = event.data.get("entity_id")
+        if entity_id in [self.config.get(CONF_CURRENT_PRICE_ENTITY), 
+                        self.config.get(CONF_HIGHEST_PRICE_ENTITY),
+                        self.config.get(CONF_LOWEST_PRICE_ENTITY),
+                        self.config.get(CONF_NEXT_PRICE_ENTITY)]:
+            self.async_create_task(self.async_request_refresh())
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Update data via library."""
