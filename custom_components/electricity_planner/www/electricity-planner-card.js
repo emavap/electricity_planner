@@ -1,8 +1,11 @@
-class ElectricityPlannerCard extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-  }
+(function() {
+  'use strict';
+  
+  class ElectricityPlannerCard extends HTMLElement {
+    constructor() {
+      super();
+      this.attachShadow({ mode: 'open' });
+    }
 
   setConfig(config) {
     this.config = config;
@@ -257,25 +260,37 @@ class ElectricityPlannerCard extends HTMLElement {
     return 4;
   }
 
-  static get styles() {
-    return [];
+    static get styles() {
+      return [];
+    }
   }
-}
 
-customElements.define('electricity-planner-card', ElectricityPlannerCard);
+  // Only define if not already defined
+  if (!customElements.get('electricity-planner-card')) {
+    customElements.define('electricity-planner-card', ElectricityPlannerCard);
+  }
 
-// Register the card
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: 'electricity-planner-card',
-  name: 'Electricity Planner Card',
-  description: 'A comprehensive card showing electricity planning decisions',
-  preview: true,
-  documentationURL: 'https://github.com/emavap/electricity_planner',
-});
+  // Safe card registration that doesn't interfere with other cards
+  if (!window.customCards) {
+    window.customCards = [];
+  }
 
-console.info(
-  `%c ELECTRICITY-PLANNER-CARD %c v1.0.0 `,
-  'color: orange; font-weight: bold; background: black',
-  'color: white; font-weight: bold; background: dimgray',
-);
+  // Check if already registered
+  const existingCard = window.customCards.find(card => card.type === 'electricity-planner-card');
+  if (!existingCard) {
+    window.customCards.push({
+      type: 'electricity-planner-card',
+      name: 'Electricity Planner Card',
+      description: 'A comprehensive card showing electricity planning decisions',
+      preview: true,
+      documentationURL: 'https://github.com/emavap/electricity_planner',
+    });
+  }
+
+  console.info(
+    '%c ELECTRICITY-PLANNER-CARD %c v1.0.0 ',
+    'color: orange; font-weight: bold; background: black',
+    'color: white; font-weight: bold; background: dimgray',
+  );
+
+})();
