@@ -234,39 +234,12 @@ class ChargingDecisionEngine:
                 "battery_grid_charging_reason": f"Very low price ({current:.3f}€/kWh) - bottom 30% of daily range",
             }
 
-        # Enhanced logic for battery SOC and price trend analysis
         average_soc = battery_analysis.get("average_soc")
-        current_price = price_analysis.get("current_price")
-        next_price = price_analysis.get("next_price")
-        
-        # If batteries are reasonably charged (>= 50%) and price is improving significantly or solar is available
-        if average_soc is not None and average_soc >= 50:
-            # Check if price is improving next hour by more than 20%
-            if (next_price is not None and current_price is not None and 
-                next_price < current_price * 0.8):  # Next price is 20%+ lower
-                return {
-                    "battery_grid_charging": False,
-                    "battery_grid_charging_reason": f"Batteries at {average_soc:.0f}% - price dropping significantly next hour ({current_price:.3f}→{next_price:.3f}€/kWh)",
-                }
-            
-            # Check if solar is producing and batteries are well charged
-            if power_analysis.get("has_solar_surplus") and average_soc >= 60:
-                return {
-                    "battery_grid_charging": False,
-                    "battery_grid_charging_reason": f"Batteries well charged ({average_soc:.0f}%) with solar production - use solar instead",
-                }
-        
-        # Original 30% threshold for lower SOC batteries
         if average_soc is not None and average_soc >= 30 and not price_analysis.get("very_low_price"):
-            # But still allow charging if price will get much worse next hour
-            if (next_price is not None and current_price is not None and 
-                next_price > current_price * 1.5):  # Next price is 50%+ higher
-                pass  # Continue to charging logic
-            else:
-                return {
-                    "battery_grid_charging": False,
-                    "battery_grid_charging_reason": f"Batteries above 30% ({average_soc:.0f}%) and price not very low - no need to charge",
-                }
+            return {
+                "battery_grid_charging": False,
+                "battery_grid_charging_reason": f"Batteries above 30% ({average_soc:.0f}%) and price not very low - no need to charge",
+            }
 
         current = price_analysis.get("current_price")
         position = price_analysis.get("price_position", 0.5)
