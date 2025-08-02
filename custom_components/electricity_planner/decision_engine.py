@@ -38,6 +38,7 @@ class ChargingDecisionEngine:
             "price_analysis": {},
             "power_analysis": {},
             "battery_analysis": {},
+            "solar_analysis": {},
         }
 
         current_price = data.get("current_price")
@@ -57,6 +58,9 @@ class ChargingDecisionEngine:
 
         power_analysis = self._analyze_power_flow(data)
         decision_data["power_analysis"] = power_analysis
+
+        solar_analysis = self._analyze_solar_production(data)
+        decision_data["solar_analysis"] = solar_analysis
 
         battery_decision = self._decide_battery_grid_charging(
             price_analysis, battery_analysis, power_analysis
@@ -137,6 +141,20 @@ class ChargingDecisionEngine:
             "significant_solar_surplus": solar_surplus > 1000,  # >1kW surplus
             "car_currently_charging": car_charging_power > 0,
             "available_surplus_for_batteries": max(0, solar_surplus - car_charging_power),
+        }
+
+    def _analyze_solar_production(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Analyze solar production status."""
+        solar_surplus = data.get("solar_surplus") or 0
+        
+        # Consider solar producing if there's any surplus
+        is_producing = solar_surplus > 0
+        
+        return {
+            "current_production": solar_surplus,
+            "is_producing": is_producing,
+            "forecast": None,  # Could be expanded later with forecast data
+            "has_good_forecast": False,  # Could be expanded later
         }
 
     def _analyze_battery_status(self, battery_soc_data: list[dict[str, Any]]) -> dict[str, Any]:

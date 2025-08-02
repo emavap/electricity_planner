@@ -55,7 +55,7 @@ class BatteryGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the battery grid charging binary sensor."""
         super().__init__(coordinator, entry)
-        self._attr_name = "Battery Grid Charging"
+        self._attr_name = "Battery: Charge from Grid"
         self._attr_unique_id = f"{entry.entry_id}_battery_grid_charging"
         self._attr_icon = "mdi:battery-charging"
         self._attr_device_class = BinarySensorDeviceClass.POWER
@@ -83,7 +83,7 @@ class CarGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the car grid charging binary sensor."""
         super().__init__(coordinator, entry)
-        self._attr_name = "Car Grid Charging"
+        self._attr_name = "Car: Charge from Grid"
         self._attr_unique_id = f"{entry.entry_id}_car_grid_charging"
         self._attr_icon = "mdi:car-electric"
         self._attr_device_class = BinarySensorDeviceClass.POWER
@@ -111,7 +111,7 @@ class LowPriceBinarySensor(ElectricityPlannerBinarySensorBase):
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the low price binary sensor."""
         super().__init__(coordinator, entry)
-        self._attr_name = "Low Electricity Price"
+        self._attr_name = "Price: Below Threshold"
         self._attr_unique_id = f"{entry.entry_id}_low_price"
         self._attr_icon = "mdi:currency-eur-off"
         self._attr_device_class = BinarySensorDeviceClass.POWER
@@ -143,7 +143,7 @@ class SolarProductionBinarySensor(ElectricityPlannerBinarySensorBase):
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the solar production binary sensor."""
         super().__init__(coordinator, entry)
-        self._attr_name = "Solar Production Active"
+        self._attr_name = "Solar: Producing Power"
         self._attr_unique_id = f"{entry.entry_id}_solar_production"
         self._attr_icon = "mdi:solar-power"
         self._attr_device_class = BinarySensorDeviceClass.POWER

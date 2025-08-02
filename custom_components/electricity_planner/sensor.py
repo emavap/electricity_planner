@@ -52,7 +52,7 @@ class ChargingDecisionSensor(ElectricityPlannerSensorBase):
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the charging decision sensor."""
         super().__init__(coordinator, entry)
-        self._attr_name = "Grid Charging Decision"
+        self._attr_name = "Charging Recommendation & Reason"
         self._attr_unique_id = f"{entry.entry_id}_grid_charging_decision"
         self._attr_icon = "mdi:transmission-tower"
 
@@ -68,11 +68,15 @@ class ChargingDecisionSensor(ElectricityPlannerSensorBase):
         if battery_grid and car_grid:
             return "charge_both_from_grid"
         elif battery_grid:
-            return "charge_battery_from_grid"
+            battery_reason = self.coordinator.data.get("battery_grid_charging_reason", "")
+            return f"charge_battery: {battery_reason}"
         elif car_grid:
-            return "charge_car_from_grid"
+            car_reason = self.coordinator.data.get("car_grid_charging_reason", "")
+            return f"charge_car: {car_reason}"
         else:
-            return "no_grid_charging"
+            # Show the most relevant reason for not charging
+            battery_reason = self.coordinator.data.get("battery_grid_charging_reason", "")
+            return f"no_charging: {battery_reason}"
 
     @property
     def extra_state_attributes(self) -> dict[str, any]:
@@ -95,7 +99,7 @@ class BatteryAnalysisSensor(ElectricityPlannerSensorBase):
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the battery analysis sensor."""
         super().__init__(coordinator, entry)
-        self._attr_name = "Battery Analysis"
+        self._attr_name = "Battery SOC Average"
         self._attr_unique_id = f"{entry.entry_id}_battery_analysis"
         self._attr_icon = "mdi:battery"
         self._attr_device_class = SensorDeviceClass.BATTERY
@@ -133,7 +137,7 @@ class PriceAnalysisSensor(ElectricityPlannerSensorBase):
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the price analysis sensor."""
         super().__init__(coordinator, entry)
-        self._attr_name = "Price Analysis"
+        self._attr_name = "Current Electricity Price"
         self._attr_unique_id = f"{entry.entry_id}_price_analysis"
         self._attr_icon = "mdi:currency-eur"
         self._attr_native_unit_of_measurement = "€/kWh"
@@ -174,7 +178,7 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the power analysis sensor.""" 
         super().__init__(coordinator, entry)
-        self._attr_name = "Power Analysis"
+        self._attr_name = "Solar Surplus Power"
         self._attr_unique_id = f"{entry.entry_id}_power_analysis"
         self._attr_icon = "mdi:transmission-tower"
         self._attr_native_unit_of_measurement = "W"

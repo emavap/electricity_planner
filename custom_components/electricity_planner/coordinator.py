@@ -48,7 +48,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(minutes=5),
+            update_interval=timedelta(minutes=5),  # Fallback only, real updates via entity listeners
         )
 
         self._setup_entity_listeners()
@@ -81,7 +81,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
     def _handle_entity_change(self, event):
         """Handle entity state changes."""
         _LOGGER.debug("Entity changed: %s", event.data.get("entity_id"))
-        self.async_set_updated_data(self.data)
+        # Trigger a fresh data update when any tracked entity changes
+        self.async_create_task(self.async_request_refresh())
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Update data via library."""
@@ -125,9 +126,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         data["battery_soc"] = battery_soc_values
         
         # Power data
-        data["solar_surplus"] = await self._get_state_value(
-            self.config.get(CONF_SOLAR_SURPLUS_ENTITY)
-        )
+        solar_entity = self.config.get(CONF_SOLAR_SURPLUS_ENTITY)
+        solar_surplus = await self._get_state_value(solar_entity)
+        data["solar_surplus"] = solar_surplus
+        
+        _LOGGER.debug("Solar surplus entity: %s, value: %s", solar_entity, solar_surplus)
+        
         data["car_charging_power"] = await self._get_state_value(
             self.config.get(CONF_CAR_CHARGING_POWER_ENTITY)
         )
