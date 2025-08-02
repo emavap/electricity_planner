@@ -29,11 +29,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up dashboard creation service
     await async_setup_dashboard_services(hass)
     
-    # Register the frontend card with proper isolation
-    try:
-        add_extra_js_url(hass, f"/local/custom_components/{DOMAIN}/electricity-planner-card.js")
-    except Exception as e:
-        _LOGGER.warning("Could not register frontend card: %s", e)
+    # Frontend card registration disabled to prevent interference
+    # Users can manually add the card if needed
+    # add_extra_js_url(hass, f"/local/custom_components/{DOMAIN}/electricity-planner-card.js")
 
     return True
 
