@@ -449,12 +449,13 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🎨 Lovelace Dashboard Card
+## 🎨 Lovelace Card (Automatic)
 
-A beautiful, comprehensive dashboard card is provided to visualize the decision making and current situation.
+A beautiful, comprehensive card is **automatically included** with the integration - no manual setup required!
 
 ### Card Features
 
+#### Status Overview:
 - **🎯 Main Decision Display**: Shows current charging recommendations with color-coded status
 - **💰 Price Analysis**: Current price with daily positioning (0-100%)
 - **📊 Daily Price Range**: Visual bar showing where current price sits in daily range
@@ -463,28 +464,34 @@ A beautiful, comprehensive dashboard card is provided to visualize the decision 
 - **📈 Price Trends**: Next hour price and trend direction
 - **✅ Decision Details**: Detailed reasoning for each recommendation
 
-### Prerequisites
+### Usage
 
-Install these custom cards via HACS:
-- [Mushroom Cards](https://github.com/piitaya/lovelace-mushroom)
-- [Bar Card](https://github.com/custom-cards/bar-card)
+1. **Install the integration** (card included automatically)
+2. **Add to dashboard**: Go to your dashboard → "Add Card" → Search "Electricity Planner Card"
+3. **Done!** The card automatically displays all your electricity planning data
 
-### Installation
+### Card displays:
+- ⚡ **Current charging status** (battery/car/both/none)
+- 💰 **Current electricity price** with color-coded badge
+- 🔋 **Battery status** (SOC %, battery count)
+- 🏠 **House power** consumption
+- ☀️ **Solar surplus** production  
+- 📊 **Price position** in daily range with visual bar
+- ✅ **Charging decisions** with detailed reasoning
 
-1. **Install Prerequisites**:
-   - Install "Mushroom" via HACS Frontend
-   - Install "Bar Card" via HACS Frontend
+### Advanced Dashboard (Optional)
 
-2. **Add the Card**:
-   - Copy the contents of [`lovelace-card.yaml`](lovelace-card.yaml)
-   - In Home Assistant, go to your dashboard
-   - Click "Edit Dashboard" → "Add Card" → "Manual"
-   - Paste the YAML content
+For users who want historical graphs and detailed analysis:
 
-3. **Customize** (optional):
-   - Adjust colors in the `severity` sections
-   - Modify price thresholds for color coding
-   - Change card arrangement as needed
+#### Prerequisites
+Install via HACS: [Mushroom Cards](https://github.com/piitaya/lovelace-mushroom), [Bar Card](https://github.com/custom-cards/bar-card), [ApexCharts Card](https://github.com/RomRider/apexcharts-card)
+
+#### Automatic Creation
+- Go to Developer Tools → Services → "Electricity Planner: Create Dashboard"
+- Dashboard created at `/lovelace/electricity-planner` with historical graphs
+
+#### Manual Creation  
+- Copy contents of [`lovelace-card.yaml`](lovelace-card.yaml) to your dashboard
 
 ### Card Preview
 

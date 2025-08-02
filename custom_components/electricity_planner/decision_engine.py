@@ -221,20 +221,7 @@ class ChargingDecisionEngine:
                 "battery_grid_charging_reason": f"Price too high ({current:.3f}€/kWh) - threshold: {threshold:.3f}€/kWh",
             }
 
-        if power_analysis.get("significant_solar_surplus"):
-            return {
-                "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"Solar surplus available ({power_analysis.get('solar_surplus')}W) - use solar instead of grid",
-            }
-
-        if price_analysis.get("very_low_price"):
-            current = price_analysis.get("current_price")
-            return {
-                "battery_grid_charging": True,
-                "battery_grid_charging_reason": f"Very low price ({current:.3f}€/kWh) - bottom 30% of daily range",
-            }
-
-        # Enhanced logic for battery SOC and price trend analysis
+        # Enhanced logic for battery SOC and price trend analysis (BEFORE very low price logic)
         average_soc = battery_analysis.get("average_soc")
         current_price = price_analysis.get("current_price")
         next_price = price_analysis.get("next_price")
@@ -255,18 +242,26 @@ class ChargingDecisionEngine:
                     "battery_grid_charging": False,
                     "battery_grid_charging_reason": f"Batteries well charged ({average_soc:.0f}%) with solar production ({power_analysis.get('solar_surplus', 0)}W) - use solar instead",
                 }
+
+        if power_analysis.get("significant_solar_surplus"):
+            return {
+                "battery_grid_charging": False,
+                "battery_grid_charging_reason": f"Solar surplus available ({power_analysis.get('solar_surplus')}W) - use solar instead of grid",
+            }
+
+        if price_analysis.get("very_low_price"):
+            current = price_analysis.get("current_price")
+            return {
+                "battery_grid_charging": True,
+                "battery_grid_charging_reason": f"Very low price ({current:.3f}€/kWh) - bottom 30% of daily range",
+            }
         
-        # Original 30% threshold logic with enhanced price consideration
+        # Original 30% threshold logic
         if average_soc is not None and average_soc >= 30 and not price_analysis.get("very_low_price"):
-            # Allow charging if price will increase significantly next hour (50%+ increase)
-            if (next_price is not None and current_price is not None and 
-                next_price > current_price * 1.5):  # Next price is 50%+ higher
-                pass  # Continue to charging logic - charge now before price jumps
-            else:
-                return {
-                    "battery_grid_charging": False,
-                    "battery_grid_charging_reason": f"Batteries above 30% ({average_soc:.0f}%) and price not very low - no need to charge",
-                }
+            return {
+                "battery_grid_charging": False,
+                "battery_grid_charging_reason": f"Batteries above 30% ({average_soc:.0f}%) and price not very low - no need to charge",
+            }
 
         current = price_analysis.get("current_price")
         position = price_analysis.get("price_position", 0.5)

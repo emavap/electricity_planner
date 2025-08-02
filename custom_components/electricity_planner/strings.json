@@ -59,5 +59,23 @@
         }
       }
     }
+  },
+  "services": {
+    "create_dashboard": {
+      "name": "Create Dashboard",
+      "description": "Automatically create a comprehensive Electricity Planner dashboard",
+      "fields": {
+        "dashboard_title": {
+          "name": "Dashboard Title",
+          "description": "Title for the new dashboard",
+          "default": "Electricity Planner"
+        },
+        "dashboard_url": {
+          "name": "Dashboard URL",
+          "description": "URL path for the dashboard (e.g. 'electricity-planner')",
+          "default": "electricity-planner"
+        }
+      }
+    }
   }
 }
