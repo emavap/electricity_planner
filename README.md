@@ -141,7 +141,7 @@ price_position = (current_price - lowest_price) / (highest_price - lowest_price)
 
 ## 🔄 Real-time Updates
 
-The integration updates every **5 minutes** and immediately when any tracked entity changes:
+The integration updates every **30 seconds** and immediately when any tracked entity changes:
 
 - **Nord Pool prices** (current, highest, lowest, next)
 - **Battery SOC and capacity** values
@@ -225,6 +225,44 @@ Battery SOC: 80% (above 30% threshold)
 
 Decision:
 ❌ Battery Grid Charging: FALSE ("Batteries above 30% and price not very low")
+✅ Car Grid Charging: TRUE ("Low price - below threshold")
+```
+
+### Scenario 7: Price Dropping Significantly with Well-Charged Batteries
+```
+Current Price: 0.027 €/kWh (threshold: 0.15)
+Next Hour Price: 0.01 €/kWh (63% price drop)
+Battery SOC: 60%
+Solar Surplus: 0W
+Time: Morning
+
+Decision:
+❌ Battery Grid Charging: FALSE ("Batteries at 60% - price dropping significantly next hour (0.027→0.01€/kWh)")
+✅ Car Grid Charging: TRUE ("Low price - below threshold")
+```
+
+### Scenario 8: Solar Production with Well-Charged Batteries
+```
+Current Price: 0.027 €/kWh (threshold: 0.15)
+Next Hour Price: 0.025 €/kWh
+Battery SOC: 60%
+Solar Surplus: 218W
+Time: Daytime
+
+Decision:
+❌ Battery Grid Charging: FALSE ("Batteries well charged (60%) with solar production (218W) - use solar instead")
+✅ Car Grid Charging: TRUE ("Low price - below threshold")
+```
+
+### Scenario 9: Price Jump Expected - Charge Now
+```
+Current Price: 0.12 €/kWh (threshold: 0.15)
+Next Hour Price: 0.20 €/kWh (67% price increase)
+Battery SOC: 45%
+Solar Surplus: 0W
+
+Decision:
+✅ Battery Grid Charging: TRUE ("Price OK but not optimal - current: 0.120€/kWh, position: 35%")
 ✅ Car Grid Charging: TRUE ("Low price - below threshold")
 ```
 
