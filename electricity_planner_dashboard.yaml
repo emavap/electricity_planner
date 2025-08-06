@@ -1,0 +1,477 @@
+# Electricity Planner Dashboard Configuration
+# Copy and paste these card configurations into your Home Assistant dashboard
+
+# Main Decision Overview Card - Key charging decisions and status
+type: entities
+title: "⚡ Electricity Planner - Charging Decisions"
+state_color: true
+entities:
+  - entity: binary_sensor.electricity_planner_battery_grid_charging
+    name: "Battery Grid Charging"
+    icon: mdi:battery-charging
+    secondary_info: last-updated
+  - entity: binary_sensor.electricity_planner_car_grid_charging
+    name: "Car Grid Charging"
+    icon: mdi:car-electric
+    secondary_info: last-updated
+  - entity: binary_sensor.electricity_planner_low_electricity_price
+    name: "Low Price Indicator"
+    icon: mdi:currency-eur
+  - entity: binary_sensor.electricity_planner_solar_production_active
+    name: "Solar Production Active"
+    icon: mdi:solar-power
+  - type: divider
+  - entity: sensor.electricity_planner_grid_charging_decision
+    name: "Overall Decision"
+    icon: mdi:flash
+
+---
+
+# Price Analysis Gauges - Visual price positioning
+type: horizontal-stack
+cards:
+  - type: gauge
+    entity: sensor.electricity_planner_price_analysis
+    name: "Current Price"
+    unit: "€/kWh"
+    min: 0
+    max: 0.50
+    severity:
+      green: 0
+      yellow: 0.15
+      red: 0.25
+    needle: true
+    
+  - type: gauge  
+    entity: sensor.electricity_planner_battery_analysis
+    name: "Battery SOC"
+    unit: "%"
+    min: 0
+    max: 100
+    severity:
+      red: 0
+      yellow: 30
+      green: 60
+    needle: true
+
+  - type: gauge
+    entity: sensor.electricity_planner_power_analysis
+    name: "House Power"
+    unit: "W"
+    min: 0
+    max: 5000
+    severity:
+      green: 0
+      yellow: 3000
+      red: 4500
+    needle: true
+
+---
+
+# Nord Pool Price Trends - Historical and forecast price data
+type: custom:apexcharts-card
+header:
+  show: true
+  title: "💰 Nord Pool Price Trends (24h)"
+  show_states: true
+  colorize_states: true
+graph_span: 24h
+span:
+  end: day
+apex_config:
+  chart:
+    height: 300
+  stroke:
+    curve: smooth
+    width: 2
+  fill:
+    type: gradient
+    gradient:
+      shadeIntensity: 0.1
+  yaxis:
+    - decimalsInFloat: 3
+      min: 0
+      title:
+        text: "Price (€/kWh)"
+  annotations:
+    yaxis:
+      - y: 0.15
+        borderColor: '#FFA500'
+        label:
+          text: 'Price Threshold'
+          style:
+            color: '#FFA500'
+series:
+  # Replace with your actual Nord Pool entity
+  - entity: sensor.nordpool_kwh_be_eur_3_10_025
+    name: "Current Price"
+    color: '#2196F3'
+    stroke_width: 3
+  - entity: sensor.electricity_planner_price_analysis
+    name: "Planner Price Analysis"
+    color: '#FF5722'
+    stroke_width: 2
+
+---
+
+# Battery Analysis and Charging Decisions - Multi-axis chart
+type: custom:apexcharts-card
+header:
+  show: true
+  title: "🔋 Battery SOC & Charging Decisions (24h)"
+  show_states: true
+  colorize_states: true
+graph_span: 24h
+apex_config:
+  chart:
+    height: 300
+  stroke:
+    curve: smooth
+    width: 3
+  yaxis:
+    - id: soc
+      min: 0
+      max: 100
+      title:
+        text: "Battery SOC (%)"
+      axisBorder:
+        show: true
+    - id: charging
+      opposite: true
+      min: -0.1
+      max: 1.1
+      title:
+        text: "Charging Decision"
+      labels:
+        formatter: |
+          EVAL:function(val) {
+            return val === 1 ? 'ON' : val === 0 ? 'OFF' : '';
+          }
+series:
+  - entity: sensor.electricity_planner_battery_analysis
+    name: "Battery SOC Average"
+    yaxis_id: soc
+    color: '#4CAF50'
+    stroke_width: 3
+  - entity: binary_sensor.electricity_planner_battery_grid_charging
+    name: "Battery Grid Charging"
+    yaxis_id: charging
+    color: '#FF5722'
+    stroke_width: 4
+    transform: |
+      return hass.states[entity.entity_id].state === 'on' ? 1 : 0;
+  - entity: binary_sensor.electricity_planner_car_grid_charging
+    name: "Car Grid Charging"
+    yaxis_id: charging
+    color: '#9C27B0'
+    stroke_width: 4
+    transform: |
+      return hass.states[entity.entity_id].state === 'on' ? 1 : 0;
+
+---
+
+# Power Flow Analysis - House consumption and solar production
+type: custom:apexcharts-card
+header:
+  show: true
+  title: "⚡ Power Flow Analysis (24h)"
+  show_states: true
+  colorize_states: true
+graph_span: 24h
+apex_config:
+  chart:
+    height: 300
+    type: area
+    stacked: false
+  stroke:
+    curve: smooth
+    width: 2
+  fill:
+    type: gradient
+    gradient:
+      shadeIntensity: 0.1
+  yaxis:
+    - title:
+        text: "Power (W)"
+      min: -2000
+series:
+  - entity: sensor.electricity_planner_power_analysis
+    attribute: solar_surplus
+    name: "Solar Surplus"
+    color: '#FFC107'
+    stroke_width: 3
+  - entity: sensor.electricity_planner_power_analysis
+    attribute: car_charging_power
+    name: "Car Charging Power"
+    color: '#9C27B0'
+    stroke_width: 2
+  - entity: sensor.electricity_planner_power_analysis
+    name: "House Consumption"
+    color: '#607D8B'
+    stroke_width: 2
+
+---
+
+# Price Position & Decision Logic - Advanced decision analysis
+type: custom:apexcharts-card
+header:
+  show: true
+  title: "📊 Price Position & Decision Logic (24h)"
+  show_states: true
+  colorize_states: true
+graph_span: 24h
+apex_config:
+  chart:
+    height: 300
+  stroke:
+    curve: smooth
+    width: 2
+  yaxis:
+    - id: position
+      min: 0
+      max: 1
+      title:
+        text: "Price Position (0-1)"
+      labels:
+        formatter: |
+          EVAL:function(val) {
+            return (val * 100).toFixed(0) + '%';
+          }
+    - id: binary
+      opposite: true
+      min: -0.1
+      max: 1.1
+      title:
+        text: "Decisions"
+      labels:
+        formatter: |
+          EVAL:function(val) {
+            return val === 1 ? 'ON' : val === 0 ? 'OFF' : '';
+          }
+  annotations:
+    yaxis:
+      - y: 0.3
+        borderColor: '#4CAF50'
+        label:
+          text: 'Very Low Price (30%)'
+          style:
+            color: '#4CAF50'
+series:
+  - entity: sensor.electricity_planner_price_analysis
+    attribute: price_position
+    name: "Price Position"
+    yaxis_id: position
+    color: '#2196F3'
+    stroke_width: 3
+  - entity: binary_sensor.electricity_planner_low_electricity_price
+    name: "Low Price Indicator"
+    yaxis_id: binary
+    color: '#4CAF50'
+    stroke_width: 2
+    transform: |
+      return hass.states[entity.entity_id].state === 'on' ? 1 : 0;
+  - entity: binary_sensor.electricity_planner_solar_production_active
+    name: "Solar Production"
+    yaxis_id: binary
+    color: '#FFC107'
+    stroke_width: 2
+    transform: |
+      return hass.states[entity.entity_id].state === 'on' ? 1 : 0;
+
+---
+
+# Input Entities Status - Monitor all data sources
+type: entities
+title: "📥 Input Data Sources"
+entities:
+  # Nord Pool Entities - replace with your actual entities
+  - entity: sensor.nordpool_kwh_be_eur_3_10_025
+    name: "Nord Pool Current Price"
+    icon: mdi:currency-eur
+  - entity: sensor.nordpool_kwh_be_eur_3_10_025
+    attribute: max
+    name: "Highest Price Today"
+    icon: mdi:trending-up
+  - entity: sensor.nordpool_kwh_be_eur_3_10_025
+    attribute: min
+    name: "Lowest Price Today"
+    icon: mdi:trending-down
+  - entity: sensor.nordpool_kwh_be_eur_3_10_025
+    attribute: next_hour
+    name: "Next Hour Price"
+    icon: mdi:clock-time-four
+  - type: divider
+  # Battery Entities - replace with your actual entities
+  - entity: sensor.battery_soc
+    name: "Battery SOC"
+    icon: mdi:battery
+  - entity: sensor.battery_capacity
+    name: "Battery Capacity"
+    icon: mdi:battery-high
+  - type: divider
+  # Power Flow Entities - replace with your actual entities
+  - entity: sensor.house_consumption
+    name: "House Consumption"
+    icon: mdi:home-lightning-bolt
+  - entity: sensor.solar_surplus
+    name: "Solar Surplus"
+    icon: mdi:solar-power
+  - entity: sensor.car_charging_power
+    name: "Car Charging Power"
+    icon: mdi:car-electric
+
+---
+
+# Quick Status Glance - Minimal overview for mobile
+type: glance
+title: "⚡ Electricity Planner Quick View"
+entities:
+  - entity: binary_sensor.electricity_planner_battery_grid_charging
+    name: "Battery"
+  - entity: binary_sensor.electricity_planner_car_grid_charging
+    name: "Car"
+  - entity: sensor.electricity_planner_price_analysis
+    name: "Price"
+  - entity: sensor.electricity_planner_battery_analysis
+    name: "Battery"
+  - entity: sensor.electricity_planner_power_analysis
+    name: "Power"
+
+---
+
+# Statistics Summary - Weekly decision patterns
+type: statistics-graph
+title: "📈 Weekly Charging Patterns"
+entities:
+  - sensor.electricity_planner_battery_analysis
+  - sensor.electricity_planner_price_analysis
+  - sensor.electricity_planner_power_analysis
+period: week
+stat_types:
+  - mean
+  - max
+  - min
+
+---
+
+# Decision Reasoning Card - Detailed explanations
+type: entities
+title: "🧠 Decision Reasoning"
+entities:
+  - entity: binary_sensor.electricity_planner_battery_grid_charging
+    attribute: reason
+    name: "Battery Charging Reason"
+    icon: mdi:battery-charging
+  - entity: binary_sensor.electricity_planner_car_grid_charging
+    attribute: reason
+    name: "Car Charging Reason"
+    icon: mdi:car-electric
+  - entity: sensor.electricity_planner_grid_charging_decision
+    attribute: next_evaluation
+    name: "Next Evaluation"
+    icon: mdi:clock-time-four
+
+---
+
+# Advanced Multi-Column Layout - Comprehensive dashboard
+type: vertical-stack
+cards:
+  # Header with main decisions
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: binary_sensor.electricity_planner_battery_grid_charging
+        name: "Battery Grid Charging"
+        icon: mdi:battery-charging
+        
+      - type: entity
+        entity: binary_sensor.electricity_planner_car_grid_charging
+        name: "Car Grid Charging"
+        icon: mdi:car-electric
+        
+  # Main metrics row
+  - type: horizontal-stack
+    cards:
+      - type: statistic
+        entity: sensor.electricity_planner_price_analysis
+        name: "Current Price"
+        icon: mdi:currency-eur
+        
+      - type: statistic
+        entity: sensor.electricity_planner_battery_analysis
+        name: "Battery SOC"
+        icon: mdi:battery
+        
+      - type: statistic
+        entity: sensor.electricity_planner_power_analysis
+        name: "House Power"
+        icon: mdi:home-lightning-bolt
+        
+  # Price analysis row
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: sensor.electricity_planner_price_analysis
+        attribute: price_position
+        name: "Price Position"
+        icon: mdi:chart-line
+        
+      - type: entity
+        entity: sensor.electricity_planner_price_analysis
+        attribute: very_low_price
+        name: "Very Low Price"
+        icon: mdi:currency-eur-off
+        
+      - type: entity
+        entity: sensor.electricity_planner_price_analysis
+        attribute: price_trend_improving
+        name: "Price Improving"
+        icon: mdi:trending-up
+
+---
+
+# Markdown Information Card - Integration status and info
+type: markdown
+title: "ℹ️ Electricity Planner Information"
+content: |
+  **Belgian Electricity Market Planner**
+  
+  - **Current Price**: {{ states('sensor.electricity_planner_price_analysis') | default('Unknown') }} €/kWh
+  - **Price Position**: {{ (state_attr('sensor.electricity_planner_price_analysis', 'price_position') | float(0) * 100) | round(1) }}% of daily range
+  - **Battery SOC**: {{ states('sensor.electricity_planner_battery_analysis') | default('Unknown') }}%
+  - **House Power**: {{ states('sensor.electricity_planner_power_analysis') | default('Unknown') }}W
+  - **Solar Surplus**: {{ state_attr('sensor.electricity_planner_power_analysis', 'solar_surplus') | default('0') }}W
+  
+  **Current Decisions**:
+  - Battery Grid Charging: {{ states('binary_sensor.electricity_planner_battery_grid_charging') | title }}
+  - Car Grid Charging: {{ states('binary_sensor.electricity_planner_car_grid_charging') | title }}
+  - Low Price Active: {{ states('binary_sensor.electricity_planner_low_electricity_price') | title }}
+  - Solar Production: {{ states('binary_sensor.electricity_planner_solar_production_active') | title }}
+  
+  **Reasoning**:
+  - Battery: {{ state_attr('binary_sensor.electricity_planner_battery_grid_charging', 'reason') | default('No reason available') }}
+  - Car: {{ state_attr('binary_sensor.electricity_planner_car_grid_charging', 'reason') | default('No reason available') }}
+
+---
+
+# Custom Button Card for Manual Override (requires custom:button-card)
+# Install via HACS: https://github.com/custom-cards/button-card
+type: horizontal-stack
+cards:
+  - type: custom:button-card
+    name: "Force Battery Charge"
+    icon: mdi:battery-charging
+    color_type: card
+    color: orange
+    tap_action:
+      action: more-info
+      entity: binary_sensor.electricity_planner_battery_grid_charging
+    
+  - type: custom:button-card
+    name: "Force Car Charge"
+    icon: mdi:car-electric
+    color_type: card
+    color: blue
+    tap_action:
+      action: more-info
+      entity: binary_sensor.electricity_planner_car_grid_charging
