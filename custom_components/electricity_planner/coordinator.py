@@ -21,6 +21,7 @@ from .const import (
     CONF_BATTERY_SOC_ENTITIES,
     CONF_SOLAR_SURPLUS_ENTITY,
     CONF_CAR_CHARGING_POWER_ENTITY,
+    CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
@@ -73,7 +74,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             entities_to_track.extend(self.config[CONF_BATTERY_SOC_ENTITIES])
         
         # Power entities
-        for entity_key in [CONF_SOLAR_SURPLUS_ENTITY, CONF_CAR_CHARGING_POWER_ENTITY]:
+        for entity_key in [CONF_SOLAR_SURPLUS_ENTITY, CONF_CAR_CHARGING_POWER_ENTITY, CONF_MONTHLY_GRID_PEAK_ENTITY]:
             if self.config.get(entity_key):
                 entities_to_track.append(self.config[entity_key])
 
@@ -155,6 +156,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         
         data["car_charging_power"] = await self._get_state_value(
             self.config.get(CONF_CAR_CHARGING_POWER_ENTITY)
+        )
+        
+        data["monthly_grid_peak"] = await self._get_state_value(
+            self.config.get(CONF_MONTHLY_GRID_PEAK_ENTITY)
         )
         
         return data

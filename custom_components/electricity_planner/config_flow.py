@@ -17,6 +17,7 @@ from .const import (
     CONF_BATTERY_SOC_ENTITIES,
     CONF_SOLAR_SURPLUS_ENTITY,
     CONF_CAR_CHARGING_POWER_ENTITY,
+    CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
@@ -69,6 +70,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_CAR_CHARGING_POWER_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
+            vol.Optional(CONF_MONTHLY_GRID_PEAK_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
         })
 
         return self.async_show_form(
@@ -82,6 +86,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "battery_soc": "Battery State of Charge entities",
                 "solar_surplus": "Current solar surplus (production - consumption) in W",
                 "car_charging": "Car charging power in W (optional)",
+                "monthly_grid_peak": "Current month grid peak in W (optional)",
             },
         )
 
@@ -180,6 +185,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(
                 CONF_CAR_CHARGING_POWER_ENTITY,
                 default=current_config.get(CONF_CAR_CHARGING_POWER_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_MONTHLY_GRID_PEAK_ENTITY,
+                default=current_config.get(CONF_MONTHLY_GRID_PEAK_ENTITY)
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),

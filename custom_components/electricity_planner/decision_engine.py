@@ -34,6 +34,10 @@ class ChargingDecisionEngine:
             "car_grid_charging": False,
             "battery_grid_charging_reason": "No decision made",
             "car_grid_charging_reason": "No decision made",
+            "charger_limit": 0,
+            "grid_setpoint": 0,
+            "charger_limit_reason": "No decision made",
+            "grid_setpoint_reason": "No decision made",
             "next_evaluation": datetime.now() + timedelta(minutes=5),
             "price_analysis": {},
             "power_analysis": {},
@@ -71,6 +75,17 @@ class ChargingDecisionEngine:
             price_analysis, battery_analysis, power_analysis
         )
         decision_data.update(car_decision)
+
+        charger_limit_decision = self._calculate_charger_limit(
+            price_analysis, battery_analysis, power_analysis, data
+        )
+        decision_data.update(charger_limit_decision)
+
+        grid_setpoint_decision = self._calculate_grid_setpoint(
+            price_analysis, battery_analysis, power_analysis, data, 
+            decision_data.get("charger_limit", 0)
+        )
+        decision_data.update(grid_setpoint_decision)
 
         return decision_data
 
@@ -317,4 +332,91 @@ class ChargingDecisionEngine:
         return {
             "car_grid_charging": False,
             "car_grid_charging_reason": f"Price not favorable - current: {current:.3f}€/kWh, position: {position:.0%}",
+        }
+
+    def _calculate_charger_limit(
+        self,
+        price_analysis: dict[str, Any],
+        battery_analysis: dict[str, Any],
+        power_analysis: dict[str, Any],
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Calculate optimal charger power limit based on energy management scenario."""
+        car_charging_power = power_analysis.get("car_charging_power", 0)
+        
+        if car_charging_power <= 0:
+            return {
+                "charger_limit": 0,
+                "charger_limit_reason": "Car not currently charging",
+            }
+
+        solar_surplus = power_analysis.get("solar_surplus", 0)
+        monthly_grid_peak = data.get("monthly_grid_peak", 0)
+        max_grid_setpoint = max(monthly_grid_peak, 2500) if monthly_grid_peak and monthly_grid_peak > 2500 else 2500
+        average_soc = battery_analysis.get("average_soc", 50)
+        
+        # If battery < 80%: Car gets grid setpoint only, surplus goes to batteries
+        if average_soc < 80:
+            charger_limit = min(max_grid_setpoint, 11000)
+            return {
+                "charger_limit": int(charger_limit),
+                "charger_limit_reason": f"Battery {average_soc:.0f}% < 80% - car limited to grid setpoint ({int(charger_limit)}W), surplus for batteries",
+            }
+        
+        # If battery ≥ 80%: Car can use surplus + grid setpoint
+        available_power = solar_surplus + max_grid_setpoint
+        charger_limit = min(available_power, 11000)
+        return {
+            "charger_limit": int(charger_limit),
+            "charger_limit_reason": f"Battery {average_soc:.0f}% ≥ 80% - car can use surplus + grid ({int(charger_limit)}W = {solar_surplus}W + {max_grid_setpoint}W)",
+        }
+
+    def _calculate_grid_setpoint(
+        self,
+        price_analysis: dict[str, Any],
+        battery_analysis: dict[str, Any],
+        power_analysis: dict[str, Any],
+        data: dict[str, Any],
+        charger_limit: int,
+    ) -> dict[str, Any]:
+        """Calculate grid setpoint based on energy management scenario."""
+        car_charging_power = power_analysis.get("car_charging_power", 0)
+        solar_surplus = power_analysis.get("solar_surplus", 0)
+        monthly_grid_peak = data.get("monthly_grid_peak", 0)
+        battery_grid_charging = data.get("battery_grid_charging", False)
+        average_soc = battery_analysis.get("average_soc", 50)
+        
+        # Determine maximum grid setpoint based on monthly peak
+        max_grid_setpoint = max(monthly_grid_peak, 2500) if monthly_grid_peak and monthly_grid_peak > 2500 else 2500
+        
+        # Case 1: Car charging + battery < 80% - car gets grid setpoint, surplus for batteries
+        if car_charging_power > 0 and average_soc < 80:
+            grid_setpoint = min(charger_limit, max_grid_setpoint)
+            return {
+                "grid_setpoint": int(grid_setpoint),
+                "grid_setpoint_reason": f"Car charging + battery {average_soc:.0f}% < 80% - grid setpoint for car ({int(grid_setpoint)}W), surplus for batteries",
+            }
+        
+        # Case 2: Car charging + battery ≥ 80% - car can use surplus + grid
+        if car_charging_power > 0 and average_soc >= 80:
+            # Grid covers what surplus can't for the charger limit
+            needed_from_grid = max(0, charger_limit - solar_surplus)
+            grid_setpoint = min(needed_from_grid, max_grid_setpoint)
+            return {
+                "grid_setpoint": int(grid_setpoint),
+                "grid_setpoint_reason": f"Car charging + battery {average_soc:.0f}% ≥ 80% - grid supports car charging ({int(grid_setpoint)}W of {charger_limit}W limit)",
+            }
+        
+        # Case 3: No car charging, but battery charging decision is on
+        if car_charging_power <= 0 and battery_grid_charging:
+            grid_setpoint = max_grid_setpoint
+            return {
+                "grid_setpoint": int(grid_setpoint),
+                "grid_setpoint_reason": f"No car charging - grid setpoint for battery charging ({int(grid_setpoint)}W)",
+            }
+        
+        # Case 4: No car charging, no battery charging
+        return {
+            "grid_setpoint": 0,
+            "grid_setpoint_reason": "No car charging and no battery grid charging decision",
         }

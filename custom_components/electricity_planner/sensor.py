@@ -28,6 +28,8 @@ async def async_setup_entry(
         PowerAnalysisSensor(coordinator, entry),
         DataAvailabilitySensor(coordinator, entry),
         HourlyDecisionHistorySensor(coordinator, entry),
+        ChargerLimitSensor(coordinator, entry),
+        GridSetpointSensor(coordinator, entry),
     ]
     
     async_add_entities(entities, False)
@@ -367,4 +369,78 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
             "price_data": price_series,
             "battery_charging_data": battery_series,
             "car_charging_data": car_series,
+        }
+
+
+class ChargerLimitSensor(ElectricityPlannerSensorBase):
+    """Sensor for optimal car charger power limit."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the charger limit sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_name = "Car Charger Limit"
+        self._attr_unique_id = f"{entry.entry_id}_charger_limit"
+        self._attr_icon = "mdi:ev-station"
+        self._attr_native_unit_of_measurement = "W"
+        self._attr_device_class = SensorDeviceClass.POWER
+
+    @property
+    def native_value(self) -> int:
+        """Return the recommended charger power limit."""
+        if not self.coordinator.data:
+            return 0
+        
+        return self.coordinator.data.get("charger_limit", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, any]:
+        """Return the state attributes."""
+        if not self.coordinator.data:
+            return {}
+        
+        return {
+            "charger_limit_reason": self.coordinator.data.get("charger_limit_reason", ""),
+            "current_car_power": self.coordinator.data.get("power_analysis", {}).get("car_charging_power", 0),
+            "solar_surplus": self.coordinator.data.get("power_analysis", {}).get("solar_surplus", 0),
+            "car_currently_charging": self.coordinator.data.get("power_analysis", {}).get("car_currently_charging", False),
+        }
+
+
+class GridSetpointSensor(ElectricityPlannerSensorBase):
+    """Sensor for grid setpoint to avoid battery discharge during car charging."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the grid setpoint sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_name = "Grid Setpoint"
+        self._attr_unique_id = f"{entry.entry_id}_grid_setpoint"
+        self._attr_icon = "mdi:transmission-tower"
+        self._attr_native_unit_of_measurement = "W"
+        self._attr_device_class = SensorDeviceClass.POWER
+
+    @property
+    def native_value(self) -> int:
+        """Return the recommended grid setpoint."""
+        if not self.coordinator.data:
+            return 0
+        
+        return self.coordinator.data.get("grid_setpoint", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, any]:
+        """Return the state attributes."""
+        if not self.coordinator.data:
+            return {}
+        
+        monthly_peak = self.coordinator.data.get("monthly_grid_peak", 0)
+        max_grid_setpoint = max(monthly_peak, 2500) if monthly_peak and monthly_peak > 2500 else 2500
+        
+        return {
+            "grid_setpoint_reason": self.coordinator.data.get("grid_setpoint_reason", ""),
+            "charger_limit": self.coordinator.data.get("charger_limit", 0),
+            "current_car_power": self.coordinator.data.get("power_analysis", {}).get("car_charging_power", 0),
+            "solar_surplus": self.coordinator.data.get("power_analysis", {}).get("solar_surplus", 0),
+            "battery_average_soc": self.coordinator.data.get("battery_analysis", {}).get("average_soc", 0),
+            "monthly_grid_peak": monthly_peak,
+            "max_grid_setpoint": max_grid_setpoint,
         }
