@@ -294,12 +294,15 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
         
         # Return last 48 hours of data for graphing
         recent_data = self._history_data[-48:] if self._history_data else []
+        formatted_data = self._format_for_apex_charts(recent_data)
         
         return {
             "hourly_data": recent_data,
             "total_records": len(self._history_data),
             "last_updated": datetime.now().isoformat(),
-            "graph_data": self._format_for_apex_charts(recent_data),
+            "price_data": formatted_data.get("price_data", []),
+            "battery_charging_data": formatted_data.get("battery_charging_data", []),
+            "car_charging_data": formatted_data.get("car_charging_data", []),
         }
 
     def _update_history(self):

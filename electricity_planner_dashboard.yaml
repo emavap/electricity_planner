@@ -170,24 +170,21 @@ apex_config:
             background: '#FFC107'
 series:
   - entity: sensor.electricity_planner_hourly_decision_history
-    attribute: graph_data
-    attribute_key: price_data
+    attribute: price_data
     name: "Hourly Price"
     yaxis_id: price
     color: '#2196F3'
     stroke_width: 3
     type: line
   - entity: sensor.electricity_planner_hourly_decision_history
-    attribute: graph_data
-    attribute_key: battery_charging_data
+    attribute: battery_charging_data
     name: "Battery Charging"
     yaxis_id: decision
     color: '#4CAF50'
     stroke_width: 4
     type: column
   - entity: sensor.electricity_planner_hourly_decision_history
-    attribute: graph_data
-    attribute_key: car_charging_data
+    attribute: car_charging_data
     name: "Car Charging"
     yaxis_id: decision
     color: '#9C27B0'
