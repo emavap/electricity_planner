@@ -114,13 +114,13 @@ series:
 
 ---
 
-# Price & Charging Decisions History - Combined hourly view
+# Price & Charging Decisions History - Single colored price line
 type: custom:apexcharts-card
 header:
   show: true
-  title: "💰 Hourly Price & Charging Decisions (48h)"
-  show_states: true
-  colorize_states: true
+  title: "💰 Hourly Price with Charging Decisions (48h)"
+  show_states: false
+  colorize_states: false
 graph_span: 48h
 apex_config:
   chart:
@@ -128,68 +128,76 @@ apex_config:
     type: line
   stroke:
     curve: smooth
-    width: 3
+    width: 4
+  tooltip:
+    shared: false
+    custom: |
+      EVAL:function({series, seriesIndex, dataPointIndex, w}) {
+        const price = series[seriesIndex][dataPointIndex];
+        if (price === null) return '';
+        const seriesNames = ['No Charging', 'Battery Charging', 'Car Charging'];
+        const colors = ['#607D8B', '#4CAF50', '#9C27B0'];
+        return '<div class="apexcharts-tooltip-custom">' +
+          '<div style="background: ' + colors[seriesIndex] + '; color: white; padding: 8px; border-radius: 4px;">' +
+          '<strong>' + seriesNames[seriesIndex] + '</strong><br>' +
+          'Price: ' + price.toFixed(3) + ' €/kWh' +
+          '</div></div>';
+      }
   yaxis:
-    - id: price
-      min: 0
+    - min: 0
       max: 0.50
       title:
         text: "Price (€/kWh)"
-      axisBorder:
-        show: true
-        color: '#2196F3'
       labels:
-        style:
-          colors: '#2196F3'
-    - id: decision
-      opposite: true
-      min: -0.1
-      max: 1.1
-      title:
-        text: "Charging Decision"
-      axisBorder:
-        show: true
-        color: '#FF5722'
-      labels:
-        style:
-          colors: '#FF5722'
         formatter: |
           EVAL:function(val) {
-            return val === 1 ? 'ON' : val === 0 ? 'OFF' : '';
+            return val.toFixed(3) + ' €/kWh';
           }
-  annotations:
-    yaxis:
-      - y: 0.15
-        yAxisIndex: 0
-        borderColor: '#FFC107'
-        strokeDashArray: 5
-        label:
-          text: 'Low Price Threshold'
-          style:
-            color: '#FFC107'
-            background: '#FFC107'
+  legend:
+    show: true
+    position: bottom
 series:
-  - entity: sensor.electricity_planner_hourly_decision_history
-    attribute: price_data
-    name: "Hourly Price"
-    yaxis_id: price
-    color: '#2196F3'
-    stroke_width: 3
+  - entity: sensor.electricity_planner_price_analysis
+    name: "No Charging"
+    color: '#607D8B'
+    stroke_width: 4
     type: line
-  - entity: sensor.electricity_planner_hourly_decision_history
-    attribute: battery_charging_data
+    show:
+      legend_value: false
+    transform: |
+      // Show price only when no charging
+      const historyEntity = 'sensor.electricity_planner_hourly_decision_history';
+      const batteryCharging = hass.states[historyEntity]?.attributes?.battery_charging_data || [];
+      const carCharging = hass.states[historyEntity]?.attributes?.car_charging_data || [];
+      const priceValue = parseFloat(hass.states[entity.entity_id].state);
+      
+      // Check if currently charging (simplified check)
+      const batteryOn = hass.states['binary_sensor.electricity_planner_battery_grid_charging']?.state === 'on';
+      const carOn = hass.states['binary_sensor.electricity_planner_car_grid_charging']?.state === 'on';
+      
+      return (!batteryOn && !carOn) ? priceValue : null;
+  - entity: sensor.electricity_planner_price_analysis
     name: "Battery Charging"
-    yaxis_id: decision
     color: '#4CAF50'
     stroke_width: 4
-    type: column
-  - entity: sensor.electricity_planner_hourly_decision_history
-    attribute: car_charging_data
+    type: line
+    show:
+      legend_value: false
+    transform: |
+      const priceValue = parseFloat(hass.states[entity.entity_id].state);
+      const batteryOn = hass.states['binary_sensor.electricity_planner_battery_grid_charging']?.state === 'on';
+      return batteryOn ? priceValue : null;
+  - entity: sensor.electricity_planner_price_analysis
     name: "Car Charging"
-    yaxis_id: decision
     color: '#9C27B0'
     stroke_width: 4
-    type: column
+    type: line
+    show:
+      legend_value: false
+    transform: |
+      const priceValue = parseFloat(hass.states[entity.entity_id].state);
+      const carOn = hass.states['binary_sensor.electricity_planner_car_grid_charging']?.state === 'on';
+      return carOn ? priceValue : null;
 
 ---
 
