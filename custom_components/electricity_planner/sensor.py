@@ -355,7 +355,7 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
             "car_charging": car_charging,
             "price_position": round(price_position, 2) if price_position else 0,
             "is_low_price": is_low_price,
-            "charging_decision": "battery" if battery_charging else "car" if car_charging else "none",
+            "charging_decision": "both" if battery_charging and car_charging else "battery" if battery_charging else "car" if car_charging else "none",
         }
 
         # Add to history
