@@ -64,7 +64,7 @@ class BatteryGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
     def is_on(self) -> bool | None:
         """Return true if battery should be charged from grid."""
         if not self.coordinator.data:
-            return None
+            return False  # Safety: Never charge when no data available
         return self.coordinator.data.get("battery_grid_charging", False)
 
     @property
@@ -92,7 +92,7 @@ class CarGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
     def is_on(self) -> bool | None:
         """Return true if car should be charged from grid."""
         if not self.coordinator.data:
-            return None
+            return False  # Safety: Never charge when no data available
         return self.coordinator.data.get("car_grid_charging", False)
 
     @property
@@ -120,7 +120,7 @@ class LowPriceBinarySensor(ElectricityPlannerBinarySensorBase):
     def is_on(self) -> bool | None:
         """Return true if electricity price is low."""
         if not self.coordinator.data or "price_analysis" not in self.coordinator.data:
-            return None
+            return False  # Safety: Assume price is not low when no data available
         return self.coordinator.data["price_analysis"].get("is_low_price", False)
 
     @property
@@ -152,7 +152,7 @@ class SolarProductionBinarySensor(ElectricityPlannerBinarySensorBase):
     def is_on(self) -> bool | None:
         """Return true if solar panels are producing power."""
         if not self.coordinator.data or "solar_analysis" not in self.coordinator.data:
-            return None
+            return False  # Safety: Assume no solar production when no data available
         return self.coordinator.data["solar_analysis"].get("is_producing", False)
 
     @property
