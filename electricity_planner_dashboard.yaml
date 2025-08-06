@@ -114,6 +114,88 @@ series:
 
 ---
 
+# Price & Charging Decisions History - Combined hourly view
+type: custom:apexcharts-card
+header:
+  show: true
+  title: "💰 Hourly Price & Charging Decisions (48h)"
+  show_states: true
+  colorize_states: true
+graph_span: 48h
+apex_config:
+  chart:
+    height: 400
+    type: line
+  stroke:
+    curve: smooth
+    width: 3
+  yaxis:
+    - id: price
+      min: 0
+      max: 0.50
+      title:
+        text: "Price (€/kWh)"
+      axisBorder:
+        show: true
+        color: '#2196F3'
+      labels:
+        style:
+          colors: '#2196F3'
+    - id: decision
+      opposite: true
+      min: -0.1
+      max: 1.1
+      title:
+        text: "Charging Decision"
+      axisBorder:
+        show: true
+        color: '#FF5722'
+      labels:
+        style:
+          colors: '#FF5722'
+        formatter: |
+          EVAL:function(val) {
+            return val === 1 ? 'ON' : val === 0 ? 'OFF' : '';
+          }
+  annotations:
+    yaxis:
+      - y: 0.15
+        yAxisIndex: 0
+        borderColor: '#FFC107'
+        strokeDashArray: 5
+        label:
+          text: 'Low Price Threshold'
+          style:
+            color: '#FFC107'
+            background: '#FFC107'
+series:
+  - entity: sensor.electricity_planner_hourly_decision_history
+    attribute: graph_data
+    attribute_key: price_data
+    name: "Hourly Price"
+    yaxis_id: price
+    color: '#2196F3'
+    stroke_width: 3
+    type: line
+  - entity: sensor.electricity_planner_hourly_decision_history
+    attribute: graph_data
+    attribute_key: battery_charging_data
+    name: "Battery Charging"
+    yaxis_id: decision
+    color: '#4CAF50'
+    stroke_width: 4
+    type: column
+  - entity: sensor.electricity_planner_hourly_decision_history
+    attribute: graph_data
+    attribute_key: car_charging_data
+    name: "Car Charging"
+    yaxis_id: decision
+    color: '#9C27B0'
+    stroke_width: 4
+    type: column
+
+---
+
 # Battery Analysis and Charging Decisions - Multi-axis chart
 type: custom:apexcharts-card
 header:
@@ -167,6 +249,23 @@ series:
     stroke_width: 4
     transform: |
       return hass.states[entity.entity_id].state === 'on' ? 1 : 0;
+
+---
+
+# Alternative: Simple History Graph (No ApexCharts Required)
+type: history-graph
+title: "💰 Price & Decisions History (Alternative View)"
+entities:
+  - entity: sensor.electricity_planner_price_analysis
+    name: "Current Price (€/kWh)"
+  - entity: binary_sensor.electricity_planner_battery_grid_charging
+    name: "Battery Charging"
+  - entity: binary_sensor.electricity_planner_car_grid_charging
+    name: "Car Charging"
+  - entity: binary_sensor.electricity_planner_low_electricity_price
+    name: "Low Price Active"
+hours_to_show: 48
+refresh_interval: 300
 
 ---
 
