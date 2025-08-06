@@ -389,24 +389,37 @@ class ChargingDecisionEngine:
         # Determine maximum grid setpoint based on monthly peak
         max_grid_setpoint = max(monthly_grid_peak, 2500) if monthly_grid_peak and monthly_grid_peak > 2500 else 2500
         
-        # Case 1: Car charging + battery < 80% - grid follows car consumption, surplus for batteries
+        # Case 1: Car charging + battery < 80% - grid for car consumption, surplus for batteries
         if car_charging_power > 0 and average_soc < 80:
             # Grid setpoint follows actual car consumption up to the charger limit and grid peak limit
-            grid_setpoint = min(car_charging_power, charger_limit, max_grid_setpoint)
+            car_grid_need = min(car_charging_power, charger_limit, max_grid_setpoint)
+            grid_setpoint = car_grid_need
             return {
                 "grid_setpoint": int(grid_setpoint),
-                "grid_setpoint_reason": f"Car drawing {car_charging_power}W, battery {average_soc:.0f}% < 80% - grid follows car consumption ({int(grid_setpoint)}W), surplus for batteries",
+                "grid_setpoint_reason": f"Car drawing {car_charging_power}W, battery {average_soc:.0f}% < 80% - grid for car ({int(grid_setpoint)}W), surplus for batteries",
             }
         
-        # Case 2: Car charging + battery ≥ 80% - grid supports car up to available power
+        # Case 2: Car charging + battery ≥ 80% - grid supports car, can also charge batteries if decided
         if car_charging_power > 0 and average_soc >= 80:
-            # Grid covers what surplus can't, up to car's actual consumption and limits
-            needed_from_grid = max(0, car_charging_power - solar_surplus)
-            grid_setpoint = min(needed_from_grid, max_grid_setpoint)
-            return {
-                "grid_setpoint": int(grid_setpoint),
-                "grid_setpoint_reason": f"Car drawing {car_charging_power}W, battery {average_soc:.0f}% ≥ 80% - grid covers deficit ({int(grid_setpoint)}W = {car_charging_power}W - {solar_surplus}W surplus)",
-            }
+            # Grid covers car needs first
+            car_grid_need = max(0, car_charging_power - solar_surplus)
+            
+            # If battery charging decision is on, add battery charging to grid setpoint
+            if battery_grid_charging:
+                # Grid for car + remaining capacity for batteries
+                remaining_grid_capacity = max_grid_setpoint - car_grid_need
+                battery_grid_power = max(0, remaining_grid_capacity)
+                grid_setpoint = min(car_grid_need + battery_grid_power, max_grid_setpoint)
+                return {
+                    "grid_setpoint": int(grid_setpoint),
+                    "grid_setpoint_reason": f"Car {car_charging_power}W + battery {average_soc:.0f}% charging - grid for car ({car_grid_need}W) + batteries ({battery_grid_power}W) = {int(grid_setpoint)}W",
+                }
+            else:
+                grid_setpoint = min(car_grid_need, max_grid_setpoint)
+                return {
+                    "grid_setpoint": int(grid_setpoint),
+                    "grid_setpoint_reason": f"Car drawing {car_charging_power}W, battery {average_soc:.0f}% ≥ 80% - grid covers car deficit ({int(grid_setpoint)}W = {car_charging_power}W - {solar_surplus}W surplus)",
+                }
         
         # Case 3: No car charging, but battery charging decision is on
         if car_charging_power <= 0 and battery_grid_charging:
