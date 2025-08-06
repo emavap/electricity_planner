@@ -292,20 +292,27 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
     @property
     def extra_state_attributes(self) -> dict[str, any]:
         """Return the hourly history data as attributes."""
-        self._update_history()
+        current_hour = datetime.now().replace(minute=0, second=0, microsecond=0)
         
-        # Return last 48 hours of data for graphing
-        recent_data = self._history_data[-48:] if self._history_data else []
-        formatted_data = self._format_for_apex_charts(recent_data)
+        # Only update history and recalculate when hour changes
+        if not hasattr(self, '_last_attributes_hour') or self._last_attributes_hour != current_hour:
+            self._update_history()
+            
+            # Cache formatted data - only recalculate when hour changes
+            recent_data = self._history_data[-48:] if self._history_data else []
+            self._cached_formatted_data = self._format_for_apex_charts(recent_data)
+            self._cached_attributes = {
+                "hourly_data": recent_data,
+                "total_records": len(self._history_data),
+                "last_updated": datetime.now().isoformat(),
+                "price_data": self._cached_formatted_data.get("price_data", []),
+                "battery_charging_data": self._cached_formatted_data.get("battery_charging_data", []),
+                "car_charging_data": self._cached_formatted_data.get("car_charging_data", []),
+            }
+            self._last_attributes_hour = current_hour
         
-        return {
-            "hourly_data": recent_data,
-            "total_records": len(self._history_data),
-            "last_updated": datetime.now().isoformat(),
-            "price_data": formatted_data.get("price_data", []),
-            "battery_charging_data": formatted_data.get("battery_charging_data", []),
-            "car_charging_data": formatted_data.get("car_charging_data", []),
-        }
+        # Return cached attributes to avoid processing on every access
+        return self._cached_attributes if hasattr(self, '_cached_attributes') else {}
 
     def _update_history(self):
         """Update the hourly history data."""
