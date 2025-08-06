@@ -124,11 +124,19 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Battery SOC data
         battery_soc_entities = self.config.get(CONF_BATTERY_SOC_ENTITIES, [])
         battery_soc_values = []
+        
+        _LOGGER.debug("Battery SOC entities configured: %s", battery_soc_entities)
+        
         for entity_id in battery_soc_entities:
             soc = await self._get_state_value(entity_id)
+            state = self.hass.states.get(entity_id)
+            _LOGGER.debug("Battery entity %s: state=%s, parsed_value=%s", 
+                         entity_id, state.state if state else "missing", soc)
             if soc is not None:
                 battery_soc_values.append({"entity_id": entity_id, "soc": soc})
+        
         data["battery_soc"] = battery_soc_values
+        _LOGGER.debug("Final battery SOC data: %s", battery_soc_values)
         
         # Power data
         solar_entity = self.config.get(CONF_SOLAR_SURPLUS_ENTITY)

@@ -151,11 +151,38 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Manage the options."""
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # Merge with existing entity configuration
+            updated_data = dict(self.config_entry.data)
+            updated_data.update(user_input)
+            self.hass.config_entries.async_update_entry(
+                self.config_entry, data=updated_data
+            )
+            return self.async_create_entry(title="", data={})
 
         current_config = self.config_entry.data
 
         schema = vol.Schema({
+            vol.Required(
+                CONF_BATTERY_SOC_ENTITIES,
+                default=current_config.get(CONF_BATTERY_SOC_ENTITIES, [])
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    multiple=True
+                )
+            ),
+            vol.Required(
+                CONF_SOLAR_SURPLUS_ENTITY,
+                default=current_config.get(CONF_SOLAR_SURPLUS_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_CAR_CHARGING_POWER_ENTITY,
+                default=current_config.get(CONF_CAR_CHARGING_POWER_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
             vol.Optional(
                 CONF_MIN_SOC_THRESHOLD,
                 default=current_config.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)
