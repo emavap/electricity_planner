@@ -44,6 +44,11 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         
         self.decision_engine = ChargingDecisionEngine(hass, self.config)
         
+        # Data availability tracking
+        self._last_successful_update = datetime.now()
+        self._data_unavailable_since = None
+        self._notification_sent = False
+        
         super().__init__(
             hass,
             _LOGGER,
@@ -97,6 +102,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             charging_decision = await self.decision_engine.evaluate_charging_decision(data)
             
             data.update(charging_decision)
+            
+            # Check data availability and handle notifications
+            await self._check_data_availability(data)
             
             return data
             
@@ -166,6 +174,66 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("Could not convert state to float: %s = %s", entity_id, state.state)
             return None
 
+    async def _check_data_availability(self, data: dict[str, Any]) -> None:
+        """Check data availability and send notifications if needed."""
+        now = datetime.now()
+        
+        # Check if critical data is available
+        price_available = data.get("current_price") is not None
+        price_analysis_available = data.get("price_analysis", {}).get("data_available", False)
+        data_is_available = price_available and price_analysis_available
+        
+        if data_is_available:
+            # Data is available - reset tracking
+            self._last_successful_update = now
+            if self._data_unavailable_since is not None:
+                # Data was unavailable but is now available - send recovery notification
+                unavailable_duration = now - self._data_unavailable_since
+                await self._send_notification(
+                    "Electricity Planner Data Restored",
+                    f"Nord Pool data has been restored after {unavailable_duration.total_seconds():.0f} seconds. "
+                    f"Charging decisions are now active.",
+                    "electricity_planner_data_restored"
+                )
+                self._data_unavailable_since = None
+                self._notification_sent = False
+                _LOGGER.info("Data availability restored after %.1f seconds", unavailable_duration.total_seconds())
+        else:
+            # Data is not available
+            if self._data_unavailable_since is None:
+                # First time detecting unavailability
+                self._data_unavailable_since = now
+                _LOGGER.warning("Critical data unavailable - starting tracking")
+            else:
+                # Data has been unavailable for some time
+                unavailable_duration = now - self._data_unavailable_since
+                
+                # Send notification if data unavailable for more than 1 minute and notification not sent yet
+                if unavailable_duration > timedelta(minutes=1) and not self._notification_sent:
+                    await self._send_notification(
+                        "Electricity Planner Data Unavailable",
+                        f"Critical data (Nord Pool prices) has been unavailable for {unavailable_duration.total_seconds():.0f} seconds. "
+                        f"All charging from grid is disabled for safety. Please check your Nord Pool integration.",
+                        "electricity_planner_data_unavailable"
+                    )
+                    self._notification_sent = True
+                    _LOGGER.error("Data unavailable notification sent after %.1f seconds", unavailable_duration.total_seconds())
+
+    async def _send_notification(self, title: str, message: str, notification_id: str) -> None:
+        """Send a persistent notification."""
+        try:
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": title,
+                    "message": message,
+                    "notification_id": notification_id,
+                },
+            )
+            _LOGGER.info("Sent notification: %s", title)
+        except Exception as err:
+            _LOGGER.error("Failed to send notification: %s", err)
 
     @property
     def min_soc_threshold(self) -> float:

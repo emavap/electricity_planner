@@ -1,6 +1,8 @@
 """Binary sensor platform for Electricity Planner."""
 from __future__ import annotations
 
+from datetime import datetime
+
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
@@ -27,6 +29,7 @@ async def async_setup_entry(
         CarGridChargingBinarySensor(coordinator, entry),
         LowPriceBinarySensor(coordinator, entry),
         SolarProductionBinarySensor(coordinator, entry),
+        DataAvailabilityBinarySensor(coordinator, entry),
     ]
     
     async_add_entities(entities, False)
@@ -167,5 +170,62 @@ class SolarProductionBinarySensor(ElectricityPlannerBinarySensorBase):
             "forecast": solar_analysis.get("forecast"),
             "has_good_forecast": solar_analysis.get("has_good_forecast"),
         }
+
+
+class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
+    """Binary sensor for data availability status."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the data availability binary sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_name = "Data: Nord Pool Available"
+        self._attr_unique_id = f"{entry.entry_id}_data_availability"
+        self._attr_icon = "mdi:database-check"
+        self._attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return true if critical data is available."""
+        if not self.coordinator.data:
+            return False
+        
+        # Check if both price data and price analysis indicate data is available
+        price_available = self.coordinator.data.get("current_price") is not None
+        price_analysis_available = self.coordinator.data.get("price_analysis", {}).get("data_available", False)
+        return price_available and price_analysis_available
+
+    @property
+    def extra_state_attributes(self) -> dict[str, any]:
+        """Return the state attributes."""
+        if not self.coordinator.data:
+            return {
+                "last_successful_update": None,
+                "data_unavailable_since": None,
+                "unavailable_duration_seconds": None,
+            }
+        
+        attributes = {}
+        
+        # Add availability timestamps from coordinator
+        if hasattr(self.coordinator, '_last_successful_update'):
+            attributes["last_successful_update"] = self.coordinator._last_successful_update.isoformat()
+        
+        if hasattr(self.coordinator, '_data_unavailable_since') and self.coordinator._data_unavailable_since:
+            attributes["data_unavailable_since"] = self.coordinator._data_unavailable_since.isoformat()
+            unavailable_duration = (datetime.now() - self.coordinator._data_unavailable_since).total_seconds()
+            attributes["unavailable_duration_seconds"] = int(unavailable_duration)
+        
+        # Add data source status
+        price_analysis = self.coordinator.data.get("price_analysis", {})
+        attributes.update({
+            "current_price_available": self.coordinator.data.get("current_price") is not None,
+            "highest_price_available": self.coordinator.data.get("highest_price") is not None,
+            "lowest_price_available": self.coordinator.data.get("lowest_price") is not None,
+            "next_price_available": self.coordinator.data.get("next_price") is not None,
+            "price_analysis_available": price_analysis.get("data_available", False),
+            "notification_sent": getattr(self.coordinator, '_notification_sent', False),
+        })
+        
+        return attributes
 
 
