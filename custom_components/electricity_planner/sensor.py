@@ -292,13 +292,22 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
     @property
     def extra_state_attributes(self) -> dict[str, any]:
         """Return the hourly history data as attributes."""
-        current_hour = datetime.now().replace(minute=0, second=0, microsecond=0)
+        if not self.coordinator.data:
+            return self._cached_attributes if hasattr(self, '_cached_attributes') else {}
         
-        # Only update history and recalculate when hour changes
-        if not hasattr(self, '_last_attributes_hour') or self._last_attributes_hour != current_hour:
+        # Check if price or decisions have changed since last update
+        current_price = self.coordinator.data.get("price_analysis", {}).get("current_price")
+        battery_charging = self.coordinator.data.get("battery_grid_charging", False)
+        car_charging = self.coordinator.data.get("car_grid_charging", False)
+        
+        # Create state signature to detect changes
+        current_state = (current_price, battery_charging, car_charging)
+        
+        # Only update when price or decisions change, or first time
+        if not hasattr(self, '_last_state') or self._last_state != current_state:
             self._update_history()
             
-            # Cache formatted data - only recalculate when hour changes
+            # Cache formatted data - only recalculate when data changes
             recent_data = self._history_data[-48:] if self._history_data else []
             self._cached_formatted_data = self._format_for_apex_charts(recent_data)
             self._cached_attributes = {
@@ -309,7 +318,7 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
                 "battery_charging_data": self._cached_formatted_data.get("battery_charging_data", []),
                 "car_charging_data": self._cached_formatted_data.get("car_charging_data", []),
             }
-            self._last_attributes_hour = current_hour
+            self._last_state = current_state
         
         # Return cached attributes to avoid processing on every access
         return self._cached_attributes if hasattr(self, '_cached_attributes') else {}
