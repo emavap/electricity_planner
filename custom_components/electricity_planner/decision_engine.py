@@ -386,11 +386,14 @@ class ChargingDecisionEngine:
         battery_grid_charging = data.get("battery_grid_charging", False)
         average_soc = battery_analysis.get("average_soc", 50)
         
+        # Ignore car charging power below 100W (standby/measurement noise)
+        significant_car_charging = car_charging_power >= 100
+        
         # Determine maximum grid setpoint based on monthly peak
         max_grid_setpoint = max(monthly_grid_peak, 2500) if monthly_grid_peak and monthly_grid_peak > 2500 else 2500
         
         # Case 1: Car charging + battery < 80% - grid for car consumption, surplus for batteries
-        if car_charging_power > 0 and average_soc < 80:
+        if significant_car_charging and average_soc < 80:
             # Grid setpoint follows actual car consumption up to the charger limit and grid peak limit
             car_grid_need = min(car_charging_power, charger_limit, max_grid_setpoint)
             grid_setpoint = car_grid_need
@@ -400,7 +403,7 @@ class ChargingDecisionEngine:
             }
         
         # Case 2: Car charging + battery ≥ 80% - grid supports car, can also charge batteries if decided
-        if car_charging_power > 0 and average_soc >= 80:
+        if significant_car_charging and average_soc >= 80:
             # Grid covers car needs first
             car_grid_need = max(0, car_charging_power - solar_surplus)
             
@@ -421,16 +424,16 @@ class ChargingDecisionEngine:
                     "grid_setpoint_reason": f"Car drawing {car_charging_power}W, battery {average_soc:.0f}% ≥ 80% - grid covers car deficit ({int(grid_setpoint)}W = {car_charging_power}W - {solar_surplus}W surplus)",
                 }
         
-        # Case 3: No car charging, but battery charging decision is on
-        if car_charging_power <= 0 and battery_grid_charging:
+        # Case 3: No significant car charging, but battery charging decision is on
+        if not significant_car_charging and battery_grid_charging:
             grid_setpoint = max_grid_setpoint
             return {
                 "grid_setpoint": int(grid_setpoint),
                 "grid_setpoint_reason": f"No car charging - grid setpoint for battery charging ({int(grid_setpoint)}W)",
             }
         
-        # Case 4: No car charging, no battery charging
+        # Case 4: No significant car charging, no battery charging
         return {
             "grid_setpoint": 0,
-            "grid_setpoint_reason": "No car charging and no battery grid charging decision",
+            "grid_setpoint_reason": "No significant car charging and no battery grid charging decision",
         }

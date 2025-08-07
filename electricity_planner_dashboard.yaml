@@ -114,7 +114,7 @@ series:
 
 ---
 
-# Price & Charging Decisions History - Single colored price line
+# Price & Charging Decisions History - Using historical data
 type: custom:apexcharts-card
 header:
   show: true
@@ -157,47 +157,56 @@ apex_config:
     show: true
     position: bottom
 series:
-  - entity: sensor.electricity_planner_price_analysis
+  - entity: sensor.electricity_planner_hourly_decision_history
+    attribute: price_data
     name: "No Charging"
     color: '#607D8B'
     stroke_width: 4
     type: line
     show:
       legend_value: false
-    transform: |
-      // Show price only when no charging
-      const historyEntity = 'sensor.electricity_planner_hourly_decision_history';
-      const batteryCharging = hass.states[historyEntity]?.attributes?.battery_charging_data || [];
-      const carCharging = hass.states[historyEntity]?.attributes?.car_charging_data || [];
-      const priceValue = parseFloat(hass.states[entity.entity_id].state);
+    data_generator: |
+      const priceData = entity.attributes.price_data || [];
+      const batteryData = entity.attributes.battery_charging_data || [];
+      const carData = entity.attributes.car_charging_data || [];
       
-      // Check if currently charging (simplified check)
-      const batteryOn = hass.states['binary_sensor.electricity_planner_battery_grid_charging']?.state === 'on';
-      const carOn = hass.states['binary_sensor.electricity_planner_car_grid_charging']?.state === 'on';
-      
-      return (!batteryOn && !carOn) ? priceValue : null;
-  - entity: sensor.electricity_planner_price_analysis
+      return priceData.map((point, index) => {
+        const batteryCharging = batteryData[index] && batteryData[index][1] === 1;
+        const carCharging = carData[index] && carData[index][1] === 1;
+        return (!batteryCharging && !carCharging) ? point : [point[0], null];
+      });
+  - entity: sensor.electricity_planner_hourly_decision_history
+    attribute: price_data
     name: "Battery Charging"
     color: '#4CAF50'
     stroke_width: 4
     type: line
     show:
       legend_value: false
-    transform: |
-      const priceValue = parseFloat(hass.states[entity.entity_id].state);
-      const batteryOn = hass.states['binary_sensor.electricity_planner_battery_grid_charging']?.state === 'on';
-      return batteryOn ? priceValue : null;
-  - entity: sensor.electricity_planner_price_analysis
+    data_generator: |
+      const priceData = entity.attributes.price_data || [];
+      const batteryData = entity.attributes.battery_charging_data || [];
+      
+      return priceData.map((point, index) => {
+        const batteryCharging = batteryData[index] && batteryData[index][1] === 1;
+        return batteryCharging ? point : [point[0], null];
+      });
+  - entity: sensor.electricity_planner_hourly_decision_history
+    attribute: price_data
     name: "Car Charging"
     color: '#9C27B0'
     stroke_width: 4
     type: line
     show:
       legend_value: false
-    transform: |
-      const priceValue = parseFloat(hass.states[entity.entity_id].state);
-      const carOn = hass.states['binary_sensor.electricity_planner_car_grid_charging']?.state === 'on';
-      return carOn ? priceValue : null;
+    data_generator: |
+      const priceData = entity.attributes.price_data || [];
+      const carData = entity.attributes.car_charging_data || [];
+      
+      return priceData.map((point, index) => {
+        const carCharging = carData[index] && carData[index][1] === 1;
+        return carCharging ? point : [point[0], null];
+      });
 
 ---
 
