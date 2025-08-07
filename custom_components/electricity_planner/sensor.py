@@ -303,9 +303,11 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
         # Create state signature to detect changes
         current_state = (current_price, battery_charging, car_charging)
         
-        # Only update when price or decisions change, or first time
+        # Always try to update history (handles hourly recording)
+        self._update_history()
+        
+        # Only recalculate cached data when price or decisions change, or first time
         if not hasattr(self, '_last_state') or self._last_state != current_state:
-            self._update_history()
             
             # Cache formatted data - only recalculate when data changes
             recent_data = self._history_data[-48:] if self._history_data else []
