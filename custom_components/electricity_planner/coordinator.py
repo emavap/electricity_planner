@@ -143,6 +143,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                          entity_id, state.state if state else "missing", soc)
             if soc is not None:
                 battery_soc_values.append({"entity_id": entity_id, "soc": soc})
+            else:
+                _LOGGER.warning("Battery entity %s is unavailable - excluding from calculations", entity_id)
         
         data["battery_soc"] = battery_soc_values
         _LOGGER.debug("Final battery SOC data: %s", battery_soc_values)

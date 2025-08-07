@@ -47,9 +47,12 @@ class ChargingDecisionEngine:
 
         current_price = data.get("current_price")
         if current_price is None:
-            reason = "No current price data available"
+            reason = "No current price data available - all grid charging disabled for safety"
             decision_data["battery_grid_charging_reason"] = reason
             decision_data["car_grid_charging_reason"] = reason
+            decision_data["charger_limit_reason"] = "No price data - limiting to solar only"
+            decision_data["grid_setpoint_reason"] = "No price data - grid setpoint set to 0"
+            _LOGGER.warning("Critical price data unavailable - disabling all grid charging")
             return decision_data
 
         price_analysis = self._analyze_comprehensive_pricing(data)
@@ -146,8 +149,12 @@ class ChargingDecisionEngine:
 
     def _analyze_power_flow(self, data: dict[str, Any]) -> dict[str, Any]:
         """Analyze current power flow and consumption."""
-        solar_surplus = data.get("solar_surplus") or 0
-        car_charging_power = data.get("car_charging_power") or 0
+        solar_surplus = data.get("solar_surplus")
+        car_charging_power = data.get("car_charging_power")
+        
+        # Handle unavailable sensors - use 0 as safe default for power calculations
+        solar_surplus = solar_surplus if solar_surplus is not None else 0
+        car_charging_power = car_charging_power if car_charging_power is not None else 0
 
         return {
             "solar_surplus": solar_surplus,
@@ -160,7 +167,8 @@ class ChargingDecisionEngine:
 
     def _analyze_solar_production(self, data: dict[str, Any]) -> dict[str, Any]:
         """Analyze solar production status."""
-        solar_surplus = data.get("solar_surplus") or 0
+        solar_surplus = data.get("solar_surplus")
+        solar_surplus = solar_surplus if solar_surplus is not None else 0
         
         # Consider solar producing if there's any surplus
         is_producing = solar_surplus > 0
@@ -183,8 +191,21 @@ class ChargingDecisionEngine:
                 "batteries_full": False,
             }
 
-        # Defensive: if a battery dict lacks 'soc', default to 0 (adjust if undesired)
-        soc_values = [battery.get("soc", 0) for battery in battery_soc_data]
+        # Only include batteries with valid SOC values (not unavailable/unknown)
+        soc_values = [battery["soc"] for battery in battery_soc_data if "soc" in battery and battery["soc"] is not None]
+        
+        # If no valid SOC values are available, return safe defaults
+        if not soc_values:
+            _LOGGER.warning("All battery SOC sensors are unavailable - no charging decisions will be made")
+            return {
+                "average_soc": None,
+                "min_soc": None,
+                "max_soc": None,
+                "batteries_count": len(battery_soc_data),
+                "batteries_full": False,
+                "batteries_available": False,
+            }
+
         min_soc_threshold = self.config.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)
         max_soc_threshold = self.config.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
 
@@ -196,11 +217,12 @@ class ChargingDecisionEngine:
             "average_soc": average_soc,
             "min_soc": min_soc,
             "max_soc": max_soc,
-            "batteries_count": len(battery_soc_data),
+            "batteries_count": len(soc_values),
             "batteries_full": min_soc >= max_soc_threshold,
             "min_soc_threshold": min_soc_threshold,
             "max_soc_threshold": max_soc_threshold,
             "remaining_capacity_percent": max_soc_threshold - average_soc,
+            "batteries_available": True,
         }
 
     def _decide_battery_grid_charging(
@@ -214,6 +236,13 @@ class ChargingDecisionEngine:
             return {
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": "No battery entities configured",
+            }
+        
+        # Check if battery data is available (not all sensors unavailable)
+        if not battery_analysis.get("batteries_available", True):
+            return {
+                "battery_grid_charging": False,
+                "battery_grid_charging_reason": "All battery SOC sensors unavailable - no charging decision possible",
             }
 
         if battery_analysis.get("batteries_full"):
@@ -353,7 +382,15 @@ class ChargingDecisionEngine:
         solar_surplus = power_analysis.get("solar_surplus", 0)
         monthly_grid_peak = data.get("monthly_grid_peak", 0)
         max_grid_setpoint = max(monthly_grid_peak, 2500) if monthly_grid_peak and monthly_grid_peak > 2500 else 2500
-        average_soc = battery_analysis.get("average_soc", 50)
+        average_soc = battery_analysis.get("average_soc")
+        
+        # If battery data is unavailable, use conservative approach
+        if average_soc is None:
+            charger_limit = min(max_grid_setpoint, 11000)
+            return {
+                "charger_limit": int(charger_limit),
+                "charger_limit_reason": f"Battery data unavailable - conservative limit ({int(charger_limit)}W)",
+            }
         
         # If battery < 80%: Car gets grid setpoint only, surplus goes to batteries
         if average_soc < 80:
@@ -384,7 +421,23 @@ class ChargingDecisionEngine:
         solar_surplus = power_analysis.get("solar_surplus", 0)
         monthly_grid_peak = data.get("monthly_grid_peak", 0)
         battery_grid_charging = data.get("battery_grid_charging", False)
-        average_soc = battery_analysis.get("average_soc", 50)
+        average_soc = battery_analysis.get("average_soc")
+        
+        # If battery data is unavailable, use safe grid setpoint approach
+        if average_soc is None:
+            if significant_car_charging:
+                # Only provide grid for car, no battery charging
+                max_grid_setpoint = max(monthly_grid_peak, 2500) if monthly_grid_peak and monthly_grid_peak > 2500 else 2500
+                grid_setpoint = min(car_charging_power, max_grid_setpoint)
+                return {
+                    "grid_setpoint": int(grid_setpoint),
+                    "grid_setpoint_reason": f"Battery data unavailable - grid only for car ({int(grid_setpoint)}W)",
+                }
+            else:
+                return {
+                    "grid_setpoint": 0,
+                    "grid_setpoint_reason": "Battery data unavailable and no car charging - grid setpoint 0W",
+                }
         
         # Ignore car charging power below 100W (standby/measurement noise)
         significant_car_charging = car_charging_power >= 100
