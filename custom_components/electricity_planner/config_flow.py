@@ -41,7 +41,7 @@ from .const import (
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Electricity Planner."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self):
         """Initialize the config flow."""
@@ -255,6 +255,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Optional(
+                CONF_WEATHER_ENTITY,
+                default=current_config.get(CONF_WEATHER_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["weather"])
+            ),
+            vol.Optional(
                 CONF_MIN_SOC_THRESHOLD,
                 default=current_config.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)
             ): selector.NumberSelector(
@@ -276,6 +282,46 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0, max=1, step=0.01, unit_of_measurement="€/kWh"
+                )
+            ),
+            vol.Optional(
+                CONF_EMERGENCY_SOC_THRESHOLD,
+                default=current_config.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=5, max=50, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_VERY_LOW_PRICE_THRESHOLD,
+                default=current_config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=10, max=50, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_SIGNIFICANT_SOLAR_THRESHOLD,
+                default=current_config.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=500, max=5000, step=100, unit_of_measurement="W"
+                )
+            ),
+            vol.Optional(
+                CONF_POOR_SOLAR_FORECAST_THRESHOLD,
+                default=current_config.get(CONF_POOR_SOLAR_FORECAST_THRESHOLD, DEFAULT_POOR_SOLAR_FORECAST)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=10, max=60, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD,
+                default=current_config.get(CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD, DEFAULT_EXCELLENT_SOLAR_FORECAST)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=60, max=95, unit_of_measurement="%"
                 )
             ),
         })
