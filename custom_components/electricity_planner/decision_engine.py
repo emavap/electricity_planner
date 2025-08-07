@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict
+from typing import Any
 
 from homeassistant.core import HomeAssistant
 
@@ -195,8 +195,6 @@ class ChargingDecisionEngine:
         return {
             "current_production": solar_surplus,
             "is_producing": is_producing,
-            "forecast": None,  # Could be expanded later with forecast data
-            "has_good_forecast": False,  # Could be expanded later
         }
 
     def _analyze_solar_forecast(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -486,17 +484,6 @@ class ChargingDecisionEngine:
             "battery_grid_charging_reason": f"Price not favorable ({current:.3f}€/kWh, {position:.0%} of daily range) for SOC {average_soc:.0f}%",
         }
 
-    def _decide_battery_grid_charging(
-        self,
-        price_analysis: dict[str, Any],
-        battery_analysis: dict[str, Any],
-        power_analysis: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Legacy battery charging decision - kept for compatibility."""
-        # This function is kept but no longer used - replaced by enhanced version
-        return self._decide_battery_grid_charging_enhanced(
-            price_analysis, battery_analysis, power_analysis, {"solar_production_factor": 0.5}
-        )
 
     def _decide_car_grid_charging(
         self,
@@ -521,9 +508,10 @@ class ChargingDecisionEngine:
 
         if price_analysis.get("very_low_price"):
             current = price_analysis.get("current_price")
+            very_low_threshold_percent = self.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
             return {
                 "car_grid_charging": True,
-                "car_grid_charging_reason": f"Very low price ({current:.3f}€/kWh) - bottom 30% of daily range",
+                "car_grid_charging_reason": f"Very low price ({current:.3f}€/kWh) - bottom {very_low_threshold_percent}% of daily range",
             }
 
         if price_analysis.get("price_trend_improving"):
