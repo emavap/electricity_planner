@@ -11,9 +11,20 @@ from .const import (
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
+    CONF_WEATHER_ENTITY,
+    CONF_EMERGENCY_SOC_THRESHOLD,
+    CONF_VERY_LOW_PRICE_THRESHOLD,
+    CONF_SIGNIFICANT_SOLAR_THRESHOLD,
+    CONF_POOR_SOLAR_FORECAST_THRESHOLD,
+    CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
+    DEFAULT_EMERGENCY_SOC,
+    DEFAULT_VERY_LOW_PRICE_THRESHOLD,
+    DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
+    DEFAULT_POOR_SOLAR_FORECAST,
+    DEFAULT_EXCELLENT_SOLAR_FORECAST,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,8 +80,11 @@ class ChargingDecisionEngine:
         solar_analysis = self._analyze_solar_production(data)
         decision_data["solar_analysis"] = solar_analysis
 
-        battery_decision = self._decide_battery_grid_charging(
-            price_analysis, battery_analysis, power_analysis
+        solar_forecast = self._analyze_solar_forecast(data)
+        decision_data["solar_forecast"] = solar_forecast
+
+        battery_decision = self._decide_battery_grid_charging_enhanced(
+            price_analysis, battery_analysis, power_analysis, solar_forecast
         )
         decision_data.update(battery_decision)
 
@@ -100,6 +114,7 @@ class ChargingDecisionEngine:
         next_price = data.get("next_price")
 
         price_threshold = self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
+        very_low_price_threshold = self.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD) / 100.0
 
         # Handle missing current price
         if current_price is None:
@@ -143,7 +158,7 @@ class ChargingDecisionEngine:
             "price_position": price_position,  # 0=lowest, 1=highest
             "next_price_higher": next_price_higher,
             "price_trend_improving": price_trend_improving,
-            "very_low_price": price_position <= 0.3,  # Bottom 30% of daily range
+            "very_low_price": price_position <= very_low_price_threshold,  # Configurable threshold of daily range
             "data_available": True,
         }
 
@@ -155,14 +170,18 @@ class ChargingDecisionEngine:
         # Handle unavailable sensors - use 0 as safe default for power calculations
         solar_surplus = solar_surplus if solar_surplus is not None else 0
         car_charging_power = car_charging_power if car_charging_power is not None else 0
+        
+        # Get configurable solar threshold
+        significant_solar_threshold = self.config.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)
 
         return {
             "solar_surplus": solar_surplus,
             "car_charging_power": car_charging_power,
             "has_solar_surplus": solar_surplus > 0,
-            "significant_solar_surplus": solar_surplus > 1000,  # >1kW surplus
+            "significant_solar_surplus": solar_surplus > significant_solar_threshold,
             "car_currently_charging": car_charging_power > 0,
             "available_surplus_for_batteries": max(0, solar_surplus - car_charging_power),
+            "significant_solar_threshold": significant_solar_threshold,
         }
 
     def _analyze_solar_production(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -178,6 +197,119 @@ class ChargingDecisionEngine:
             "is_producing": is_producing,
             "forecast": None,  # Could be expanded later with forecast data
             "has_good_forecast": False,  # Could be expanded later
+        }
+
+    def _analyze_solar_forecast(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Analyze tomorrow's solar production potential based on weather forecast."""
+        weather_entity = self.config.get(CONF_WEATHER_ENTITY)
+        
+        if not weather_entity:
+            return {
+                "forecast_available": False, 
+                "solar_production_factor": 0.5,  # Neutral assumption
+                "expected_solar_production": "unknown",
+                "reason": "No weather entity configured"
+            }
+        
+        state = data.get("weather_state")
+        if not state or not hasattr(state, 'attributes'):
+            return {
+                "forecast_available": False,
+                "solar_production_factor": 0.5,
+                "expected_solar_production": "unknown", 
+                "reason": "Weather entity unavailable"
+            }
+        
+        forecast = state.attributes.get('forecast', [])
+        if not forecast:
+            return {
+                "forecast_available": False,
+                "solar_production_factor": 0.5,
+                "expected_solar_production": "unknown",
+                "reason": "No forecast data available"
+            }
+        
+        now = datetime.now()
+        tomorrow_forecasts = []
+        
+        for f in forecast:
+            if not f.get('datetime'):
+                continue
+            try:
+                forecast_time = datetime.fromisoformat(f['datetime'].replace('Z', '+00:00'))
+                # Get forecasts for next 24 hours
+                if now < forecast_time <= now + timedelta(hours=24):
+                    tomorrow_forecasts.append(f)
+            except (ValueError, TypeError):
+                continue
+        
+        if not tomorrow_forecasts:
+            return {
+                "forecast_available": False,
+                "solar_production_factor": 0.5,
+                "expected_solar_production": "unknown",
+                "reason": "No valid forecast data for next 24h"
+            }
+        
+        # Analyze cloud coverage and precipitation for solar potential
+        sunny_hours = 0
+        partly_cloudy_hours = 0
+        cloudy_hours = 0
+        
+        for forecast_hour in tomorrow_forecasts:
+            condition = forecast_hour.get('condition', '').lower()
+            precipitation = forecast_hour.get('precipitation', 0) or 0
+            
+            # Only consider daylight hours (6 AM to 8 PM)
+            try:
+                forecast_time = datetime.fromisoformat(forecast_hour['datetime'].replace('Z', '+00:00'))
+                if 6 <= forecast_time.hour <= 20:
+                    if precipitation > 2:  # Heavy rain/snow
+                        cloudy_hours += 1
+                    elif condition in ['sunny', 'clear']:
+                        sunny_hours += 1
+                    elif condition in ['partlycloudy', 'cloudy']:
+                        if precipitation < 0.5:
+                            partly_cloudy_hours += 1
+                        else:
+                            cloudy_hours += 1
+                    else:
+                        cloudy_hours += 1
+            except (ValueError, TypeError):
+                cloudy_hours += 1  # Conservative assumption
+        
+        total_daylight_hours = sunny_hours + partly_cloudy_hours + cloudy_hours
+        if total_daylight_hours == 0:
+            return {
+                "forecast_available": False,
+                "solar_production_factor": 0.5,
+                "expected_solar_production": "unknown",
+                "reason": "No daylight hours in forecast"
+            }
+        
+        # Calculate expected solar production relative to perfect day
+        solar_production_factor = (
+            (sunny_hours * 1.0) +           # 100% production
+            (partly_cloudy_hours * 0.6) +  # 60% production  
+            (cloudy_hours * 0.2)           # 20% production
+        ) / total_daylight_hours
+        
+        expected_production = (
+            "excellent" if solar_production_factor > 0.8 else
+            "good" if solar_production_factor > 0.6 else
+            "moderate" if solar_production_factor > 0.3 else
+            "poor"
+        )
+        
+        return {
+            "forecast_available": True,
+            "sunny_hours": sunny_hours,
+            "partly_cloudy_hours": partly_cloudy_hours,
+            "cloudy_hours": cloudy_hours,
+            "total_daylight_hours": total_daylight_hours,
+            "solar_production_factor": solar_production_factor,  # 0.0 to 1.0
+            "expected_solar_production": expected_production,
+            "reason": f"Forecast: {sunny_hours}h sunny, {partly_cloudy_hours}h partly cloudy, {cloudy_hours}h cloudy"
         }
 
     def _analyze_battery_status(self, battery_soc_data: list[dict[str, Any]]) -> dict[str, Any]:
@@ -225,13 +357,30 @@ class ChargingDecisionEngine:
             "batteries_available": True,
         }
 
-    def _decide_battery_grid_charging(
+    def _get_time_context(self) -> dict[str, Any]:
+        """Get time-of-day context for charging decisions."""
+        now = datetime.now()
+        hour = now.hour
+        
+        return {
+            "current_hour": hour,
+            "is_night": 22 <= hour or hour <= 6,      # 10 PM - 6 AM  
+            "is_early_morning": 6 < hour <= 9,        # 6 AM - 9 AM
+            "is_solar_peak": 10 <= hour <= 16,        # 10 AM - 4 PM
+            "is_evening": 17 <= hour <= 21,           # 5 PM - 9 PM
+            "hours_until_sunrise": max(0, (6 - hour) % 24),
+            "winter_season": now.month in [11, 12, 1, 2]  # Shorter days
+        }
+
+    def _decide_battery_grid_charging_enhanced(
         self,
         price_analysis: dict[str, Any],
         battery_analysis: dict[str, Any],
         power_analysis: dict[str, Any],
+        solar_forecast: dict[str, Any],
     ) -> dict[str, Any]:
-        """Decide whether to charge batteries from grid based on comprehensive analysis."""
+        """Enhanced battery charging decision with solar forecasting."""
+        # Safety checks first
         if battery_analysis.get("batteries_count", 0) == 0:
             return {
                 "battery_grid_charging": False,
@@ -256,63 +405,98 @@ class ChargingDecisionEngine:
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": "No price data available",
             }
-
-        if not price_analysis.get("is_low_price", False):
-            current = price_analysis.get("current_price")
-            threshold = price_analysis.get("price_threshold")
-            return {
-                "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"Price too high ({current:.3f}€/kWh) - threshold: {threshold:.3f}€/kWh",
-            }
-
-        # Enhanced logic for battery SOC and price trend analysis (BEFORE very low price logic)
-        average_soc = battery_analysis.get("average_soc")
-        current_price = price_analysis.get("current_price")
-        next_price = price_analysis.get("next_price")
         
-        # For batteries >= 50% SOC, be more selective about charging
-        if average_soc is not None and average_soc >= 50:
-            # Check if price is dropping significantly next hour (20%+ drop)
-            if (next_price is not None and current_price is not None and 
-                next_price < current_price * 0.8):  # Next price is 20%+ lower
+        # Get key values
+        average_soc = battery_analysis.get("average_soc", 0)
+        current_price = price_analysis.get("current_price")
+        is_low_price = price_analysis.get("is_low_price", False)
+        very_low_price = price_analysis.get("very_low_price", False)
+        solar_surplus = power_analysis.get("solar_surplus", 0)
+        solar_forecast_factor = solar_forecast.get("solar_production_factor", 0.5)
+        
+        # Get configurable thresholds
+        emergency_soc = self.config.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC)
+        significant_solar_threshold = self.config.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)
+        poor_forecast_threshold = self.config.get(CONF_POOR_SOLAR_FORECAST_THRESHOLD, DEFAULT_POOR_SOLAR_FORECAST) / 100.0
+        excellent_forecast_threshold = self.config.get(CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD, DEFAULT_EXCELLENT_SOLAR_FORECAST) / 100.0
+        
+        # 1. EMERGENCY: Always charge if critically low (but respect price limits)
+        if average_soc < emergency_soc:
+            if is_low_price:
+                return {
+                    "battery_grid_charging": True,
+                    "battery_grid_charging_reason": f"Emergency charge - SOC {average_soc:.0f}% < {emergency_soc}% with acceptable price ({current_price:.3f}€/kWh)",
+                }
+            else:
                 return {
                     "battery_grid_charging": False,
-                    "battery_grid_charging_reason": f"Batteries at {average_soc:.0f}% - price dropping significantly next hour ({current_price:.3f}→{next_price:.3f}€/kWh)",
+                    "battery_grid_charging_reason": f"Emergency level ({average_soc:.0f}%) but price too high ({current_price:.3f}€/kWh)",
                 }
-            
-            # For well-charged batteries (>= 60%) with solar production, avoid grid charging
-            if power_analysis.get("has_solar_surplus") and average_soc >= 60:
-                return {
-                    "battery_grid_charging": False,
-                    "battery_grid_charging_reason": f"Batteries well charged ({average_soc:.0f}%) with solar production ({power_analysis.get('solar_surplus', 0)}W) - use solar instead",
-                }
-
-        if power_analysis.get("significant_solar_surplus"):
+        
+        # 2. SOLAR PRIORITY: Never use grid when significant solar available (unless very low price)
+        if solar_surplus > significant_solar_threshold and not very_low_price:
             return {
                 "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"Solar surplus available ({power_analysis.get('solar_surplus')}W) - use solar instead of grid",
+                "battery_grid_charging_reason": f"Solar surplus {solar_surplus}W > {significant_solar_threshold}W threshold - use solar instead of grid",
             }
-
-        if price_analysis.get("very_low_price"):
-            current = price_analysis.get("current_price")
+        
+        # 3. VERY LOW PRICE: Always charge (configurable threshold of daily range)
+        if very_low_price:
+            very_low_threshold_percent = self.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
             return {
                 "battery_grid_charging": True,
-                "battery_grid_charging_reason": f"Very low price ({current:.3f}€/kWh) - bottom 30% of daily range",
+                "battery_grid_charging_reason": f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_threshold_percent}% of daily range",
             }
         
-        # Original 30% threshold logic
-        if average_soc is not None and average_soc >= 30 and not price_analysis.get("very_low_price"):
-            return {
-                "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"Batteries above 30% ({average_soc:.0f}%) and price not very low - no need to charge",
-            }
-
+        # 4. FORECAST-AWARE CHARGING: Main logic enhancement using configurable thresholds
+        if is_low_price:
+            # Low SOC + poor solar forecast = charge now
+            if average_soc < 40 and solar_forecast_factor < poor_forecast_threshold:
+                return {
+                    "battery_grid_charging": True,
+                    "battery_grid_charging_reason": f"SOC {average_soc:.0f}% + {solar_forecast.get('expected_solar_production', 'poor')} solar forecast ({solar_forecast_factor:.0%} < {poor_forecast_threshold:.0%}) - charge while price low",
+                }
+            
+            # Medium SOC + excellent solar forecast = skip charging  
+            if 30 <= average_soc <= 60 and solar_forecast_factor > excellent_forecast_threshold:
+                return {
+                    "battery_grid_charging": False,
+                    "battery_grid_charging_reason": f"SOC {average_soc:.0f}% sufficient + {solar_forecast.get('expected_solar_production', 'excellent')} solar forecast ({solar_forecast_factor:.0%} > {excellent_forecast_threshold:.0%})",
+                }
+            
+            # Low SOC but good solar expected = still charge (conservative)
+            if average_soc < 30:
+                return {
+                    "battery_grid_charging": True,
+                    "battery_grid_charging_reason": f"SOC {average_soc:.0f}% low - charge despite {solar_forecast.get('expected_solar_production', 'good')} solar forecast",
+                }
+            
+            # Medium SOC + moderate forecast = charge
+            if average_soc < 50:
+                return {
+                    "battery_grid_charging": True,
+                    "battery_grid_charging_reason": f"SOC {average_soc:.0f}% + {solar_forecast.get('expected_solar_production', 'moderate')} conditions - charge at low price",
+                }
+        
+        # 5. DEFAULT: Price not favorable
         current = price_analysis.get("current_price")
         position = price_analysis.get("price_position", 0.5)
         return {
             "battery_grid_charging": False,
-            "battery_grid_charging_reason": f"Price OK but not optimal - current: {current:.3f}€/kWh, position: {position:.0%}",
+            "battery_grid_charging_reason": f"Price not favorable ({current:.3f}€/kWh, {position:.0%} of daily range) for SOC {average_soc:.0f}%",
         }
+
+    def _decide_battery_grid_charging(
+        self,
+        price_analysis: dict[str, Any],
+        battery_analysis: dict[str, Any],
+        power_analysis: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Legacy battery charging decision - kept for compatibility."""
+        # This function is kept but no longer used - replaced by enhanced version
+        return self._decide_battery_grid_charging_enhanced(
+            price_analysis, battery_analysis, power_analysis, {"solar_production_factor": 0.5}
+        )
 
     def _decide_car_grid_charging(
         self,

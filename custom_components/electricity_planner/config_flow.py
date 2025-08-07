@@ -18,12 +18,23 @@ from .const import (
     CONF_SOLAR_SURPLUS_ENTITY,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MONTHLY_GRID_PEAK_ENTITY,
+    CONF_WEATHER_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
+    CONF_EMERGENCY_SOC_THRESHOLD,
+    CONF_VERY_LOW_PRICE_THRESHOLD,
+    CONF_SIGNIFICANT_SOLAR_THRESHOLD,
+    CONF_POOR_SOLAR_FORECAST_THRESHOLD,
+    CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
+    DEFAULT_EMERGENCY_SOC,
+    DEFAULT_VERY_LOW_PRICE_THRESHOLD,
+    DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
+    DEFAULT_POOR_SOLAR_FORECAST,
+    DEFAULT_EXCELLENT_SOLAR_FORECAST,
 )
 
 
@@ -73,6 +84,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_MONTHLY_GRID_PEAK_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
+            vol.Optional(CONF_WEATHER_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["weather"])
+            ),
         })
 
         return self.async_show_form(
@@ -87,6 +101,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "solar_surplus": "Current solar surplus (production - consumption) in W",
                 "car_charging": "Car charging power in W (optional)",
                 "monthly_grid_peak": "Current month grid peak in W (optional)",
+                "weather": "Weather forecast entity for solar prediction (optional)",
             },
         )
 
@@ -126,6 +141,46 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     min=0, max=1, step=0.01, unit_of_measurement="€/kWh"
                 )
             ),
+            vol.Optional(
+                CONF_EMERGENCY_SOC_THRESHOLD,
+                default=DEFAULT_EMERGENCY_SOC
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=5, max=50, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_VERY_LOW_PRICE_THRESHOLD,
+                default=DEFAULT_VERY_LOW_PRICE_THRESHOLD
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=10, max=50, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_SIGNIFICANT_SOLAR_THRESHOLD,
+                default=DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=500, max=5000, step=100, unit_of_measurement="W"
+                )
+            ),
+            vol.Optional(
+                CONF_POOR_SOLAR_FORECAST_THRESHOLD,
+                default=DEFAULT_POOR_SOLAR_FORECAST
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=10, max=60, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD,
+                default=DEFAULT_EXCELLENT_SOLAR_FORECAST
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=60, max=95, unit_of_measurement="%"
+                )
+            ),
         })
 
         return self.async_show_form(
@@ -135,6 +190,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "min_soc": "Minimum battery charge level to maintain",
                 "max_soc": "Maximum battery charge level target", 
                 "price_threshold": "Price threshold for charging decisions",
+                "emergency_soc": "Emergency SOC level that triggers charging regardless of price",
+                "very_low_price": "Percentage threshold for 'very low' price in daily range",
+                "significant_solar": "Solar surplus threshold considered significant",
+                "poor_forecast": "Solar forecast below this percentage is considered poor",
+                "excellent_forecast": "Solar forecast above this percentage is considered excellent",
             },
         )
 
