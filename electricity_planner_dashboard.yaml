@@ -114,92 +114,18 @@ series:
 
 ---
 
-# Price & Charging Decisions History - Using historical data
-type: custom:apexcharts-card
-header:
-  show: true
-  title: "💰 Hourly Price with Charging Decisions (48h)"
-  show_states: false
-  colorize_states: false
-graph_span: 48h
-apex_config:
-  chart:
-    height: 400
-    type: line
-  stroke:
-    curve: smooth
-    width: 4
-  tooltip:
-    shared: false
-    custom: |
-      EVAL:function({series, seriesIndex, dataPointIndex, w}) {
-        const price = series[seriesIndex][dataPointIndex];
-        if (price === null) return '';
-        const seriesNames = ['No Charging', 'Battery Charging', 'Car Charging'];
-        const colors = ['#607D8B', '#4CAF50', '#9C27B0'];
-        return '<div class="apexcharts-tooltip-custom">' +
-          '<div style="background: ' + colors[seriesIndex] + '; color: white; padding: 8px; border-radius: 4px;">' +
-          '<strong>' + seriesNames[seriesIndex] + '</strong><br>' +
-          'Price: ' + price.toFixed(4) + ' €/kWh' +
-          '</div></div>';
-      }
-  yaxis:
-    - min: -0.1
-      max: 0.25
-      title:
-        text: "Price (€/kWh)"
-      labels:
-        formatter: |
-          EVAL:function(val) {
-            return val.toFixed(4) + ' €/kWh';
-          }
-  annotations:
-    yaxis:
-      - y: 0
-        borderColor: '#FF0000'
-        borderWidth: 1
-        strokeDashArray: 2
-  legend:
-    show: true
-    position: bottom
-  fill:
-    type: solid
-    opacity: 0
-series:
-  - entity: sensor.electricity_planner_price_analysis
-    name: "No Charging"
-    color: "#607D8B"
-    stroke_width: 4
-    type: line
-    show:
-      legend_value: false
-    transform: |
-      const priceValue = parseFloat(hass.states[entity.entity_id].state);
-      const batteryOn = hass.states['binary_sensor.electricity_planner_battery_grid_charging']?.state === 'on';
-      const carOn = hass.states['binary_sensor.electricity_planner_car_grid_charging']?.state === 'on';
-      return (!batteryOn && !carOn) ? priceValue : null;
-  - entity: sensor.electricity_planner_price_analysis
+# Price & Charging Decisions History - Simple and reliable
+type: history-graph
+title: "💰 Price & Charging Decisions History (48h)"
+entities:
+  - entity: sensor.electricity_planner_current_electricity_price
+    name: "Price (€/kWh)"
+  - entity: binary_sensor.electricity_planner_battery_charge_from_grid
     name: "Battery Charging"
-    color: "#4CAF50"
-    stroke_width: 4
-    type: line
-    show:
-      legend_value: false
-    transform: |
-      const priceValue = parseFloat(hass.states[entity.entity_id].state);
-      const batteryOn = hass.states['binary_sensor.electricity_planner_battery_grid_charging']?.state === 'on';
-      return batteryOn ? priceValue : null;
-  - entity: sensor.electricity_planner_price_analysis
+  - entity: binary_sensor.electricity_planner_car_charge_from_grid
     name: "Car Charging"
-    color: "#9C27B0"
-    stroke_width: 4
-    type: line
-    show:
-      legend_value: false
-    transform: |
-      const priceValue = parseFloat(hass.states[entity.entity_id].state);
-      const carOn = hass.states['binary_sensor.electricity_planner_car_grid_charging']?.state === 'on';
-      return carOn ? priceValue : null;
+hours_to_show: 48
+refresh_interval: 300
 
 ---
 
