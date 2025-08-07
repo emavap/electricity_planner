@@ -140,27 +140,36 @@ apex_config:
         return '<div class="apexcharts-tooltip-custom">' +
           '<div style="background: ' + colors[seriesIndex] + '; color: white; padding: 8px; border-radius: 4px;">' +
           '<strong>' + seriesNames[seriesIndex] + '</strong><br>' +
-          'Price: ' + price.toFixed(3) + ' €/kWh' +
+          'Price: ' + price.toFixed(4) + ' €/kWh' +
           '</div></div>';
       }
   yaxis:
-    - min: 0
-      max: 0.50
+    - min: -0.1
+      max: 0.25
       title:
         text: "Price (€/kWh)"
       labels:
         formatter: |
           EVAL:function(val) {
-            return val.toFixed(3) + ' €/kWh';
+            return val.toFixed(4) + ' €/kWh';
           }
+  annotations:
+    yaxis:
+      - y: 0
+        borderColor: '#FF0000'
+        borderWidth: 1
+        strokeDashArray: 2
   legend:
     show: true
     position: bottom
+  fill:
+    type: solid
+    opacity: 0
 series:
   - entity: sensor.electricity_planner_hourly_decision_history
     attribute: price_data
     name: "No Charging"
-    color: '#607D8B'
+    color: "#607D8B"
     stroke_width: 4
     type: line
     show:
@@ -178,7 +187,7 @@ series:
   - entity: sensor.electricity_planner_hourly_decision_history
     attribute: price_data
     name: "Battery Charging"
-    color: '#4CAF50'
+    color: "#4CAF50"
     stroke_width: 4
     type: line
     show:
@@ -194,7 +203,7 @@ series:
   - entity: sensor.electricity_planner_hourly_decision_history
     attribute: price_data
     name: "Car Charging"
-    color: '#9C27B0'
+    color: "#9C27B0"
     stroke_width: 4
     type: line
     show:
