@@ -181,24 +181,21 @@ class ChargingDecisionEngine:
         if not price_analysis.get("data_available", True):
             return {
                 "feedin_solar": False,
-                "feedin_solar_reason": "No price data available - disable feed-in for safety",
+                "feedin_solar_reason": "No price data available",
             }
 
         current_price = price_analysis.get("current_price", 0)
         feedin_threshold = self.config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
         remaining_solar = power_allocation.get("remaining_solar", 0)
         
-        # Price-driven decision: Enable feed-in if price is above threshold (regardless of surplus)
-        if current_price >= feedin_threshold:
-            return {
-                "feedin_solar": True,
-                "feedin_solar_reason": f"Price {current_price:.3f}€/kWh ≥ {feedin_threshold:.3f}€/kWh threshold - enable solar export (surplus: {remaining_solar}W)",
-            }
-        else:
-            return {
-                "feedin_solar": False,
-                "feedin_solar_reason": f"Price {current_price:.3f}€/kWh < {feedin_threshold:.3f}€/kWh threshold - disable solar export, keep local (surplus: {remaining_solar}W)",
-            }
+        # Price-driven decision: Enable feed-in if price meets threshold
+        enable_feedin = current_price >= feedin_threshold
+        action = "enable" if enable_feedin else "disable"
+        
+        return {
+            "feedin_solar": enable_feedin,
+            "feedin_solar_reason": f"Price {current_price:.3f}€/kWh {'≥' if enable_feedin else '<'} {feedin_threshold:.3f}€/kWh - {action} solar export (surplus: {remaining_solar}W)",
+        }
 
     def _analyze_comprehensive_pricing(self, data: dict[str, Any]) -> dict[str, Any]:
         """Analyze comprehensive pricing data from Nord Pool."""
@@ -352,31 +349,29 @@ class ChargingDecisionEngine:
         average_soc = battery_analysis.get("average_soc", 0)
         max_soc_threshold = battery_analysis.get("max_soc_threshold", 80)
         
-        # Priority 1: Allocate remaining solar to batteries if they need charging
-        # CRITICAL FIX: Prevent solar allocation to nearly full batteries to avoid waste
-        battery_needs_solar = (not batteries_full and 
-                              average_soc < max_soc_threshold - 5 and  # Add 5% safety margin to prevent waste
-                              available_solar > 0)
+        # Priority 1: Allocate solar to batteries if they need charging (with safety margin)
+        battery_needs_solar = (
+            not batteries_full and 
+            average_soc < max_soc_threshold - 5 and  # 5% safety margin to prevent waste
+            available_solar > 0
+        )
         
         if battery_needs_solar:
-            # CRITICAL FIX: Add safety limits to battery allocation
-            soc_deficit = max(0, max_soc_threshold - average_soc)  # Prevent negative
-            # Conservative estimation with safety margin: 1% SOC ≈ 100W for typical batteries
+            soc_deficit = max(0, max_soc_threshold - average_soc)
             estimated_battery_need = min(
                 available_solar, 
-                int(soc_deficit * 100),
+                int(soc_deficit * 100),  # 1% SOC ≈ 100W estimation
                 significant_solar_threshold,
-                self.config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)  # Configurable battery power limit
+                self.config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)
             )
-            solar_for_batteries = max(0, estimated_battery_need)  # Ensure non-negative
+            solar_for_batteries = max(0, estimated_battery_need)
             available_solar = max(0, available_solar - solar_for_batteries)
         
         # Priority 2: Allocate remaining solar to car if batteries are near full
-        if available_solar > 0 and average_soc >= max_soc_threshold - 10:  # Allow car when batteries >70%
-            # CRITICAL FIX: Add safety limit for car charging
+        if available_solar > 0 and average_soc >= max_soc_threshold - 10:
             solar_for_car = min(
                 available_solar, 
-                self.config.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)  # Configurable car power limit
+                self.config.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)
             )
             available_solar = max(0, available_solar - solar_for_car)
         
@@ -407,17 +402,17 @@ class ChargingDecisionEngine:
         weather_entity = self.config.get(CONF_WEATHER_ENTITY)
         
         if not weather_entity:
-            _LOGGER.debug("Solar forecast: No weather entity configured")
             return {
                 "forecast_available": False, 
-                "solar_production_factor": 0.5,  # Neutral assumption
+                "solar_production_factor": 0.5,
                 "expected_solar_production": "unknown",
                 "reason": "No weather entity configured"
             }
         
         state = data.get("weather_state")
-        if not state:
-            _LOGGER.warning("Solar forecast: Weather entity '%s' state is None", weather_entity)
+        
+        if not state or not hasattr(state, 'attributes'):
+            _LOGGER.warning("Solar forecast: Weather entity '%s' unavailable or missing attributes", weather_entity)
             return {
                 "forecast_available": False,
                 "solar_production_factor": 0.5,
@@ -425,22 +420,11 @@ class ChargingDecisionEngine:
                 "reason": f"Weather entity '{weather_entity}' unavailable"
             }
         
-        if not hasattr(state, 'attributes'):
-            _LOGGER.warning("Solar forecast: Weather entity '%s' has no attributes", weather_entity)
-            return {
-                "forecast_available": False,
-                "solar_production_factor": 0.5,
-                "expected_solar_production": "unknown", 
-                "reason": f"Weather entity '{weather_entity}' has no attributes"
-            }
-        
         # Try to get forecast from attributes first (legacy)
         forecast = state.attributes.get('forecast', [])
-        _LOGGER.debug("Solar forecast: Found %d forecast entries in attributes", len(forecast))
         
         # If no forecast in attributes, try weather.get_forecasts service (modern HA)
         if not forecast:
-            _LOGGER.debug("Solar forecast: No forecast in attributes, trying weather.get_forecasts service")
             try:
                 response = await self.hass.services.async_call(
                     "weather",
@@ -454,50 +438,57 @@ class ChargingDecisionEngine:
                 )
                 if response and weather_entity in response:
                     forecast = response[weather_entity].get("forecast", [])
-                    _LOGGER.debug("Solar forecast: Got %d forecast entries from service", len(forecast))
-                else:
-                    _LOGGER.warning("Solar forecast: Service returned no data for entity '%s'", weather_entity)
             except Exception as e:
-                _LOGGER.warning("Solar forecast: Failed to get weather forecast via service: %s", e)
+                _LOGGER.warning("Failed to get weather forecast via service: %s", e)
         
         if not forecast:
-            _LOGGER.warning("Solar forecast: No forecast data available from attributes or service")
+            # Fallback: Use current weather conditions to estimate solar production
+            current_condition = str(state.state).lower()
+            cloud_coverage = state.attributes.get('cloud_coverage', 50)  # Default 50%
+            
+            # Estimate solar production based on current conditions
+            if current_condition in ['sunny', 'clear']:
+                solar_factor = max(0.2, 1.0 - (cloud_coverage / 100))  # 20-100% based on clouds
+                production = "good" if solar_factor > 0.6 else "moderate"
+            elif current_condition in ['partlycloudy', 'partly-cloudy']:
+                solar_factor = max(0.1, 0.6 - (cloud_coverage / 150))  # 10-60% based on clouds  
+                production = "moderate"
+            elif current_condition in ['cloudy', 'overcast']:
+                solar_factor = max(0.05, 0.3 - (cloud_coverage / 200))  # 5-30% based on clouds
+                production = "poor" 
+            elif current_condition in ['rainy', 'pouring', 'snowy']:
+                solar_factor = 0.1  # 10% production in rain/snow
+                production = "poor"
+            else:
+                solar_factor = 0.4  # 40% default for unknown conditions
+                production = "moderate"
+            
             return {
-                "forecast_available": False,
-                "solar_production_factor": 0.5,
-                "expected_solar_production": "unknown",
-                "reason": "No forecast data available from attributes or service"
+                "forecast_available": True,  # We have a fallback estimate
+                "solar_production_factor": solar_factor,
+                "expected_solar_production": production,
+                "reason": f"Using current conditions fallback: {current_condition} with {cloud_coverage}% clouds"
             }
         
         now = datetime.now()
         tomorrow_forecasts = []
         
-        _LOGGER.debug("Solar forecast: Processing %d forecast entries, looking for next 24h from %s", 
-                     len(forecast), now.isoformat())
-        
-        for i, f in enumerate(forecast):
+        for f in forecast:
             if not f.get('datetime'):
-                _LOGGER.debug("Solar forecast: Entry %d missing datetime", i)
                 continue
             try:
                 forecast_time = datetime.fromisoformat(f['datetime'].replace('Z', '+00:00'))
-                # Get forecasts for next 24 hours
                 if now < forecast_time <= now + timedelta(hours=24):
                     tomorrow_forecasts.append(f)
-                    _LOGGER.debug("Solar forecast: Added entry %d: %s (%s)", 
-                                i, forecast_time.isoformat(), f.get('condition', 'no condition'))
-            except (ValueError, TypeError) as e:
-                _LOGGER.debug("Solar forecast: Entry %d datetime parse error: %s", i, e)
+            except (ValueError, TypeError):
                 continue
-        
-        _LOGGER.debug("Solar forecast: Found %d valid forecasts for next 24h", len(tomorrow_forecasts))
         
         if not tomorrow_forecasts:
             return {
                 "forecast_available": False,
                 "solar_production_factor": 0.5,
                 "expected_solar_production": "unknown",
-                "reason": f"No valid forecast data for next 24h (checked {len(forecast)} entries from {now.isoformat()})"
+                "reason": "No valid forecast data for next 24h"
             }
         
         # Analyze cloud coverage and precipitation for solar potential
@@ -528,18 +519,13 @@ class ChargingDecisionEngine:
                 cloudy_hours += 1  # Conservative assumption
         
         total_daylight_hours = sunny_hours + partly_cloudy_hours + cloudy_hours
-        _LOGGER.debug("Solar forecast: Daylight analysis - sunny: %d, partly cloudy: %d, cloudy: %d, total: %d", 
-                     sunny_hours, partly_cloudy_hours, cloudy_hours, total_daylight_hours)
         
         if total_daylight_hours == 0:
-            # Fallback: if no daylight hours found, assume moderate conditions
-            _LOGGER.warning("Solar forecast: No daylight hours found in %d forecast entries, using fallback", 
-                          len(tomorrow_forecasts))
             return {
-                "forecast_available": True,  # Still provide a forecast
-                "solar_production_factor": 0.5,  # Moderate assumption
+                "forecast_available": True,
+                "solar_production_factor": 0.5,
                 "expected_solar_production": "moderate",
-                "reason": f"No daylight hours detected in {len(tomorrow_forecasts)} forecasts - using moderate fallback"
+                "reason": "No daylight hours detected - using moderate fallback"
             }
         
         # Calculate expected solar production relative to perfect day
@@ -555,9 +541,6 @@ class ChargingDecisionEngine:
             "moderate" if solar_production_factor > 0.3 else
             "poor"
         )
-        
-        _LOGGER.debug("Solar forecast: Successful forecast - %s production (factor: %.2f)", 
-                     expected_production, solar_production_factor)
         
         return {
             "forecast_available": True,
@@ -695,12 +678,12 @@ class ChargingDecisionEngine:
                 "battery_grid_charging_reason": f"Using allocated solar power ({allocated_solar}W) for batteries instead of grid",
             }
         
-        # CRITICAL FIX: Avoid grid charging when batteries are nearly full and there's solar surplus
+        # Avoid grid charging when batteries are nearly full with solar surplus
         max_soc_threshold = battery_analysis.get("max_soc_threshold", 80)
         if remaining_solar > 0 and average_soc >= max_soc_threshold - 10:
             return {
                 "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"Battery {average_soc:.0f}% nearly full with {remaining_solar}W solar surplus - avoid grid charging to prevent solar waste",
+                "battery_grid_charging_reason": f"Battery {average_soc:.0f}% nearly full with {remaining_solar}W solar surplus - preventing solar waste",
             }
         
         # 3. VERY LOW PRICE: Always charge (configurable threshold of daily range)
@@ -739,10 +722,8 @@ class ChargingDecisionEngine:
         if is_low_price:
             # Time-of-day priority logic (avoid conflicts)
             
-            # CRITICAL FIX: Solar peak hours with emergency override for poor weather
-            # Solar peak hours: Be conservative if solar is expected (highest priority)
+            # Solar peak hours: Be conservative if solar is expected
             if is_solar_peak and average_soc > 30 and solar_forecast_factor > 0.6:
-                # Emergency override: charge anyway if SOC is too low even during solar peak
                 solar_peak_emergency_soc = self.config.get(CONF_SOLAR_PEAK_EMERGENCY_SOC, DEFAULT_SOLAR_PEAK_EMERGENCY_SOC)
                 if average_soc < solar_peak_emergency_soc:
                     return {
@@ -997,13 +978,9 @@ class ChargingDecisionEngine:
         
         # Case 1: Car charging + battery < max_soc_threshold - grid for car consumption, surplus for batteries
         if significant_car_charging and average_soc < max_soc_threshold:
-            # CRITICAL FIX: Add safety validation for grid setpoint calculation
             car_grid_need = min(car_charging_power, charger_limit, max_grid_setpoint)
-            
-            # Validate car grid power need
             max_grid_power = self._get_max_grid_power()
             car_grid_need = self._validate_power_value(car_grid_need, 0, max_grid_power, "car_grid_need")
-            
             grid_setpoint = car_grid_need
             return {
                 "grid_setpoint": int(grid_setpoint),
