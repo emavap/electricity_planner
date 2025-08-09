@@ -550,7 +550,7 @@ class ChargingDecisionEngine:
         self,
         price_analysis: dict[str, Any],
         battery_analysis: dict[str, Any],
-        power_analysis: dict[str, Any],
+        power_allocation: dict[str, Any],
         solar_forecast: dict[str, Any],
         time_context: dict[str, Any],
     ) -> dict[str, Any]:
@@ -586,7 +586,7 @@ class ChargingDecisionEngine:
         current_price = price_analysis.get("current_price")
         is_low_price = price_analysis.get("is_low_price", False)
         very_low_price = price_analysis.get("very_low_price", False)
-        solar_surplus = power_analysis.get("solar_surplus", 0)
+        solar_surplus = power_allocation.get("remaining_solar", 0)
         solar_forecast_factor = solar_forecast.get("solar_production_factor", 0.5)
         
         # Get configurable thresholds
@@ -595,18 +595,12 @@ class ChargingDecisionEngine:
         poor_forecast_threshold = self.config.get(CONF_POOR_SOLAR_FORECAST_THRESHOLD, DEFAULT_POOR_SOLAR_FORECAST) / 100.0
         excellent_forecast_threshold = self.config.get(CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD, DEFAULT_EXCELLENT_SOLAR_FORECAST) / 100.0
         
-        # 1. EMERGENCY: Always charge if critically low (but respect price limits)
+        # 1. EMERGENCY: Always charge if critically low (true emergency overrides price)
         if average_soc < emergency_soc:
-            if is_low_price:
-                return {
-                    "battery_grid_charging": True,
-                    "battery_grid_charging_reason": f"Emergency charge - SOC {average_soc:.0f}% < {emergency_soc}% with acceptable price ({current_price:.3f}€/kWh)",
-                }
-            else:
-                return {
-                    "battery_grid_charging": False,
-                    "battery_grid_charging_reason": f"Emergency level ({average_soc:.0f}%) but price too high ({current_price:.3f}€/kWh)",
-                }
+            return {
+                "battery_grid_charging": True,
+                "battery_grid_charging_reason": f"Emergency charge - SOC {average_soc:.0f}% < {emergency_soc}% threshold, charging regardless of price ({current_price:.3f}€/kWh)",
+            }
         
         # 2. SOLAR PRIORITY: Use allocated solar power (prevents race conditions)
         allocated_solar = power_allocation.get("solar_for_batteries", 0)
@@ -837,11 +831,11 @@ class ChargingDecisionEngine:
             }
         
         # If battery ≥ max_soc_threshold: Car can use surplus + grid setpoint
-        available_power = solar_surplus + max_grid_setpoint
+        available_power = original_solar_surplus + max_grid_setpoint
         charger_limit = min(available_power, 11000)
         return {
             "charger_limit": int(charger_limit),
-            "charger_limit_reason": f"Battery {average_soc:.0f}% ≥ {max_soc_threshold}% - car can use surplus + grid ({int(charger_limit)}W = {solar_surplus}W + {max_grid_setpoint}W)",
+            "charger_limit_reason": f"Battery {average_soc:.0f}% ≥ {max_soc_threshold}% - car can use surplus + grid ({int(charger_limit)}W = {original_solar_surplus}W + {max_grid_setpoint}W)",
         }
 
     def _calculate_grid_setpoint(
