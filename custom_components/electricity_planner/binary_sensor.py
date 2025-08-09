@@ -229,16 +229,16 @@ class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
         return attributes
 
 
-class FeedinSolarBinarySensor(CoordinatorEntity, BinarySensorEntity):
+class FeedinSolarBinarySensor(ElectricityPlannerBinarySensorBase):
     """Binary sensor for solar feed-in decision."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the feed-in solar binary sensor."""
-        super().__init__(coordinator)
-        self.entry = entry
+        super().__init__(coordinator, entry)
         self._attr_name = "Solar: Feed-in Grid"
         self._attr_unique_id = f"{entry.entry_id}_feedin_solar"
         self._attr_icon = "mdi:solar-power-variant"
+        self._attr_device_class = BinarySensorDeviceClass.POWER
 
     @property
     def is_on(self) -> bool | None:
