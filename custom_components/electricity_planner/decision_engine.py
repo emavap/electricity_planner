@@ -55,6 +55,27 @@ class ChargingDecisionEngine:
         """Initialize the decision engine."""
         self.hass = hass
         self.config = config
+    
+    def _validate_power_value(self, power: float, min_value: float = 0, max_value: float | None = None, name: str = "power") -> float:
+        """Validate and clamp power values to safe ranges."""
+        if power < min_value:
+            _LOGGER.warning("%s value %dW below minimum, clamping to %dW", name, power, min_value)
+            return min_value
+        if max_value and power > max_value:
+            _LOGGER.warning("%s value %dW above maximum, clamping to %dW", name, power, max_value)
+            return max_value
+        return power
+    
+    def _get_max_grid_power(self) -> int:
+        """Get maximum allowed grid power with safety margin."""
+        return self.config.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER)
+    
+    def _get_safe_grid_setpoint(self, monthly_peak: float | None) -> int:
+        """Calculate safe grid setpoint based on monthly peak."""
+        base_setpoint = 2500
+        if monthly_peak and monthly_peak > base_setpoint:
+            return int(monthly_peak * 0.9)  # 90% safety margin
+        return base_setpoint
 
     async def evaluate_charging_decision(self, data: dict[str, Any]) -> dict[str, Any]:
         """Evaluate whether to charge batteries and car from grid based on comprehensive data."""
@@ -290,10 +311,8 @@ class ChargingDecisionEngine:
         solar_surplus = power_analysis.get("solar_surplus", 0)
         significant_solar_threshold = self.config.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)
         
-        # CRITICAL FIX: Validate solar surplus is not negative
-        if solar_surplus < 0:
-            solar_surplus = 0
-            _LOGGER.warning("Negative solar surplus detected, setting to 0W for safety")
+        # Validate solar surplus
+        solar_surplus = self._validate_power_value(solar_surplus, name="solar_surplus")
         
         if solar_surplus <= significant_solar_threshold:
             # Even with insufficient solar, account for current car consumption
@@ -358,39 +377,18 @@ class ChargingDecisionEngine:
             )
             available_solar = max(0, available_solar - solar_for_car)
         
-        # CRITICAL FIX: Enhanced power budget validation with hard safety checks
+        # Validate total power allocation doesn't exceed available solar
         total_allocated = solar_for_batteries + solar_for_car + car_current_solar_usage
-        
-        # Absolute safety check - never exceed available solar
         if total_allocated > solar_surplus:
-            _LOGGER.error("CRITICAL: Power allocation exceeds available solar: %dW allocated vs %dW available - applying emergency correction", 
+            _LOGGER.warning("Power allocation %dW exceeds available solar %dW - applying proportional reduction", 
                           total_allocated, solar_surplus)
-            
-            # Emergency correction: Scale down all allocations proportionally
             if total_allocated > 0:
                 scale_factor = solar_surplus / total_allocated
                 solar_for_batteries = int(solar_for_batteries * scale_factor)
                 solar_for_car = int(solar_for_car * scale_factor)
                 car_current_solar_usage = int(car_current_solar_usage * scale_factor)
-            else:
-                solar_for_batteries = 0
-                solar_for_car = 0
-                car_current_solar_usage = 0
-            
-            # Recalculate remaining with safety check
-            remaining_solar = max(0, solar_surplus - solar_for_batteries - solar_for_car - car_current_solar_usage)
-        else:
-            remaining_solar = available_solar
         
-        # Final validation
-        final_total = solar_for_batteries + solar_for_car + car_current_solar_usage
-        if final_total > solar_surplus:
-            _LOGGER.critical("EMERGENCY: Power allocation still invalid after correction - forcing safe values")
-            solar_for_batteries = 0
-            solar_for_car = 0
-            min_car_charging_threshold = self.config.get(CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD)
-            car_current_solar_usage = min(car_charging_power, solar_surplus) if car_charging_power > min_car_charging_threshold else 0
-            remaining_solar = max(0, solar_surplus - car_current_solar_usage)
+        remaining_solar = max(0, solar_surplus - solar_for_batteries - solar_for_car - car_current_solar_usage)
         
         return {
             "solar_for_batteries": solar_for_batteries,
@@ -711,7 +709,7 @@ class ChargingDecisionEngine:
                 }
             
             # Night + Winter: Most aggressive (both conditions)
-            elif is_night and winter_season and average_soc < 60:
+            elif is_night and winter_season and average_soc < DEFAULT_HIGH_SOC_THRESHOLD:
                 return {
                     "battery_grid_charging": True,
                     "battery_grid_charging_reason": f"Night + Winter charging - SOC {average_soc:.0f}% at low price ({current_price:.3f}€/kWh) during off-peak winter hours",
@@ -864,13 +862,8 @@ class ChargingDecisionEngine:
         allocated_solar_for_car = power_allocation.get("solar_for_car", 0)
         original_solar_surplus = data.get("solar_surplus", 0)  # Keep for reference
         monthly_grid_peak = data.get("monthly_grid_peak", 0)
-        # Use consistent 90% safety margin logic
-        base_grid_setpoint = 2500  # Conservative base limit
-        if monthly_grid_peak and monthly_grid_peak > base_grid_setpoint:
-            # Use 90% of monthly peak to avoid exceeding it
-            max_grid_setpoint = int(monthly_grid_peak * 0.9)
-        else:
-            max_grid_setpoint = base_grid_setpoint
+        # Calculate safe grid setpoint
+        max_grid_setpoint = self._get_safe_grid_setpoint(monthly_grid_peak)
         average_soc = battery_analysis.get("average_soc")
         
         # If battery data is unavailable, use conservative approach
@@ -927,11 +920,10 @@ class ChargingDecisionEngine:
         min_car_charging_threshold = self.config.get(CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD)
         significant_car_charging = car_charging_power >= min_car_charging_threshold
         
-        # If battery data is unavailable, use safe grid setpoint approach
+        # Handle unavailable battery data
         if average_soc is None:
             if significant_car_charging:
-                # Only provide grid for car, no battery charging
-                max_grid_setpoint = max(monthly_grid_peak, 2500) if monthly_grid_peak and monthly_grid_peak > 2500 else 2500
+                max_grid_setpoint = self._get_safe_grid_setpoint(monthly_grid_peak)
                 grid_setpoint = min(car_charging_power, max_grid_setpoint)
                 return {
                     "grid_setpoint": int(grid_setpoint),
@@ -943,13 +935,8 @@ class ChargingDecisionEngine:
                     "grid_setpoint_reason": "Battery data unavailable and no car charging - grid setpoint 0W",
                 }
         
-        # Determine maximum grid setpoint based on monthly peak with safety margin
-        base_grid_setpoint = 2500  # Conservative base limit
-        if monthly_grid_peak and monthly_grid_peak > base_grid_setpoint:
-            # Use 90% of monthly peak to avoid exceeding it
-            max_grid_setpoint = int(monthly_grid_peak * 0.9)
-        else:
-            max_grid_setpoint = base_grid_setpoint
+        # Determine maximum grid setpoint
+        max_grid_setpoint = self._get_safe_grid_setpoint(monthly_grid_peak)
         
         # Use car_solar_only flag instead of redundant logic  
         max_soc_threshold = battery_analysis.get("max_soc_threshold", 80)
@@ -966,14 +953,9 @@ class ChargingDecisionEngine:
             # CRITICAL FIX: Add safety validation for grid setpoint calculation
             car_grid_need = min(car_charging_power, charger_limit, max_grid_setpoint)
             
-            # Safety validation: ensure grid setpoint doesn't exceed system limits
-            if car_grid_need < 0:
-                _LOGGER.warning("Negative car grid need calculated, setting to 0W for safety")
-                car_grid_need = 0
-            max_grid_power = self.config.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER)
-            elif car_grid_need > max_grid_power:  # Safety limit for home connection
-                _LOGGER.warning("Car grid need %dW exceeds safety limit, capping to %dW", car_grid_need, max_grid_power)
-                car_grid_need = max_grid_power
+            # Validate car grid power need
+            max_grid_power = self._get_max_grid_power()
+            car_grid_need = self._validate_power_value(car_grid_need, 0, max_grid_power, "car_grid_need")
             
             grid_setpoint = car_grid_need
             return {
@@ -989,14 +971,9 @@ class ChargingDecisionEngine:
             # Ensure within safety limits
             car_grid_need = min(car_grid_need, max_grid_setpoint)
             
-            # CRITICAL FIX: Additional safety validation
-            if car_grid_need < 0:
-                _LOGGER.warning("Negative car grid need in Case 2, setting to 0W for safety")
-                car_grid_need = 0
-            max_grid_power = self.config.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER)
-            elif car_grid_need > max_grid_power:  # Safety limit
-                _LOGGER.warning("Car grid need %dW in Case 2 exceeds safety limit, capping to %dW", car_grid_need, max_grid_power)
-                car_grid_need = max_grid_power
+            # Validate car grid power need
+            max_grid_power = self._get_max_grid_power()
+            car_grid_need = self._validate_power_value(car_grid_need, 0, max_grid_power, "car_grid_need")
             
             # If battery charging decision is on, add battery charging to grid setpoint
             if battery_grid_charging:

@@ -53,6 +53,15 @@ DEFAULT_WINTER_NIGHT_SOC_OVERRIDE = 40  # SOC threshold for winter night emergen
 DEFAULT_SOLAR_PEAK_EMERGENCY_SOC = 25  # SOC below which to charge even during solar peak
 DEFAULT_PREDICTIVE_CHARGING_MIN_SOC = 30  # Minimum SOC for predictive charging logic
 
+# Algorithm Constants
+DEFAULT_SIGNIFICANT_PRICE_DROP_THRESHOLD = 0.15  # 15% price drop threshold
+DEFAULT_BASE_GRID_SETPOINT = 2500  # Conservative base grid limit (W)
+DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN = 0.9  # Use 90% of monthly peak
+DEFAULT_CAR_PRIORITY_SOC_THRESHOLD = 70  # Above this SOC, car can use surplus
+DEFAULT_CRITICAL_SOC_THRESHOLD = 30  # Below this is considered critical
+DEFAULT_MEDIUM_SOC_THRESHOLD = 50  # Medium SOC charging threshold
+DEFAULT_HIGH_SOC_THRESHOLD = 60  # High SOC threshold for time-based charging
+
 ATTR_BATTERY_GRID_CHARGING = "battery_grid_charging"
 ATTR_CAR_GRID_CHARGING = "car_grid_charging"
 ATTR_BATTERY_REASON = "battery_reason"

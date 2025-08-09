@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -72,7 +73,7 @@ class BatteryGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
         return self.coordinator.data.get("battery_grid_charging", False)
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if not self.coordinator.data:
             return {}
@@ -100,7 +101,7 @@ class CarGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
         return self.coordinator.data.get("car_grid_charging", False)
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if not self.coordinator.data:
             return {}
@@ -128,7 +129,7 @@ class LowPriceBinarySensor(ElectricityPlannerBinarySensorBase):
         return self.coordinator.data["price_analysis"].get("is_low_price", False)
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if not self.coordinator.data or "price_analysis" not in self.coordinator.data:
             return {}
@@ -160,7 +161,7 @@ class SolarProductionBinarySensor(ElectricityPlannerBinarySensorBase):
         return self.coordinator.data["solar_analysis"].get("is_producing", False)
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if not self.coordinator.data or "solar_analysis" not in self.coordinator.data:
             return {}
@@ -190,13 +191,11 @@ class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
         if not self.coordinator.data:
             return False
         
-        # Check if both price data and price analysis indicate data is available
-        price_available = self.coordinator.data.get("current_price") is not None
-        price_analysis_available = self.coordinator.data.get("price_analysis", {}).get("data_available", False)
-        return price_available and price_analysis_available
+        # Use coordinator's data availability check
+        return self.coordinator._is_data_available(self.coordinator.data)
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if not self.coordinator.data:
             return {
@@ -235,7 +234,8 @@ class FeedinSolarBinarySensor(CoordinatorEntity, BinarySensorEntity):
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the feed-in solar binary sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator)
+        self.entry = entry
         self._attr_name = "Solar: Feed-in Grid"
         self._attr_unique_id = f"{entry.entry_id}_feedin_solar"
         self._attr_icon = "mdi:solar-power-variant"
@@ -248,7 +248,7 @@ class FeedinSolarBinarySensor(CoordinatorEntity, BinarySensorEntity):
         return self.coordinator.data.get("feedin_solar", False)
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if not self.coordinator.data:
             return {}

@@ -56,6 +56,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             name=DOMAIN,
             update_interval=timedelta(seconds=30),  # Keep responsive 30s updates
         )
+    
+    def _is_data_available(self, data: dict[str, Any]) -> bool:
+        """Check if critical data is available for decisions."""
+        price_available = data.get("current_price") is not None
+        price_analysis_available = data.get("price_analysis", {}).get("data_available", False)
+        return price_available and price_analysis_available
 
         self._setup_entity_listeners()
 
@@ -90,13 +96,19 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
     @callback
     def _handle_entity_change(self, event):
         """Handle entity state changes."""
-        _LOGGER.debug("Entity changed: %s", event.data.get("entity_id"))
-        # Reduced aggressive updating - only refresh price changes
         entity_id = event.data.get("entity_id")
-        if entity_id in [self.config.get(CONF_CURRENT_PRICE_ENTITY), 
-                        self.config.get(CONF_HIGHEST_PRICE_ENTITY),
-                        self.config.get(CONF_LOWEST_PRICE_ENTITY),
-                        self.config.get(CONF_NEXT_PRICE_ENTITY)]:
+        _LOGGER.debug("Entity changed: %s", entity_id)
+        
+        # Trigger immediate updates for critical entities
+        critical_entities = [
+            self.config.get(CONF_CURRENT_PRICE_ENTITY),
+            self.config.get(CONF_SOLAR_SURPLUS_ENTITY),
+        ]
+        
+        # Trigger updates for battery SOC changes (any configured battery)
+        battery_entities = self.config.get(CONF_BATTERY_SOC_ENTITIES, [])
+        
+        if entity_id in critical_entities or entity_id in battery_entities:
             self.async_create_task(self.async_request_refresh())
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -199,9 +211,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         now = datetime.now()
         
         # Check if critical data is available
-        price_available = data.get("current_price") is not None
-        price_analysis_available = data.get("price_analysis", {}).get("data_available", False)
-        data_is_available = price_available and price_analysis_available
+        data_is_available = self._is_data_available(data)
         
         if data_is_available:
             # Data is available - reset tracking
