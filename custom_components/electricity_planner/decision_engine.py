@@ -43,6 +43,11 @@ from .const import (
     DEFAULT_WINTER_NIGHT_SOC_OVERRIDE,
     DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
+    DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN,
+    DEFAULT_CRITICAL_SOC_THRESHOLD,
+    DEFAULT_MEDIUM_SOC_THRESHOLD,
+    DEFAULT_HIGH_SOC_THRESHOLD,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -72,9 +77,9 @@ class ChargingDecisionEngine:
     
     def _get_safe_grid_setpoint(self, monthly_peak: float | None) -> int:
         """Calculate safe grid setpoint based on monthly peak."""
-        base_setpoint = 2500
+        base_setpoint = DEFAULT_BASE_GRID_SETPOINT
         if monthly_peak and monthly_peak > base_setpoint:
-            return int(monthly_peak * 0.9)  # 90% safety margin
+            return int(monthly_peak * DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN)
         return base_setpoint
 
     async def evaluate_charging_decision(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -716,17 +721,17 @@ class ChargingDecisionEngine:
                 }
             
             # Night charging: More aggressive during off-peak hours  
-            elif is_night and average_soc < 60:
+            elif is_night and average_soc < DEFAULT_HIGH_SOC_THRESHOLD:
                 return {
                     "battery_grid_charging": True,
                     "battery_grid_charging_reason": f"Night charging - SOC {average_soc:.0f}% at low price ({current_price:.3f}€/kWh) during off-peak hours",
                 }
                 
             # Winter season: More aggressive due to shorter days (only if not night)
-            elif winter_season and average_soc < 50:
+            elif winter_season and average_soc < DEFAULT_MEDIUM_SOC_THRESHOLD:
                 return {
                     "battery_grid_charging": True,
-                    "battery_grid_charging_reason": f"Winter season - SOC {average_soc:.0f}% < 50% with low price ({current_price:.3f}€/kWh)",
+                    "battery_grid_charging_reason": f"Winter season - SOC {average_soc:.0f}% < {DEFAULT_MEDIUM_SOC_THRESHOLD}% with low price ({current_price:.3f}€/kWh)",
                 }
             
             # Restructured logic to avoid overlaps - order matters!
@@ -738,22 +743,22 @@ class ChargingDecisionEngine:
                     "battery_grid_charging_reason": f"Critical SOC {average_soc:.0f}% < 30% - charge despite {solar_forecast.get('expected_solar_production', 'any')} solar forecast",
                 }
             
-            # LOW + POOR FORECAST: 30% ≤ SOC < 40% + poor forecast = charge
+            # LOW + POOR FORECAST: low SOC + poor forecast = charge
             elif average_soc < 40 and solar_forecast_factor < poor_forecast_threshold:
                 return {
                     "battery_grid_charging": True,
                     "battery_grid_charging_reason": f"Low SOC {average_soc:.0f}% + {solar_forecast.get('expected_solar_production', 'poor')} solar forecast ({solar_forecast_factor:.0%} < {poor_forecast_threshold:.0%}) - charge while price low",
                 }
             
-            # MEDIUM + EXCELLENT: 30% ≤ SOC ≤ 60% + excellent forecast = skip
-            elif 30 <= average_soc <= 60 and solar_forecast_factor > excellent_forecast_threshold:
+            # MEDIUM + EXCELLENT: threshold range + excellent forecast = skip
+            elif DEFAULT_CRITICAL_SOC_THRESHOLD <= average_soc <= DEFAULT_HIGH_SOC_THRESHOLD and solar_forecast_factor > excellent_forecast_threshold:
                 return {
                     "battery_grid_charging": False,
                     "battery_grid_charging_reason": f"SOC {average_soc:.0f}% sufficient + {solar_forecast.get('expected_solar_production', 'excellent')} solar forecast ({solar_forecast_factor:.0%} > {excellent_forecast_threshold:.0%})",
                 }
             
-            # MEDIUM: SOC < 50% = charge (default for medium levels)
-            elif average_soc < 50:
+            # MEDIUM: SOC below threshold = charge (default for medium levels)
+            elif average_soc < DEFAULT_MEDIUM_SOC_THRESHOLD:
                 return {
                     "battery_grid_charging": True,
                     "battery_grid_charging_reason": f"Medium SOC {average_soc:.0f}% < 50% + {solar_forecast.get('expected_solar_production', 'moderate')} conditions - charge at low price",
