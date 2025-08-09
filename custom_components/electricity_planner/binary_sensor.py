@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, CONF_FEEDIN_PRICE_THRESHOLD
+from .const import DOMAIN, CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
 from .coordinator import ElectricityPlannerCoordinator
 
 
@@ -25,14 +25,21 @@ async def async_setup_entry(
     """Set up the binary sensor platform."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     
-    entities = [
+    # AUTOMATION SENSORS: Essential binary sensors for automations (3/5 total automation sensors)
+    automation_entities = [
         BatteryGridChargingBinarySensor(coordinator, entry),
         CarGridChargingBinarySensor(coordinator, entry),
+        FeedinSolarBinarySensor(coordinator, entry),
+    ]
+    
+    # DIAGNOSTIC SENSORS: For monitoring and troubleshooting only
+    diagnostic_entities = [
         LowPriceBinarySensor(coordinator, entry),
         SolarProductionBinarySensor(coordinator, entry),
         DataAvailabilityBinarySensor(coordinator, entry),
-        FeedinSolarBinarySensor(coordinator, entry),
     ]
+    
+    entities = automation_entities + diagnostic_entities
     
     async_add_entities(entities, False)
 
@@ -55,7 +62,7 @@ class ElectricityPlannerBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
 
 
 class BatteryGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
-    """Binary sensor for battery grid charging recommendation."""
+    """AUTOMATION SENSOR (1/5): Battery grid charging decision."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the battery grid charging binary sensor."""
@@ -83,7 +90,7 @@ class BatteryGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
 
 
 class CarGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
-    """Binary sensor for car grid charging recommendation."""
+    """AUTOMATION SENSOR (2/5): Car grid charging decision."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the car grid charging binary sensor."""
@@ -111,7 +118,7 @@ class CarGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
 
 
 class LowPriceBinarySensor(ElectricityPlannerBinarySensorBase):
-    """Binary sensor for low electricity price."""
+    """DIAGNOSTIC SENSOR: Low electricity price indicator."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the low price binary sensor."""
@@ -143,7 +150,7 @@ class LowPriceBinarySensor(ElectricityPlannerBinarySensorBase):
 
 
 class SolarProductionBinarySensor(ElectricityPlannerBinarySensorBase):
-    """Binary sensor for solar production status."""
+    """DIAGNOSTIC SENSOR: Solar production status indicator."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the solar production binary sensor."""
@@ -175,7 +182,7 @@ class SolarProductionBinarySensor(ElectricityPlannerBinarySensorBase):
 
 
 class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
-    """Binary sensor for data availability status."""
+    """DIAGNOSTIC SENSOR: Nord Pool data availability status."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the data availability binary sensor."""
@@ -230,7 +237,7 @@ class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
 
 
 class FeedinSolarBinarySensor(ElectricityPlannerBinarySensorBase):
-    """Binary sensor for solar feed-in decision."""
+    """AUTOMATION SENSOR (3/5): Solar feed-in decision."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the feed-in solar binary sensor."""
@@ -257,7 +264,7 @@ class FeedinSolarBinarySensor(ElectricityPlannerBinarySensorBase):
         return {
             "reason": self.coordinator.data.get("feedin_solar_reason", "No reason available"),
             "current_price": self.coordinator.data.get("current_price"),
-            "feedin_threshold": self.entry.data.get(CONF_FEEDIN_PRICE_THRESHOLD, 0.05),
+            "feedin_threshold": self.entry.data.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD),
             "remaining_solar": power_allocation.get("remaining_solar", 0),
             "total_solar_allocated": power_allocation.get("total_allocated", 0),
         }

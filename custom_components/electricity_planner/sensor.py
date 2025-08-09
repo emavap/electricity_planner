@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
 from homeassistant.config_entries import ConfigEntry
@@ -21,17 +22,24 @@ async def async_setup_entry(
     """Set up the sensor platform."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     
-    entities = [
+    # AUTOMATION SENSORS: Essential power sensors for automations (2/5 total automation sensors)
+    automation_entities = [
+        ChargerLimitSensor(coordinator, entry),
+        GridSetpointSensor(coordinator, entry),
+    ]
+    
+    # DIAGNOSTIC SENSORS: For monitoring and troubleshooting only
+    diagnostic_entities = [
         ChargingDecisionSensor(coordinator, entry),
         BatteryAnalysisSensor(coordinator, entry),
         PriceAnalysisSensor(coordinator, entry),
         PowerAnalysisSensor(coordinator, entry),
         DataAvailabilitySensor(coordinator, entry),
         HourlyDecisionHistorySensor(coordinator, entry),
-        ChargerLimitSensor(coordinator, entry),
-        GridSetpointSensor(coordinator, entry),
         DecisionDiagnosticsSensor(coordinator, entry),
     ]
+    
+    entities = automation_entities + diagnostic_entities
     
     async_add_entities(entities, False)
 
@@ -86,7 +94,7 @@ class ChargingDecisionSensor(ElectricityPlannerSensorBase):
             return f"no_charging: {battery_reason}"
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if not self.coordinator.data:
             return {"data_available": False}
@@ -126,7 +134,7 @@ class BatteryAnalysisSensor(ElectricityPlannerSensorBase):
         return avg_soc if avg_soc is not None else 0  # Return 0 if no batteries configured
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if not self.coordinator.data or "battery_analysis" not in self.coordinator.data:
             return {}
@@ -165,7 +173,7 @@ class PriceAnalysisSensor(ElectricityPlannerSensorBase):
         return current_price if current_price is not None else 0.0  # Return 0 if no price data
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if not self.coordinator.data or "price_analysis" not in self.coordinator.data:
             return {}
@@ -207,7 +215,7 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
         return solar_surplus if solar_surplus is not None else 0.0  # Return 0 if no power data
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if not self.coordinator.data or "power_analysis" not in self.coordinator.data:
             return {}
@@ -245,7 +253,7 @@ class DataAvailabilitySensor(ElectricityPlannerSensorBase):
         return int(unavailable_duration.total_seconds())
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if not self.coordinator.data:
             return {}
@@ -291,7 +299,7 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
         return current_price if current_price is not None else 0.0
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the hourly history data as attributes."""
         if not self.coordinator.data:
             return self._cached_attributes if hasattr(self, '_cached_attributes') else {}
@@ -390,7 +398,7 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
 
 
 class ChargerLimitSensor(ElectricityPlannerSensorBase):
-    """Sensor for optimal car charger power limit."""
+    """AUTOMATION SENSOR (4/5): Car charger power limit in Watts."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the charger limit sensor."""
@@ -410,7 +418,7 @@ class ChargerLimitSensor(ElectricityPlannerSensorBase):
         return self.coordinator.data.get("charger_limit", 0)
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if not self.coordinator.data:
             return {}
@@ -424,7 +432,7 @@ class ChargerLimitSensor(ElectricityPlannerSensorBase):
 
 
 class GridSetpointSensor(ElectricityPlannerSensorBase):
-    """Sensor for grid setpoint to avoid battery discharge during car charging."""
+    """AUTOMATION SENSOR (5/5): Grid power setpoint in Watts."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
         """Initialize the grid setpoint sensor."""
@@ -444,7 +452,7 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
         return self.coordinator.data.get("grid_setpoint", 0)
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         if not self.coordinator.data:
             return {}
@@ -493,7 +501,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
             return "no_charging"
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return comprehensive diagnostics data for decision validation."""
         if not self.coordinator.data:
             return {"error": "No coordinator data available"}

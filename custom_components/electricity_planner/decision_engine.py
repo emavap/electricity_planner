@@ -451,11 +451,11 @@ class ChargingDecisionEngine:
                 solar_factor = max(0.2, 1.0 - (cloud_coverage / 100))  # 20-100% based on clouds
                 production = "good" if solar_factor > 0.6 else "moderate"
             elif current_condition in ['partlycloudy', 'partly-cloudy']:
-                solar_factor = max(0.1, 0.6 - (cloud_coverage / 150))  # 10-60% based on clouds  
+                solar_factor = max(0.1, 0.6 - (cloud_coverage / 150))  # 10-60% based on clouds
                 production = "moderate"
             elif current_condition in ['cloudy', 'overcast']:
                 solar_factor = max(0.05, 0.3 - (cloud_coverage / 200))  # 5-30% based on clouds
-                production = "poor" 
+                production = "poor"
             elif current_condition in ['rainy', 'pouring', 'snowy']:
                 solar_factor = 0.1  # 10% production in rain/snow
                 production = "poor"
