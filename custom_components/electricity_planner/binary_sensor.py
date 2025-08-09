@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, CONF_FEEDIN_PRICE_THRESHOLD
 from .coordinator import ElectricityPlannerCoordinator
 
 
@@ -256,7 +256,7 @@ class FeedinSolarBinarySensor(CoordinatorEntity, BinarySensorEntity):
         return {
             "reason": self.coordinator.data.get("feedin_solar_reason", "No reason available"),
             "current_price": self.coordinator.data.get("current_price"),
-            "feedin_threshold": self.coordinator.entry.data.get("feedin_price_threshold", 0.05),
+            "feedin_threshold": self.coordinator.entry.data.get(CONF_FEEDIN_PRICE_THRESHOLD, 0.05),
             "remaining_solar": self.coordinator.data.get("power_allocation", {}).get("remaining_solar", 0),
             "total_solar_allocated": self.coordinator.data.get("power_allocation", {}).get("total_allocated", 0),
         }

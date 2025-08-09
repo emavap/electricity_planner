@@ -67,6 +67,7 @@ class ChargingDecisionEngine:
             decision_data["car_grid_charging_reason"] = reason
             decision_data["charger_limit_reason"] = "No price data - limiting to solar only"
             decision_data["grid_setpoint_reason"] = "No price data - grid setpoint set to 0"
+            decision_data["feedin_solar_reason"] = "No price data - feed-in decision disabled"
             _LOGGER.warning("Critical price data unavailable - disabling all grid charging")
             return decision_data
 
@@ -148,8 +149,8 @@ class ChargingDecisionEngine:
         # Only consider feed-in if there's remaining solar power to export
         if remaining_solar <= 0:
             return {
-                "feedin_solar": True,  # Always allow feed-in when no surplus (no effect)
-                "feedin_solar_reason": f"No solar surplus to export ({remaining_solar}W) - feed-in enabled but inactive",
+                "feedin_solar": False,  # No need for feed-in when no surplus
+                "feedin_solar_reason": f"No solar surplus to export ({remaining_solar}W) - feed-in disabled",
             }
         
         # Main decision: Enable feed-in if price is above threshold
@@ -274,11 +275,22 @@ class ChargingDecisionEngine:
         significant_solar_threshold = self.config.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)
         
         if solar_surplus <= significant_solar_threshold:
+            # Even with insufficient solar, account for current car consumption
+            car_charging_power = power_analysis.get("car_charging_power", 0)
+            if car_charging_power > 100:  # Car is actually charging
+                car_current_solar_usage = min(car_charging_power, solar_surplus)
+                remaining_solar = solar_surplus - car_current_solar_usage
+            else:
+                car_current_solar_usage = 0
+                remaining_solar = solar_surplus
+                
             return {
                 "solar_for_batteries": 0,
                 "solar_for_car": 0,
-                "remaining_solar": solar_surplus,
-                "allocation_reason": f"Insufficient solar surplus ({solar_surplus}W ≤ {significant_solar_threshold}W)"
+                "car_current_solar_usage": car_current_solar_usage,
+                "remaining_solar": remaining_solar,
+                "total_allocated": car_current_solar_usage,
+                "allocation_reason": f"Insufficient solar surplus ({solar_surplus}W ≤ {significant_solar_threshold}W) - car using {car_current_solar_usage}W, {remaining_solar}W remaining"
             }
         
         available_solar = solar_surplus
@@ -316,15 +328,21 @@ class ChargingDecisionEngine:
             available_solar = 0
         
         # Power budget validation
-        total_allocated = solar_for_batteries + solar_for_car
+        total_allocated = solar_for_batteries + solar_for_car + car_current_solar_usage
         if total_allocated > solar_surplus:
             _LOGGER.warning("Power allocation exceeds available solar: %dW allocated vs %dW available", 
                           total_allocated, solar_surplus)
-            # Scale down proportionally
-            scale_factor = solar_surplus / total_allocated if total_allocated > 0 else 0
-            solar_for_batteries = int(solar_for_batteries * scale_factor)
-            solar_for_car = int(solar_for_car * scale_factor)
-            available_solar = solar_surplus - solar_for_batteries - solar_for_car
+            # Scale down proportionally (preserve car current usage first)
+            available_for_scaling = solar_surplus - car_current_solar_usage
+            new_total = solar_for_batteries + solar_for_car
+            if new_total > 0 and available_for_scaling >= 0:
+                scale_factor = available_for_scaling / new_total
+                solar_for_batteries = int(solar_for_batteries * scale_factor)
+                solar_for_car = int(solar_for_car * scale_factor)
+            else:
+                solar_for_batteries = 0
+                solar_for_car = 0
+            available_solar = solar_surplus - solar_for_batteries - solar_for_car - car_current_solar_usage
         
         return {
             "solar_for_batteries": solar_for_batteries,
@@ -591,7 +609,7 @@ class ChargingDecisionEngine:
                 }
         
         # 2. SOLAR PRIORITY: Use allocated solar power (prevents race conditions)
-        allocated_solar = power_analysis.get("solar_for_batteries", 0)
+        allocated_solar = power_allocation.get("solar_for_batteries", 0)
         if allocated_solar > 0:
             return {
                 "battery_grid_charging": False,
@@ -910,7 +928,7 @@ class ChargingDecisionEngine:
                 grid_setpoint = min(car_grid_need, max_grid_setpoint)
                 return {
                     "grid_setpoint": int(grid_setpoint),
-                    "grid_setpoint_reason": f"Car drawing {car_charging_power}W, battery {average_soc:.0f}% ≥ {max_soc_threshold}% - grid covers car deficit ({int(grid_setpoint)}W = {car_charging_power}W - {solar_surplus}W surplus)",
+                    "grid_setpoint_reason": f"Car drawing {car_charging_power}W, battery {average_soc:.0f}% ≥ {max_soc_threshold}% - grid covers car deficit ({int(grid_setpoint)}W = {car_charging_power}W - {power_analysis.get('solar_surplus', 0)}W surplus)",
                 }
         
         # Case 3: No significant car charging, but battery charging decision is on
