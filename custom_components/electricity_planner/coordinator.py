@@ -50,11 +50,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._data_unavailable_since = None
         self._notification_sent = False
         
+        # Update throttling
+        self._last_entity_update = None
+        self._min_update_interval = timedelta(seconds=10)  # Minimum 10s between entity-triggered updates
+        
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=30),  # Keep responsive 30s updates
+            update_interval=timedelta(seconds=30),  # Maximum 30s updates (minimum 10s via entity changes)
         )
     
     def _is_data_available(self, data: dict[str, Any]) -> bool:
@@ -95,7 +99,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
     @callback
     def _handle_entity_change(self, event):
-        """Handle entity state changes."""
+        """Handle entity state changes with minimum update interval."""
         entity_id = event.data.get("entity_id")
         _LOGGER.debug("Entity changed: %s", entity_id)
         
@@ -109,7 +113,20 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         battery_entities = self.config.get(CONF_BATTERY_SOC_ENTITIES, [])
         
         if entity_id in critical_entities or entity_id in battery_entities:
-            self.async_create_task(self.async_request_refresh())
+            now = datetime.now()
+            
+            # Apply minimum interval throttling
+            if (self._last_entity_update is None or 
+                now - self._last_entity_update >= self._min_update_interval):
+                
+                self._last_entity_update = now
+                self.async_create_task(self.async_request_refresh())
+                _LOGGER.debug("Entity update triggered for %s (throttled to %ds minimum)", 
+                            entity_id, self._min_update_interval.total_seconds())
+            else:
+                time_remaining = (self._last_entity_update + self._min_update_interval - now).total_seconds()
+                _LOGGER.debug("Entity update skipped for %s (throttled, %.1fs remaining)", 
+                            entity_id, time_remaining)
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Update data via library."""
