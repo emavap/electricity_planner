@@ -38,7 +38,8 @@
           "very_low_price_threshold": "Very Low Price Threshold",
           "significant_solar_threshold": "Significant Solar Threshold",
           "poor_solar_forecast_threshold": "Poor Solar Forecast Threshold",
-          "excellent_solar_forecast_threshold": "Excellent Solar Forecast Threshold"
+          "excellent_solar_forecast_threshold": "Excellent Solar Forecast Threshold",
+          "feedin_price_threshold": "Feed-in Solar Price Threshold"
         },
         "data_description": {
           "min_soc_threshold": "Minimum battery charge level to maintain (%)",
@@ -48,7 +49,8 @@
           "very_low_price_threshold": "Percentage of daily price range considered 'very low' (e.g., 30 = bottom 30%)",
           "significant_solar_threshold": "Solar surplus power level considered significant enough to prefer over grid (W)",
           "poor_solar_forecast_threshold": "Solar forecast percentage below which is considered poor (e.g., 40 = below 40%)",
-          "excellent_solar_forecast_threshold": "Solar forecast percentage above which is considered excellent (e.g., 80 = above 80%)"
+          "excellent_solar_forecast_threshold": "Solar forecast percentage above which is considered excellent (e.g., 80 = above 80%)",
+          "feedin_price_threshold": "Price threshold above which solar export to grid is enabled (€/kWh)"
         }
       }
     },
@@ -74,7 +76,8 @@
           "very_low_price_threshold": "Very Low Price Threshold",
           "significant_solar_threshold": "Significant Solar Threshold",
           "poor_solar_forecast_threshold": "Poor Solar Forecast Threshold",
-          "excellent_solar_forecast_threshold": "Excellent Solar Forecast Threshold"
+          "excellent_solar_forecast_threshold": "Excellent Solar Forecast Threshold",
+          "feedin_price_threshold": "Feed-in Solar Price Threshold"
         }
       }
     }

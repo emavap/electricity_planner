@@ -30,6 +30,7 @@ async def async_setup_entry(
         LowPriceBinarySensor(coordinator, entry),
         SolarProductionBinarySensor(coordinator, entry),
         DataAvailabilityBinarySensor(coordinator, entry),
+        FeedinSolarBinarySensor(coordinator, entry),
     ]
     
     async_add_entities(entities, False)
@@ -227,5 +228,37 @@ class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
         })
         
         return attributes
+
+
+class FeedinSolarBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Binary sensor for solar feed-in decision."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the feed-in solar binary sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_name = "Solar: Feed-in Grid"
+        self._attr_unique_id = f"{entry.entry_id}_feedin_solar"
+        self._attr_icon = "mdi:solar-power-variant"
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return true if solar feed-in should be enabled."""
+        if not self.coordinator.data:
+            return False
+        return self.coordinator.data.get("feedin_solar", False)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, any]:
+        """Return the state attributes."""
+        if not self.coordinator.data:
+            return {}
+        
+        return {
+            "reason": self.coordinator.data.get("feedin_solar_reason", "No reason available"),
+            "current_price": self.coordinator.data.get("current_price"),
+            "feedin_threshold": self.coordinator.entry.data.get("feedin_price_threshold", 0.05),
+            "remaining_solar": self.coordinator.data.get("power_allocation", {}).get("remaining_solar", 0),
+            "total_solar_allocated": self.coordinator.data.get("power_allocation", {}).get("total_allocated", 0),
+        }
 
 

@@ -27,6 +27,7 @@ from .const import (
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
     CONF_POOR_SOLAR_FORECAST_THRESHOLD,
     CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD,
+    CONF_FEEDIN_PRICE_THRESHOLD,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
@@ -35,6 +36,7 @@ from .const import (
     DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
     DEFAULT_POOR_SOLAR_FORECAST,
     DEFAULT_EXCELLENT_SOLAR_FORECAST,
+    DEFAULT_FEEDIN_PRICE_THRESHOLD,
 )
 
 
@@ -181,6 +183,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     min=60, max=95, unit_of_measurement="%"
                 )
             ),
+            vol.Optional(
+                CONF_FEEDIN_PRICE_THRESHOLD,
+                default=DEFAULT_FEEDIN_PRICE_THRESHOLD
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.0, max=1.0, step=0.01, unit_of_measurement="€/kWh"
+                )
+            ),
         })
 
         return self.async_show_form(
@@ -322,6 +332,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=60, max=95, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_FEEDIN_PRICE_THRESHOLD,
+                default=current_config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.0, max=1.0, step=0.01, unit_of_measurement="€/kWh"
                 )
             ),
         })
