@@ -24,19 +24,19 @@ async def async_setup_entry(
     
     # AUTOMATION SENSORS: Essential power sensors for automations (2/5 total automation sensors)
     automation_entities = [
-        ChargerLimitSensor(coordinator, entry),
-        GridSetpointSensor(coordinator, entry),
+        ChargerLimitSensor(coordinator, entry, "_automation"),
+        GridSetpointSensor(coordinator, entry, "_automation"),
     ]
     
     # DIAGNOSTIC SENSORS: For monitoring and troubleshooting only
     diagnostic_entities = [
-        ChargingDecisionSensor(coordinator, entry),
-        BatteryAnalysisSensor(coordinator, entry),
-        PriceAnalysisSensor(coordinator, entry),
-        PowerAnalysisSensor(coordinator, entry),
-        DataAvailabilitySensor(coordinator, entry),
-        HourlyDecisionHistorySensor(coordinator, entry),
-        DecisionDiagnosticsSensor(coordinator, entry),
+        ChargingDecisionSensor(coordinator, entry, "_diagnostic"),
+        BatteryAnalysisSensor(coordinator, entry, "_diagnostic"),
+        PriceAnalysisSensor(coordinator, entry, "_diagnostic"),
+        PowerAnalysisSensor(coordinator, entry, "_diagnostic"),
+        DataAvailabilitySensor(coordinator, entry, "_diagnostic"),
+        HourlyDecisionHistorySensor(coordinator, entry, "_diagnostic"),
+        DecisionDiagnosticsSensor(coordinator, entry, "_diagnostic"),
     ]
     
     entities = automation_entities + diagnostic_entities
@@ -47,14 +47,24 @@ async def async_setup_entry(
 class ElectricityPlannerSensorBase(CoordinatorEntity, SensorEntity):
     """Base class for Electricity Planner sensors."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self.entry = entry
         self._attr_has_entity_name = True
+        
+        # Create device identifier with suffix for grouping
+        device_id = f"{entry.entry_id}{device_suffix}"
+        if device_suffix == "_automation":
+            device_name = "Electricity Planner - Automation Controls"
+        elif device_suffix == "_diagnostic":
+            device_name = "Electricity Planner - Diagnostics & Monitoring"
+        else:
+            device_name = "Electricity Planner"
+        
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "Electricity Planner",
+            "identifiers": {(DOMAIN, device_id)},
+            "name": device_name,
             "manufacturer": "Custom",
             "model": "Electricity Planner",
             "sw_version": "1.0.0",
@@ -64,9 +74,9 @@ class ElectricityPlannerSensorBase(CoordinatorEntity, SensorEntity):
 class ChargingDecisionSensor(ElectricityPlannerSensorBase):
     """Sensor for grid charging decision status."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the charging decision sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Charging Recommendation & Reason"
         self._attr_unique_id = f"{entry.entry_id}_grid_charging_decision"
         self._attr_icon = "mdi:transmission-tower"
@@ -115,9 +125,9 @@ class ChargingDecisionSensor(ElectricityPlannerSensorBase):
 class BatteryAnalysisSensor(ElectricityPlannerSensorBase):
     """Sensor for battery analysis."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the battery analysis sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Battery SOC Average"
         self._attr_unique_id = f"{entry.entry_id}_battery_analysis"
         self._attr_icon = "mdi:battery"
@@ -154,9 +164,9 @@ class BatteryAnalysisSensor(ElectricityPlannerSensorBase):
 class PriceAnalysisSensor(ElectricityPlannerSensorBase):
     """Sensor for price analysis."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the price analysis sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Current Electricity Price"
         self._attr_unique_id = f"{entry.entry_id}_price_analysis"
         self._attr_icon = "mdi:currency-eur"
@@ -196,9 +206,9 @@ class PriceAnalysisSensor(ElectricityPlannerSensorBase):
 class PowerAnalysisSensor(ElectricityPlannerSensorBase):
     """Sensor for power flow analysis."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the power analysis sensor.""" 
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Solar Surplus Power"
         self._attr_unique_id = f"{entry.entry_id}_power_analysis"
         self._attr_icon = "mdi:transmission-tower"
@@ -234,9 +244,9 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
 class DataAvailabilitySensor(ElectricityPlannerSensorBase):
     """Sensor for data availability duration tracking."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the data availability sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Data Unavailable Duration"
         self._attr_unique_id = f"{entry.entry_id}_data_unavailable_duration"
         self._attr_icon = "mdi:database-clock"
@@ -278,9 +288,9 @@ class DataAvailabilitySensor(ElectricityPlannerSensorBase):
 class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
     """Sensor for hourly price and decision history data."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the hourly decision history sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Hourly Price & Decision History"
         self._attr_unique_id = f"{entry.entry_id}_hourly_decision_history"
         self._attr_icon = "mdi:chart-timeline-variant"
@@ -400,9 +410,9 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
 class ChargerLimitSensor(ElectricityPlannerSensorBase):
     """AUTOMATION SENSOR (4/5): Car charger power limit in Watts."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the charger limit sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Car Charger Limit"
         self._attr_unique_id = f"{entry.entry_id}_charger_limit"
         self._attr_icon = "mdi:ev-station"
@@ -434,9 +444,9 @@ class ChargerLimitSensor(ElectricityPlannerSensorBase):
 class GridSetpointSensor(ElectricityPlannerSensorBase):
     """AUTOMATION SENSOR (5/5): Grid power setpoint in Watts."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the grid setpoint sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Grid Setpoint"
         self._attr_unique_id = f"{entry.entry_id}_grid_setpoint"
         self._attr_icon = "mdi:transmission-tower"
@@ -474,9 +484,9 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
 class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
     """Comprehensive diagnostics sensor exposing all decision parameters for validation."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the decision diagnostics sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Decision Diagnostics"
         self._attr_unique_id = f"{entry.entry_id}_decision_diagnostics"
         self._attr_icon = "mdi:bug-check"

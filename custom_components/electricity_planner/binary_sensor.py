@@ -27,16 +27,16 @@ async def async_setup_entry(
     
     # AUTOMATION SENSORS: Essential binary sensors for automations (3/5 total automation sensors)
     automation_entities = [
-        BatteryGridChargingBinarySensor(coordinator, entry),
-        CarGridChargingBinarySensor(coordinator, entry),
-        FeedinSolarBinarySensor(coordinator, entry),
+        BatteryGridChargingBinarySensor(coordinator, entry, "_automation"),
+        CarGridChargingBinarySensor(coordinator, entry, "_automation"),
+        FeedinSolarBinarySensor(coordinator, entry, "_automation"),
     ]
     
     # DIAGNOSTIC SENSORS: For monitoring and troubleshooting only
     diagnostic_entities = [
-        LowPriceBinarySensor(coordinator, entry),
-        SolarProductionBinarySensor(coordinator, entry),
-        DataAvailabilityBinarySensor(coordinator, entry),
+        LowPriceBinarySensor(coordinator, entry, "_diagnostic"),
+        SolarProductionBinarySensor(coordinator, entry, "_diagnostic"),
+        DataAvailabilityBinarySensor(coordinator, entry, "_diagnostic"),
     ]
     
     entities = automation_entities + diagnostic_entities
@@ -47,14 +47,24 @@ async def async_setup_entry(
 class ElectricityPlannerBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
     """Base class for Electricity Planner binary sensors."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the binary sensor."""
         super().__init__(coordinator)
         self.entry = entry
         self._attr_has_entity_name = True
+        
+        # Create device identifier with suffix for grouping
+        device_id = f"{entry.entry_id}{device_suffix}"
+        if device_suffix == "_automation":
+            device_name = "Electricity Planner - Automation Controls"
+        elif device_suffix == "_diagnostic":
+            device_name = "Electricity Planner - Diagnostics & Monitoring"
+        else:
+            device_name = "Electricity Planner"
+        
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "Electricity Planner",
+            "identifiers": {(DOMAIN, device_id)},
+            "name": device_name,
             "manufacturer": "Custom",
             "model": "Electricity Planner",
             "sw_version": "1.0.0",
@@ -64,9 +74,9 @@ class ElectricityPlannerBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
 class BatteryGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
     """AUTOMATION SENSOR (1/5): Battery grid charging decision."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the battery grid charging binary sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Battery: Charge from Grid"
         self._attr_unique_id = f"{entry.entry_id}_battery_grid_charging"
         self._attr_icon = "mdi:battery-charging"
@@ -92,9 +102,9 @@ class BatteryGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
 class CarGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
     """AUTOMATION SENSOR (2/5): Car grid charging decision."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the car grid charging binary sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Car: Charge from Grid"
         self._attr_unique_id = f"{entry.entry_id}_car_grid_charging"
         self._attr_icon = "mdi:car-electric"
@@ -120,9 +130,9 @@ class CarGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
 class LowPriceBinarySensor(ElectricityPlannerBinarySensorBase):
     """DIAGNOSTIC SENSOR: Low electricity price indicator."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the low price binary sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Price: Below Threshold"
         self._attr_unique_id = f"{entry.entry_id}_low_price"
         self._attr_icon = "mdi:currency-eur-off"
@@ -152,9 +162,9 @@ class LowPriceBinarySensor(ElectricityPlannerBinarySensorBase):
 class SolarProductionBinarySensor(ElectricityPlannerBinarySensorBase):
     """DIAGNOSTIC SENSOR: Solar production status indicator."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the solar production binary sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Solar: Producing Power"
         self._attr_unique_id = f"{entry.entry_id}_solar_production"
         self._attr_icon = "mdi:solar-power"
@@ -184,9 +194,9 @@ class SolarProductionBinarySensor(ElectricityPlannerBinarySensorBase):
 class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
     """DIAGNOSTIC SENSOR: Nord Pool data availability status."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the data availability binary sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Data: Nord Pool Available"
         self._attr_unique_id = f"{entry.entry_id}_data_availability"
         self._attr_icon = "mdi:database-check"
@@ -239,9 +249,9 @@ class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
 class FeedinSolarBinarySensor(ElectricityPlannerBinarySensorBase):
     """AUTOMATION SENSOR (3/5): Solar feed-in decision."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
         """Initialize the feed-in solar binary sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Solar: Feed-in Grid"
         self._attr_unique_id = f"{entry.entry_id}_feedin_solar"
         self._attr_icon = "mdi:solar-power-variant"
