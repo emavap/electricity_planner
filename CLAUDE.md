@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Home Assistant custom integration called "Electricity Planner" - a Belgian electricity market optimization system that provides intelligent charging decisions for batteries and electric vehicles. The integration analyzes Nord Pool pricing, battery status, and solar production to make **boolean recommendations** for when to charge from the grid.
+This is a Home Assistant custom integration called "Electricity Planner" - a smart electricity market optimization system that provides intelligent charging decisions for batteries and electric vehicles. The integration analyzes Nord Pool pricing, battery status, and solar production to make **boolean recommendations** for when to charge from the grid.
 
 ## Architecture
 
@@ -73,12 +73,12 @@ custom_components/electricity_planner/
 - **Dependencies**: Only `aiohttp>=3.8.0` (specified in `manifest.json`)
 - **Platforms**: Registers both `sensor` and `binary_sensor` platforms
 
-## Belgian Market Focus
+## Dynamic Market Focus
 
-The integration is specifically designed for Belgian electricity markets:
-- Dynamic Nord Pool pricing integration
-- Solar feed-in tariff considerations  
-- Regulatory compliance for residential battery storage
+The integration is designed for dynamic electricity markets:
+- Nord Pool pricing integration (and similar dynamic pricing markets)
+- Solar feed-in tariff considerations and export optimization
+- Configurable safety limits for residential battery storage
 - Peak shaving during high-price periods
 
 ## Important Code Patterns

@@ -1,10 +1,10 @@
-# Electricity Planner for Home Assistant
+# Electricity Planner - Smart Energy Management System
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 [![GitHub release](https://img.shields.io/github/release/emavap/electricity_planner.svg)](https://github.com/emavap/electricity_planner/releases/)
 [![License](https://img.shields.io/github/license/emavap/electricity_planner.svg)](LICENSE)
 
-A Home Assistant integration that provides intelligent electricity usage planning decisions, specifically designed for Belgian electricity markets. The integration analyzes battery status, solar forecasts, and electricity prices to provide **boolean recommendations** for when to charge batteries and cars from the grid. **Power control is handled by external systems.**
+A comprehensive Home Assistant custom integration for intelligent electricity management with dynamic pricing markets. This integration optimizes battery and electric vehicle charging based on Nord Pool pricing, solar production forecasts, and **configurable safety parameters**. All decisions are boolean outputs with detailed reasoning and comprehensive diagnostics for validation.
 
 ## ✨ Features
 
@@ -56,59 +56,330 @@ Decision factors:
 - **Smart logic**: Very low prices (bottom 30%), price trend improvements
 - **Solar preference**: Uses solar surplus instead of grid when available
 
-## 🔄 Decision Sequences & Logic
+## 🧠 Decision Logic Documentation
 
-### Battery Grid Charging Decision Sequence
+### Overview
 
-The integration evaluates battery grid charging in this specific order:
+The Electricity Planner uses a hierarchical decision engine that evaluates multiple factors to make intelligent charging recommendations. All decisions are boolean outputs (charge/don't charge) with detailed reasoning provided for validation.
 
-1. **🔋 Battery Status Check**
-   ```
-   ❌ No batteries configured → FALSE
-   ❌ Batteries full (>90% SOC) → FALSE
-   ✅ Continue to price analysis
-   ```
+### Core Decision Flow
 
-2. **💰 Price Threshold Check**
-   ```
-   ❌ Price above threshold → FALSE ("Price too high")
-   ✅ Price below threshold → Continue
-   ```
+```
+1. Data Validation → 2. Power Allocation → 3. Decision Logic → 4. Safety Validation → 5. Output Generation
+```
 
-3. **☀️ Solar Surplus Check**
-   ```
-   ❌ Significant solar surplus (>1kW) → FALSE ("Use solar instead")
-   ✅ No/low solar surplus → Continue
-   ```
+## 📊 Power Allocation Logic
 
-4. **📊 Smart Price Analysis**
-   ```
-   ✅ Very low price (bottom 30% of daily range) → TRUE
-   ❌ Batteries >30% SOC and price not very low → FALSE ("No need to charge")
-   ❌ Otherwise → FALSE ("Price OK but not optimal")
-   ```
+### Solar Power Allocation (Hierarchical Priority)
 
-**Important**: Battery charging only occurs if batteries are below 30% combined SOC OR it's a very low price day (bottom 30% of daily range).
+```python
+Available Solar Power = Solar Production - House Consumption
+```
 
-### Car Grid Charging Decision Sequence
+**Priority Order:**
+1. **Current Car Consumption** (if car is charging > min_car_charging_threshold)
+2. **Battery Charging** (if SOC < max_soc_threshold AND not batteries_full)
+3. **Additional Car Charging** (if average_soc >= max_soc_threshold - 10%)
+4. **Remaining Solar** (available for export or curtailment)
 
-The integration evaluates car grid charging in this specific order:
+**Safety Limits Applied:**
+- Battery allocation: `min(available_solar, max_battery_power, significant_solar_threshold)`
+- Car allocation: `min(available_solar, max_car_power)`
+- Total validation: `total_allocated <= solar_surplus` (with emergency correction if exceeded)
 
-1. **💰 Price Threshold Check**
-   ```
-   ❌ Price above threshold → FALSE ("Price too high")
-   ✅ Price below threshold → Continue
-   ```
+## 🔋 Battery Charging Decision Logic
 
-2. **📊 Price-Only Analysis**
-   ```
-   ✅ Very low price (bottom 30% daily range) → TRUE
-   ❌ Price improving next hour → FALSE ("Wait for better price")
-   ✅ Any low price (below threshold) → TRUE
-   ❌ Otherwise → FALSE ("Price not favorable")
-   ```
+### Decision Hierarchy (Evaluated in Order)
 
-**Note**: Car charging is purely price-based. Solar surplus is not considered as it's typically insufficient for car charging needs.
+#### 1. **EMERGENCY CHARGING** (Highest Priority)
+```python
+if average_soc < emergency_soc_threshold:
+    return CHARGE  # Override all other logic
+```
+
+#### 2. **SOLAR PRIORITY** 
+```python
+if solar_for_batteries > 0:
+    return NO_GRID_CHARGE  # Use solar instead
+```
+
+#### 3. **VERY LOW PRICE** 
+```python
+if price_position <= (very_low_price_threshold / 100):
+    return CHARGE  # Bottom X% of daily price range
+```
+
+#### 4. **PREDICTIVE CHARGING** (with Emergency Overrides)
+```python
+if is_low_price AND significant_price_drop AND average_soc > predictive_charging_min_soc:
+    # Check emergency overrides
+    if average_soc < emergency_soc_override OR 
+       (is_night AND winter_season AND average_soc < winter_night_soc_override):
+        return CHARGE  # Emergency override
+    return NO_CHARGE  # Wait for better price
+```
+
+#### 5. **TIME-AWARE CHARGING** (During Low Price Periods)
+
+**Solar Peak Hours Logic:**
+```python
+if is_solar_peak AND average_soc > 30 AND solar_forecast_factor > 0.6:
+    if average_soc < solar_peak_emergency_soc:
+        return CHARGE  # Emergency override
+    return NO_CHARGE  # Wait for solar
+```
+
+**Winter Night Logic:**
+```python
+if is_night AND winter_season AND average_soc < 60:
+    return CHARGE  # Aggressive winter charging
+```
+
+**Standard Night Logic:**
+```python
+if is_night AND average_soc < 60:
+    return CHARGE  # Off-peak charging
+```
+
+**Winter Day Logic:**
+```python
+if winter_season AND average_soc < 50:
+    return CHARGE  # Compensate for shorter days
+```
+
+#### 6. **SOC-BASED CHARGING** (During Low Price Periods)
+
+**Critical Low:** `average_soc < 30%` → **ALWAYS CHARGE**
+**Low + Poor Forecast:** `30% ≤ SOC < 40% AND solar_forecast < poor_solar_forecast_threshold` → **CHARGE**
+**Medium + Excellent Forecast:** `30% ≤ SOC ≤ 60% AND solar_forecast > excellent_solar_forecast_threshold` → **NO CHARGE**
+**Medium:** `SOC < 50%` → **CHARGE**
+
+## 🚗 Car Charging Decision Logic
+
+### Decision Hierarchy
+
+#### 1. **Solar-Only Charging**
+```python
+if solar_for_car > 0:
+    return CHARGE_WITH_SOLAR  # Use allocated solar power
+```
+
+#### 2. **Predictive Price Logic**
+```python
+if is_low_price AND significant_price_drop:
+    return NO_CHARGE  # Wait for better price
+```
+
+#### 3. **Very Low Price**
+```python
+if very_low_price:
+    return CHARGE  # Bottom X% of daily range
+```
+
+#### 4. **Price Improvement Check**
+```python
+if next_price < current_price:
+    return NO_CHARGE  # Wait for better price
+```
+
+#### 5. **Standard Low Price**
+```python
+if is_low_price:
+    return CHARGE
+```
+
+## ⚡ Power Output Calculations
+
+### Charger Limit Logic
+
+```python
+if car_not_charging:
+    return 0
+
+if car_solar_only AND solar_for_car > 0:
+    return min(solar_for_car, max_car_power)
+
+if average_soc < max_soc_threshold:
+    # Car gets grid setpoint, surplus goes to batteries
+    return min(max_grid_setpoint, max_car_power)
+else:
+    # Car can use solar surplus + grid setpoint
+    return min(solar_surplus + max_grid_setpoint, max_car_power)
+```
+
+### Grid Setpoint Logic
+
+```python
+max_grid_setpoint = min(monthly_grid_peak * 0.9, max_grid_power) if monthly_grid_peak > 2500 else 2500
+
+# Case 1: Car charging + Battery < max_soc
+if car_charging AND average_soc < max_soc_threshold:
+    return min(car_charging_power, charger_limit, max_grid_setpoint)
+
+# Case 2: Car charging + Battery >= max_soc  
+if car_charging AND average_soc >= max_soc_threshold:
+    car_grid_need = max(0, car_charging_power - allocated_solar)
+    if battery_grid_charging:
+        battery_power = min(max_grid_setpoint - car_grid_need, max_battery_power)
+        return min(car_grid_need + battery_power, max_grid_power)
+    return min(car_grid_need, max_grid_power)
+
+# Case 3: No car, battery charging
+if battery_grid_charging:
+    return min(max_grid_setpoint, max_battery_power, max_grid_power)
+
+# Case 4: No charging
+return 0
+```
+
+## 🌞 Solar Feed-in Logic
+
+```python
+if remaining_solar <= 0:
+    return NO_FEEDIN
+
+if current_price >= feedin_price_threshold:
+    return ENABLE_FEEDIN
+else:
+    return DISABLE_FEEDIN  # Keep surplus local
+```
+
+## ⚙️ Configurable Safety Parameters
+
+All safety limits are user-configurable through the Home Assistant UI:
+
+### Power Limits
+- **max_battery_power**: Maximum battery charging power (Default: 3000W)
+- **max_car_power**: Maximum car charging power (Default: 11000W)  
+- **max_grid_power**: Absolute grid power safety limit (Default: 15000W)
+- **min_car_charging_threshold**: Minimum power to consider car "charging" (Default: 100W)
+
+### SOC Thresholds
+- **emergency_soc_threshold**: True emergency SOC (Default: 15%)
+- **emergency_soc_override**: SOC for predictive/solar overrides (Default: 25%)
+- **winter_night_soc_override**: Winter night emergency charging SOC (Default: 40%)
+- **solar_peak_emergency_soc**: Solar peak hours emergency SOC (Default: 25%)
+- **predictive_charging_min_soc**: Minimum SOC for predictive logic (Default: 30%)
+
+### Price & Solar Thresholds
+- **price_threshold**: Base price threshold for "low price" (Default: €0.15/kWh)
+- **very_low_price_threshold**: Percentage of daily range for "very low" (Default: 30%)
+- **significant_solar_threshold**: Minimum solar surplus considered significant (Default: 1000W)
+- **feedin_price_threshold**: Minimum price to enable solar export (Default: €0.05/kWh)
+
+### Forecast Thresholds
+- **poor_solar_forecast_threshold**: Below this % = poor forecast (Default: 40%)
+- **excellent_solar_forecast_threshold**: Above this % = excellent forecast (Default: 80%)
+
+## 🔍 Decision Validation
+
+### Using the Diagnostics Sensor
+
+The integration provides a comprehensive `Decision Diagnostics` sensor that exposes all decision parameters:
+
+```yaml
+# Example attributes available for validation
+sensor.electricity_planner_decision_diagnostics:
+  state: "charging_battery"
+  attributes:
+    decisions:
+      battery_grid_charging: true
+      battery_reason: "Low price (€0.12/kWh) - SOC 45% < 50% charging"
+    power_allocation:
+      solar_for_batteries: 0
+      total_allocated: 150
+      allocation_reason: "Car using 150W, 0W to batteries..."
+    validation_flags:
+      price_data_valid: true
+      power_allocation_valid: true
+      emergency_override_active: false
+    configured_limits:
+      max_battery_power: 3000
+      emergency_soc_override: 25
+```
+
+### Validation Checklist
+
+**Price Validation:**
+- ✅ `price_data_valid = true`
+- ✅ `current_price` matches external Nord Pool data
+- ✅ `price_position` calculation: `(current - lowest) / (highest - lowest)`
+
+**Power Allocation Validation:**
+- ✅ `power_allocation_valid = true` (total_allocated ≤ solar_surplus)
+- ✅ `solar_for_batteries` + `solar_for_car` + `car_current_solar_usage` = `total_allocated`
+- ✅ Individual allocations respect configured limits
+
+**SOC Logic Validation:**
+- ✅ Emergency overrides activate below configured thresholds
+- ✅ Predictive logic only applies above `predictive_charging_min_soc`
+- ✅ Time-aware logic respects season and time contexts
+
+**Safety Validation:**
+- ✅ `charger_limit` ≤ `max_car_power`
+- ✅ `grid_setpoint` ≤ `max_grid_power`
+- ✅ Battery allocation ≤ `max_battery_power`
+
+## 🚨 Emergency Override Logic
+
+The system implements multiple layers of emergency overrides to prevent battery discharge during critical situations:
+
+1. **True Emergency**: `SOC < emergency_soc_threshold` → Charge regardless of price
+2. **Predictive Override**: `SOC < emergency_soc_override` → Override price waiting logic
+3. **Winter Night Override**: `SOC < winter_night_soc_override` during winter nights
+4. **Solar Peak Override**: `SOC < solar_peak_emergency_soc` during solar peak hours
+
+## 📈 Time Context Logic
+
+**Time Periods Defined:**
+- **Night**: 22:00 - 06:00 (off-peak grid rates)
+- **Early Morning**: 06:00 - 09:00 (pre-solar period)
+- **Solar Peak**: 10:00 - 16:00 (maximum solar production)
+- **Evening**: 17:00 - 21:00 (peak consumption period)
+- **Winter Season**: November, December, January, February
+
+## 🔧 Configuration Through Home Assistant UI
+
+The integration provides a comprehensive configuration flow:
+
+1. **Entity Selection**: Configure Nord Pool, battery, solar, and car entities
+2. **Basic Thresholds**: Set SOC limits, price thresholds, and solar parameters
+3. **Safety Limits**: Configure power limits and emergency overrides
+
+All parameters are reconfigurable through Home Assistant's integration options without restarting the integration.
+
+## 🎯 Usage Examples
+
+### Example 1: Winter Night Emergency Override
+- **Conditions**: 02:00 AM, December, SOC 35%, Low price with significant drop expected
+- **Normal Logic**: Wait for price drop
+- **Emergency Override**: SOC 35% < 40% (winter_night_soc_override) → **CHARGE**
+- **Reason**: "Emergency override - SOC 35% too low to wait for price drop (winter night: true)"
+
+### Example 2: Solar Peak Conservation
+- **Conditions**: 12:00 PM, SOC 35%, Low price, Excellent solar forecast (85%)
+- **Solar Peak Logic**: Normally wait for solar
+- **Emergency Override**: SOC 35% > 25% (solar_peak_emergency_soc) → **NO CHARGE**
+- **Reason**: "Solar peak hours - SOC 35% sufficient, awaiting solar production (forecast: 85%)"
+
+### Example 3: Power Allocation Validation
+- **Available Solar**: 2500W
+- **Car Drawing**: 3000W
+- **Allocation**: Car current usage: 2500W, Batteries: 0W, Car additional: 0W, Remaining: 0W
+- **Validation**: `total_allocated (2500W) ≤ solar_surplus (2500W)` ✅
+
+### Example 4: Predictive Charging with Emergency Override
+- **Conditions**: 23:00 PM, SOC 20%, Low price (€0.10/kWh), Next hour: €0.05/kWh
+- **Predictive Logic**: Would normally wait for better price
+- **Emergency Override**: SOC 20% < 25% (emergency_soc_override) → **CHARGE**
+- **Reason**: "Emergency override - SOC 20% too low to wait for price drop"
+
+### Example 5: Configured Safety Limits Applied
+- **Solar Surplus**: 15000W (unusual spike)
+- **Max Battery Power**: 5000W (user configured)
+- **Max Car Power**: 7000W (user configured)
+- **Allocation**: Batteries: 5000W, Car: 7000W, Remaining: 3000W
+- **Safety**: All allocations respect configured limits
 
 ## 📈 Price Analysis Logic
 
@@ -392,13 +663,13 @@ automation:
           message: "Electricity price is now {{ states('sensor.electricity_planner_price_analysis') }}€/kWh - good time to charge!"
 ```
 
-## 🇧🇪 Belgium Specific Features
+## 🌍 Universal Compatibility Features
 
-This integration is optimized for the Belgian electricity market:
-- **Dynamic Pricing**: Compatible with variable electricity pricing
-- **Solar Feed-in**: Considers Belgian feed-in tariff structures
+This integration is optimized for dynamic electricity markets:
+- **Dynamic Pricing**: Compatible with variable electricity pricing (Nord Pool and similar markets)
+- **Solar Feed-in**: Considers feed-in tariff structures and export optimization
 - **Peak Shaving**: Reduces consumption during high-price periods
-- **Regulatory Compliance**: Follows Belgian residential battery storage guidelines
+- **Regulatory Compliance**: Configurable safety limits for residential battery storage
 
 ## 🔗 Compatibility
 

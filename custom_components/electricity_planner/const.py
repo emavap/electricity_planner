@@ -22,6 +22,17 @@ CONF_POOR_SOLAR_FORECAST_THRESHOLD = "poor_solar_forecast_threshold"
 CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD = "excellent_solar_forecast_threshold"
 CONF_FEEDIN_PRICE_THRESHOLD = "feedin_price_threshold"
 
+# Safety Limits Configuration Keys
+CONF_MAX_BATTERY_POWER = "max_battery_power"
+CONF_MAX_CAR_POWER = "max_car_power"  
+CONF_MAX_GRID_POWER = "max_grid_power"
+CONF_MIN_CAR_CHARGING_THRESHOLD = "min_car_charging_threshold"
+CONF_EMERGENCY_SOC_OVERRIDE = "emergency_soc_override"
+CONF_WINTER_NIGHT_SOC_OVERRIDE = "winter_night_soc_override"
+CONF_SOLAR_PEAK_EMERGENCY_SOC = "solar_peak_emergency_soc"
+CONF_PREDICTIVE_CHARGING_MIN_SOC = "predictive_charging_min_soc"
+
+# Default Threshold Values
 DEFAULT_MIN_SOC = 20
 DEFAULT_MAX_SOC = 90
 DEFAULT_PRICE_THRESHOLD = 0.15
@@ -31,6 +42,16 @@ DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD = 1000  # 1kW
 DEFAULT_POOR_SOLAR_FORECAST = 40  # Below 40% = poor forecast
 DEFAULT_EXCELLENT_SOLAR_FORECAST = 80  # Above 80% = excellent forecast
 DEFAULT_FEEDIN_PRICE_THRESHOLD = 0.05  # €0.05/kWh - export only above this price
+
+# Default Safety Limits (W)
+DEFAULT_MAX_BATTERY_POWER = 3000  # 3kW typical home battery inverter limit
+DEFAULT_MAX_CAR_POWER = 11000  # 11kW typical home car charger limit
+DEFAULT_MAX_GRID_POWER = 15000  # 15kW typical home grid connection limit
+DEFAULT_MIN_CAR_CHARGING_THRESHOLD = 100  # Minimum power to consider car "charging"
+DEFAULT_EMERGENCY_SOC_OVERRIDE = 25  # SOC below which emergency overrides apply
+DEFAULT_WINTER_NIGHT_SOC_OVERRIDE = 40  # SOC threshold for winter night emergency charging
+DEFAULT_SOLAR_PEAK_EMERGENCY_SOC = 25  # SOC below which to charge even during solar peak
+DEFAULT_PREDICTIVE_CHARGING_MIN_SOC = 30  # Minimum SOC for predictive charging logic
 
 ATTR_BATTERY_GRID_CHARGING = "battery_grid_charging"
 ATTR_CAR_GRID_CHARGING = "car_grid_charging"

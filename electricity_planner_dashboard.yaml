@@ -466,7 +466,7 @@ cards:
 type: markdown
 title: "ℹ️ Electricity Planner Information"
 content: |
-  **Belgian Electricity Market Planner**
+  **Dynamic Electricity Market Planner**
   
   - **Current Price**: {{ states('sensor.electricity_planner_price_analysis') | default('Unknown') }} €/kWh
   - **Price Position**: {{ (state_attr('sensor.electricity_planner_price_analysis', 'price_position') | float(0) * 100) | round(1) }}% of daily range

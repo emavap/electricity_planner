@@ -1,6 +1,6 @@
 # Electricity Planner Integration
 
-This integration provides intelligent electricity usage planning **decisions** for Home Assistant, specifically designed for Belgian electricity markets. It analyzes battery status, solar forecasts, and electricity prices to provide **boolean recommendations** for when to charge from the grid. **The integration does not control hardware directly** - it provides decision outputs for external charging control systems.
+This integration provides intelligent electricity usage planning **decisions** for Home Assistant, designed for dynamic electricity markets. It analyzes battery status, solar forecasts, and electricity prices to provide **boolean recommendations** for when to charge from the grid. **The integration does not control hardware directly** - it provides decision outputs for external charging control systems.
 
 ## Key Features
 
@@ -116,13 +116,13 @@ automation:
         entity_id: switch.electricity_planner_car_charger_control
 ```
 
-## Belgium Specific Considerations
+## Dynamic Market Considerations
 
-This integration is optimized for the Belgian electricity market:
-- **Dynamic Pricing**: Works with variable electricity pricing
-- **Solar Feed-in**: Considers Belgian solar feed-in tariffs
+This integration is optimized for dynamic electricity markets:
+- **Dynamic Pricing**: Works with variable electricity pricing (Nord Pool and similar markets)
+- **Solar Feed-in**: Considers solar feed-in tariffs and export optimization
 - **Grid Optimization**: Reduces peak consumption during high-price periods
-- **Battery Regulations**: Complies with Belgian residential battery storage guidelines
+- **Battery Regulations**: Configurable safety limits for residential battery storage
 
 ## Compatibility
 
@@ -156,5 +156,5 @@ For issues and feature requests, please visit the [GitHub repository](https://gi
 - Multi-battery support (Huawei Luna, Victron)
 - Solar forecast integration
 - Car charging control
-- Belgian market optimization
+- Dynamic market optimization
 - GUI-based entity configuration

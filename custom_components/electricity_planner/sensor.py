@@ -30,6 +30,7 @@ async def async_setup_entry(
         HourlyDecisionHistorySensor(coordinator, entry),
         ChargerLimitSensor(coordinator, entry),
         GridSetpointSensor(coordinator, entry),
+        DecisionDiagnosticsSensor(coordinator, entry),
     ]
     
     async_add_entities(entities, False)
@@ -460,3 +461,199 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
             "monthly_grid_peak": monthly_peak,
             "max_grid_setpoint": max_grid_setpoint,
         }
+
+
+class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
+    """Comprehensive diagnostics sensor exposing all decision parameters for validation."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the decision diagnostics sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_name = "Decision Diagnostics"
+        self._attr_unique_id = f"{entry.entry_id}_decision_diagnostics"
+        self._attr_icon = "mdi:bug-check"
+        self._attr_native_unit_of_measurement = None
+
+    @property
+    def native_value(self) -> str:
+        """Return a summary of the decision state."""
+        if not self.coordinator.data:
+            return "no_data"
+        
+        battery_charging = self.coordinator.data.get("battery_grid_charging", False)
+        car_charging = self.coordinator.data.get("car_grid_charging", False)
+        
+        if battery_charging and car_charging:
+            return "charging_both"
+        elif battery_charging:
+            return "charging_battery"
+        elif car_charging:
+            return "charging_car"
+        else:
+            return "no_charging"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, any]:
+        """Return comprehensive diagnostics data for decision validation."""
+        if not self.coordinator.data:
+            return {"error": "No coordinator data available"}
+        
+        # Get all analysis data
+        price_analysis = self.coordinator.data.get("price_analysis", {})
+        battery_analysis = self.coordinator.data.get("battery_analysis", {})
+        power_analysis = self.coordinator.data.get("power_analysis", {})
+        power_allocation = self.coordinator.data.get("power_allocation", {})
+        solar_analysis = self.coordinator.data.get("solar_analysis", {})
+        solar_forecast = self.coordinator.data.get("solar_forecast", {})
+        time_context = self.coordinator.data.get("time_context", {})
+        
+        # Configuration values (for validation)
+        config = self.coordinator.config
+        
+        return {
+            # Main decisions
+            "decisions": {
+                "battery_grid_charging": self.coordinator.data.get("battery_grid_charging", False),
+                "car_grid_charging": self.coordinator.data.get("car_grid_charging", False),
+                "feedin_solar": self.coordinator.data.get("feedin_solar", False),
+                "battery_reason": self.coordinator.data.get("battery_grid_charging_reason", ""),
+                "car_reason": self.coordinator.data.get("car_grid_charging_reason", ""),
+                "feedin_reason": self.coordinator.data.get("feedin_solar_reason", ""),
+            },
+            
+            # Power outputs
+            "power_outputs": {
+                "charger_limit": self.coordinator.data.get("charger_limit", 0),
+                "grid_setpoint": self.coordinator.data.get("grid_setpoint", 0),
+                "charger_limit_reason": self.coordinator.data.get("charger_limit_reason", ""),
+                "grid_setpoint_reason": self.coordinator.data.get("grid_setpoint_reason", ""),
+            },
+            
+            # Price analysis (for validation)
+            "price_analysis": {
+                "current_price": price_analysis.get("current_price"),
+                "highest_price": price_analysis.get("highest_price"),
+                "lowest_price": price_analysis.get("lowest_price"),
+                "next_price": price_analysis.get("next_price"),
+                "price_threshold": price_analysis.get("price_threshold"),
+                "is_low_price": price_analysis.get("is_low_price", False),
+                "very_low_price": price_analysis.get("very_low_price", False),
+                "price_position": price_analysis.get("price_position"),
+                "significant_price_drop": price_analysis.get("significant_price_drop", False),
+                "data_available": price_analysis.get("data_available", False),
+            },
+            
+            # Battery analysis (for validation)
+            "battery_analysis": {
+                "average_soc": battery_analysis.get("average_soc"),
+                "min_soc": battery_analysis.get("min_soc"),
+                "max_soc": battery_analysis.get("max_soc"),
+                "batteries_count": battery_analysis.get("batteries_count", 0),
+                "batteries_full": battery_analysis.get("batteries_full", False),
+                "batteries_available": battery_analysis.get("batteries_available", True),
+                "min_soc_threshold": battery_analysis.get("min_soc_threshold"),
+                "max_soc_threshold": battery_analysis.get("max_soc_threshold"),
+            },
+            
+            # Power analysis (for validation)
+            "power_analysis": {
+                "solar_surplus": power_analysis.get("solar_surplus"),
+                "car_charging_power": power_analysis.get("car_charging_power"),
+                "has_solar_surplus": power_analysis.get("has_solar_surplus", False),
+                "significant_solar_surplus": power_analysis.get("significant_solar_surplus", False),
+                "car_currently_charging": power_analysis.get("car_currently_charging", False),
+            },
+            
+            # Power allocation (critical for validation)
+            "power_allocation": {
+                "solar_for_batteries": power_allocation.get("solar_for_batteries", 0),
+                "solar_for_car": power_allocation.get("solar_for_car", 0),
+                "car_current_solar_usage": power_allocation.get("car_current_solar_usage", 0),
+                "remaining_solar": power_allocation.get("remaining_solar", 0),
+                "total_allocated": power_allocation.get("total_allocated", 0),
+                "allocation_reason": power_allocation.get("allocation_reason", ""),
+            },
+            
+            # Solar forecast (for validation)
+            "solar_forecast": {
+                "forecast_available": solar_forecast.get("forecast_available", False),
+                "solar_production_factor": solar_forecast.get("solar_production_factor"),
+                "expected_solar_production": solar_forecast.get("expected_solar_production", "unknown"),
+                "sunny_hours": solar_forecast.get("sunny_hours", 0),
+                "cloudy_hours": solar_forecast.get("cloudy_hours", 0),
+            },
+            
+            # Time context (for validation)
+            "time_context": {
+                "current_hour": time_context.get("current_hour"),
+                "is_night": time_context.get("is_night", False),
+                "is_early_morning": time_context.get("is_early_morning", False),
+                "is_solar_peak": time_context.get("is_solar_peak", False),
+                "is_evening": time_context.get("is_evening", False),
+                "winter_season": time_context.get("winter_season", False),
+            },
+            
+            # Configuration values (for validation)
+            "configured_limits": {
+                "emergency_soc": config.get("emergency_soc_threshold", 15),
+                "max_battery_power": config.get("max_battery_power", 3000),
+                "max_car_power": config.get("max_car_power", 11000),
+                "max_grid_power": config.get("max_grid_power", 15000),
+                "min_car_charging_threshold": config.get("min_car_charging_threshold", 100),
+                "emergency_soc_override": config.get("emergency_soc_override", 25),
+                "winter_night_soc_override": config.get("winter_night_soc_override", 40),
+                "solar_peak_emergency_soc": config.get("solar_peak_emergency_soc", 25),
+                "predictive_charging_min_soc": config.get("predictive_charging_min_soc", 30),
+                "significant_solar_threshold": config.get("significant_solar_threshold", 1000),
+                "very_low_price_threshold": config.get("very_low_price_threshold", 30),
+                "price_threshold": config.get("price_threshold", 0.15),
+                "feedin_price_threshold": config.get("feedin_price_threshold", 0.05),
+            },
+            
+            # Validation flags (for quick problem identification)
+            "validation_flags": {
+                "price_data_valid": price_analysis.get("data_available", False),
+                "battery_data_valid": battery_analysis.get("batteries_available", True),
+                "power_allocation_valid": power_allocation.get("total_allocated", 0) <= power_analysis.get("solar_surplus", 0),
+                "emergency_override_active": self._check_emergency_override(battery_analysis, time_context, config),
+                "predictive_logic_active": self._check_predictive_logic(price_analysis, battery_analysis, config),
+                "solar_forecast_influencing": solar_forecast.get("forecast_available", False) and solar_forecast.get("solar_production_factor", 0.5) != 0.5,
+            },
+            
+            # Last update
+            "last_evaluation": self.coordinator.data.get("next_evaluation", "unknown"),
+        }
+
+    def _check_emergency_override(self, battery_analysis: dict, time_context: dict, config: dict) -> bool:
+        """Check if any emergency overrides are currently active."""
+        average_soc = battery_analysis.get("average_soc", 100)
+        if average_soc is None:
+            return False
+            
+        emergency_soc = config.get("emergency_soc_threshold", 15)
+        emergency_soc_override = config.get("emergency_soc_override", 25)
+        winter_night_soc_override = config.get("winter_night_soc_override", 40)
+        solar_peak_emergency_soc = config.get("solar_peak_emergency_soc", 25)
+        
+        is_night = time_context.get("is_night", False)
+        winter_season = time_context.get("winter_season", False)
+        is_solar_peak = time_context.get("is_solar_peak", False)
+        
+        return (
+            average_soc < emergency_soc or
+            average_soc < emergency_soc_override or
+            (is_night and winter_season and average_soc < winter_night_soc_override) or
+            (is_solar_peak and average_soc < solar_peak_emergency_soc)
+        )
+
+    def _check_predictive_logic(self, price_analysis: dict, battery_analysis: dict, config: dict) -> bool:
+        """Check if predictive charging logic is active."""
+        significant_price_drop = price_analysis.get("significant_price_drop", False)
+        is_low_price = price_analysis.get("is_low_price", False)
+        average_soc = battery_analysis.get("average_soc", 100)
+        predictive_min_soc = config.get("predictive_charging_min_soc", 30)
+        
+        if average_soc is None:
+            return False
+            
+        return is_low_price and significant_price_drop and average_soc > predictive_min_soc
