@@ -701,9 +701,25 @@ class ChargingDecisionEngine:
                 "battery_grid_charging_reason": f"Battery {average_soc:.0f}% nearly full with {remaining_solar}W solar surplus - preventing solar waste",
             }
 
-        # 3. VERY LOW PRICE: Always charge (configurable threshold of daily range)
+        # 3. VERY LOW PRICE: Charge only if it makes sense (not when battery nearly full + good conditions)
         if very_low_price:
             very_low_threshold_percent = self.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
+            
+            # Don't charge from grid if battery nearly full AND good solar conditions
+            if average_soc >= max_soc_threshold - 10:  # Within 10% of max
+                if remaining_solar > 0:
+                    return {
+                        "battery_grid_charging": False,
+                        "battery_grid_charging_reason": f"Battery nearly full ({average_soc:.0f}%) with {remaining_solar}W solar surplus - avoid grid charging despite very low price",
+                    }
+                
+                # Also check solar forecast - if tomorrow will be excellent, don't charge nearly full battery
+                if solar_forecast_factor > 0.8:  # Excellent forecast
+                    return {
+                        "battery_grid_charging": False,
+                        "battery_grid_charging_reason": f"Battery nearly full ({average_soc:.0f}%) + excellent solar forecast ({solar_forecast_factor:.0%}) - skip charging despite very low price",
+                    }
+            
             return {
                 "battery_grid_charging": True,
                 "battery_grid_charging_reason": f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_threshold_percent}% of daily range",
