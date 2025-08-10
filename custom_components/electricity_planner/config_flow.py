@@ -466,8 +466,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         schema_dict.update({
             vol.Required(
-                CONF_SOLAR_SURPLUS_ENTITY,
-                default=current_config.get(CONF_SOLAR_SURPLUS_ENTITY)
+                CONF_SOLAR_PRODUCTION_ENTITY,
+                default=current_config.get(CONF_SOLAR_PRODUCTION_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(
+                CONF_HOUSE_CONSUMPTION_ENTITY,
+                default=current_config.get(CONF_HOUSE_CONSUMPTION_ENTITY)
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
