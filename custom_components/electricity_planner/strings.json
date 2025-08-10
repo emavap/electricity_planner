@@ -13,7 +13,12 @@
           "solar_production_entity": "Solar Production Entity",
           "house_consumption_entity": "House Consumption Entity", 
           "car_charging_power_entity": "Car Charging Power Entity (Optional)",
-          "monthly_grid_peak_entity": "Monthly Grid Peak Entity (Optional)"
+          "monthly_grid_peak_entity": "Monthly Grid Peak Entity (Optional)",
+          "solar_forecast_current_entity": "Solar Forecast Current Hour (Optional)",
+          "solar_forecast_next_entity": "Solar Forecast Next Hour (Optional)",
+          "solar_forecast_today_entity": "Solar Forecast Today Total (Optional)",
+          "solar_forecast_remaining_today_entity": "Solar Forecast Remaining Today (Optional)",
+          "solar_forecast_tomorrow_entity": "Solar Forecast Tomorrow (Optional)"
         },
         "data_description": {
           "current_price_entity": "Current electricity price from Nord Pool integration",
@@ -24,7 +29,12 @@
           "solar_production_entity": "Current solar production in W",
           "house_consumption_entity": "Current house power consumption in W",
           "car_charging_power_entity": "Car charging power in W",
-          "monthly_grid_peak_entity": "Current month grid peak in W for power management"
+          "monthly_grid_peak_entity": "Current month grid peak in W for power management",
+          "solar_forecast_current_entity": "Solar forecast for current hour (kWh)",
+          "solar_forecast_next_entity": "Solar forecast for next hour (kWh)",
+          "solar_forecast_today_entity": "Total solar forecast for today (kWh)",
+          "solar_forecast_remaining_today_entity": "Remaining solar forecast for today (kWh)",
+          "solar_forecast_tomorrow_entity": "Solar forecast for tomorrow (kWh)"
         }
       },
       "settings": {
@@ -69,6 +79,16 @@
         "title": "Update Settings",
         "description": "Update charging thresholds and preferences.",
         "data": {
+          "battery_soc_entities": "Battery SOC Entities",
+          "solar_production_entity": "Solar Production Entity",
+          "house_consumption_entity": "House Consumption Entity",
+          "car_charging_power_entity": "Car Charging Power Entity (Optional)",
+          "monthly_grid_peak_entity": "Monthly Grid Peak Entity (Optional)",
+          "solar_forecast_current_entity": "Solar Forecast Current Hour (Optional)",
+          "solar_forecast_next_entity": "Solar Forecast Next Hour (Optional)",
+          "solar_forecast_today_entity": "Solar Forecast Today Total (Optional)",
+          "solar_forecast_remaining_today_entity": "Solar Forecast Remaining Today (Optional)",
+          "solar_forecast_tomorrow_entity": "Solar Forecast Tomorrow (Optional)",
           "min_soc_threshold": "Minimum SOC Threshold",
           "max_soc_threshold": "Maximum SOC Threshold",
           "price_threshold": "Price Threshold",
@@ -77,7 +97,15 @@
           "significant_solar_threshold": "Significant Solar Threshold",
           "poor_solar_forecast_threshold": "Poor Solar Forecast Threshold",
           "excellent_solar_forecast_threshold": "Excellent Solar Forecast Threshold",
-          "feedin_price_threshold": "Feed-in Solar Price Threshold"
+          "feedin_price_threshold": "Feed-in Solar Price Threshold",
+          "max_battery_power": "Max Battery Power",
+          "max_car_power": "Max Car Power",
+          "max_grid_power": "Max Grid Power",
+          "min_car_charging_threshold": "Min Car Charging Threshold",
+          "emergency_soc_override": "Emergency SOC Override",
+          "winter_night_soc_override": "Winter Night SOC Override",
+          "solar_peak_emergency_soc": "Solar Peak Emergency SOC",
+          "predictive_charging_min_soc": "Predictive Charging Min SOC"
         }
       }
     }

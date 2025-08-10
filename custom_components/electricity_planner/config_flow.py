@@ -490,6 +490,36 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Optional(
+                CONF_SOLAR_FORECAST_CURRENT_ENTITY,
+                default=current_config.get(CONF_SOLAR_FORECAST_CURRENT_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_SOLAR_FORECAST_NEXT_ENTITY,
+                default=current_config.get(CONF_SOLAR_FORECAST_NEXT_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_SOLAR_FORECAST_TODAY_ENTITY,
+                default=current_config.get(CONF_SOLAR_FORECAST_TODAY_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY,
+                default=current_config.get(CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_SOLAR_FORECAST_TOMORROW_ENTITY,
+                default=current_config.get(CONF_SOLAR_FORECAST_TOMORROW_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
                 CONF_MIN_SOC_THRESHOLD,
                 default=current_config.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)
             ): selector.NumberSelector(
