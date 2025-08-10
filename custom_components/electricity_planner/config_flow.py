@@ -17,10 +17,15 @@ from .const import (
     CONF_NEXT_PRICE_ENTITY,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_BATTERY_CAPACITIES,
-    CONF_SOLAR_SURPLUS_ENTITY,
+    CONF_SOLAR_PRODUCTION_ENTITY,
+    CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MONTHLY_GRID_PEAK_ENTITY,
-    CONF_WEATHER_ENTITY,
+    CONF_SOLAR_FORECAST_CURRENT_ENTITY,
+    CONF_SOLAR_FORECAST_NEXT_ENTITY,
+    CONF_SOLAR_FORECAST_TODAY_ENTITY,
+    CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY,
+    CONF_SOLAR_FORECAST_TOMORROW_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
@@ -95,7 +100,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     multiple=True
                 )
             ),
-            vol.Required(CONF_SOLAR_SURPLUS_ENTITY): selector.EntitySelector(
+            vol.Required(CONF_SOLAR_PRODUCTION_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(CONF_HOUSE_CONSUMPTION_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Optional(CONF_CAR_CHARGING_POWER_ENTITY): selector.EntitySelector(
@@ -104,8 +112,20 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_MONTHLY_GRID_PEAK_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
-            vol.Optional(CONF_WEATHER_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=["weather"])
+            vol.Optional(CONF_SOLAR_FORECAST_CURRENT_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(CONF_SOLAR_FORECAST_NEXT_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(CONF_SOLAR_FORECAST_TODAY_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(CONF_SOLAR_FORECAST_TOMORROW_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
             ),
         })
 
@@ -118,10 +138,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "lowest_price": "Lowest price today from Nord Pool",
                 "next_price": "Next hour price from Nord Pool",
                 "battery_soc": "Battery State of Charge entities",
-                "solar_surplus": "Current solar surplus (production - consumption) in W",
+                "solar_production": "Current solar production in W",
+                "house_consumption": "Current house power consumption in W", 
                 "car_charging": "Car charging power in W (optional)",
                 "monthly_grid_peak": "Current month grid peak in W (optional)",
-                "weather": "Weather forecast entity for solar prediction (optional)",
+                "solar_forecast_current": "Solar forecast for current hour (kWh) (optional)",
+                "solar_forecast_next": "Solar forecast for next hour (kWh) (optional)", 
+                "solar_forecast_today": "Total solar forecast for today (kWh) (optional)",
+                "solar_forecast_remaining": "Remaining solar forecast for today (kWh) (optional)",
+                "solar_forecast_tomorrow": "Solar forecast for tomorrow (kWh) (optional)",
             },
         )
 
@@ -457,12 +482,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 default=current_config.get(CONF_MONTHLY_GRID_PEAK_ENTITY)
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(
-                CONF_WEATHER_ENTITY,
-                default=current_config.get(CONF_WEATHER_ENTITY)
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=["weather"])
             ),
             vol.Optional(
                 CONF_MIN_SOC_THRESHOLD,

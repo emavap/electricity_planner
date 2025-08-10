@@ -21,13 +21,13 @@ async def async_setup_entry(
 ) -> None:
     """Set up the sensor platform."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    
+
     # AUTOMATION SENSORS: Essential power sensors for automations (2/5 total automation sensors)
     automation_entities = [
         ChargerLimitSensor(coordinator, entry, "_automation"),
         GridSetpointSensor(coordinator, entry, "_automation"),
     ]
-    
+
     # DIAGNOSTIC SENSORS: For monitoring and troubleshooting only
     diagnostic_entities = [
         ChargingDecisionSensor(coordinator, entry, "_diagnostic"),
@@ -38,9 +38,9 @@ async def async_setup_entry(
         HourlyDecisionHistorySensor(coordinator, entry, "_diagnostic"),
         DecisionDiagnosticsSensor(coordinator, entry, "_diagnostic"),
     ]
-    
+
     entities = automation_entities + diagnostic_entities
-    
+
     async_add_entities(entities, False)
 
 
@@ -52,7 +52,7 @@ class ElectricityPlannerSensorBase(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self.entry = entry
         self._attr_has_entity_name = True
-        
+
         # Create device identifier with suffix for grouping
         device_id = f"{entry.entry_id}{device_suffix}"
         if device_suffix == "_automation":
@@ -61,7 +61,7 @@ class ElectricityPlannerSensorBase(CoordinatorEntity, SensorEntity):
             device_name = "Electricity Planner - Diagnostics & Monitoring"
         else:
             device_name = "Electricity Planner"
-        
+
         self._attr_device_info = {
             "identifiers": {(DOMAIN, device_id)},
             "name": device_name,
@@ -86,10 +86,10 @@ class ChargingDecisionSensor(ElectricityPlannerSensorBase):
         """Return the state of the sensor."""
         if not self.coordinator.data:
             return "no_data_available"
-        
+
         battery_grid = self.coordinator.data.get("battery_grid_charging", False)
         car_grid = self.coordinator.data.get("car_grid_charging", False)
-        
+
         if battery_grid and car_grid:
             return "charge_both_from_grid"
         elif battery_grid:
@@ -108,9 +108,9 @@ class ChargingDecisionSensor(ElectricityPlannerSensorBase):
         """Return the state attributes."""
         if not self.coordinator.data:
             return {"data_available": False}
-        
+
         price_data_available = self.coordinator.data.get("price_analysis", {}).get("data_available", False)
-        
+
         return {
             "battery_grid_charging": self.coordinator.data.get("battery_grid_charging"),
             "car_grid_charging": self.coordinator.data.get("car_grid_charging"),
@@ -139,7 +139,7 @@ class BatteryAnalysisSensor(ElectricityPlannerSensorBase):
         """Return the average battery SOC."""
         if not self.coordinator.data or "battery_analysis" not in self.coordinator.data:
             return 0  # Return 0 instead of None when no data
-        
+
         avg_soc = self.coordinator.data["battery_analysis"].get("average_soc")
         return avg_soc if avg_soc is not None else 0  # Return 0 if no batteries configured
 
@@ -148,7 +148,7 @@ class BatteryAnalysisSensor(ElectricityPlannerSensorBase):
         """Return the state attributes."""
         if not self.coordinator.data or "battery_analysis" not in self.coordinator.data:
             return {}
-        
+
         battery_analysis = self.coordinator.data["battery_analysis"]
         return {
             "min_soc": battery_analysis.get("min_soc"),
@@ -178,7 +178,7 @@ class PriceAnalysisSensor(ElectricityPlannerSensorBase):
         """Return the current electricity price."""
         if not self.coordinator.data or "price_analysis" not in self.coordinator.data:
             return 0.0  # Return 0 instead of None when no data
-        
+
         current_price = self.coordinator.data["price_analysis"].get("current_price")
         return current_price if current_price is not None else 0.0  # Return 0 if no price data
 
@@ -187,7 +187,7 @@ class PriceAnalysisSensor(ElectricityPlannerSensorBase):
         """Return the state attributes."""
         if not self.coordinator.data or "price_analysis" not in self.coordinator.data:
             return {}
-        
+
         price_analysis = self.coordinator.data["price_analysis"]
         return {
             "highest_price": price_analysis.get("highest_price"),
@@ -207,7 +207,7 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
     """Sensor for power flow analysis."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
-        """Initialize the power analysis sensor.""" 
+        """Initialize the power analysis sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Solar Surplus Power"
         self._attr_unique_id = f"{entry.entry_id}_power_analysis"
@@ -220,7 +220,7 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
         """Return the solar surplus."""
         if not self.coordinator.data or "power_analysis" not in self.coordinator.data:
             return 0.0  # Return 0 instead of None when no data
-        
+
         solar_surplus = self.coordinator.data["power_analysis"].get("solar_surplus")
         return solar_surplus if solar_surplus is not None else 0.0  # Return 0 if no power data
 
@@ -229,15 +229,21 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
         """Return the state attributes."""
         if not self.coordinator.data or "power_analysis" not in self.coordinator.data:
             return {}
-        
+
         power_analysis = self.coordinator.data["power_analysis"]
         return {
-            "solar_surplus": power_analysis.get("solar_surplus"),
+            "solar_production": power_analysis.get("solar_production"),
+            "house_consumption": power_analysis.get("house_consumption"),
+            "house_consumption_without_car": power_analysis.get("house_consumption_without_car"),
+            "solar_surplus": power_analysis.get("solar_surplus"),  # Available excess for batteries/car/export
             "car_charging_power": power_analysis.get("car_charging_power"),
-            "has_solar_surplus": power_analysis.get("has_solar_surplus"),
+            "has_solar_production": power_analysis.get("has_solar_production"),
+            "has_solar_surplus": power_analysis.get("has_solar_surplus"),  # Has available excess solar
             "significant_solar_surplus": power_analysis.get("significant_solar_surplus"),
             "car_currently_charging": power_analysis.get("car_currently_charging"),
             "available_surplus_for_batteries": power_analysis.get("available_surplus_for_batteries"),
+            "solar_coverage_ratio": power_analysis.get("solar_coverage_ratio"),
+            "has_excess_solar_available": power_analysis.get("has_excess_solar_available"),  # Available for any use
         }
 
 
@@ -258,7 +264,7 @@ class DataAvailabilitySensor(ElectricityPlannerSensorBase):
         """Return the duration in seconds that data has been unavailable."""
         if not hasattr(self.coordinator, '_data_unavailable_since') or not self.coordinator._data_unavailable_since:
             return 0  # Data is available or never was unavailable
-        
+
         unavailable_duration = datetime.now() - self.coordinator._data_unavailable_since
         return int(unavailable_duration.total_seconds())
 
@@ -267,21 +273,21 @@ class DataAvailabilitySensor(ElectricityPlannerSensorBase):
         """Return the state attributes."""
         if not self.coordinator.data:
             return {}
-        
+
         attributes = {}
-        
+
         # Add availability information
         if hasattr(self.coordinator, '_last_successful_update'):
             attributes["last_successful_update"] = self.coordinator._last_successful_update.isoformat()
-        
+
         if hasattr(self.coordinator, '_data_unavailable_since') and self.coordinator._data_unavailable_since:
             attributes["data_unavailable_since"] = self.coordinator._data_unavailable_since.isoformat()
-        
+
         attributes.update({
             "notification_sent": getattr(self.coordinator, '_notification_sent', False),
             "data_currently_available": self.coordinator.data.get("price_analysis", {}).get("data_available", False),
         })
-        
+
         return attributes
 
 
@@ -304,7 +310,7 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
         """Return the current electricity price for compatibility."""
         if not self.coordinator.data or "price_analysis" not in self.coordinator.data:
             return 0.0
-        
+
         current_price = self.coordinator.data["price_analysis"].get("current_price")
         return current_price if current_price is not None else 0.0
 
@@ -313,19 +319,19 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
         """Return the hourly history data as attributes."""
         if not self.coordinator.data:
             return self._cached_attributes if hasattr(self, '_cached_attributes') else {}
-        
+
         # Check if price or decisions have changed since last update
         current_price = self.coordinator.data.get("price_analysis", {}).get("current_price")
         battery_charging = self.coordinator.data.get("battery_grid_charging", False)
         car_charging = self.coordinator.data.get("car_grid_charging", False)
-        
+
         # Create state signature to detect changes
         current_state = (current_price, battery_charging, car_charging)
-        
+
         # Only update when price or decisions change, or first time
         if not hasattr(self, '_last_state') or self._last_state != current_state:
             self._update_history()
-            
+
             # Cache formatted data - only recalculate when data changes
             recent_data = self._history_data[-48:] if self._history_data else []
             self._cached_formatted_data = self._format_for_apex_charts(recent_data)
@@ -338,7 +344,7 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
                 "car_charging_data": self._cached_formatted_data.get("car_charging_data", []),
             }
             self._last_state = current_state
-        
+
         # Return cached attributes to avoid processing on every access
         return self._cached_attributes if hasattr(self, '_cached_attributes') else {}
 
@@ -348,14 +354,14 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
             return
 
         current_hour = datetime.now().replace(minute=0, second=0, microsecond=0)
-        
+
         # Only record once per hour
         if self._last_hour_recorded == current_hour:
             return
 
         price_analysis = self.coordinator.data.get("price_analysis", {})
         current_price = price_analysis.get("current_price")
-        
+
         if current_price is None:
             return
 
@@ -393,13 +399,13 @@ class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
         price_series = []
         battery_series = []
         car_series = []
-        
+
         for record in data:
             timestamp = record["timestamp"]
             price_series.append([timestamp, record["price"]])
             battery_series.append([timestamp, 1 if record["battery_charging"] else 0])
             car_series.append([timestamp, 1 if record["car_charging"] else 0])
-        
+
         return {
             "price_data": price_series,
             "battery_charging_data": battery_series,
@@ -424,7 +430,7 @@ class ChargerLimitSensor(ElectricityPlannerSensorBase):
         """Return the recommended charger power limit."""
         if not self.coordinator.data:
             return 0
-        
+
         return self.coordinator.data.get("charger_limit", 0)
 
     @property
@@ -432,7 +438,7 @@ class ChargerLimitSensor(ElectricityPlannerSensorBase):
         """Return the state attributes."""
         if not self.coordinator.data:
             return {}
-        
+
         return {
             "charger_limit_reason": self.coordinator.data.get("charger_limit_reason", ""),
             "current_car_power": self.coordinator.data.get("power_analysis", {}).get("car_charging_power", 0),
@@ -458,7 +464,7 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
         """Return the recommended grid setpoint."""
         if not self.coordinator.data:
             return 0
-        
+
         return self.coordinator.data.get("grid_setpoint", 0)
 
     @property
@@ -466,10 +472,10 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
         """Return the state attributes."""
         if not self.coordinator.data:
             return {}
-        
+
         monthly_peak = self.coordinator.data.get("monthly_grid_peak", 0)
         max_grid_setpoint = max(monthly_peak, 2500) if monthly_peak and monthly_peak > 2500 else 2500
-        
+
         return {
             "grid_setpoint_reason": self.coordinator.data.get("grid_setpoint_reason", ""),
             "charger_limit": self.coordinator.data.get("charger_limit", 0),
@@ -497,10 +503,10 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
         """Return a summary of the decision state."""
         if not self.coordinator.data:
             return "no_data"
-        
+
         battery_charging = self.coordinator.data.get("battery_grid_charging", False)
         car_charging = self.coordinator.data.get("car_grid_charging", False)
-        
+
         if battery_charging and car_charging:
             return "charging_both"
         elif battery_charging:
@@ -515,7 +521,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
         """Return comprehensive diagnostics data for decision validation."""
         if not self.coordinator.data:
             return {"error": "No coordinator data available"}
-        
+
         # Get all analysis data
         price_analysis = self.coordinator.data.get("price_analysis", {})
         battery_analysis = self.coordinator.data.get("battery_analysis", {})
@@ -524,10 +530,10 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
         solar_analysis = self.coordinator.data.get("solar_analysis", {})
         solar_forecast = self.coordinator.data.get("solar_forecast", {})
         time_context = self.coordinator.data.get("time_context", {})
-        
+
         # Configuration values (for validation)
         config = self.coordinator.config
-        
+
         return {
             # Main decisions
             "decisions": {
@@ -538,7 +544,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "car_reason": self.coordinator.data.get("car_grid_charging_reason", ""),
                 "feedin_reason": self.coordinator.data.get("feedin_solar_reason", ""),
             },
-            
+
             # Power outputs
             "power_outputs": {
                 "charger_limit": self.coordinator.data.get("charger_limit", 0),
@@ -546,7 +552,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "charger_limit_reason": self.coordinator.data.get("charger_limit_reason", ""),
                 "grid_setpoint_reason": self.coordinator.data.get("grid_setpoint_reason", ""),
             },
-            
+
             # Price analysis (for validation)
             "price_analysis": {
                 "current_price": price_analysis.get("current_price"),
@@ -560,7 +566,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "significant_price_drop": price_analysis.get("significant_price_drop", False),
                 "data_available": price_analysis.get("data_available", False),
             },
-            
+
             # Battery analysis (for validation)
             "battery_analysis": {
                 "average_soc": battery_analysis.get("average_soc"),
@@ -572,7 +578,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "min_soc_threshold": battery_analysis.get("min_soc_threshold"),
                 "max_soc_threshold": battery_analysis.get("max_soc_threshold"),
             },
-            
+
             # Power analysis (for validation)
             "power_analysis": {
                 "solar_surplus": power_analysis.get("solar_surplus"),
@@ -581,7 +587,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "significant_solar_surplus": power_analysis.get("significant_solar_surplus", False),
                 "car_currently_charging": power_analysis.get("car_currently_charging", False),
             },
-            
+
             # Power allocation (critical for validation)
             "power_allocation": {
                 "solar_for_batteries": power_allocation.get("solar_for_batteries", 0),
@@ -591,7 +597,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "total_allocated": power_allocation.get("total_allocated", 0),
                 "allocation_reason": power_allocation.get("allocation_reason", ""),
             },
-            
+
             # Solar forecast (for validation)
             "solar_forecast": {
                 "forecast_available": solar_forecast.get("forecast_available", False),
@@ -600,7 +606,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "sunny_hours": solar_forecast.get("sunny_hours", 0),
                 "cloudy_hours": solar_forecast.get("cloudy_hours", 0),
             },
-            
+
             # Time context (for validation)
             "time_context": {
                 "current_hour": time_context.get("current_hour"),
@@ -610,7 +616,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "is_evening": time_context.get("is_evening", False),
                 "winter_season": time_context.get("winter_season", False),
             },
-            
+
             # Configuration values (for validation)
             "configured_limits": {
                 "emergency_soc": config.get("emergency_soc_threshold", 15),
@@ -627,7 +633,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "price_threshold": config.get("price_threshold", 0.15),
                 "feedin_price_threshold": config.get("feedin_price_threshold", 0.05),
             },
-            
+
             # Validation flags (for quick problem identification)
             "validation_flags": {
                 "price_data_valid": price_analysis.get("data_available", False),
@@ -637,7 +643,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "predictive_logic_active": self._check_predictive_logic(price_analysis, battery_analysis, config),
                 "solar_forecast_influencing": solar_forecast.get("forecast_available", False) and solar_forecast.get("solar_production_factor", 0.5) != 0.5,
             },
-            
+
             # Last update
             "last_evaluation": self.coordinator.data.get("next_evaluation", "unknown"),
         }
@@ -647,16 +653,16 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
         average_soc = battery_analysis.get("average_soc", 100)
         if average_soc is None:
             return False
-            
+
         emergency_soc = config.get("emergency_soc_threshold", 15)
         emergency_soc_override = config.get("emergency_soc_override", 25)
         winter_night_soc_override = config.get("winter_night_soc_override", 40)
         solar_peak_emergency_soc = config.get("solar_peak_emergency_soc", 25)
-        
+
         is_night = time_context.get("is_night", False)
         winter_season = time_context.get("winter_season", False)
         is_solar_peak = time_context.get("is_solar_peak", False)
-        
+
         return (
             average_soc < emergency_soc or
             average_soc < emergency_soc_override or
@@ -670,8 +676,8 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
         is_low_price = price_analysis.get("is_low_price", False)
         average_soc = battery_analysis.get("average_soc", 100)
         predictive_min_soc = config.get("predictive_charging_min_soc", 30)
-        
+
         if average_soc is None:
             return False
-            
+
         return is_low_price and significant_price_drop and average_soc > predictive_min_soc

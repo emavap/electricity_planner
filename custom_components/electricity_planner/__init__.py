@@ -25,11 +25,11 @@ PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate old entry."""
     _LOGGER.debug("Migrating from version %s", entry.version)
-    
+
     if entry.version == 1:
         # Migration from version 1 to version 2: add new threshold defaults
         new_data = dict(entry.data)
-        
+
         # Add new configurable thresholds with defaults if not present
         if "emergency_soc_threshold" not in new_data:
             new_data["emergency_soc_threshold"] = DEFAULT_EMERGENCY_SOC
@@ -41,10 +41,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             new_data["poor_solar_forecast_threshold"] = DEFAULT_POOR_SOLAR_FORECAST
         if "excellent_solar_forecast_threshold" not in new_data:
             new_data["excellent_solar_forecast_threshold"] = DEFAULT_EXCELLENT_SOLAR_FORECAST
-        
+
         hass.config_entries.async_update_entry(entry, data=new_data, version=2)
         _LOGGER.info("Migration to version 2 successful")
-    
+
     return True
 
 

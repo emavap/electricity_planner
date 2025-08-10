@@ -11,7 +11,11 @@ from .const import (
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
-    CONF_WEATHER_ENTITY,
+    CONF_SOLAR_FORECAST_CURRENT_ENTITY,
+    CONF_SOLAR_FORECAST_NEXT_ENTITY,
+    CONF_SOLAR_FORECAST_TODAY_ENTITY,
+    CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY,
+    CONF_SOLAR_FORECAST_TOMORROW_ENTITY,
     CONF_BATTERY_CAPACITIES,
     CONF_EMERGENCY_SOC_THRESHOLD,
     CONF_VERY_LOW_PRICE_THRESHOLD,
@@ -261,38 +265,63 @@ class ChargingDecisionEngine:
         }
 
     def _analyze_power_flow(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Analyze current power flow and consumption."""
-        solar_surplus = data.get("solar_surplus")
+        """Analyze current power flow and consumption with separate solar production and house consumption."""
+        solar_production = data.get("solar_production")
+        house_consumption = data.get("house_consumption")  
+        solar_surplus = data.get("solar_surplus")  # Already calculated in coordinator
         car_charging_power = data.get("car_charging_power")
 
         # Handle unavailable sensors - use 0 as safe default for power calculations
+        solar_production = solar_production if solar_production is not None else 0
+        house_consumption = house_consumption if house_consumption is not None else 0
         solar_surplus = solar_surplus if solar_surplus is not None else 0
         car_charging_power = car_charging_power if car_charging_power is not None else 0
 
         # Get configurable solar threshold
         significant_solar_threshold = self.config.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)
 
+        # Calculate additional metrics with separate values
+        house_consumption_without_car = max(0, house_consumption - car_charging_power)
+        solar_coverage_ratio = (solar_production / house_consumption) if house_consumption > 0 else 0
+
         return {
-            "solar_surplus": solar_surplus,
+            "solar_production": solar_production,
+            "house_consumption": house_consumption,
+            "house_consumption_without_car": house_consumption_without_car,
+            "solar_surplus": solar_surplus,  # Available excess solar that can be used for batteries/car/export
             "car_charging_power": car_charging_power,
-            "has_solar_surplus": solar_surplus > 0,
+            "has_solar_production": solar_production > 0,
+            "has_solar_surplus": solar_surplus > 0,  # Has available excess solar power
             "significant_solar_surplus": solar_surplus > significant_solar_threshold,
             "car_currently_charging": car_charging_power > 0,
-            "available_surplus_for_batteries": max(0, solar_surplus - car_charging_power),
+            "available_surplus_for_batteries": max(0, solar_surplus - car_charging_power),  # Surplus after car consumption
             "significant_solar_threshold": significant_solar_threshold,
+            "solar_coverage_ratio": solar_coverage_ratio,  # 1.0 = solar covers 100% of house consumption
+            "has_excess_solar_available": solar_surplus > 0,  # Available for batteries, car, or grid export
         }
 
     def _analyze_solar_production(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Analyze solar production status."""
+        """Analyze solar production status with separate production and consumption data."""
+        solar_production = data.get("solar_production")
+        house_consumption = data.get("house_consumption")
         solar_surplus = data.get("solar_surplus")
+        
+        solar_production = solar_production if solar_production is not None else 0
+        house_consumption = house_consumption if house_consumption is not None else 0
         solar_surplus = solar_surplus if solar_surplus is not None else 0
 
-        # Consider solar producing if there's any surplus
-        is_producing = solar_surplus > 0
+        # More detailed solar analysis with separate values
+        is_producing = solar_production > 0
+        has_available_surplus = solar_surplus > 0  # Has excess that could be used for batteries/car/export
+        production_efficiency = min(1.0, solar_production / 5000) if solar_production > 0 else 0  # Assume 5kW max
 
         return {
-            "current_production": solar_surplus,
+            "current_production": solar_production,
+            "house_consumption": house_consumption,
+            "available_surplus": solar_surplus,  # Available for batteries, car charging, or grid export
             "is_producing": is_producing,
+            "has_available_surplus": has_available_surplus,  # Can allocate to batteries/car/export
+            "production_efficiency": production_efficiency,  # 0.0-1.0 relative to typical max
         }
 
     def _allocate_solar_power(
@@ -399,160 +428,113 @@ class ChargingDecisionEngine:
         }
 
     async def _analyze_solar_forecast(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Analyze tomorrow's solar production potential based on weather forecast."""
-        weather_entity = self.config.get(CONF_WEATHER_ENTITY)
+        """Analyze solar production potential based on dedicated forecast entities."""
+        # Get forecast values from entities 
+        forecast_current = data.get("solar_forecast_current")
+        forecast_next = data.get("solar_forecast_next") 
+        forecast_today = data.get("solar_forecast_today")
+        forecast_remaining_today = data.get("solar_forecast_remaining_today")
+        forecast_tomorrow = data.get("solar_forecast_tomorrow")
 
-        if not weather_entity:
+        # Check if any forecast entities are configured
+        has_forecast_entities = any([
+            self.config.get(CONF_SOLAR_FORECAST_CURRENT_ENTITY),
+            self.config.get(CONF_SOLAR_FORECAST_NEXT_ENTITY),
+            self.config.get(CONF_SOLAR_FORECAST_TODAY_ENTITY),
+            self.config.get(CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY),
+            self.config.get(CONF_SOLAR_FORECAST_TOMORROW_ENTITY)
+        ])
+
+        # If no forecast entities configured, use safe defaults
+        if not has_forecast_entities:
             return {
                 "forecast_available": False,
                 "solar_production_factor": 0.5,
                 "expected_solar_production": "unknown",
-                "reason": "No weather entity configured"
+                "reason": "No solar forecast entities configured"
             }
 
-        state = data.get("weather_state")
-
-        if not state or not hasattr(state, 'attributes'):
-            _LOGGER.warning("Solar forecast: Weather entity '%s' unavailable or missing attributes", weather_entity)
-            return {
-                "forecast_available": False,
-                "solar_production_factor": 0.5,
-                "expected_solar_production": "unknown",
-                "reason": f"Weather entity '{weather_entity}' unavailable"
-            }
-
-        # Try to get forecast from attributes first (legacy)
-        forecast = state.attributes.get('forecast', [])
-
-        # If no forecast in attributes, try weather.get_forecasts service (modern HA)
-        if not forecast:
-            try:
-                response = await self.hass.services.async_call(
-                    "weather",
-                    "get_forecasts",
-                    {
-                        "entity_id": weather_entity,
-                        "type": "hourly"
-                    },
-                    blocking=True,
-                    return_response=True
-                )
-                if response and weather_entity in response:
-                    forecast = response[weather_entity].get("forecast", [])
-            except Exception as e:
-                _LOGGER.warning("Failed to get weather forecast via service: %s", e)
-
-        if not forecast:
-            # Fallback: Use current weather conditions to estimate solar production
-            current_condition = str(state.state).lower()
-            cloud_coverage = state.attributes.get('cloud_coverage', 50)  # Default 50%
-
-            # Estimate solar production based on current conditions
-            if current_condition in ['sunny', 'clear']:
-                solar_factor = max(0.2, 1.0 - (cloud_coverage / 100))  # 20-100% based on clouds
-                production = "good" if solar_factor > 0.6 else "moderate"
-            elif current_condition in ['partlycloudy', 'partly-cloudy']:
-                solar_factor = max(0.1, 0.6 - (cloud_coverage / 150))  # 10-60% based on clouds
-                production = "moderate"
-            elif current_condition in ['cloudy', 'overcast']:
-                solar_factor = max(0.05, 0.3 - (cloud_coverage / 200))  # 5-30% based on clouds
-                production = "poor"
-            elif current_condition in ['rainy', 'pouring', 'snowy']:
-                solar_factor = 0.1  # 10% production in rain/snow
-                production = "poor"
+        # Use the new forecast entities  
+        if forecast_tomorrow is not None and forecast_today is not None:
+            # Calculate relative performance: tomorrow vs today
+            if forecast_today > 0:
+                solar_production_factor = min(1.0, forecast_tomorrow / forecast_today)
             else:
-                solar_factor = 0.4  # 40% default for unknown conditions
-                production = "moderate"
+                solar_production_factor = 0.5  # Default if today's forecast is 0
+                
+            # Categorize expected production
+            if solar_production_factor > 0.8:
+                expected_production = "excellent"
+            elif solar_production_factor > 0.6:
+                expected_production = "good"
+            elif solar_production_factor > 0.3:
+                expected_production = "moderate"
+            else:
+                expected_production = "poor"
 
-            return {
-                "forecast_available": True,  # We have a fallback estimate
-                "solar_production_factor": solar_factor,
-                "expected_solar_production": production,
-                "reason": f"Using current conditions fallback: {current_condition} with {cloud_coverage}% clouds"
-            }
-
-        now = datetime.now()
-        tomorrow_forecasts = []
-
-        for f in forecast:
-            if not f.get('datetime'):
-                continue
-            try:
-                forecast_time = datetime.fromisoformat(f['datetime'].replace('Z', '+00:00'))
-                if now < forecast_time <= now + timedelta(hours=24):
-                    tomorrow_forecasts.append(f)
-            except (ValueError, TypeError):
-                continue
-
-        if not tomorrow_forecasts:
-            return {
-                "forecast_available": False,
-                "solar_production_factor": 0.5,
-                "expected_solar_production": "unknown",
-                "reason": "No valid forecast data for next 24h"
-            }
-
-        # Analyze cloud coverage and precipitation for solar potential
-        sunny_hours = 0
-        partly_cloudy_hours = 0
-        cloudy_hours = 0
-
-        for forecast_hour in tomorrow_forecasts:
-            condition = forecast_hour.get('condition', '').lower()
-            precipitation = forecast_hour.get('precipitation', 0) or 0
-
-            # Only consider daylight hours (6 AM to 8 PM)
-            try:
-                forecast_time = datetime.fromisoformat(forecast_hour['datetime'].replace('Z', '+00:00'))
-                if 6 <= forecast_time.hour <= 20:
-                    if precipitation > 2:  # Heavy rain/snow
-                        cloudy_hours += 1
-                    elif condition in ['sunny', 'clear']:
-                        sunny_hours += 1
-                    elif condition in ['partlycloudy', 'cloudy']:
-                        if precipitation < 0.5:
-                            partly_cloudy_hours += 1
-                        else:
-                            cloudy_hours += 1
-                    else:
-                        cloudy_hours += 1
-            except (ValueError, TypeError):
-                cloudy_hours += 1  # Conservative assumption
-
-        total_daylight_hours = sunny_hours + partly_cloudy_hours + cloudy_hours
-
-        if total_daylight_hours == 0:
             return {
                 "forecast_available": True,
-                "solar_production_factor": 0.5,
-                "expected_solar_production": "moderate",
-                "reason": "No daylight hours detected - using moderate fallback"
+                "solar_production_factor": solar_production_factor,
+                "expected_solar_production": expected_production,
+                "forecast_current_kwh": forecast_current,
+                "forecast_next_kwh": forecast_next,
+                "forecast_today_kwh": forecast_today,
+                "forecast_remaining_today_kwh": forecast_remaining_today, 
+                "forecast_tomorrow_kwh": forecast_tomorrow,
+                "reason": f"Tomorrow {forecast_tomorrow:.1f}kWh vs today {forecast_today:.1f}kWh (factor: {solar_production_factor:.1%})"
+            }
+        
+        # If only remaining today is available, use that for near-term decisions
+        elif forecast_remaining_today is not None:
+            # Estimate factor based on remaining production vs typical daily minimum
+            typical_minimum_daily = 5.0  # Assume 5kWh minimum for a decent solar day
+            solar_production_factor = min(1.0, forecast_remaining_today / typical_minimum_daily)
+            
+            expected_production = (
+                "good" if solar_production_factor > 0.6 else
+                "moderate" if solar_production_factor > 0.3 else
+                "poor"
+            )
+
+            return {
+                "forecast_available": True,
+                "solar_production_factor": solar_production_factor,
+                "expected_solar_production": expected_production,
+                "forecast_remaining_today_kwh": forecast_remaining_today,
+                "reason": f"Remaining today: {forecast_remaining_today:.1f}kWh"
             }
 
-        # Calculate expected solar production relative to perfect day
-        solar_production_factor = (
-            (sunny_hours * 1.0) +           # 100% production
-            (partly_cloudy_hours * 0.6) +  # 60% production
-            (cloudy_hours * 0.2)           # 20% production
-        ) / total_daylight_hours
+        # If only current/next hour available, use for immediate decisions
+        elif forecast_current is not None or forecast_next is not None:
+            current_kwh = forecast_current or 0
+            next_kwh = forecast_next or 0
+            
+            # Use hourly forecasts for immediate solar assessment
+            solar_production_factor = min(1.0, max(current_kwh, next_kwh) / 2.0)  # Assume 2kWh/hour is good
+            
+            expected_production = (
+                "good" if solar_production_factor > 0.6 else
+                "moderate" if solar_production_factor > 0.3 else
+                "poor"
+            )
 
-        expected_production = (
-            "excellent" if solar_production_factor > 0.8 else
-            "good" if solar_production_factor > 0.6 else
-            "moderate" if solar_production_factor > 0.3 else
-            "poor"
-        )
+            return {
+                "forecast_available": True,
+                "solar_production_factor": solar_production_factor,
+                "expected_solar_production": expected_production,
+                "forecast_current_kwh": current_kwh,
+                "forecast_next_kwh": next_kwh,
+                "reason": f"Hourly: current {current_kwh:.1f}kWh, next {next_kwh:.1f}kWh"
+            }
 
+        # No usable forecast data
         return {
-            "forecast_available": True,
-            "sunny_hours": sunny_hours,
-            "partly_cloudy_hours": partly_cloudy_hours,
-            "cloudy_hours": cloudy_hours,
-            "total_daylight_hours": total_daylight_hours,
-            "solar_production_factor": solar_production_factor,  # 0.0 to 1.0
-            "expected_solar_production": expected_production,
-            "reason": f"Forecast: {sunny_hours}h sunny, {partly_cloudy_hours}h partly cloudy, {cloudy_hours}h cloudy"
+            "forecast_available": False,
+            "solar_production_factor": 0.5,
+            "expected_solar_production": "unknown",
+            "reason": "Solar forecast entities configured but no data available"
         }
+
 
     def _analyze_battery_status(self, battery_soc_data: list[dict[str, Any]]) -> dict[str, Any]:
         """Analyze battery status for all configured batteries with capacity-weighted calculations."""
@@ -921,7 +903,7 @@ class ChargingDecisionEngine:
 
         # Use allocated solar power instead of raw surplus
         allocated_solar_for_car = power_allocation.get("solar_for_car", 0)
-        original_solar_surplus = data.get("solar_surplus", 0)  # Keep for reference
+        available_solar_surplus = power_allocation.get("remaining_solar", 0)
         monthly_grid_peak = data.get("monthly_grid_peak", 0)
         # Calculate safe grid setpoint
         max_grid_setpoint = self._get_safe_grid_setpoint(monthly_grid_peak)
@@ -954,12 +936,12 @@ class ChargingDecisionEngine:
                 "charger_limit_reason": f"Battery {average_soc:.0f}% < {max_soc_threshold}% - car limited to grid setpoint ({int(charger_limit)}W), surplus for batteries",
             }
 
-        # If battery ≥ max_soc_threshold: Car can use surplus + grid setpoint
-        available_power = original_solar_surplus + max_grid_setpoint
+        # If battery ≥ max_soc_threshold: Car can use remaining surplus + grid setpoint
+        available_power = available_solar_surplus + max_grid_setpoint
         charger_limit = min(available_power, 11000)
         return {
             "charger_limit": int(charger_limit),
-            "charger_limit_reason": f"Battery {average_soc:.0f}% ≥ {max_soc_threshold}% - car can use surplus + grid ({int(charger_limit)}W = {original_solar_surplus}W + {max_grid_setpoint}W)",
+            "charger_limit_reason": f"Battery {average_soc:.0f}% ≥ {max_soc_threshold}% - car can use remaining surplus + grid ({int(charger_limit)}W = {available_solar_surplus}W + {max_grid_setpoint}W)",
         }
 
     def _calculate_grid_setpoint(

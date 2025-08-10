@@ -28,7 +28,7 @@ A comprehensive Home Assistant custom integration for intelligent electricity ma
 
 ### 🌞 Solar Optimization
 - **Real-time production monitoring**
-- **Weather-based solar forecasting**
+- **Dedicated solar forecast entities** for accurate production prediction
 - **Grid feed-in optimization** to minimize unnecessary charging
 
 ## 🏗️ Architecture
@@ -56,6 +56,35 @@ Decision factors:
 - **Smart logic**: Very low prices (bottom 30%), price trend improvements
 - **Solar preference**: Uses solar surplus instead of grid when available
 
+### 🌞 Solar Forecast Analysis
+
+The integration supports dedicated solar forecast entities for accurate production prediction:
+
+#### Forecast Entity Priority
+
+1. **Best**: Tomorrow + Today comparison
+   ```python
+   solar_production_factor = min(1.0, forecast_tomorrow / forecast_today)
+   ```
+
+2. **Good**: Remaining today forecast  
+   ```python
+   solar_production_factor = min(1.0, forecast_remaining_today / 5.0)  # 5kWh typical daily minimum
+   ```
+
+3. **Basic**: Hourly forecasts
+   ```python
+   solar_production_factor = min(1.0, max(current_hour, next_hour) / 2.0)  # 2kWh/hour good production
+   ```
+
+4. **Fallback**: Safe default (50% solar factor) when no entities configured
+
+#### Solar Production Categories
+- **Excellent**: Solar factor > 80% - Skip charging, wait for solar
+- **Good**: Solar factor > 60% - Moderate charging decisions
+- **Moderate**: Solar factor > 30% - Normal charging logic  
+- **Poor**: Solar factor ≤ 30% - Prefer grid charging when cheap
+
 ## 🧠 Decision Logic Documentation
 
 ### Overview
@@ -73,7 +102,7 @@ The Electricity Planner uses a hierarchical decision engine that evaluates multi
 ### Solar Power Allocation (Hierarchical Priority)
 
 ```python
-Available Solar Power = Solar Production - House Consumption
+Available Solar Surplus = Solar Production - House Consumption
 ```
 
 **Priority Order:**
@@ -573,11 +602,19 @@ Decision:
 - **Battery Capacity Entities**: Battery capacity sensors (kWh)
 
 #### Power Flow Entities
+- **Solar Production Entity**: Current solar production (W)
 - **House Consumption Entity**: Current house power consumption (W)
-- **Solar Surplus Entity**: Current solar surplus = production - consumption (W)
 
 ### Optional Entities  
 - **Car Charging Power Entity**: Current car charging power (W)
+- **Monthly Grid Peak Entity**: Current month grid peak (W)
+
+#### Solar Forecast Entities (Optional but Recommended)
+- **Solar Forecast Current Entity**: Solar forecast for current hour (kWh)
+- **Solar Forecast Next Entity**: Solar forecast for next hour (kWh)
+- **Solar Forecast Today Entity**: Total solar forecast for today (kWh)
+- **Solar Forecast Remaining Today Entity**: Remaining solar forecast for today (kWh)
+- **Solar Forecast Tomorrow Entity**: Solar forecast for tomorrow (kWh)
 
 ### Settings
 | Setting | Default | Description |
@@ -594,7 +631,7 @@ Decision:
 - `sensor.electricity_planner_grid_charging_decision` - Overall grid charging status
 - `sensor.electricity_planner_battery_analysis` - Battery status, SOC and capacity data
 - `sensor.electricity_planner_price_analysis` - Comprehensive Nord Pool price analysis
-- `sensor.electricity_planner_power_analysis` - House consumption, solar surplus, car charging power
+- `sensor.electricity_planner_power_analysis` - Solar production, house consumption, calculated surplus, car charging power
 
 ### Binary Sensors (Key Outputs)
 - **`binary_sensor.electricity_planner_battery_grid_charging`** - ✅ **Charge batteries from grid** (True only when price favorable)

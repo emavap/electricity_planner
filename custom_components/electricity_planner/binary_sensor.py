@@ -24,23 +24,23 @@ async def async_setup_entry(
 ) -> None:
     """Set up the binary sensor platform."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    
+
     # AUTOMATION SENSORS: Essential binary sensors for automations (3/5 total automation sensors)
     automation_entities = [
         BatteryGridChargingBinarySensor(coordinator, entry, "_automation"),
         CarGridChargingBinarySensor(coordinator, entry, "_automation"),
         FeedinSolarBinarySensor(coordinator, entry, "_automation"),
     ]
-    
+
     # DIAGNOSTIC SENSORS: For monitoring and troubleshooting only
     diagnostic_entities = [
         LowPriceBinarySensor(coordinator, entry, "_diagnostic"),
         SolarProductionBinarySensor(coordinator, entry, "_diagnostic"),
         DataAvailabilityBinarySensor(coordinator, entry, "_diagnostic"),
     ]
-    
+
     entities = automation_entities + diagnostic_entities
-    
+
     async_add_entities(entities, False)
 
 
@@ -52,7 +52,7 @@ class ElectricityPlannerBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
         super().__init__(coordinator)
         self.entry = entry
         self._attr_has_entity_name = True
-        
+
         # Create device identifier with suffix for grouping
         device_id = f"{entry.entry_id}{device_suffix}"
         if device_suffix == "_automation":
@@ -61,7 +61,7 @@ class ElectricityPlannerBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
             device_name = "Electricity Planner - Diagnostics & Monitoring"
         else:
             device_name = "Electricity Planner"
-        
+
         self._attr_device_info = {
             "identifiers": {(DOMAIN, device_id)},
             "name": device_name,
@@ -150,7 +150,7 @@ class LowPriceBinarySensor(ElectricityPlannerBinarySensorBase):
         """Return the state attributes."""
         if not self.coordinator.data or "price_analysis" not in self.coordinator.data:
             return {}
-        
+
         price_analysis = self.coordinator.data["price_analysis"]
         return {
             "current_price": price_analysis.get("current_price"),
@@ -182,7 +182,7 @@ class SolarProductionBinarySensor(ElectricityPlannerBinarySensorBase):
         """Return the state attributes."""
         if not self.coordinator.data or "solar_analysis" not in self.coordinator.data:
             return {}
-        
+
         solar_analysis = self.coordinator.data["solar_analysis"]
         return {
             "current_production": solar_analysis.get("current_production"),
@@ -207,7 +207,7 @@ class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
         """Return true if critical data is available."""
         if not self.coordinator.data:
             return False
-        
+
         # Use coordinator's data availability check
         return self.coordinator._is_data_available(self.coordinator.data)
 
@@ -220,18 +220,18 @@ class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
                 "data_unavailable_since": None,
                 "unavailable_duration_seconds": None,
             }
-        
+
         attributes = {}
-        
+
         # Add availability timestamps from coordinator
         if hasattr(self.coordinator, '_last_successful_update'):
             attributes["last_successful_update"] = self.coordinator._last_successful_update.isoformat()
-        
+
         if hasattr(self.coordinator, '_data_unavailable_since') and self.coordinator._data_unavailable_since:
             attributes["data_unavailable_since"] = self.coordinator._data_unavailable_since.isoformat()
             unavailable_duration = (datetime.now() - self.coordinator._data_unavailable_since).total_seconds()
             attributes["unavailable_duration_seconds"] = int(unavailable_duration)
-        
+
         # Add data source status
         price_analysis = self.coordinator.data.get("price_analysis", {})
         attributes.update({
@@ -242,7 +242,7 @@ class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
             "price_analysis_available": price_analysis.get("data_available", False),
             "notification_sent": getattr(self.coordinator, '_notification_sent', False),
         })
-        
+
         return attributes
 
 
@@ -269,7 +269,7 @@ class FeedinSolarBinarySensor(ElectricityPlannerBinarySensorBase):
         """Return the state attributes."""
         if not self.coordinator.data:
             return {}
-        
+
         power_allocation = self.coordinator.data.get("power_allocation", {})
         return {
             "reason": self.coordinator.data.get("feedin_solar_reason", "No reason available"),
