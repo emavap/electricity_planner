@@ -1,5 +1,6 @@
 """Config flow for Electricity Planner integration."""
 from __future__ import annotations
+from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
@@ -15,6 +16,7 @@ from .const import (
     CONF_LOWEST_PRICE_ENTITY,
     CONF_NEXT_PRICE_ENTITY,
     CONF_BATTERY_SOC_ENTITIES,
+    CONF_BATTERY_CAPACITIES,
     CONF_SOLAR_SURPLUS_ENTITY,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MONTHLY_GRID_PEAK_ENTITY,
@@ -66,12 +68,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.data = {}
 
     async def async_step_user(
-        self, user_input: dict[str, any] | None = None
+        self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the initial step - Entity Selection."""
         if user_input is not None:
             self.data.update(user_input)
-            return await self.async_step_settings()
+            return await self.async_step_battery_capacities()
 
 
         schema = vol.Schema({
@@ -112,7 +114,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=schema,
             description_placeholders={
                 "current_price": "Current electricity price from Nord Pool",
-                "highest_price": "Highest price today from Nord Pool", 
+                "highest_price": "Highest price today from Nord Pool",
                 "lowest_price": "Lowest price today from Nord Pool",
                 "next_price": "Next hour price from Nord Pool",
                 "battery_soc": "Battery State of Charge entities",
@@ -123,8 +125,64 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
+    async def async_step_battery_capacities(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle the battery capacities step - Configure capacity for each battery."""
+        if user_input is not None:
+            battery_entities = self.data.get(CONF_BATTERY_SOC_ENTITIES, [])
+            battery_capacities = {}
+
+            for entity_id in battery_entities:
+                entity_key = f"capacity_{entity_id.replace('.', '_')}"
+                if entity_key in user_input:
+                    battery_capacities[entity_id] = user_input[entity_key]
+
+            self.data[CONF_BATTERY_CAPACITIES] = battery_capacities
+            return await self.async_step_settings()
+
+        battery_entities = self.data.get(CONF_BATTERY_SOC_ENTITIES, [])
+
+        if not battery_entities:
+            self.data[CONF_BATTERY_CAPACITIES] = {}
+            return await self.async_step_settings()
+
+        battery_capacities = {}
+        for entity_id in battery_entities:
+            entity_key = f"capacity_{entity_id.replace('.', '_')}"
+            battery_capacities[vol.Optional(entity_key, default=10.0)] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1.0,
+                    max=200.0,
+                    step=0.5,
+                    unit_of_measurement="kWh",
+                    mode=selector.NumberSelectorMode.BOX
+                )
+            )
+
+        if not battery_capacities:
+            self.data[CONF_BATTERY_CAPACITIES] = {}
+            return await self.async_step_settings()
+
+        schema = vol.Schema(battery_capacities)
+
+        entity_registry = async_get_entity_registry(self.hass)
+        description_placeholders = {}
+
+        for entity_id in battery_entities:
+            entity_entry = entity_registry.async_get(entity_id)
+            friendly_name = entity_entry.name if entity_entry and entity_entry.name else entity_id.split(".")[-1]
+            entity_key = f"capacity_{entity_id.replace('.', '_')}"
+            description_placeholders[entity_key] = f"Nominal capacity for {friendly_name}"
+
+        return self.async_show_form(
+            step_id="battery_capacities",
+            data_schema=schema,
+            description_placeholders=description_placeholders,
+        )
+
     async def async_step_settings(
-        self, user_input: dict[str, any] | None = None
+        self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the settings step - Thresholds and Preferences."""
         if user_input is not None:
@@ -133,7 +191,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema({
             vol.Optional(
-                CONF_MIN_SOC_THRESHOLD, 
+                CONF_MIN_SOC_THRESHOLD,
                 default=DEFAULT_MIN_SOC
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
@@ -141,7 +199,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             ),
             vol.Optional(
-                CONF_MAX_SOC_THRESHOLD, 
+                CONF_MAX_SOC_THRESHOLD,
                 default=DEFAULT_MAX_SOC
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
@@ -149,7 +207,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             ),
             vol.Optional(
-                CONF_PRICE_THRESHOLD, 
+                CONF_PRICE_THRESHOLD,
                 default=DEFAULT_PRICE_THRESHOLD
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
@@ -211,7 +269,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=schema,
             description_placeholders={
                 "min_soc": "Minimum battery charge level to maintain",
-                "max_soc": "Maximum battery charge level target", 
+                "max_soc": "Maximum battery charge level target",
                 "price_threshold": "Price threshold for charging decisions",
                 "emergency_soc": "Emergency SOC level that triggers charging regardless of price",
                 "very_low_price": "Percentage threshold for 'very low' price in daily range",
@@ -222,7 +280,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_safety_limits(
-        self, user_input: dict[str, any] | None = None
+        self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the safety limits step - Power and SOC Safety Limits."""
         if user_input is not None:
@@ -328,13 +386,24 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self.config_entry = config_entry
 
     async def async_step_init(
-        self, user_input: dict[str, any] | None = None
+        self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage the options."""
         if user_input is not None:
-            # Merge with existing entity configuration
             updated_data = dict(self.config_entry.data)
+
+            battery_entities = user_input.get(CONF_BATTERY_SOC_ENTITIES, [])
+            battery_capacities = {}
+
+            for entity_id in battery_entities:
+                entity_key = f"capacity_{entity_id.replace('.', '_')}"
+                if entity_key in user_input:
+                    battery_capacities[entity_id] = user_input[entity_key]
+                    user_input.pop(entity_key, None)
+
+            user_input[CONF_BATTERY_CAPACITIES] = battery_capacities
             updated_data.update(user_input)
+
             self.hass.config_entries.async_update_entry(
                 self.config_entry, data=updated_data
             )
@@ -342,16 +411,35 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         current_config = self.config_entry.data
 
-        schema = vol.Schema({
+        battery_entities = current_config.get(CONF_BATTERY_SOC_ENTITIES, [])
+        current_capacities = current_config.get(CONF_BATTERY_CAPACITIES, {})
+
+        schema_dict = {
             vol.Required(
                 CONF_BATTERY_SOC_ENTITIES,
-                default=current_config.get(CONF_BATTERY_SOC_ENTITIES, [])
+                default=battery_entities
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(
                     domain="sensor",
                     multiple=True
                 )
             ),
+        }
+
+        for entity_id in battery_entities:
+            entity_key = f"capacity_{entity_id.replace('.', '_')}"
+            default_capacity = current_capacities.get(entity_id, 10.0)
+            schema_dict[vol.Optional(entity_key, default=default_capacity)] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1.0,
+                    max=200.0,
+                    step=0.5,
+                    unit_of_measurement="kWh",
+                    mode=selector.NumberSelectorMode.BOX
+                )
+            )
+
+        schema_dict.update({
             vol.Required(
                 CONF_SOLAR_SURPLUS_ENTITY,
                 default=current_config.get(CONF_SOLAR_SURPLUS_ENTITY)
@@ -514,4 +602,5 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ),
         })
 
+        schema = vol.Schema(schema_dict)
         return self.async_show_form(step_id="init", data_schema=schema)
