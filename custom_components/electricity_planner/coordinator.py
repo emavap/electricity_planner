@@ -202,9 +202,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         data["solar_production"] = solar_production
         data["house_consumption"] = house_consumption
         
-        # Calculate solar surplus dynamically (production - consumption)
+        # Calculate solar surplus dynamically (production - consumption, cannot be negative)
         if solar_production is not None and house_consumption is not None:
-            solar_surplus = solar_production - house_consumption
+            solar_surplus = max(0, solar_production - house_consumption)
         elif solar_production is not None:
             solar_surplus = solar_production  # Assume minimal consumption if not available
         else:
