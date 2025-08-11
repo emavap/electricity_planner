@@ -37,6 +37,7 @@ CONF_EMERGENCY_SOC_OVERRIDE = "emergency_soc_override"
 CONF_WINTER_NIGHT_SOC_OVERRIDE = "winter_night_soc_override"
 CONF_SOLAR_PEAK_EMERGENCY_SOC = "solar_peak_emergency_soc"
 CONF_PREDICTIVE_CHARGING_MIN_SOC = "predictive_charging_min_soc"
+CONF_GRID_BATTERY_CHARGING_LIMIT_SOC = "grid_battery_charging_limit_soc"
 
 # Default Threshold Values
 DEFAULT_MIN_SOC = 20
@@ -58,6 +59,7 @@ DEFAULT_EMERGENCY_SOC_OVERRIDE = 25  # SOC below which emergency overrides apply
 DEFAULT_WINTER_NIGHT_SOC_OVERRIDE = 40  # SOC threshold for winter night emergency charging
 DEFAULT_SOLAR_PEAK_EMERGENCY_SOC = 25  # SOC below which to charge even during solar peak
 DEFAULT_PREDICTIVE_CHARGING_MIN_SOC = 30  # Minimum SOC for predictive charging logic
+DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC = 80  # SOC above which grid battery charging becomes very selective
 
 # Algorithm Constants
 DEFAULT_SIGNIFICANT_PRICE_DROP_THRESHOLD = 0.15  # 15% price drop threshold

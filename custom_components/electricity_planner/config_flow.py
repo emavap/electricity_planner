@@ -30,6 +30,7 @@ from .const import (
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
     CONF_EMERGENCY_SOC_THRESHOLD,
+    CONF_GRID_BATTERY_CHARGING_LIMIT_SOC,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
     CONF_POOR_SOLAR_FORECAST_THRESHOLD,
@@ -47,6 +48,7 @@ from .const import (
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_EMERGENCY_SOC,
+    DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
     DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
     DEFAULT_POOR_SOLAR_FORECAST,
@@ -549,6 +551,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=5, max=50, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_GRID_BATTERY_CHARGING_LIMIT_SOC,
+                default=current_config.get(CONF_GRID_BATTERY_CHARGING_LIMIT_SOC, DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=60, max=95, unit_of_measurement="%"
                 )
             ),
             vol.Optional(

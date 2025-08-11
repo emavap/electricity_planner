@@ -31,6 +31,7 @@ from .const import (
     CONF_WINTER_NIGHT_SOC_OVERRIDE,
     CONF_SOLAR_PEAK_EMERGENCY_SOC,
     CONF_PREDICTIVE_CHARGING_MIN_SOC,
+    CONF_GRID_BATTERY_CHARGING_LIMIT_SOC,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
@@ -48,6 +49,7 @@ from .const import (
     DEFAULT_WINTER_NIGHT_SOC_OVERRIDE,
     DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
+    DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN,
     DEFAULT_CRITICAL_SOC_THRESHOLD,
@@ -701,23 +703,41 @@ class ChargingDecisionEngine:
                 "battery_grid_charging_reason": f"Battery {average_soc:.0f}% nearly full with {remaining_solar}W solar surplus - preventing solar waste",
             }
 
-        # 3. VERY LOW PRICE: Charge only if it makes sense (not when battery nearly full + good conditions)
+        # 3. VERY LOW PRICE: Charge only if it makes sense (not when battery above grid charging limit + good conditions)
         if very_low_price:
             very_low_threshold_percent = self.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
+            grid_charging_limit_soc = self.config.get(CONF_GRID_BATTERY_CHARGING_LIMIT_SOC, DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC)
             
-            # Don't charge from grid if battery nearly full AND good solar conditions
-            if average_soc >= max_soc_threshold - 10:  # Within 10% of max
+            # Don't charge from grid if battery above grid charging limit AND good conditions exist
+            if average_soc >= grid_charging_limit_soc:
+                # Check current solar surplus
                 if remaining_solar > 0:
                     return {
                         "battery_grid_charging": False,
-                        "battery_grid_charging_reason": f"Battery nearly full ({average_soc:.0f}%) with {remaining_solar}W solar surplus - avoid grid charging despite very low price",
+                        "battery_grid_charging_reason": f"Battery above grid charging limit ({average_soc:.0f}% ≥ {grid_charging_limit_soc}%) with {remaining_solar}W solar surplus - avoid grid charging despite very low price",
                     }
                 
-                # Also check solar forecast - if tomorrow will be excellent, don't charge nearly full battery
+                # Check if remaining solar forecast can reach target SOC (accounting for house consumption)
+                forecast_remaining_today = solar_forecast.get("forecast_remaining_today_kwh")
+                if forecast_remaining_today is not None:
+                    # Estimate surplus after house consumption (rough 50% assumption)
+                    estimated_surplus_kwh = forecast_remaining_today * 0.5
+                    # Estimate kWh needed to reach target SOC (rough 1% ≈ 0.1kWh assumption)
+                    target_soc = min(max_soc_threshold, 90)  # Don't go above max_soc_threshold or 90%
+                    soc_deficit = max(0, target_soc - average_soc)
+                    kwh_needed = soc_deficit * 0.1
+                    
+                    if estimated_surplus_kwh >= kwh_needed:
+                        return {
+                            "battery_grid_charging": False,
+                            "battery_grid_charging_reason": f"Battery {average_soc:.0f}% with {forecast_remaining_today:.1f}kWh solar remaining (≈{estimated_surplus_kwh:.1f}kWh surplus) - sufficient to reach {target_soc}% - skip grid charging",
+                        }
+                
+                # Also check solar forecast - if tomorrow will be excellent, don't charge when above limit
                 if solar_forecast_factor > 0.8:  # Excellent forecast
                     return {
                         "battery_grid_charging": False,
-                        "battery_grid_charging_reason": f"Battery nearly full ({average_soc:.0f}%) + excellent solar forecast ({solar_forecast_factor:.0%}) - skip charging despite very low price",
+                        "battery_grid_charging_reason": f"Battery above grid charging limit ({average_soc:.0f}% ≥ {grid_charging_limit_soc}%) + excellent solar forecast ({solar_forecast_factor:.0%}) - skip charging despite very low price",
                     }
             
             return {
