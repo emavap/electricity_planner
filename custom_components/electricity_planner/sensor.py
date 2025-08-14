@@ -10,7 +10,21 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+    CONF_PRICE_THRESHOLD,
+    CONF_FEEDIN_PRICE_THRESHOLD,
+    CONF_VERY_LOW_PRICE_THRESHOLD,
+    CONF_SIGNIFICANT_SOLAR_THRESHOLD,
+    CONF_EMERGENCY_SOC_THRESHOLD,
+    CONF_GRID_BATTERY_CHARGING_LIMIT_SOC,
+    DEFAULT_PRICE_THRESHOLD,
+    DEFAULT_FEEDIN_PRICE_THRESHOLD,
+    DEFAULT_VERY_LOW_PRICE_THRESHOLD,
+    DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
+    DEFAULT_EMERGENCY_SOC,
+    DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC,
+)
 from .coordinator import ElectricityPlannerCoordinator
 
 
@@ -37,6 +51,12 @@ async def async_setup_entry(
         DataAvailabilitySensor(coordinator, entry, "_diagnostic"),
         HourlyDecisionHistorySensor(coordinator, entry, "_diagnostic"),
         DecisionDiagnosticsSensor(coordinator, entry, "_diagnostic"),
+        PriceThresholdSensor(coordinator, entry, "_diagnostic"),
+        FeedinPriceThresholdSensor(coordinator, entry, "_diagnostic"),
+        VeryLowPriceThresholdSensor(coordinator, entry, "_diagnostic"),
+        SignificantSolarThresholdSensor(coordinator, entry, "_diagnostic"),
+        EmergencySOCThresholdSensor(coordinator, entry, "_diagnostic"),
+        GridBatteryChargingLimitSOCSensor(coordinator, entry, "_diagnostic"),
     ]
 
     entities = automation_entities + diagnostic_entities
@@ -681,3 +701,213 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
             return False
 
         return is_low_price and significant_price_drop and average_soc > predictive_min_soc
+
+
+class PriceThresholdSensor(ElectricityPlannerSensorBase):
+    """Sensor displaying the configured price threshold for charging decisions."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        """Initialize the price threshold sensor."""
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Price Threshold"
+        self._attr_unique_id = f"{entry.entry_id}_price_threshold"
+        self._attr_icon = "mdi:currency-eur"
+        self._attr_device_class = None
+        self._attr_unit_of_measurement = "€/kWh"
+
+    @property
+    def native_value(self) -> float:
+        """Return the configured price threshold."""
+        return self.coordinator.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        if not self.coordinator.data:
+            return {}
+
+        current_price = self.coordinator.data.get("price_analysis", {}).get("current_price")
+        threshold = self.native_value
+
+        return {
+            "description": "Price below which grid charging is considered favorable",
+            "current_price": current_price,
+            "price_below_threshold": current_price < threshold if current_price else None,
+            "margin": round(current_price - threshold, 3) if current_price else None,
+        }
+
+
+class FeedinPriceThresholdSensor(ElectricityPlannerSensorBase):
+    """Sensor displaying the configured feed-in price threshold."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        """Initialize the feed-in price threshold sensor."""
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Feed-in Price Threshold"
+        self._attr_unique_id = f"{entry.entry_id}_feedin_price_threshold"
+        self._attr_icon = "mdi:solar-power"
+        self._attr_device_class = None
+        self._attr_unit_of_measurement = "€/kWh"
+
+    @property
+    def native_value(self) -> float:
+        """Return the configured feed-in price threshold."""
+        return self.coordinator.config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        if not self.coordinator.data:
+            return {}
+
+        current_price = self.coordinator.data.get("price_analysis", {}).get("current_price")
+        threshold = self.native_value
+
+        return {
+            "description": "Price above which solar export to grid is enabled",
+            "current_price": current_price,
+            "price_above_threshold": current_price >= threshold if current_price else None,
+            "margin": round(current_price - threshold, 3) if current_price else None,
+            "feedin_enabled": self.coordinator.data.get("feedin_solar", False),
+        }
+
+
+class VeryLowPriceThresholdSensor(ElectricityPlannerSensorBase):
+    """Sensor displaying the very low price threshold percentage."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        """Initialize the very low price threshold sensor."""
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Very Low Price Threshold"
+        self._attr_unique_id = f"{entry.entry_id}_very_low_price_threshold"
+        self._attr_icon = "mdi:percent"
+        self._attr_device_class = None
+        self._attr_unit_of_measurement = "%"
+
+    @property
+    def native_value(self) -> int:
+        """Return the configured very low price threshold."""
+        return self.coordinator.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        if not self.coordinator.data:
+            return {}
+
+        price_analysis = self.coordinator.data.get("price_analysis", {})
+        price_position = price_analysis.get("price_position")
+        very_low_price = price_analysis.get("very_low_price", False)
+        threshold = self.native_value / 100.0
+
+        return {
+            "description": "Bottom percentage of daily price range considered 'very low'",
+            "price_position": f"{price_position:.0%}" if price_position is not None else None,
+            "is_very_low_price": very_low_price,
+            "threshold_decimal": threshold,
+        }
+
+
+class SignificantSolarThresholdSensor(ElectricityPlannerSensorBase):
+    """Sensor displaying the significant solar threshold."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        """Initialize the significant solar threshold sensor."""
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Significant Solar Threshold"
+        self._attr_unique_id = f"{entry.entry_id}_significant_solar_threshold"
+        self._attr_icon = "mdi:solar-power"
+        self._attr_device_class = SensorDeviceClass.POWER
+        self._attr_unit_of_measurement = "W"
+
+    @property
+    def native_value(self) -> int:
+        """Return the configured significant solar threshold."""
+        return self.coordinator.config.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        if not self.coordinator.data:
+            return {}
+
+        power_analysis = self.coordinator.data.get("power_analysis", {})
+        solar_surplus = power_analysis.get("solar_surplus", 0)
+        has_significant_surplus = power_analysis.get("significant_solar_surplus", False)
+
+        return {
+            "description": "Solar surplus power level considered significant enough to prefer over grid",
+            "current_solar_surplus": solar_surplus,
+            "has_significant_surplus": has_significant_surplus,
+            "margin": solar_surplus - self.native_value,
+        }
+
+
+class EmergencySOCThresholdSensor(ElectricityPlannerSensorBase):
+    """Sensor displaying the emergency SOC threshold."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        """Initialize the emergency SOC threshold sensor."""
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Emergency SOC Threshold"
+        self._attr_unique_id = f"{entry.entry_id}_emergency_soc_threshold"
+        self._attr_icon = "mdi:battery-alert"
+        self._attr_device_class = None
+        self._attr_unit_of_measurement = "%"
+
+    @property
+    def native_value(self) -> int:
+        """Return the configured emergency SOC threshold."""
+        return self.coordinator.config.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        if not self.coordinator.data:
+            return {}
+
+        battery_analysis = self.coordinator.data.get("battery_analysis", {})
+        average_soc = battery_analysis.get("average_soc")
+        is_emergency = average_soc < self.native_value if average_soc is not None else None
+
+        return {
+            "description": "SOC level below which emergency charging is triggered regardless of price",
+            "average_soc": average_soc,
+            "is_emergency": is_emergency,
+            "margin": average_soc - self.native_value if average_soc is not None else None,
+        }
+
+
+class GridBatteryChargingLimitSOCSensor(ElectricityPlannerSensorBase):
+    """Sensor displaying the grid battery charging limit SOC."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        """Initialize the grid battery charging limit SOC sensor."""
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Grid Battery Charging Limit SOC"
+        self._attr_unique_id = f"{entry.entry_id}_grid_battery_charging_limit_soc"
+        self._attr_icon = "mdi:battery-charging-80"
+        self._attr_device_class = None
+        self._attr_unit_of_measurement = "%"
+
+    @property
+    def native_value(self) -> int:
+        """Return the configured grid battery charging limit SOC."""
+        return self.coordinator.config.get(CONF_GRID_BATTERY_CHARGING_LIMIT_SOC, DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        if not self.coordinator.data:
+            return {}
+
+        battery_analysis = self.coordinator.data.get("battery_analysis", {})
+        average_soc = battery_analysis.get("average_soc")
+        above_limit = average_soc >= self.native_value if average_soc is not None else None
+
+        return {
+            "description": "SOC level above which grid battery charging becomes very selective - prefers solar over grid",
+            "average_soc": average_soc,
+            "above_limit": above_limit,
+            "margin": average_soc - self.native_value if average_soc is not None else None,
+        }
