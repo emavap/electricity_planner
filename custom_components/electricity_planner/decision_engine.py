@@ -1069,16 +1069,30 @@ class ChargingDecisionEngine:
                 "grid_setpoint_reason": f"Solar-only car charging detected - grid setpoint 0W",
             }
 
-        # Case 1: Car charging + battery < max_soc_threshold - grid for car consumption, surplus for batteries
+        # Case 1: Car charging + battery < max_soc_threshold - grid for car consumption, add battery if charging
         if significant_car_charging and average_soc < max_soc_threshold:
             car_grid_need = min(car_charging_power, charger_limit, max_grid_setpoint)
             max_grid_power = self._get_max_grid_power()
             car_grid_need = self._validate_power_value(car_grid_need, 0, max_grid_power, "car_grid_need")
-            grid_setpoint = car_grid_need
-            return {
-                "grid_setpoint": int(grid_setpoint),
-                "grid_setpoint_reason": f"Car drawing {car_charging_power}W, battery {average_soc:.0f}% < {max_soc_threshold}% - grid for car ({int(grid_setpoint)}W), surplus for batteries",
-            }
+            
+            # If battery charging decision is on, add battery charging to grid setpoint
+            if battery_grid_charging:
+                # Grid for car + remaining capacity for batteries
+                remaining_grid_capacity = max(0, max_grid_setpoint - car_grid_need)  # Ensure non-negative
+                max_battery_power = self.config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)
+                battery_grid_power = max(0, min(remaining_grid_capacity, max_battery_power))  # Cap battery charging
+                grid_setpoint = min(car_grid_need + battery_grid_power, max_grid_setpoint, max_grid_power)  # Multiple safety checks
+                
+                return {
+                    "grid_setpoint": int(grid_setpoint),
+                    "grid_setpoint_reason": f"Car {car_charging_power}W + battery {average_soc:.0f}% charging - grid for car ({int(car_grid_need)}W) + batteries ({int(battery_grid_power)}W) = {int(grid_setpoint)}W",
+                }
+            else:
+                grid_setpoint = car_grid_need
+                return {
+                    "grid_setpoint": int(grid_setpoint),
+                    "grid_setpoint_reason": f"Car drawing {car_charging_power}W, battery {average_soc:.0f}% < {max_soc_threshold}% not charging - grid for car only ({int(grid_setpoint)}W)",
+                }
 
         # Case 2: Car charging + battery ≥ max_soc_threshold - grid supports car, can also charge batteries if decided
         if significant_car_charging and average_soc >= max_soc_threshold:
