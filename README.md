@@ -25,6 +25,7 @@ A comprehensive Home Assistant custom integration for intelligent electricity ma
 - **Solar preference** - avoids grid charging when solar is available
 - **Battery priority** ensures home batteries are maintained first
 - **Time-based logic** for optimal night charging
+- **Smart power limits** - When charging not allowed, car is limited to 1.4kW with no grid power allocation
 
 ### 🌞 Solar Optimization
 - **Real-time production monitoring**
@@ -225,6 +226,10 @@ if is_low_price:
 if car_not_charging:
     return 0
 
+# NEW: Car charging restriction logic
+if not car_grid_charging:
+    return 1400  # 1.4kW limit when charging not allowed
+
 if car_solar_only AND solar_for_car > 0:
     return min(solar_for_car, max_car_power)
 
@@ -241,24 +246,19 @@ else:
 ```python
 max_grid_setpoint = min(monthly_grid_peak * 0.9, max_grid_power) if monthly_grid_peak > 2500 else 2500
 
-# Case 1: Car charging + Battery < max_soc
-if car_charging AND average_soc < max_soc_threshold:
-    return min(car_charging_power, charger_limit, max_grid_setpoint)
+# NEW: Unified calculation based on actual charging needs
+car_grid_need = 0
+if car_charging AND car_grid_charging:
+    car_available_solar = allocated_solar_for_car + car_current_solar_usage
+    car_grid_need = max(0, car_charging_power - car_available_solar)
+    car_grid_need = min(car_grid_need, max_grid_setpoint)
 
-# Case 2: Car charging + Battery >= max_soc  
-if car_charging AND average_soc >= max_soc_threshold:
-    car_grid_need = max(0, car_charging_power - allocated_solar)
-    if battery_grid_charging:
-        battery_power = min(max_grid_setpoint - car_grid_need, max_battery_power)
-        return min(car_grid_need + battery_power, max_grid_power)
-    return min(car_grid_need, max_grid_power)
-
-# Case 3: No car, battery charging
+battery_grid_need = 0
 if battery_grid_charging:
-    return min(max_grid_setpoint, max_battery_power, max_grid_power)
+    remaining_capacity = max(0, max_grid_setpoint - car_grid_need)
+    battery_grid_need = min(remaining_capacity, max_battery_power)
 
-# Case 4: No charging
-return 0
+return min(car_grid_need + battery_grid_need, max_grid_setpoint, max_grid_power)
 ```
 
 ## 🌞 Solar Feed-in Logic
@@ -282,6 +282,12 @@ All safety limits are user-configurable through the Home Assistant UI:
 - **max_car_power**: Maximum car charging power (Default: 11000W)  
 - **max_grid_power**: Absolute grid power safety limit (Default: 15000W)
 - **min_car_charging_threshold**: Minimum power to consider car "charging" (Default: 100W)
+
+### Car Charging Restrictions
+When `car_grid_charging = False` (charging not allowed):
+- **Charger Limit**: Fixed at 1.4kW maximum
+- **Grid Power for Car**: 0W (no grid power allocated to car)
+- **Battery Independence**: Battery charging unaffected by car restrictions
 
 ### SOC Thresholds
 - **emergency_soc_threshold**: True emergency SOC (Default: 15%)
@@ -409,6 +415,16 @@ All parameters are reconfigurable through Home Assistant's integration options w
 - **Max Car Power**: 7000W (user configured)
 - **Allocation**: Batteries: 5000W, Car: 7000W, Remaining: 3000W
 - **Safety**: All allocations respect configured limits
+
+### Example 6: Car Charging Restriction Active
+- **Conditions**: High price period, car charging not allowed
+- **Car Drawing**: 5000W (actual consumption)
+- **Car Grid Charging**: False (not allowed due to high price)
+- **Battery Grid Charging**: True (battery still allowed)
+- **Outputs**:
+  - **Charger Limit**: 1400W (1.4kW restriction)
+  - **Grid Setpoint**: 3000W (battery power only, 0W for car)
+  - **Reason**: "Car charging not allowed - grid power only for battery charging"
 
 ## 📈 Price Analysis Logic
 
@@ -632,6 +648,8 @@ Decision:
 - `sensor.electricity_planner_battery_analysis` - Battery status, SOC and capacity data
 - `sensor.electricity_planner_price_analysis` - Comprehensive Nord Pool price analysis
 - `sensor.electricity_planner_power_analysis` - Solar production, house consumption, calculated surplus, car charging power
+- **`sensor.electricity_planner_car_charger_limit`** - ⚡ **Car charger power limit** (1.4kW when charging restricted)
+- **`sensor.electricity_planner_grid_setpoint`** - ⚡ **Grid power setpoint** (excludes car when restricted)
 
 ### Binary Sensors (Key Outputs)
 - **`binary_sensor.electricity_planner_battery_grid_charging`** - ✅ **Charge batteries from grid** (True only when price favorable)
@@ -671,9 +689,17 @@ automation:
     trigger:
       - platform: state
         entity_id: binary_sensor.electricity_planner_car_grid_charging
+      - platform: state
+        entity_id: sensor.electricity_planner_car_charger_limit
     action:
+      # Set charger limit based on recommendations
+      - service: number.set_value
+        data:
+          entity_id: number.your_car_charger_limit
+          value: "{{ states('sensor.electricity_planner_car_charger_limit') | int }}"
+      # Enable/disable grid charging
       - service: >
-          {% if trigger.to_state.state == 'on' %}
+          {% if is_state('binary_sensor.electricity_planner_car_grid_charging', 'on') %}
             switch.turn_on
           {% else %}
             switch.turn_off
@@ -682,7 +708,24 @@ automation:
           entity_id: switch.your_car_charger
       - service: notify.mobile_app_your_device
         data:
-          message: "Car grid charging {{ 'started' if trigger.to_state.state == 'on' else 'stopped' }} - {{ state_attr('binary_sensor.electricity_planner_car_grid_charging', 'reason') }}"
+          message: "Car charger limit: {{ states('sensor.electricity_planner_car_charger_limit') }}W, Grid charging: {{ 'enabled' if is_state('binary_sensor.electricity_planner_car_grid_charging', 'on') else 'disabled' }}"
+```
+
+### Grid Setpoint Control
+```yaml
+automation:
+  - alias: "Control Grid Setpoint"
+    trigger:
+      - platform: state
+        entity_id: sensor.electricity_planner_grid_setpoint
+    action:
+      - service: number.set_value
+        data:
+          entity_id: number.your_grid_setpoint
+          value: "{{ states('sensor.electricity_planner_grid_setpoint') | int }}"
+      - service: notify.mobile_app_your_device
+        data:
+          message: "Grid setpoint updated to {{ states('sensor.electricity_planner_grid_setpoint') }}W - {{ state_attr('sensor.electricity_planner_grid_setpoint', 'grid_setpoint_reason') }}"
 ```
 
 ### Price Alert Notification
