@@ -74,6 +74,7 @@ from .const import (
     CONF_SOLAR_PEAK_EMERGENCY_SOC,
     CONF_PREDICTIVE_CHARGING_MIN_SOC,
     CONF_GRID_BATTERY_CHARGING_LIMIT_SOC,
+    CONF_BASE_GRID_SETPOINT,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
@@ -126,7 +127,7 @@ class ChargingDecisionEngine:
 
     def _get_safe_grid_setpoint(self, monthly_peak: float | None) -> int:
         """Calculate safe grid setpoint based on monthly peak."""
-        base_setpoint = DEFAULT_BASE_GRID_SETPOINT
+        base_setpoint = self.config.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT)
         if monthly_peak and monthly_peak > base_setpoint:
             return int(monthly_peak * DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN)
         return base_setpoint

@@ -44,6 +44,7 @@ from .const import (
     CONF_WINTER_NIGHT_SOC_OVERRIDE,
     CONF_SOLAR_PEAK_EMERGENCY_SOC,
     CONF_PREDICTIVE_CHARGING_MIN_SOC,
+    CONF_BASE_GRID_SETPOINT,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
@@ -62,6 +63,7 @@ from .const import (
     DEFAULT_WINTER_NIGHT_SOC_OVERRIDE,
     DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
+    DEFAULT_BASE_GRID_SETPOINT,
 )
 
 
@@ -382,6 +384,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     min=20, max=60, unit_of_measurement="%"
                 )
             ),
+            vol.Optional(
+                CONF_BASE_GRID_SETPOINT,
+                default=DEFAULT_BASE_GRID_SETPOINT
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1000, max=10000, step=100, unit_of_measurement="W"
+                )
+            ),
         })
 
         return self.async_show_form(
@@ -396,6 +406,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "winter_night_soc_override": "SOC threshold for winter night emergency charging",
                 "solar_peak_emergency_soc": "SOC below which to charge even during solar peak",
                 "predictive_charging_min_soc": "Minimum SOC for predictive charging logic",
+                "base_grid_setpoint": "Base minimum grid setpoint when no monthly peak data available",
             },
         )
 
@@ -663,6 +674,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=20, max=60, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_BASE_GRID_SETPOINT,
+                default=current_config.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1000, max=10000, step=100, unit_of_measurement="W"
                 )
             ),
         })

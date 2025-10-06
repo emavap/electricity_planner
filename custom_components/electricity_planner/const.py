@@ -38,6 +38,7 @@ CONF_WINTER_NIGHT_SOC_OVERRIDE = "winter_night_soc_override"
 CONF_SOLAR_PEAK_EMERGENCY_SOC = "solar_peak_emergency_soc"
 CONF_PREDICTIVE_CHARGING_MIN_SOC = "predictive_charging_min_soc"
 CONF_GRID_BATTERY_CHARGING_LIMIT_SOC = "grid_battery_charging_limit_soc"
+CONF_BASE_GRID_SETPOINT = "base_grid_setpoint"
 
 # Default Threshold Values
 DEFAULT_MIN_SOC = 20
