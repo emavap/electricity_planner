@@ -3,51 +3,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple
 
 from homeassistant.core import HomeAssistant
-
-# Algorithm Constants - Internal magic numbers used in calculations
-# Time-related
-EVALUATION_INTERVAL_MINUTES = 5
-NIGHT_START_HOUR = 22  # 10 PM
-NIGHT_END_HOUR = 6     # 6 AM
-EARLY_MORNING_END_HOUR = 9
-SOLAR_PEAK_START_HOUR = 10
-SOLAR_PEAK_END_HOUR = 16
-EVENING_START_HOUR = 17
-EVENING_END_HOUR = 21
-
-# Power/Energy estimation constants
-MAX_SOLAR_PRODUCTION_ESTIMATE = 5000  # W - Assumed max solar production for efficiency calculation
-POWER_PER_SOC_PERCENT = 100  # W - Estimated power per 1% SOC
-KWH_PER_SOC_PERCENT = 0.1  # kWh - Estimated energy per 1% SOC
-TYPICAL_MINIMUM_DAILY_SOLAR = 5.0  # kWh - Minimum for a decent solar day
-GOOD_HOURLY_SOLAR_PRODUCTION = 2.0  # kWh/hour - Considered good production
-HOUSE_CONSUMPTION_FACTOR = 0.5  # 50% - Estimated surplus after house consumption
-DEFAULT_BATTERY_CAPACITY = 10.0  # kWh - Default if not configured
-
-# SOC/Battery related
-SOC_SAFETY_MARGIN = 5  # % - Safety margin to prevent waste
-SOC_BUFFER = 10  # % - Buffer for various SOC checks
-CRITICAL_LOW_SOC = 30  # % - Always charge below this
-LOW_SOC_THRESHOLD = 40  # % - Low SOC for decision logic
-MAX_TARGET_SOC = 90  # % - Maximum target SOC for calculations
-
-# Price related
-SIGNIFICANT_PRICE_DROP_PERCENTAGE = 0.15  # 15% - Price drop considered significant
-NEUTRAL_PRICE_POSITION = 0.5  # 50% - Neutral position in daily price range
-
-# Solar forecast thresholds for immediate decisions
-POOR_SOLAR_THRESHOLD = 0.3  # 30% - Below this is poor
-MODERATE_SOLAR_THRESHOLD = 0.6  # 60% - Above this is good
-EXCELLENT_SOLAR_THRESHOLD = 0.8  # 80% - Above this is excellent
-
-# Charger limits
-MAX_CAR_CHARGER_LIMIT = 11000  # W - Maximum car charger power
-
-# Winter months for seasonal logic
-WINTER_MONTHS = [11, 12, 1, 2]
 
 from .const import (
     CONF_MIN_SOC_THRESHOLD,
@@ -95,10 +53,24 @@ from .const import (
     DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN,
-    DEFAULT_CRITICAL_SOC_THRESHOLD,
-    DEFAULT_MEDIUM_SOC_THRESHOLD,
-    DEFAULT_HIGH_SOC_THRESHOLD,
 )
+
+from .defaults import (
+    DEFAULT_TIME_SCHEDULE,
+    DEFAULT_POWER_ESTIMATES,
+    DEFAULT_ALGORITHM_THRESHOLDS,
+    DEFAULT_SYSTEM_LIMITS,
+)
+
+from .helpers import (
+    DataValidator,
+    PriceCalculator,
+    TimeContext,
+    PowerAllocationValidator,
+    format_reason,
+)
+
+from .strategies import StrategyManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -106,35 +78,125 @@ _LOGGER = logging.getLogger(__name__)
 class ChargingDecisionEngine:
     """Engine for making charging decisions based on multiple factors."""
 
-    def __init__(self, hass: HomeAssistant, config: dict[str, Any]) -> None:
+    def __init__(self, hass: HomeAssistant, config: Dict[str, Any]) -> None:
         """Initialize the decision engine."""
         self.hass = hass
         self.config = config
-
-    def _validate_power_value(self, power: float, min_value: float = 0, max_value: float | None = None, name: str = "power") -> float:
-        """Validate and clamp power values to safe ranges."""
-        if power < min_value:
-            _LOGGER.warning("%s value %dW below minimum, clamping to %dW", name, power, min_value)
-            return min_value
-        if max_value and power > max_value:
-            _LOGGER.warning("%s value %dW above maximum, clamping to %dW", name, power, max_value)
-            return max_value
-        return power
+        self.validator = DataValidator()
+        self.price_calculator = PriceCalculator()
+        self.strategy_manager = StrategyManager()
+        self.power_validator = PowerAllocationValidator()
 
     def _get_max_grid_power(self) -> int:
         """Get maximum allowed grid power with safety margin."""
-        return self.config.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER)
+        return self.validator.sanitize_config_value(
+            self.config.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER),
+            min_val=1000,
+            max_val=50000,
+            default=DEFAULT_MAX_GRID_POWER,
+            name="max_grid_power"
+        )
 
-    def _get_safe_grid_setpoint(self, monthly_peak: float | None) -> int:
+    def _get_safe_grid_setpoint(self, monthly_peak: Optional[float]) -> int:
         """Calculate safe grid setpoint based on monthly peak."""
-        base_setpoint = self.config.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT)
+        base_setpoint = self.validator.sanitize_config_value(
+            self.config.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT),
+            min_val=1000,
+            max_val=15000,
+            default=DEFAULT_BASE_GRID_SETPOINT,
+            name="base_grid_setpoint"
+        )
+        
         if monthly_peak and monthly_peak > base_setpoint:
             return int(monthly_peak * DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN)
         return base_setpoint
 
-    async def evaluate_charging_decision(self, data: dict[str, Any]) -> dict[str, Any]:
+    async def evaluate_charging_decision(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Evaluate whether to charge batteries and car from grid based on comprehensive data."""
-        decision_data: dict[str, Any] = {
+        decision_data = self._initialize_decision_data()
+        
+        # Validate critical data availability
+        current_price = data.get("current_price")
+        if current_price is None:
+            return self._create_no_data_decision(decision_data)
+        
+        # Analyze all aspects
+        price_analysis = self._analyze_comprehensive_pricing(data)
+        decision_data["price_analysis"] = price_analysis
+        
+        battery_analysis = self._analyze_battery_status(data.get("battery_soc", []))
+        decision_data["battery_analysis"] = battery_analysis
+        
+        power_analysis = self._analyze_power_flow(data)
+        decision_data["power_analysis"] = power_analysis
+        
+        solar_analysis = self._analyze_solar_production(data)
+        decision_data["solar_analysis"] = solar_analysis
+        
+        solar_forecast = await self._analyze_solar_forecast(data)
+        decision_data["solar_forecast"] = solar_forecast
+        
+        time_context = TimeContext.get_current_context(
+            night_start=DEFAULT_TIME_SCHEDULE.night_start,
+            night_end=DEFAULT_TIME_SCHEDULE.night_end,
+            solar_peak_start=DEFAULT_TIME_SCHEDULE.solar_peak_start,
+            solar_peak_end=DEFAULT_TIME_SCHEDULE.solar_peak_end,
+            evening_start=DEFAULT_TIME_SCHEDULE.evening_start,
+            evening_end=DEFAULT_TIME_SCHEDULE.evening_end,
+        )
+        decision_data["time_context"] = time_context
+        
+        # Allocate solar power
+        power_allocation = self._allocate_solar_power(
+            power_analysis, battery_analysis, price_analysis, solar_forecast, time_context
+        )
+        decision_data["power_allocation"] = power_allocation
+        
+        # Validate power allocation
+        is_valid, error = self.power_validator.validate_allocation(
+            power_allocation,
+            power_analysis.get("solar_surplus", 0),
+            self.config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER),
+            self.config.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)
+        )
+        if not is_valid:
+            _LOGGER.warning("Power allocation validation failed: %s", error)
+        
+        # Make charging decisions
+        battery_decision = self._decide_battery_grid_charging(
+            price_analysis, battery_analysis, power_allocation, solar_forecast, time_context
+        )
+        decision_data.update(battery_decision)
+        
+        car_decision = self._decide_car_grid_charging(
+            price_analysis, battery_analysis, power_allocation
+        )
+        decision_data.update(car_decision)
+        
+        # Calculate power limits
+        decision_data_for_downstream = {**data, **decision_data}
+        
+        charger_limit_decision = self._calculate_charger_limit(
+            price_analysis, battery_analysis, power_allocation, decision_data_for_downstream
+        )
+        decision_data.update(charger_limit_decision)
+        decision_data_for_downstream.update(charger_limit_decision)
+        
+        grid_setpoint_decision = self._calculate_grid_setpoint(
+            price_analysis, battery_analysis, power_allocation, decision_data_for_downstream,
+            decision_data.get("charger_limit", 0)
+        )
+        decision_data.update(grid_setpoint_decision)
+        
+        # Feed-in decision
+        feedin_decision = self._decide_feedin_solar(price_analysis, power_allocation)
+        decision_data.update(feedin_decision)
+        
+        return decision_data
+
+    def _initialize_decision_data(self) -> Dict[str, Any]:
+        """Initialize the decision data structure."""
+        return {
             "battery_grid_charging": False,
             "car_grid_charging": False,
             "battery_grid_charging_reason": "No decision made",
@@ -145,154 +207,51 @@ class ChargingDecisionEngine:
             "grid_setpoint_reason": "No decision made",
             "feedin_solar": False,
             "feedin_solar_reason": "No decision made",
-            "next_evaluation": datetime.now() + timedelta(minutes=EVALUATION_INTERVAL_MINUTES),
+            "next_evaluation": datetime.now() + timedelta(minutes=DEFAULT_SYSTEM_LIMITS.evaluation_interval),
             "price_analysis": {},
             "power_analysis": {},
             "battery_analysis": {},
             "solar_analysis": {},
         }
 
-        current_price = data.get("current_price")
-        if current_price is None:
-            reason = "No current price data available - all grid charging disabled for safety"
-            decision_data["battery_grid_charging_reason"] = reason
-            decision_data["car_grid_charging_reason"] = reason
-            decision_data["charger_limit_reason"] = "No price data - limiting to solar only"
-            decision_data["grid_setpoint_reason"] = "No price data - grid setpoint set to 0"
-            decision_data["feedin_solar_reason"] = "No price data - feed-in decision disabled"
-            _LOGGER.warning("Critical price data unavailable - disabling all grid charging")
-            return decision_data
-
-        price_analysis = self._analyze_comprehensive_pricing(data)
-        decision_data["price_analysis"] = price_analysis
-
-        battery_analysis = self._analyze_battery_status(
-            data.get("battery_soc", [])
-        )
-        decision_data["battery_analysis"] = battery_analysis
-
-        power_analysis = self._analyze_power_flow(data)
-        decision_data["power_analysis"] = power_analysis
-
-        solar_analysis = self._analyze_solar_production(data)
-        decision_data["solar_analysis"] = solar_analysis
-
-        solar_forecast = await self._analyze_solar_forecast(data)
-        decision_data["solar_forecast"] = solar_forecast
-
-        time_context = self._get_time_context()
-        decision_data["time_context"] = time_context
-
-        # Hierarchical power allocation to prevent solar surplus race conditions
-        power_allocation = self._allocate_solar_power(
-            power_analysis, battery_analysis, price_analysis, solar_forecast, time_context
-        )
-        decision_data["power_allocation"] = power_allocation
-
-        battery_decision = self._decide_battery_grid_charging_enhanced(
-            price_analysis, battery_analysis, power_allocation, solar_forecast, time_context
-        )
-        decision_data.update(battery_decision)
-
-        car_decision = self._decide_car_grid_charging(
-            price_analysis, battery_analysis, power_allocation
-        )
-        decision_data.update(car_decision)
-
-        # Pass fresh decisions and power allocation to subsequent functions
-        decision_data_for_downstream = {**data, **decision_data}
-
-        charger_limit_decision = self._calculate_charger_limit(
-            price_analysis, battery_analysis, power_allocation, decision_data_for_downstream
-        )
-        decision_data.update(charger_limit_decision)
-        decision_data_for_downstream.update(charger_limit_decision)
-
-        grid_setpoint_decision = self._calculate_grid_setpoint(
-            price_analysis, battery_analysis, power_allocation, decision_data_for_downstream,
-            decision_data.get("charger_limit", 0)
-        )
-        decision_data.update(grid_setpoint_decision)
-
-        # Feed-in solar decision (last, after all power is allocated)
-        feedin_decision = self._decide_feedin_solar(
-            price_analysis, power_allocation
-        )
-        decision_data.update(feedin_decision)
-
+    def _create_no_data_decision(self, decision_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create decision when no price data is available."""
+        reason = "No current price data available - all grid charging disabled for safety"
+        decision_data["battery_grid_charging_reason"] = reason
+        decision_data["car_grid_charging_reason"] = reason
+        decision_data["charger_limit_reason"] = "No price data - limiting to solar only"
+        decision_data["grid_setpoint_reason"] = "No price data - grid setpoint set to 0"
+        decision_data["feedin_solar_reason"] = "No price data - feed-in decision disabled"
+        _LOGGER.warning("Critical price data unavailable - disabling all grid charging")
         return decision_data
 
-    def _decide_feedin_solar(
-        self,
-        price_analysis: dict[str, Any],
-        power_allocation: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Decide whether to enable solar feed-in based purely on price threshold."""
-        if not price_analysis.get("data_available", True):
-            return {
-                "feedin_solar": False,
-                "feedin_solar_reason": "No price data available",
-            }
-
-        current_price = price_analysis.get("current_price", 0)
-        feedin_threshold = self.config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
-        remaining_solar = power_allocation.get("remaining_solar", 0)
-
-        # Price-driven decision: Enable feed-in if price meets threshold
-        enable_feedin = current_price >= feedin_threshold
-        action = "enable" if enable_feedin else "disable"
-
-        return {
-            "feedin_solar": enable_feedin,
-            "feedin_solar_reason": f"Price {current_price:.3f}€/kWh {'≥' if enable_feedin else '<'} {feedin_threshold:.3f}€/kWh - {action} solar export (surplus: {remaining_solar}W)",
-        }
-
-    def _analyze_comprehensive_pricing(self, data: dict[str, Any]) -> dict[str, Any]:
+    def _analyze_comprehensive_pricing(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze comprehensive pricing data from Nord Pool."""
         current_price = data.get("current_price")
         highest_price = data.get("highest_price")
         lowest_price = data.get("lowest_price")
         next_price = data.get("next_price")
-
+        
         price_threshold = self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
-        very_low_price_threshold = self.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD) / 100.0
-
-        # Handle missing current price
+        very_low_threshold = self.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD) / 100.0
+        
         if current_price is None:
-            return {
-                "current_price": None,
-                "highest_price": highest_price,
-                "lowest_price": lowest_price,
-                "next_price": next_price,
-                "price_threshold": price_threshold,
-                "is_low_price": False,
-                "is_lowest_price": False,
-                "price_position": None,
-                "next_price_higher": False,
-                "price_trend_improving": False,
-                "very_low_price": False,
-                "data_available": False,
-            }
-
-        # Calculate price position relative to daily range
-        if (
-            highest_price is not None
-            and lowest_price is not None
-            and highest_price > lowest_price
-        ):
-            price_position = (current_price - lowest_price) / (highest_price - lowest_price)
-        else:
-            price_position = NEUTRAL_PRICE_POSITION  # Neutral if no valid range
-
-        # Next price higher means worse for charging now; trend improving means next price is lower
+            return self._create_unavailable_price_analysis(
+                highest_price, lowest_price, next_price, price_threshold
+            )
+        
+        # Use cached price position calculation
+        price_position = self.price_calculator.calculate_price_position(
+            current_price, highest_price or current_price, lowest_price or current_price
+        )
+        
+        # Check price trends
         next_price_higher = next_price is not None and next_price > current_price
         price_trend_improving = next_price is not None and next_price < current_price
-
-        # Predictive logic: significant price improvement coming
-        significant_price_drop = (next_price is not None and
-                                 current_price > 0 and
-                                 (current_price - next_price) / current_price > SIGNIFICANT_PRICE_DROP_PERCENTAGE)  # Significant drop
-
+        significant_price_drop = self.price_calculator.is_significant_price_drop(
+            current_price, next_price, DEFAULT_ALGORITHM_THRESHOLDS.significant_price_drop
+        )
+        
         return {
             "current_price": current_price,
             "highest_price": highest_price,
@@ -301,820 +260,767 @@ class ChargingDecisionEngine:
             "price_threshold": price_threshold,
             "is_low_price": current_price <= price_threshold,
             "is_lowest_price": lowest_price is not None and current_price == lowest_price,
-            "price_position": price_position,  # 0=lowest, 1=highest
+            "price_position": price_position,
             "next_price_higher": next_price_higher,
             "price_trend_improving": price_trend_improving,
             "significant_price_drop": significant_price_drop,
-            "very_low_price": price_position <= very_low_price_threshold,  # Configurable threshold of daily range
+            "very_low_price": price_position <= very_low_threshold,
             "data_available": True,
         }
 
-    def _analyze_power_flow(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Analyze current power flow and consumption with separate solar production and house consumption."""
-        solar_production = data.get("solar_production")
-        house_consumption = data.get("house_consumption")  
-        solar_surplus = data.get("solar_surplus")  # Already calculated in coordinator
-        car_charging_power = data.get("car_charging_power")
+    def _create_unavailable_price_analysis(
+        self,
+        highest_price: Optional[float],
+        lowest_price: Optional[float],
+        next_price: Optional[float],
+        price_threshold: float
+    ) -> Dict[str, Any]:
+        """Create price analysis when current price is unavailable."""
+        return {
+            "current_price": None,
+            "highest_price": highest_price,
+            "lowest_price": lowest_price,
+            "next_price": next_price,
+            "price_threshold": price_threshold,
+            "is_low_price": False,
+            "is_lowest_price": False,
+            "price_position": None,
+            "next_price_higher": False,
+            "price_trend_improving": False,
+            "significant_price_drop": False,
+            "very_low_price": False,
+            "data_available": False,
+        }
 
-        # Handle unavailable sensors - use 0 as safe default for power calculations
-        solar_production = solar_production if solar_production is not None else 0
-        house_consumption = house_consumption if house_consumption is not None else 0
-        solar_surplus = solar_surplus if solar_surplus is not None else 0
-        car_charging_power = car_charging_power if car_charging_power is not None else 0
-
-        # Get configurable solar threshold
-        significant_solar_threshold = self.config.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)
-
-        # Calculate additional metrics with separate values
+    def _analyze_power_flow(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze current power flow and consumption."""
+        solar_production = data.get("solar_production", 0) or 0
+        house_consumption = data.get("house_consumption", 0) or 0
+        solar_surplus = data.get("solar_surplus", 0) or 0
+        car_charging_power = data.get("car_charging_power", 0) or 0
+        
+        # Validate power values
+        solar_production = self.validator.validate_power_value(
+            solar_production, name="solar_production", max_value=50000
+        )
+        house_consumption = self.validator.validate_power_value(
+            house_consumption, name="house_consumption", max_value=50000
+        )
+        car_charging_power = self.validator.validate_power_value(
+            car_charging_power, name="car_charging", max_value=22000
+        )
+        
+        significant_solar_threshold = self.config.get(
+            CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD
+        )
+        
         house_consumption_without_car = max(0, house_consumption - car_charging_power)
         solar_coverage_ratio = (solar_production / house_consumption) if house_consumption > 0 else 0
-
+        
         return {
             "solar_production": solar_production,
             "house_consumption": house_consumption,
             "house_consumption_without_car": house_consumption_without_car,
-            "solar_surplus": solar_surplus,  # Available excess solar that can be used for batteries/car/export
+            "solar_surplus": solar_surplus,
             "car_charging_power": car_charging_power,
             "has_solar_production": solar_production > 0,
-            "has_solar_surplus": solar_surplus > 0,  # Has available excess solar power
+            "has_solar_surplus": solar_surplus > 0,
             "significant_solar_surplus": solar_surplus > significant_solar_threshold,
             "car_currently_charging": car_charging_power > 0,
-            "available_surplus_for_batteries": max(0, solar_surplus - car_charging_power),  # Surplus after car consumption
+            "available_surplus_for_batteries": max(0, solar_surplus - car_charging_power),
             "significant_solar_threshold": significant_solar_threshold,
-            "solar_coverage_ratio": solar_coverage_ratio,  # 1.0 = solar covers 100% of house consumption
-            "has_excess_solar_available": solar_surplus > 0,  # Available for batteries, car, or grid export
+            "solar_coverage_ratio": solar_coverage_ratio,
+            "has_excess_solar_available": solar_surplus > 0,
         }
 
-    def _analyze_solar_production(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Analyze solar production status with separate production and consumption data."""
-        solar_production = data.get("solar_production")
-        house_consumption = data.get("house_consumption")
-        solar_surplus = data.get("solar_surplus")
+    def _analyze_solar_production(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze solar production status."""
+        solar_production = data.get("solar_production", 0) or 0
+        house_consumption = data.get("house_consumption", 0) or 0
+        solar_surplus = data.get("solar_surplus", 0) or 0
         
-        solar_production = solar_production if solar_production is not None else 0
-        house_consumption = house_consumption if house_consumption is not None else 0
-        solar_surplus = solar_surplus if solar_surplus is not None else 0
-
-        # More detailed solar analysis with separate values
         is_producing = solar_production > 0
-        has_available_surplus = solar_surplus > 0  # Has excess that could be used for batteries/car/export
-        production_efficiency = min(1.0, solar_production / MAX_SOLAR_PRODUCTION_ESTIMATE) if solar_production > 0 else 0
-
+        has_available_surplus = solar_surplus > 0
+        production_efficiency = (
+            min(1.0, solar_production / DEFAULT_POWER_ESTIMATES.max_solar_production)
+            if solar_production > 0 else 0
+        )
+        
         return {
             "current_production": solar_production,
             "house_consumption": house_consumption,
-            "available_surplus": solar_surplus,  # Available for batteries, car charging, or grid export
+            "available_surplus": solar_surplus,
             "is_producing": is_producing,
-            "has_available_surplus": has_available_surplus,  # Can allocate to batteries/car/export
-            "production_efficiency": production_efficiency,  # 0.0-1.0 relative to typical max
+            "has_available_surplus": has_available_surplus,
+            "production_efficiency": production_efficiency,
         }
 
     def _allocate_solar_power(
         self,
-        power_analysis: dict[str, Any],
-        battery_analysis: dict[str, Any],
-        price_analysis: dict[str, Any],
-        solar_forecast: dict[str, Any],
-        time_context: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Hierarchically allocate solar surplus: batteries first, then cars."""
+        power_analysis: Dict[str, Any],
+        battery_analysis: Dict[str, Any],
+        price_analysis: Dict[str, Any],
+        solar_forecast: Dict[str, Any],
+        time_context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Hierarchically allocate solar surplus."""
         solar_surplus = power_analysis.get("solar_surplus", 0)
-        significant_solar_threshold = self.config.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)
-
-        # Validate solar surplus
-        solar_surplus = self._validate_power_value(solar_surplus, name="solar_surplus")
-
+        significant_solar_threshold = self.config.get(
+            CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD
+        )
+        
+        solar_surplus = self.validator.validate_power_value(solar_surplus, name="solar_surplus")
+        
+        # Handle insufficient solar
         if solar_surplus <= significant_solar_threshold:
-            # Even with insufficient solar, account for current car consumption
-            car_charging_power = power_analysis.get("car_charging_power", 0)
-            min_car_charging_threshold = self.config.get(CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD)
-            if car_charging_power > min_car_charging_threshold:  # Car is actually charging
-                car_current_solar_usage = min(car_charging_power, solar_surplus)
-                remaining_solar = max(0, solar_surplus - car_current_solar_usage)
-            else:
-                car_current_solar_usage = 0
-                remaining_solar = solar_surplus
-
-            return {
-                "solar_for_batteries": 0,
-                "solar_for_car": 0,
-                "car_current_solar_usage": car_current_solar_usage,
-                "remaining_solar": remaining_solar,
-                "total_allocated": car_current_solar_usage,
-                "allocation_reason": f"Insufficient solar surplus ({solar_surplus}W ≤ {significant_solar_threshold}W) - car using {car_current_solar_usage}W, {remaining_solar}W remaining"
-            }
-
-        # CRITICAL FIX: Track actual solar consumption more precisely
-        car_charging_power = power_analysis.get("car_charging_power", 0)
-        car_current_solar_usage = 0
-
-        # Only count car as using solar if it's actually charging AND there's solar available
-        min_car_charging_threshold = self.config.get(CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD)
-        if car_charging_power > min_car_charging_threshold and solar_surplus > 0:
-            # Car can only use what's actually available
-            car_current_solar_usage = min(car_charging_power, solar_surplus)
-
+            return self._create_insufficient_solar_allocation(
+                solar_surplus, power_analysis, significant_solar_threshold
+            )
+        
+        # Track car's current solar usage
+        car_current_solar_usage = self._calculate_car_solar_usage(
+            power_analysis, solar_surplus
+        )
+        
         # Available solar after current car consumption
         available_solar = max(0, solar_surplus - car_current_solar_usage)
-        solar_for_batteries = 0
-        solar_for_car = 0
-
-        # Check if batteries can use solar (not full and solar available)
-        batteries_full = battery_analysis.get("batteries_full", False)
-        average_soc = battery_analysis.get("average_soc", 0)
-        max_soc_threshold = battery_analysis.get("max_soc_threshold", 80)
-
-        # Priority 1: Allocate solar to batteries if they need charging (with safety margin)
-        battery_needs_solar = (
-            not batteries_full and
-            average_soc < max_soc_threshold - SOC_SAFETY_MARGIN and  # Safety margin to prevent waste
-            available_solar > 0
+        
+        # Allocate to batteries
+        solar_for_batteries = self._calculate_battery_solar_allocation(
+            available_solar, battery_analysis, significant_solar_threshold
         )
-
-        if battery_needs_solar:
-            soc_deficit = max(0, max_soc_threshold - average_soc)
-            estimated_battery_need = min(
-                available_solar,
-                int(soc_deficit * POWER_PER_SOC_PERCENT),  # Power estimation
-                significant_solar_threshold,
-                self.config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)
-            )
-            solar_for_batteries = max(0, estimated_battery_need)
-            available_solar = max(0, available_solar - solar_for_batteries)
-
-        # Priority 2: Allocate remaining solar to car if batteries are near full
-        if available_solar > 0 and average_soc >= max_soc_threshold - SOC_BUFFER:
-            solar_for_car = min(
-                available_solar,
-                self.config.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)
-            )
-            available_solar = max(0, available_solar - solar_for_car)
-
-        # Validate total power allocation doesn't exceed available solar
+        available_solar = max(0, available_solar - solar_for_batteries)
+        
+        # Allocate remaining to car if batteries are near full
+        solar_for_car = self._calculate_car_solar_allocation(
+            available_solar, battery_analysis
+        )
+        available_solar = max(0, available_solar - solar_for_car)
+        
+        # Validate and scale if needed
         total_allocated = solar_for_batteries + solar_for_car + car_current_solar_usage
         if total_allocated > solar_surplus:
-            _LOGGER.warning("Power allocation %dW exceeds available solar %dW - applying proportional reduction",
-                          total_allocated, solar_surplus)
-            if total_allocated > 0:
-                scale_factor = solar_surplus / total_allocated
-                solar_for_batteries = int(solar_for_batteries * scale_factor)
-                solar_for_car = int(solar_for_car * scale_factor)
-                car_current_solar_usage = int(car_current_solar_usage * scale_factor)
-
+            scale_factor = solar_surplus / total_allocated if total_allocated > 0 else 0
+            solar_for_batteries = int(solar_for_batteries * scale_factor)
+            solar_for_car = int(solar_for_car * scale_factor)
+            car_current_solar_usage = int(car_current_solar_usage * scale_factor)
+            _LOGGER.warning(
+                "Power allocation %dW exceeds available solar %dW - scaled down",
+                total_allocated, solar_surplus
+            )
+        
         remaining_solar = max(0, solar_surplus - solar_for_batteries - solar_for_car - car_current_solar_usage)
-
+        
         return {
             "solar_for_batteries": solar_for_batteries,
             "solar_for_car": solar_for_car,
             "car_current_solar_usage": car_current_solar_usage,
             "remaining_solar": remaining_solar,
             "total_allocated": solar_for_batteries + solar_for_car + car_current_solar_usage,
-            "allocation_reason": f"Car using {car_current_solar_usage}W, allocated {solar_for_batteries}W to batteries, {solar_for_car}W additional to car, {remaining_solar}W remaining (total: {solar_surplus}W)"
+            "allocation_reason": format_reason(
+                "Power allocation",
+                f"Car using {car_current_solar_usage}W",
+                {
+                    "batteries": f"{solar_for_batteries}W",
+                    "car_additional": f"{solar_for_car}W",
+                    "remaining": f"{remaining_solar}W",
+                    "total": f"{solar_surplus}W"
+                }
+            )
         }
 
-    async def _analyze_solar_forecast(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Analyze solar production potential based on dedicated forecast entities."""
-        # Get forecast values from entities 
-        forecast_current = data.get("solar_forecast_current")
-        forecast_next = data.get("solar_forecast_next") 
-        forecast_today = data.get("solar_forecast_today")
-        forecast_remaining_today = data.get("solar_forecast_remaining_today")
-        forecast_tomorrow = data.get("solar_forecast_tomorrow")
+    def _create_insufficient_solar_allocation(
+        self,
+        solar_surplus: float,
+        power_analysis: Dict[str, Any],
+        threshold: float
+    ) -> Dict[str, Any]:
+        """Create allocation for insufficient solar."""
+        car_charging_power = power_analysis.get("car_charging_power", 0)
+        min_car_threshold = self.config.get(
+            CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD
+        )
+        
+        car_current_solar_usage = 0
+        if car_charging_power > min_car_threshold:
+            car_current_solar_usage = min(car_charging_power, solar_surplus)
+        
+        remaining_solar = max(0, solar_surplus - car_current_solar_usage)
+        
+        return {
+            "solar_for_batteries": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": car_current_solar_usage,
+            "remaining_solar": remaining_solar,
+            "total_allocated": car_current_solar_usage,
+            "allocation_reason": f"Insufficient solar ({solar_surplus}W ≤ {threshold}W) - car using {car_current_solar_usage}W, {remaining_solar}W remaining"
+        }
 
+    def _calculate_car_solar_usage(
+        self,
+        power_analysis: Dict[str, Any],
+        solar_surplus: float
+    ) -> int:
+        """Calculate how much solar the car is currently using."""
+        car_charging_power = power_analysis.get("car_charging_power", 0)
+        min_threshold = self.config.get(
+            CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD
+        )
+        
+        if car_charging_power > min_threshold and solar_surplus > 0:
+            return min(car_charging_power, solar_surplus)
+        return 0
+
+    def _calculate_battery_solar_allocation(
+        self,
+        available_solar: float,
+        battery_analysis: Dict[str, Any],
+        significant_threshold: float
+    ) -> int:
+        """Calculate solar allocation for batteries."""
+        batteries_full = battery_analysis.get("batteries_full", False)
+        average_soc = battery_analysis.get("average_soc", 0)
+        max_soc = battery_analysis.get("max_soc_threshold", 80)
+        
+        if (not batteries_full and
+            average_soc < max_soc - DEFAULT_ALGORITHM_THRESHOLDS.soc_safety_margin and
+            available_solar > 0):
+            
+            soc_deficit = max(0, max_soc - average_soc)
+            estimated_need = min(
+                available_solar,
+                int(soc_deficit * DEFAULT_POWER_ESTIMATES.per_soc_percent),
+                significant_threshold,
+                self.config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)
+            )
+            return max(0, estimated_need)
+        return 0
+
+    def _calculate_car_solar_allocation(
+        self,
+        available_solar: float,
+        battery_analysis: Dict[str, Any]
+    ) -> int:
+        """Calculate solar allocation for car."""
+        average_soc = battery_analysis.get("average_soc", 0)
+        max_soc = battery_analysis.get("max_soc_threshold", 80)
+        
+        if available_solar > 0 and average_soc >= max_soc - DEFAULT_ALGORITHM_THRESHOLDS.soc_buffer:
+            return min(
+                available_solar,
+                self.config.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)
+            )
+        return 0
+
+    async def _analyze_solar_forecast(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze solar production potential based on dedicated forecast entities."""
+        forecast_current = data.get("solar_forecast_current")
+        forecast_next = data.get("solar_forecast_next")
+        forecast_today = data.get("solar_forecast_today")
+        forecast_remaining = data.get("solar_forecast_remaining_today")
+        forecast_tomorrow = data.get("solar_forecast_tomorrow")
+        
         # Check if any forecast entities are configured
-        has_forecast_entities = any([
+        has_forecast = any([
             self.config.get(CONF_SOLAR_FORECAST_CURRENT_ENTITY),
             self.config.get(CONF_SOLAR_FORECAST_NEXT_ENTITY),
             self.config.get(CONF_SOLAR_FORECAST_TODAY_ENTITY),
             self.config.get(CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY),
             self.config.get(CONF_SOLAR_FORECAST_TOMORROW_ENTITY)
         ])
-
-        # If no forecast entities configured, use safe defaults
-        if not has_forecast_entities:
-            return {
-                "forecast_available": False,
-                "solar_production_factor": NEUTRAL_PRICE_POSITION,
-                "expected_solar_production": "unknown",
-                "reason": "No solar forecast entities configured"
-            }
-
-        # Use the new forecast entities  
-        if forecast_tomorrow is not None and forecast_today is not None:
-            # Calculate relative performance: tomorrow vs today
-            if forecast_today > 0:
-                solar_production_factor = min(1.0, forecast_tomorrow / forecast_today)
-            else:
-                solar_production_factor = NEUTRAL_PRICE_POSITION  # Default if today's forecast is 0
-                
-            # Categorize expected production
-            if solar_production_factor > EXCELLENT_SOLAR_THRESHOLD:
-                expected_production = "excellent"
-            elif solar_production_factor > MODERATE_SOLAR_THRESHOLD:
-                expected_production = "good"
-            elif solar_production_factor > POOR_SOLAR_THRESHOLD:
-                expected_production = "moderate"
-            else:
-                expected_production = "poor"
-
-            return {
-                "forecast_available": True,
-                "solar_production_factor": solar_production_factor,
-                "expected_solar_production": expected_production,
-                "forecast_current_kwh": forecast_current,
-                "forecast_next_kwh": forecast_next,
-                "forecast_today_kwh": forecast_today,
-                "forecast_remaining_today_kwh": forecast_remaining_today, 
-                "forecast_tomorrow_kwh": forecast_tomorrow,
-                "reason": f"Tomorrow {forecast_tomorrow:.1f}kWh vs today {forecast_today:.1f}kWh (factor: {solar_production_factor:.1%})"
-            }
         
-        # If only remaining today is available, use that for near-term decisions
-        elif forecast_remaining_today is not None:
-            # Estimate factor based on remaining production vs typical daily minimum
-            typical_minimum_daily = TYPICAL_MINIMUM_DAILY_SOLAR
-            solar_production_factor = min(1.0, forecast_remaining_today / typical_minimum_daily)
-            
-            expected_production = (
-                "good" if solar_production_factor > MODERATE_SOLAR_THRESHOLD else
-                "moderate" if solar_production_factor > POOR_SOLAR_THRESHOLD else
-                "poor"
+        if not has_forecast:
+            return self._create_no_forecast_result()
+        
+        # Analyze based on available data
+        if forecast_tomorrow is not None and forecast_today is not None:
+            return self._analyze_daily_forecast(
+                forecast_tomorrow, forecast_today, 
+                forecast_current, forecast_next, forecast_remaining
             )
-
-            return {
-                "forecast_available": True,
-                "solar_production_factor": solar_production_factor,
-                "expected_solar_production": expected_production,
-                "forecast_remaining_today_kwh": forecast_remaining_today,
-                "reason": f"Remaining today: {forecast_remaining_today:.1f}kWh"
-            }
-
-        # If only current/next hour available, use for immediate decisions
+        elif forecast_remaining is not None:
+            return self._analyze_remaining_forecast(forecast_remaining)
         elif forecast_current is not None or forecast_next is not None:
-            current_kwh = forecast_current or 0
-            next_kwh = forecast_next or 0
-            
-            # Use hourly forecasts for immediate solar assessment
-            solar_production_factor = min(1.0, max(current_kwh, next_kwh) / GOOD_HOURLY_SOLAR_PRODUCTION)
-            
-            expected_production = (
-                "good" if solar_production_factor > MODERATE_SOLAR_THRESHOLD else
-                "moderate" if solar_production_factor > POOR_SOLAR_THRESHOLD else
-                "poor"
-            )
+            return self._analyze_hourly_forecast(forecast_current, forecast_next)
+        
+        return self._create_no_data_forecast_result()
 
-            return {
-                "forecast_available": True,
-                "solar_production_factor": solar_production_factor,
-                "expected_solar_production": expected_production,
-                "forecast_current_kwh": current_kwh,
-                "forecast_next_kwh": next_kwh,
-                "reason": f"Hourly: current {current_kwh:.1f}kWh, next {next_kwh:.1f}kWh"
-            }
-
-        # No usable forecast data
+    def _create_no_forecast_result(self) -> Dict[str, Any]:
+        """Create result when no forecast entities are configured."""
         return {
             "forecast_available": False,
-            "solar_production_factor": NEUTRAL_PRICE_POSITION,
+            "solar_production_factor": DEFAULT_ALGORITHM_THRESHOLDS.neutral_price_position,
+            "expected_solar_production": "unknown",
+            "reason": "No solar forecast entities configured"
+        }
+
+    def _analyze_daily_forecast(
+        self,
+        tomorrow: float,
+        today: float,
+        current: Optional[float],
+        next_hour: Optional[float],
+        remaining: Optional[float]
+    ) -> Dict[str, Any]:
+        """Analyze daily solar forecast."""
+        if today > 0:
+            solar_factor = min(1.0, tomorrow / today)
+        else:
+            solar_factor = DEFAULT_ALGORITHM_THRESHOLDS.neutral_price_position
+        
+        expected = self._categorize_solar_production(solar_factor)
+        
+        return {
+            "forecast_available": True,
+            "solar_production_factor": solar_factor,
+            "expected_solar_production": expected,
+            "forecast_current_kwh": current,
+            "forecast_next_kwh": next_hour,
+            "forecast_today_kwh": today,
+            "forecast_remaining_today_kwh": remaining,
+            "forecast_tomorrow_kwh": tomorrow,
+            "reason": f"Tomorrow {tomorrow:.1f}kWh vs today {today:.1f}kWh (factor: {solar_factor:.1%})"
+        }
+
+    def _analyze_remaining_forecast(self, remaining: float) -> Dict[str, Any]:
+        """Analyze remaining solar forecast."""
+        solar_factor = min(1.0, remaining / DEFAULT_POWER_ESTIMATES.typical_daily_solar_min)
+        expected = self._categorize_solar_production(solar_factor)
+        
+        return {
+            "forecast_available": True,
+            "solar_production_factor": solar_factor,
+            "expected_solar_production": expected,
+            "forecast_remaining_today_kwh": remaining,
+            "reason": f"Remaining today: {remaining:.1f}kWh"
+        }
+
+    def _analyze_hourly_forecast(
+        self,
+        current: Optional[float],
+        next_hour: Optional[float]
+    ) -> Dict[str, Any]:
+        """Analyze hourly solar forecast."""
+        current_kwh = current or 0
+        next_kwh = next_hour or 0
+        
+        solar_factor = min(1.0, max(current_kwh, next_kwh) / DEFAULT_POWER_ESTIMATES.good_hourly_solar)
+        expected = self._categorize_solar_production(solar_factor)
+        
+        return {
+            "forecast_available": True,
+            "solar_production_factor": solar_factor,
+            "expected_solar_production": expected,
+            "forecast_current_kwh": current_kwh,
+            "forecast_next_kwh": next_kwh,
+            "reason": f"Hourly: current {current_kwh:.1f}kWh, next {next_kwh:.1f}kWh"
+        }
+
+    def _create_no_data_forecast_result(self) -> Dict[str, Any]:
+        """Create result when forecast entities have no data."""
+        return {
+            "forecast_available": False,
+            "solar_production_factor": DEFAULT_ALGORITHM_THRESHOLDS.neutral_price_position,
             "expected_solar_production": "unknown",
             "reason": "Solar forecast entities configured but no data available"
         }
 
+    def _categorize_solar_production(self, factor: float) -> str:
+        """Categorize solar production based on factor."""
+        if factor > DEFAULT_ALGORITHM_THRESHOLDS.excellent_solar_threshold:
+            return "excellent"
+        elif factor > DEFAULT_ALGORITHM_THRESHOLDS.moderate_solar_threshold:
+            return "good"
+        elif factor > DEFAULT_ALGORITHM_THRESHOLDS.poor_solar_threshold:
+            return "moderate"
+        return "poor"
 
-    def _analyze_battery_status(self, battery_soc_data: list[dict[str, Any]]) -> dict[str, Any]:
-        """Analyze battery status for all configured batteries with capacity-weighted calculations."""
+    def _analyze_battery_status(self, battery_soc_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze battery status for all configured batteries."""
+        # Validate battery data
+        is_valid, validation_msg = self.validator.validate_battery_data(battery_soc_data)
+        
         if not battery_soc_data:
-            return {
-                "average_soc": None,
-                "min_soc": None,
-                "max_soc": None,
-                "batteries_count": 0,
-                "batteries_full": False,
-            }
-
-        # Only include batteries with valid SOC values (not unavailable/unknown)
-        valid_batteries = [battery for battery in battery_soc_data if "soc" in battery and battery["soc"] is not None]
-
-        # If no valid SOC values are available, return safe defaults
+            return self._create_no_battery_result()
+        
+        # Filter valid batteries
+        valid_batteries = [
+            battery for battery in battery_soc_data
+            if "soc" in battery and battery["soc"] is not None
+        ]
+        
         if not valid_batteries:
-            _LOGGER.warning("All battery SOC sensors are unavailable - no charging decisions will be made")
-            return {
-                "average_soc": None,
-                "min_soc": None,
-                "max_soc": None,
-                "batteries_count": len(battery_soc_data),
-                "batteries_full": False,
-                "batteries_available": False,
-            }
-
-        min_soc_threshold = self.config.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)
-        max_soc_threshold = self.config.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
-        battery_capacities = self.config.get(CONF_BATTERY_CAPACITIES, {})
-
+            return self._create_unavailable_battery_result(len(battery_soc_data))
+        
+        # Calculate metrics
         soc_values = [battery["soc"] for battery in valid_batteries]
         min_soc = min(soc_values)
         max_soc = max(soc_values)
-
-        # Calculate capacity-weighted average SOC if capacities are configured
-        if battery_capacities:
-            total_stored_energy = 0.0
-            total_capacity = 0.0
-
-            for battery in valid_batteries:
-                entity_id = battery["entity_id"]
-                soc = battery["soc"]
-                capacity = battery_capacities.get(entity_id, DEFAULT_BATTERY_CAPACITY)  # Default if not configured
-
-                stored_energy = (soc / 100.0) * capacity
-                total_stored_energy += stored_energy
-                total_capacity += capacity
-
-                _LOGGER.debug("Battery %s: SOC=%.1f%%, Capacity=%.1fkWh, Stored=%.2fkWh",
-                             entity_id, soc, capacity, stored_energy)
-
-            if total_capacity > 0:
-                average_soc = (total_stored_energy / total_capacity) * 100.0
-                _LOGGER.debug("Capacity-weighted SOC: %.2fkWh/%.2fkWh = %.1f%%",
-                             total_stored_energy, total_capacity, average_soc)
-            else:
-                average_soc = sum(soc_values) / len(soc_values)
-                _LOGGER.warning("Total battery capacity is 0, falling back to simple average")
-        else:
-            # Fallback to simple arithmetic average when no capacities configured
-            average_soc = sum(soc_values) / len(soc_values)
-            _LOGGER.debug("No battery capacities configured, using simple average SOC: %.1f%%", average_soc)
-
+        
+        # Calculate weighted average if capacities configured
+        average_soc = self._calculate_weighted_average_soc(valid_batteries)
+        
+        min_threshold = self.config.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)
+        max_threshold = self.config.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
+        
         return {
             "average_soc": average_soc,
             "min_soc": min_soc,
             "max_soc": max_soc,
             "batteries_count": len(soc_values),
-            "batteries_full": min_soc >= max_soc_threshold,
-            "min_soc_threshold": min_soc_threshold,
-            "max_soc_threshold": max_soc_threshold,
-            "remaining_capacity_percent": max_soc_threshold - average_soc,
+            "batteries_full": min_soc >= max_threshold,
+            "min_soc_threshold": min_threshold,
+            "max_soc_threshold": max_threshold,
+            "remaining_capacity_percent": max_threshold - average_soc,
             "batteries_available": True,
-            "capacity_weighted": bool(battery_capacities),
-            "total_capacity": sum(battery_capacities.get(battery["entity_id"], DEFAULT_BATTERY_CAPACITY) for battery in valid_batteries) if battery_capacities else None,
+            "validation_status": validation_msg,
+            "capacity_weighted": bool(self.config.get(CONF_BATTERY_CAPACITIES)),
         }
 
-    def _get_time_context(self) -> dict[str, Any]:
-        """Get time-of-day context for charging decisions."""
-        now = datetime.now()
-        hour = now.hour
-
+    def _create_no_battery_result(self) -> Dict[str, Any]:
+        """Create result when no batteries configured."""
         return {
-            "current_hour": hour,
-            "is_night": NIGHT_START_HOUR <= hour or hour <= NIGHT_END_HOUR,
-            "is_early_morning": NIGHT_END_HOUR < hour <= EARLY_MORNING_END_HOUR,
-            "is_solar_peak": SOLAR_PEAK_START_HOUR <= hour <= SOLAR_PEAK_END_HOUR,
-            "is_evening": EVENING_START_HOUR <= hour <= EVENING_END_HOUR,
-            "hours_until_sunrise": max(0, (NIGHT_END_HOUR - hour) % 24),
-            "winter_season": now.month in WINTER_MONTHS  # Shorter days
+            "average_soc": None,
+            "min_soc": None,
+            "max_soc": None,
+            "batteries_count": 0,
+            "batteries_full": False,
+            "batteries_available": False,
+            "validation_status": "No battery entities configured",
         }
 
-    def _decide_battery_grid_charging_enhanced(
+    def _create_unavailable_battery_result(self, count: int) -> Dict[str, Any]:
+        """Create result when all batteries unavailable."""
+        return {
+            "average_soc": None,
+            "min_soc": None,
+            "max_soc": None,
+            "batteries_count": count,
+            "batteries_full": False,
+            "batteries_available": False,
+            "validation_status": "All battery SOC sensors unavailable",
+        }
+
+    def _calculate_weighted_average_soc(self, batteries: List[Dict[str, Any]]) -> float:
+        """Calculate capacity-weighted average SOC."""
+        capacities = self.config.get(CONF_BATTERY_CAPACITIES, {})
+        
+        if not capacities:
+            # Simple average
+            return sum(b["soc"] for b in batteries) / len(batteries)
+        
+        # Weighted average
+        total_energy = 0.0
+        total_capacity = 0.0
+        
+        for battery in batteries:
+            entity_id = battery["entity_id"]
+            soc = battery["soc"]
+            capacity = capacities.get(entity_id, DEFAULT_POWER_ESTIMATES.default_battery_capacity)
+            
+            energy = (soc / 100.0) * capacity
+            total_energy += energy
+            total_capacity += capacity
+            
+            _LOGGER.debug(
+                "Battery %s: SOC=%.1f%%, Capacity=%.1fkWh, Stored=%.2fkWh",
+                entity_id, soc, capacity, energy
+            )
+        
+        if total_capacity > 0:
+            return (total_energy / total_capacity) * 100.0
+        
+        return sum(b["soc"] for b in batteries) / len(batteries)
+
+    def _decide_battery_grid_charging(
         self,
-        price_analysis: dict[str, Any],
-        battery_analysis: dict[str, Any],
-        power_allocation: dict[str, Any],
-        solar_forecast: dict[str, Any],
-        time_context: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Enhanced battery charging decision with solar forecasting."""
-        # Safety checks first
+        price_analysis: Dict[str, Any],
+        battery_analysis: Dict[str, Any],
+        power_allocation: Dict[str, Any],
+        solar_forecast: Dict[str, Any],
+        time_context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Decide battery charging using strategy pattern."""
+        # Safety checks
         if battery_analysis.get("batteries_count", 0) == 0:
             return {
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": "No battery entities configured",
             }
-
-        # Check if battery data is available (not all sensors unavailable)
+        
         if not battery_analysis.get("batteries_available", True):
             return {
                 "battery_grid_charging": False,
-                "battery_grid_charging_reason": "All battery SOC sensors unavailable - no charging decision possible",
+                "battery_grid_charging_reason": battery_analysis.get(
+                    "validation_status",
+                    "Battery data unavailable"
+                ),
             }
-
+        
         if battery_analysis.get("batteries_full"):
+            max_threshold = battery_analysis.get("max_soc_threshold", 90)
             return {
                 "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"Batteries above {battery_analysis.get('max_soc_threshold', '?')}% SOC",
+                "battery_grid_charging_reason": f"Batteries above {max_threshold}% SOC",
             }
-
+        
         if not price_analysis.get("data_available", True):
             return {
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": "No price data available",
             }
-
-        # Get key values
-        average_soc = battery_analysis.get("average_soc", 0)
-        current_price = price_analysis.get("current_price")
-        is_low_price = price_analysis.get("is_low_price", False)
-        very_low_price = price_analysis.get("very_low_price", False)
-        solar_surplus = power_allocation.get("remaining_solar", 0)
-        solar_forecast_factor = solar_forecast.get("solar_production_factor", NEUTRAL_PRICE_POSITION)
-
-        # Get configurable thresholds
-        emergency_soc = self.config.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC)
-        significant_solar_threshold = self.config.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)
-        poor_forecast_threshold = self.config.get(CONF_POOR_SOLAR_FORECAST_THRESHOLD, DEFAULT_POOR_SOLAR_FORECAST) / 100.0
-        excellent_forecast_threshold = self.config.get(CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD, DEFAULT_EXCELLENT_SOLAR_FORECAST) / 100.0
-
-        # 1. EMERGENCY: Always charge if critically low (true emergency overrides price)
-        if average_soc < emergency_soc:
-            return {
-                "battery_grid_charging": True,
-                "battery_grid_charging_reason": f"Emergency charge - SOC {average_soc:.0f}% < {emergency_soc}% threshold, charging regardless of price ({current_price:.3f}€/kWh)",
-            }
-
-        # 2. SOLAR PRIORITY: Use allocated solar power (prevents race conditions)
-        allocated_solar = power_allocation.get("solar_for_batteries", 0)
-        remaining_solar = power_allocation.get("remaining_solar", 0)
-        if allocated_solar > 0:
-            return {
-                "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"Using allocated solar power ({allocated_solar}W) for batteries instead of grid",
-            }
-
-        # Avoid grid charging when batteries are nearly full with solar surplus
-        max_soc_threshold = battery_analysis.get("max_soc_threshold", 80)
-        if remaining_solar > 0 and average_soc >= max_soc_threshold - SOC_BUFFER:
-            return {
-                "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"Battery {average_soc:.0f}% nearly full with {remaining_solar}W solar surplus - preventing solar waste",
-            }
-
-        # 3. VERY LOW PRICE: Charge only if it makes sense (not when battery above grid charging limit + good conditions)
-        if very_low_price:
-            very_low_threshold_percent = self.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
-            grid_charging_limit_soc = self.config.get(CONF_GRID_BATTERY_CHARGING_LIMIT_SOC, DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC)
-            
-            # Don't charge from grid if battery above grid charging limit AND good conditions exist
-            if average_soc >= grid_charging_limit_soc:
-                # Check current solar surplus
-                if remaining_solar > 0:
-                    return {
-                        "battery_grid_charging": False,
-                        "battery_grid_charging_reason": f"Battery above grid charging limit ({average_soc:.0f}% ≥ {grid_charging_limit_soc}%) with {remaining_solar}W solar surplus - avoid grid charging despite very low price",
-                    }
-                
-                # Check if remaining solar forecast can reach target SOC (accounting for house consumption)
-                forecast_remaining_today = solar_forecast.get("forecast_remaining_today_kwh")
-                if forecast_remaining_today is not None:
-                    # Estimate surplus after house consumption (rough 50% assumption)
-                    estimated_surplus_kwh = forecast_remaining_today * HOUSE_CONSUMPTION_FACTOR
-                    # Estimate kWh needed to reach target SOC (rough 1% ≈ 0.1kWh assumption)
-                    target_soc = min(max_soc_threshold, MAX_TARGET_SOC)  # Don't go above max_soc_threshold or MAX_TARGET_SOC
-                    soc_deficit = max(0, target_soc - average_soc)
-                    kwh_needed = soc_deficit * KWH_PER_SOC_PERCENT
-                    
-                    if estimated_surplus_kwh >= kwh_needed:
-                        return {
-                            "battery_grid_charging": False,
-                            "battery_grid_charging_reason": f"Battery {average_soc:.0f}% with {forecast_remaining_today:.1f}kWh solar remaining (≈{estimated_surplus_kwh:.1f}kWh surplus) - sufficient to reach {target_soc}% - skip grid charging",
-                        }
-                
-                # Also check solar forecast - if tomorrow will be excellent, don't charge when above limit
-                if solar_forecast_factor > EXCELLENT_SOLAR_THRESHOLD:  # Excellent forecast
-                    return {
-                        "battery_grid_charging": False,
-                        "battery_grid_charging_reason": f"Battery above grid charging limit ({average_soc:.0f}% ≥ {grid_charging_limit_soc}%) + excellent solar forecast ({solar_forecast_factor:.0%}) - skip charging despite very low price",
-                    }
-            
-            return {
-                "battery_grid_charging": True,
-                "battery_grid_charging_reason": f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_threshold_percent}% of daily range",
-            }
-
-        # 4. TIME-AWARE & FORECAST-AWARE CHARGING: Main logic enhancement
-        is_night = time_context.get("is_night", False)
-        is_solar_peak = time_context.get("is_solar_peak", False)
-        winter_season = time_context.get("winter_season", False)
-
-        # CRITICAL FIX: Emergency charging override for price prediction logic
-        # Predictive price logic: skip charging if significant price drop expected, BUT NOT in emergency situations
-        significant_price_drop = price_analysis.get("significant_price_drop", False)
-        predictive_min_soc = self.config.get(CONF_PREDICTIVE_CHARGING_MIN_SOC, DEFAULT_PREDICTIVE_CHARGING_MIN_SOC)
-        if is_low_price and significant_price_drop and average_soc > predictive_min_soc:
-            # Additional safety check: don't wait for price drops if SOC is critically low or in winter nights
-            # Override price prediction in critical situations
-            emergency_soc_override = self.config.get(CONF_EMERGENCY_SOC_OVERRIDE, DEFAULT_EMERGENCY_SOC_OVERRIDE)
-            winter_night_soc_override = self.config.get(CONF_WINTER_NIGHT_SOC_OVERRIDE, DEFAULT_WINTER_NIGHT_SOC_OVERRIDE)
-            if average_soc < emergency_soc_override or (is_night and winter_season and average_soc < winter_night_soc_override):
-                return {
-                    "battery_grid_charging": True,
-                    "battery_grid_charging_reason": f"Emergency override - SOC {average_soc:.0f}% too low to wait for price drop (winter night: {is_night and winter_season})",
-                }
-
-            return {
-                "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"SOC {average_soc:.0f}% sufficient - waiting for significant price drop next hour ({price_analysis.get('next_price', '?'):.3f}€/kWh)",
-            }
-
-        if is_low_price:
-            # Time-of-day priority logic (avoid conflicts)
-
-            # Solar peak hours: Be conservative if solar is expected
-            if is_solar_peak and average_soc > CRITICAL_LOW_SOC and solar_forecast_factor > MODERATE_SOLAR_THRESHOLD:
-                solar_peak_emergency_soc = self.config.get(CONF_SOLAR_PEAK_EMERGENCY_SOC, DEFAULT_SOLAR_PEAK_EMERGENCY_SOC)
-                if average_soc < solar_peak_emergency_soc:
-                    return {
-                        "battery_grid_charging": True,
-                        "battery_grid_charging_reason": f"Emergency override during solar peak - SOC {average_soc:.0f}% < {solar_peak_emergency_soc}% too low to wait for solar",
-                    }
-
-                return {
-                    "battery_grid_charging": False,
-                    "battery_grid_charging_reason": f"Solar peak hours - SOC {average_soc:.0f}% sufficient, awaiting solar production (forecast: {solar_forecast_factor:.0%})",
-                }
-
-            # Night + Winter: Most aggressive (both conditions)
-            elif is_night and winter_season and average_soc < DEFAULT_HIGH_SOC_THRESHOLD:
-                return {
-                    "battery_grid_charging": True,
-                    "battery_grid_charging_reason": f"Night + Winter charging - SOC {average_soc:.0f}% at low price ({current_price:.3f}€/kWh) during off-peak winter hours",
-                }
-
-            # Night charging: More aggressive during off-peak hours
-            elif is_night and average_soc < DEFAULT_HIGH_SOC_THRESHOLD:
-                return {
-                    "battery_grid_charging": True,
-                    "battery_grid_charging_reason": f"Night charging - SOC {average_soc:.0f}% at low price ({current_price:.3f}€/kWh) during off-peak hours",
-                }
-
-            # Winter season: More aggressive due to shorter days (only if not night)
-            elif winter_season and average_soc < DEFAULT_MEDIUM_SOC_THRESHOLD:
-                return {
-                    "battery_grid_charging": True,
-                    "battery_grid_charging_reason": f"Winter season - SOC {average_soc:.0f}% < {DEFAULT_MEDIUM_SOC_THRESHOLD}% with low price ({current_price:.3f}€/kWh)",
-                }
-
-            # Restructured logic to avoid overlaps - order matters!
-
-            # CRITICAL LOW: SOC < 30% = always charge (override forecasts)
-            if average_soc < CRITICAL_LOW_SOC:
-                return {
-                    "battery_grid_charging": True,
-                    "battery_grid_charging_reason": f"Critical SOC {average_soc:.0f}% < {CRITICAL_LOW_SOC}% - charge despite {solar_forecast.get('expected_solar_production', 'any')} solar forecast",
-                }
-
-            # LOW + POOR FORECAST: low SOC + poor forecast = charge
-            elif average_soc < LOW_SOC_THRESHOLD and solar_forecast_factor < poor_forecast_threshold:
-                return {
-                    "battery_grid_charging": True,
-                    "battery_grid_charging_reason": f"Low SOC {average_soc:.0f}% + {solar_forecast.get('expected_solar_production', 'poor')} solar forecast ({solar_forecast_factor:.0%} < {poor_forecast_threshold:.0%}) - charge while price low",
-                }
-
-            # MEDIUM + EXCELLENT: threshold range + excellent forecast = skip
-            elif DEFAULT_CRITICAL_SOC_THRESHOLD <= average_soc <= DEFAULT_HIGH_SOC_THRESHOLD and solar_forecast_factor > excellent_forecast_threshold:
-                return {
-                    "battery_grid_charging": False,
-                    "battery_grid_charging_reason": f"SOC {average_soc:.0f}% sufficient + {solar_forecast.get('expected_solar_production', 'excellent')} solar forecast ({solar_forecast_factor:.0%} > {excellent_forecast_threshold:.0%})",
-                }
-
-            # MEDIUM: SOC below threshold = charge (default for medium levels)
-            elif average_soc < DEFAULT_MEDIUM_SOC_THRESHOLD:
-                return {
-                    "battery_grid_charging": True,
-                    "battery_grid_charging_reason": f"Medium SOC {average_soc:.0f}% < 50% + {solar_forecast.get('expected_solar_production', 'moderate')} conditions - charge at low price",
-                }
-
-        # 5. DEFAULT: Price not favorable
-        current = price_analysis.get("current_price")
-        position = price_analysis.get("price_position", NEUTRAL_PRICE_POSITION)
-        return {
-            "battery_grid_charging": False,
-            "battery_grid_charging_reason": f"Price not favorable ({current:.3f}€/kWh, {position:.0%} of daily range) for SOC {average_soc:.0f}%",
+        
+        # Create context for strategies
+        context = {
+            "price_analysis": price_analysis,
+            "battery_analysis": battery_analysis,
+            "power_allocation": power_allocation,
+            "solar_forecast": solar_forecast,
+            "time_context": time_context,
+            "config": self.config,
         }
-
+        
+        # Use strategy manager
+        should_charge, reason = self.strategy_manager.evaluate(context)
+        
+        return {
+            "battery_grid_charging": should_charge,
+            "battery_grid_charging_reason": reason,
+        }
 
     def _decide_car_grid_charging(
         self,
-        price_analysis: dict[str, Any],
-        battery_analysis: dict[str, Any],
-        power_analysis: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Decide whether to charge car from grid or solar based on price analysis and battery status."""
+        price_analysis: Dict[str, Any],
+        battery_analysis: Dict[str, Any],
+        power_allocation: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Decide whether to charge car from grid."""
         if not price_analysis.get("data_available", True):
             return {
                 "car_grid_charging": False,
                 "car_grid_charging_reason": "No price data available",
             }
-
-        allocated_solar = power_analysis.get("solar_for_car", 0)
-        average_soc = battery_analysis.get("average_soc")
-        max_soc_threshold = battery_analysis.get("max_soc_threshold", 80)
-
-        # Special case: Solar power allocated for car = enable solar-only car charging
+        
+        allocated_solar = power_allocation.get("solar_for_car", 0)
+        
+        # Solar-only charging
         if allocated_solar > 0:
             return {
-                "car_grid_charging": True,  # This will be solar-only via charger limit logic
-                "car_solar_only": True,  # Flag for clarity
+                "car_grid_charging": True,
+                "car_solar_only": True,
                 "car_grid_charging_reason": f"Using allocated solar power ({allocated_solar}W) for car charging, no grid usage",
             }
-
-        # Add predictive logic for car charging too
-        significant_price_drop = price_analysis.get("significant_price_drop", False)
-        is_low_price = price_analysis.get("is_low_price", False)
-
-        # Skip charging if significant price drop expected (even if currently low price)
-        if is_low_price and significant_price_drop:
+        
+        # Check predictive logic
+        if price_analysis.get("is_low_price") and price_analysis.get("significant_price_drop"):
+            next_price = price_analysis.get("next_price", 0)
+            current_price = price_analysis.get("current_price", 0)
             return {
                 "car_grid_charging": False,
-                "car_grid_charging_reason": f"Waiting for significant price drop next hour ({price_analysis.get('next_price', '?'):.3f}€/kWh) - better than current ({price_analysis.get('current_price', '?'):.3f}€/kWh)",
+                "car_grid_charging_reason": f"Waiting for significant price drop next hour ({next_price:.3f}€/kWh) - better than current ({current_price:.3f}€/kWh)",
             }
-
-        if not is_low_price:
-            current = price_analysis.get("current_price")
-            threshold = price_analysis.get("price_threshold")
+        
+        # Price-based decisions
+        if not price_analysis.get("is_low_price"):
+            current = price_analysis.get("current_price", 0)
+            threshold = price_analysis.get("price_threshold", 0.15)
             return {
                 "car_grid_charging": False,
                 "car_grid_charging_reason": f"Price too high ({current:.3f}€/kWh) - threshold: {threshold:.3f}€/kWh",
             }
-
+        
         if price_analysis.get("very_low_price"):
-            current = price_analysis.get("current_price")
-            very_low_threshold_percent = self.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
+            current = price_analysis.get("current_price", 0)
+            very_low_percent = self.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
             return {
                 "car_grid_charging": True,
-                "car_grid_charging_reason": f"Very low price ({current:.3f}€/kWh) - bottom {very_low_threshold_percent}% of daily range",
+                "car_grid_charging_reason": f"Very low price ({current:.3f}€/kWh) - bottom {very_low_percent}% of daily range",
             }
-
+        
         if price_analysis.get("price_trend_improving"):
-            next_price = price_analysis.get("next_price")
+            next_price = price_analysis.get("next_price", 0)
             return {
                 "car_grid_charging": False,
                 "car_grid_charging_reason": f"Price improving next hour ({next_price:.3f}€/kWh) - wait for better price",
             }
-
-        if price_analysis.get("is_low_price"):
-            current = price_analysis.get("current_price")
-            return {
-                "car_grid_charging": True,
-                "car_grid_charging_reason": f"Low price ({current:.3f}€/kWh) - below threshold",
-            }
-
-        current = price_analysis.get("current_price")
-        position = price_analysis.get("price_position", NEUTRAL_PRICE_POSITION)
+        
+        current = price_analysis.get("current_price", 0)
         return {
-            "car_grid_charging": False,
-            "car_grid_charging_reason": f"Price not favorable - current: {current:.3f}€/kWh, position: {position:.0%}",
+            "car_grid_charging": True,
+            "car_grid_charging_reason": f"Low price ({current:.3f}€/kWh) - below threshold",
+        }
+
+    def _decide_feedin_solar(
+        self,
+        price_analysis: Dict[str, Any],
+        power_allocation: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Decide whether to enable solar feed-in."""
+        if not price_analysis.get("data_available", True):
+            return {
+                "feedin_solar": False,
+                "feedin_solar_reason": "No price data available",
+            }
+        
+        current_price = price_analysis.get("current_price", 0)
+        feedin_threshold = self.config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
+        remaining_solar = power_allocation.get("remaining_solar", 0)
+        
+        enable_feedin = current_price >= feedin_threshold
+        action = "enable" if enable_feedin else "disable"
+        
+        return {
+            "feedin_solar": enable_feedin,
+            "feedin_solar_reason": (f"Price {current_price:.3f}€/kWh {'≥' if enable_feedin else '<'} "
+                                   f"{feedin_threshold:.3f}€/kWh - {action} solar export "
+                                   f"(surplus: {remaining_solar}W)"),
         }
 
     def _calculate_charger_limit(
         self,
-        price_analysis: dict[str, Any],
-        battery_analysis: dict[str, Any],
-        power_allocation: dict[str, Any],
-        data: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Calculate optimal charger power limit based on energy management scenario."""
-        car_charging_power = data.get("car_charging_power", 0)  # Get from original data
-        min_car_charging_threshold = self.config.get(CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD)
-
-        if car_charging_power <= min_car_charging_threshold:
+        price_analysis: Dict[str, Any],
+        battery_analysis: Dict[str, Any],
+        power_allocation: Dict[str, Any],
+        data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Calculate optimal charger power limit."""
+        car_charging_power = data.get("car_charging_power", 0)
+        min_threshold = self.config.get(CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD)
+        
+        if car_charging_power <= min_threshold:
             return {
                 "charger_limit": 0,
                 "charger_limit_reason": "Car not currently charging",
             }
-
-        # Check if car charging is allowed from grid
+        
+        # Check if car charging is allowed
         car_grid_charging = data.get("car_grid_charging", False)
         
-        # If car charging is not allowed, limit to 1.4kW
         if not car_grid_charging:
             return {
                 "charger_limit": 1400,
                 "charger_limit_reason": "Car charging not allowed - limited to 1.4kW, battery usage still allowed",
             }
-
-        # Use allocated solar power instead of raw surplus
-        allocated_solar_for_car = power_allocation.get("solar_for_car", 0)
-        available_solar_surplus = power_allocation.get("remaining_solar", 0)
-        monthly_grid_peak = data.get("monthly_grid_peak", 0)
-        # Calculate safe grid setpoint
-        max_grid_setpoint = self._get_safe_grid_setpoint(monthly_grid_peak)
+        
+        # Handle solar-only charging
+        car_solar_only = data.get("car_solar_only", False)
+        allocated_solar = power_allocation.get("solar_for_car", 0)
+        
+        if car_solar_only and allocated_solar > 0:
+            limit = min(allocated_solar, DEFAULT_SYSTEM_LIMITS.max_car_charger_power)
+            return {
+                "charger_limit": int(limit),
+                "charger_limit_reason": f"Solar-only car charging - limited to allocated solar power ({int(limit)}W), no grid usage",
+            }
+        
+        # Calculate based on battery SOC and grid limits
         average_soc = battery_analysis.get("average_soc")
-
-        # If battery data is unavailable, use conservative approach
+        
         if average_soc is None:
-            # Still respect car charging restrictions even without battery data
             if not car_grid_charging:
                 return {
                     "charger_limit": 1400,
                     "charger_limit_reason": "Battery data unavailable, car charging not allowed - limited to 1.4kW",
                 }
-            charger_limit = min(max_grid_setpoint, MAX_CAR_CHARGER_LIMIT)
+            monthly_peak = data.get("monthly_grid_peak", 0)
+            max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
+            limit = min(max_setpoint, DEFAULT_SYSTEM_LIMITS.max_car_charger_power)
             return {
-                "charger_limit": int(charger_limit),
-                "charger_limit_reason": f"Battery data unavailable - conservative limit ({int(charger_limit)}W)",
+                "charger_limit": int(limit),
+                "charger_limit_reason": f"Battery data unavailable - conservative limit ({int(limit)}W)",
             }
-
+        
         max_soc_threshold = battery_analysis.get("max_soc_threshold", 80)
-        car_solar_only = data.get("car_solar_only", False)
-
-        # Use allocated solar power for solar-only car charging (replaces redundant logic)
-        if car_solar_only and allocated_solar_for_car > 0:
-            charger_limit = min(allocated_solar_for_car, MAX_CAR_CHARGER_LIMIT)
-            return {
-                "charger_limit": int(charger_limit),
-                "charger_limit_reason": f"Solar-only car charging - limited to allocated solar power ({int(charger_limit)}W), no grid usage",
-            }
-
-        # If battery < max_soc_threshold: Car gets grid setpoint only, surplus goes to batteries
+        monthly_peak = data.get("monthly_grid_peak", 0)
+        max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
+        
         if average_soc < max_soc_threshold:
-            charger_limit = min(max_grid_setpoint, MAX_CAR_CHARGER_LIMIT)
+            limit = min(max_setpoint, DEFAULT_SYSTEM_LIMITS.max_car_charger_power)
             return {
-                "charger_limit": int(charger_limit),
-                "charger_limit_reason": f"Battery {average_soc:.0f}% < {max_soc_threshold}% - car limited to grid setpoint ({int(charger_limit)}W), surplus for batteries",
+                "charger_limit": int(limit),
+                "charger_limit_reason": (f"Battery {average_soc:.0f}% < {max_soc_threshold}% - "
+                                        f"car limited to grid setpoint ({int(limit)}W), surplus for batteries"),
             }
-
-        # If battery ≥ max_soc_threshold: Car can use remaining surplus + grid setpoint
-        available_power = available_solar_surplus + max_grid_setpoint
-        charger_limit = min(available_power, MAX_CAR_CHARGER_LIMIT)
+        
+        available_surplus = power_allocation.get("remaining_solar", 0)
+        available_power = available_surplus + max_setpoint
+        limit = min(available_power, DEFAULT_SYSTEM_LIMITS.max_car_charger_power)
+        
         return {
-            "charger_limit": int(charger_limit),
-            "charger_limit_reason": f"Battery {average_soc:.0f}% ≥ {max_soc_threshold}% - car can use remaining surplus + grid ({int(charger_limit)}W = {available_solar_surplus}W + {max_grid_setpoint}W)",
+            "charger_limit": int(limit),
+            "charger_limit_reason": (f"Battery {average_soc:.0f}% ≥ {max_soc_threshold}% - "
+                                    f"car can use remaining surplus + grid ({int(limit)}W = "
+                                    f"{available_surplus}W + {max_setpoint}W)"),
         }
 
     def _calculate_grid_setpoint(
         self,
-        price_analysis: dict[str, Any],
-        battery_analysis: dict[str, Any],
-        power_allocation: dict[str, Any],
-        data: dict[str, Any],
+        price_analysis: Dict[str, Any],
+        battery_analysis: Dict[str, Any],
+        power_allocation: Dict[str, Any],
+        data: Dict[str, Any],
         charger_limit: int,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Calculate grid setpoint based on energy management scenario."""
-        car_charging_power = data.get("car_charging_power", 0)  # Original data
-        allocated_solar_for_car = power_allocation.get("solar_for_car", 0)  # Allocated power
-        monthly_grid_peak = data.get("monthly_grid_peak", 0)
-        battery_grid_charging = data.get("battery_grid_charging", False)  # Now has fresh data
+        car_charging_power = data.get("car_charging_power", 0)
+        battery_grid_charging = data.get("battery_grid_charging", False)
+        car_grid_charging = data.get("car_grid_charging", False)
         average_soc = battery_analysis.get("average_soc")
-
-        # Ignore car charging power below threshold (standby/measurement noise)
-        min_car_charging_threshold = self.config.get(CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD)
-        significant_car_charging = car_charging_power >= min_car_charging_threshold
-
+        
+        min_threshold = self.config.get(CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD)
+        significant_car_charging = car_charging_power >= min_threshold
+        
         # Handle unavailable battery data
         if average_soc is None:
-            car_grid_charging = data.get("car_grid_charging", False)
             if significant_car_charging and car_grid_charging:
-                max_grid_setpoint = self._get_safe_grid_setpoint(monthly_grid_peak)
-                grid_setpoint = min(car_charging_power, max_grid_setpoint)
+                monthly_peak = data.get("monthly_grid_peak", 0)
+                max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
+                grid_setpoint = min(car_charging_power, max_setpoint)
                 return {
                     "grid_setpoint": int(grid_setpoint),
                     "grid_setpoint_reason": f"Battery data unavailable - grid only for car ({int(grid_setpoint)}W)",
                 }
-            else:
-                return {
-                    "grid_setpoint": 0,
-                    "grid_setpoint_reason": "Battery data unavailable - no grid power allocated" + (" (car charging not allowed)" if significant_car_charging else ""),
-                }
-
-        # Determine maximum grid setpoint
-        max_grid_setpoint = self._get_safe_grid_setpoint(monthly_grid_peak)
-
-        # Use car_solar_only flag instead of redundant logic
-        max_soc_threshold = battery_analysis.get("max_soc_threshold", 80)
+            return {
+                "grid_setpoint": 0,
+                "grid_setpoint_reason": "Battery data unavailable - no grid power allocated",
+            }
+        
+        # Solar-only car charging
         car_solar_only = data.get("car_solar_only", False)
-        car_grid_charging = data.get("car_grid_charging", False)
-
         if significant_car_charging and car_solar_only:
             return {
                 "grid_setpoint": 0,
-                "grid_setpoint_reason": f"Solar-only car charging detected - grid setpoint 0W",
+                "grid_setpoint_reason": "Solar-only car charging detected - grid setpoint 0W",
             }
-
-        # Calculate grid setpoint based on actual needs and charging decisions
-        grid_setpoint = 0
+        
+        # Calculate grid needs
+        monthly_peak = data.get("monthly_grid_peak", 0)
+        max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
+        
         grid_setpoint_parts = []
-        
-        # Car grid power need (only if car charging is allowed)
         car_grid_need = 0
-        if significant_car_charging and car_grid_charging:
-            # Calculate how much grid power the car actually needs
-            car_available_solar = allocated_solar_for_car + power_allocation.get("car_current_solar_usage", 0)
-            car_grid_need = max(0, car_charging_power - car_available_solar)
-            car_grid_need = min(car_grid_need, max_grid_setpoint)  # Limited by peak capacity
-            grid_setpoint_parts.append(f"car {int(car_grid_need)}W")
         
-        # Battery grid power need (if battery charging is allowed)
+        if significant_car_charging and car_grid_charging:
+            allocated_solar = power_allocation.get("solar_for_car", 0)
+            car_current_solar = power_allocation.get("car_current_solar_usage", 0)
+            car_available_solar = allocated_solar + car_current_solar
+            car_grid_need = max(0, min(car_charging_power - car_available_solar, max_setpoint))
+            if car_grid_need > 0:
+                grid_setpoint_parts.append(f"car {int(car_grid_need)}W")
+        
         battery_grid_need = 0
         if battery_grid_charging:
-            remaining_grid_capacity = max(0, max_grid_setpoint - car_grid_need)
+            remaining_capacity = max(0, max_setpoint - car_grid_need)
             max_battery_power = self.config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)
-            battery_grid_need = min(remaining_grid_capacity, max_battery_power)
-            grid_setpoint_parts.append(f"battery {int(battery_grid_need)}W")
+            battery_grid_need = min(remaining_capacity, max_battery_power)
+            if battery_grid_need > 0:
+                grid_setpoint_parts.append(f"battery {int(battery_grid_need)}W")
         
-        # Total grid setpoint
         grid_setpoint = car_grid_need + battery_grid_need
         max_grid_power = self._get_max_grid_power()
-        grid_setpoint = min(grid_setpoint, max_grid_setpoint, max_grid_power)
+        grid_setpoint = min(grid_setpoint, max_setpoint, max_grid_power)
         
-        # Create reason string
+        # Create reason
         if not grid_setpoint_parts:
             reason = "No grid charging needed"
         else:
