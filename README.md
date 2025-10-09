@@ -273,38 +273,12 @@ else:
     return DISABLE_FEEDIN  # Keep surplus local
 ```
 
-## ⚙️ Configurable Safety Parameters
+## ⚙️ Car Charging Restrictions
 
-All safety limits are user-configurable through the Home Assistant UI:
-
-### Power Limits
-- **max_battery_power**: Maximum battery charging power (Default: 3000W)
-- **max_car_power**: Maximum car charging power (Default: 11000W)  
-- **max_grid_power**: Absolute grid power safety limit (Default: 15000W)
-- **min_car_charging_threshold**: Minimum power to consider car "charging" (Default: 100W)
-
-### Car Charging Restrictions
-When `car_grid_charging = False` (charging not allowed):
-- **Charger Limit**: Fixed at 1.4kW maximum
+When `binary_sensor.electricity_planner_car_grid_charging` is **False** (charging not allowed):
+- **Charger Limit**: Fixed at 1.4kW maximum (prevents high-power charging)
 - **Grid Power for Car**: 0W (no grid power allocated to car)
-- **Battery Independence**: Battery charging unaffected by car restrictions
-
-### SOC Thresholds
-- **emergency_soc_threshold**: True emergency SOC (Default: 15%)
-- **emergency_soc_override**: SOC for predictive/solar overrides (Default: 25%)
-- **winter_night_soc_override**: Winter night emergency charging SOC (Default: 40%)
-- **solar_peak_emergency_soc**: Solar peak hours emergency SOC (Default: 25%)
-- **predictive_charging_min_soc**: Minimum SOC for predictive logic (Default: 30%)
-
-### Price & Solar Thresholds
-- **price_threshold**: Base price threshold for "low price" (Default: €0.15/kWh)
-- **very_low_price_threshold**: Percentage of daily range for "very low" (Default: 30%)
-- **significant_solar_threshold**: Minimum solar surplus considered significant (Default: 1000W)
-- **feedin_price_threshold**: Minimum price to enable solar export (Default: €0.05/kWh)
-
-### Forecast Thresholds
-- **poor_solar_forecast_threshold**: Below this % = poor forecast (Default: 40%)
-- **excellent_solar_forecast_threshold**: Above this % = excellent forecast (Default: 80%)
+- **Battery Independence**: Battery charging operates independently and unaffected by car restrictions
 
 ## 🔍 Decision Validation
 
@@ -355,15 +329,6 @@ sensor.electricity_planner_decision_diagnostics:
 - ✅ `grid_setpoint` ≤ `max_grid_power`
 - ✅ Battery allocation ≤ `max_battery_power`
 
-## 🚨 Emergency Override Logic
-
-The system implements multiple layers of emergency overrides to prevent battery discharge during critical situations:
-
-1. **True Emergency**: `SOC < emergency_soc_threshold` → Charge regardless of price
-2. **Predictive Override**: `SOC < emergency_soc_override` → Override price waiting logic
-3. **Winter Night Override**: `SOC < winter_night_soc_override` during winter nights
-4. **Solar Peak Override**: `SOC < solar_peak_emergency_soc` during solar peak hours
-
 ## 📈 Time Context Logic
 
 **Time Periods Defined:**
@@ -383,48 +348,66 @@ The integration provides a comprehensive configuration flow:
 
 All parameters are reconfigurable through Home Assistant's integration options without restarting the integration.
 
-## 🎯 Usage Examples
+## 🎯 Decision Examples
 
-### Example 1: Winter Night Emergency Override
-- **Conditions**: 02:00 AM, December, SOC 35%, Low price with significant drop expected
-- **Normal Logic**: Wait for price drop
-- **Emergency Override**: SOC 35% < 40% (winter_night_soc_override) → **CHARGE**
-- **Reason**: "Emergency override - SOC 35% too low to wait for price drop (winter night: true)"
+### Emergency Override Examples
 
-### Example 2: Solar Peak Conservation
-- **Conditions**: 12:00 PM, SOC 35%, Low price, Excellent solar forecast (85%)
-- **Solar Peak Logic**: Normally wait for solar
-- **Emergency Override**: SOC 35% > 25% (solar_peak_emergency_soc) → **NO CHARGE**
-- **Reason**: "Solar peak hours - SOC 35% sufficient, awaiting solar production (forecast: 85%)"
+#### Winter Night Emergency Override
+```
+Conditions: 02:00 AM, December, SOC 35%, Low price with significant drop expected
+Normal Logic: Wait for price drop
+Emergency Override: SOC 35% < 40% (winter_night_soc_override) → CHARGE
+Reason: "Emergency override - SOC 35% too low to wait for price drop (winter night: true)"
+```
 
-### Example 3: Power Allocation Validation
-- **Available Solar**: 2500W
-- **Car Drawing**: 3000W
-- **Allocation**: Car current usage: 2500W, Batteries: 0W, Car additional: 0W, Remaining: 0W
-- **Validation**: `total_allocated (2500W) ≤ solar_surplus (2500W)` ✅
+#### Solar Peak Conservation
+```
+Conditions: 12:00 PM, SOC 35%, Low price, Excellent solar forecast (85%)
+Solar Peak Logic: Normally wait for solar
+Emergency Override: SOC 35% > 25% (solar_peak_emergency_soc) → NO CHARGE
+Reason: "Solar peak hours - SOC 35% sufficient, awaiting solar production (forecast: 85%)"
+```
 
-### Example 4: Predictive Charging with Emergency Override
-- **Conditions**: 23:00 PM, SOC 20%, Low price (€0.10/kWh), Next hour: €0.05/kWh
-- **Predictive Logic**: Would normally wait for better price
-- **Emergency Override**: SOC 20% < 25% (emergency_soc_override) → **CHARGE**
-- **Reason**: "Emergency override - SOC 20% too low to wait for price drop"
+#### Predictive Charging with Emergency Override
+```
+Conditions: 23:00 PM, SOC 20%, Low price (€0.10/kWh), Next hour: €0.05/kWh
+Predictive Logic: Would normally wait for better price
+Emergency Override: SOC 20% < 25% (emergency_soc_override) → CHARGE
+Reason: "Emergency override - SOC 20% too low to wait for price drop"
+```
 
-### Example 5: Configured Safety Limits Applied
-- **Solar Surplus**: 15000W (unusual spike)
-- **Max Battery Power**: 5000W (user configured)
-- **Max Car Power**: 7000W (user configured)
-- **Allocation**: Batteries: 5000W, Car: 7000W, Remaining: 3000W
-- **Safety**: All allocations respect configured limits
+### Power Allocation Examples
 
-### Example 6: Car Charging Restriction Active
-- **Conditions**: High price period, car charging not allowed
-- **Car Drawing**: 5000W (actual consumption)
-- **Car Grid Charging**: False (not allowed due to high price)
-- **Battery Grid Charging**: True (battery still allowed)
-- **Outputs**:
-  - **Charger Limit**: 1400W (1.4kW restriction)
-  - **Grid Setpoint**: 3000W (battery power only, 0W for car)
-  - **Reason**: "Car charging not allowed - grid power only for battery charging"
+#### Solar Power Allocation
+```
+Available Solar: 2500W
+Car Drawing: 3000W
+Allocation: Car current usage: 2500W, Batteries: 0W, Car additional: 0W, Remaining: 0W
+Validation: total_allocated (2500W) ≤ solar_surplus (2500W) ✅
+```
+
+#### Safety Limits Applied
+```
+Solar Surplus: 15000W (unusual spike)
+Max Battery Power: 5000W (user configured)
+Max Car Power: 7000W (user configured)
+Allocation: Batteries: 5000W, Car: 7000W, Remaining: 3000W
+Safety: All allocations respect configured limits
+```
+
+### Car Charging Restriction Example
+
+```
+Conditions: High price period, car charging not allowed
+Car Drawing: 5000W (actual consumption)
+Car Grid Charging: False (not allowed due to high price)
+Battery Grid Charging: True (battery still allowed)
+
+Outputs:
+  Charger Limit: 1400W (1.4kW restriction)
+  Grid Setpoint: 3000W (battery power only, 0W for car)
+  Reason: "Car charging not allowed - grid power only for battery charging"
+```
 
 ## 📈 Price Analysis Logic
 
@@ -467,7 +450,7 @@ The integration updates every **30 seconds** and immediately when any tracked en
 
 Each update triggers a complete re-evaluation of both battery and car charging recommendations.
 
-## 📋 Example Scenarios
+## 📋 Real-World Scenarios
 
 ### Scenario 1: Very Low Price Period
 ```
@@ -632,30 +615,69 @@ Decision:
 - **Solar Forecast Remaining Today Entity**: Remaining solar forecast for today (kWh)
 - **Solar Forecast Tomorrow Entity**: Solar forecast for tomorrow (kWh)
 
-### Settings
+### Configuration Parameters
+
+#### SOC Thresholds
 | Setting | Default | Description |
 |---------|---------|-------------|
 | Min SOC Threshold | 20% | Minimum battery level to maintain |
 | Max SOC Threshold | 90% | Target maximum battery level |
+| Emergency SOC Threshold | 15% | True emergency - charge regardless of price |
+| Emergency SOC Override | 25% | Override predictive logic when below this SOC |
+| Winter Night SOC Override | 40% | Winter night emergency charging threshold |
+| Solar Peak Emergency SOC | 25% | Minimum SOC during solar peak hours |
+| Predictive Charging Min SOC | 30% | Minimum SOC for predictive charging logic |
+
+#### Price Thresholds
+| Setting | Default | Description |
+|---------|---------|-------------|
 | Price Threshold | 0.15 €/kWh | Price below which charging is economical |
-| Solar Forecast Hours | 12 | Hours ahead to consider for solar planning |
-| Car Charging Hours | 8 | Preferred car charging duration |
+| Very Low Price Threshold | 30% | Percentage of daily range considered "very low" |
+| Feed-in Price Threshold | 0.05 €/kWh | Minimum price to enable solar export |
+| Base Grid Setpoint | 2500W | Base grid power setpoint |
+
+#### Power Limits
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Max Battery Power | 3000W | Maximum battery charging power |
+| Max Car Power | 11000W | Maximum car charging power |
+| Max Grid Power | 15000W | Absolute grid power safety limit |
+| Min Car Charging Threshold | 100W | Minimum power to consider car "charging" |
+| Significant Solar Threshold | 1000W | Minimum solar surplus considered significant |
+
+#### Solar Forecast Thresholds
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Poor Solar Forecast Threshold | 40% | Below this percentage = poor solar forecast |
+| Excellent Solar Forecast Threshold | 80% | Above this percentage = excellent solar forecast |
 
 ## 📊 Created Entities
 
-### Sensors
-- `sensor.electricity_planner_grid_charging_decision` - Overall grid charging status
-- `sensor.electricity_planner_battery_analysis` - Battery status, SOC and capacity data
-- `sensor.electricity_planner_price_analysis` - Comprehensive Nord Pool price analysis
-- `sensor.electricity_planner_power_analysis` - Solar production, house consumption, calculated surplus, car charging power
-- **`sensor.electricity_planner_car_charger_limit`** - ⚡ **Car charger power limit** (1.4kW when charging restricted)
-- **`sensor.electricity_planner_grid_setpoint`** - ⚡ **Grid power setpoint** (excludes car when restricted)
+### Binary Sensors (Primary Outputs)
+- **`binary_sensor.electricity_planner_battery_grid_charging`** - **Charge batteries from grid** (True only when economically favorable)
+  - Attributes: `reason` - Detailed explanation for the decision
+- **`binary_sensor.electricity_planner_car_grid_charging`** - **Charge car from grid** (True only when economically favorable)
+  - Attributes: `reason` - Detailed explanation for the decision
+- `binary_sensor.electricity_planner_low_electricity_price` - Price below configured threshold
+- `binary_sensor.electricity_planner_solar_production_active` - Solar currently producing power
 
-### Binary Sensors (Key Outputs)
-- **`binary_sensor.electricity_planner_battery_grid_charging`** - ✅ **Charge batteries from grid** (True only when price favorable)
-- **`binary_sensor.electricity_planner_car_grid_charging`** - ✅ **Charge car from grid** (True only when price favorable)
-- `binary_sensor.electricity_planner_low_electricity_price` - Price below threshold
-- `binary_sensor.electricity_planner_solar_production_active` - Solar currently producing
+### Analysis Sensors
+- `sensor.electricity_planner_battery_analysis` - Battery SOC, capacity, and status data
+- `sensor.electricity_planner_price_analysis` - Nord Pool price positioning and analysis
+- `sensor.electricity_planner_power_analysis` - Solar production, consumption, and surplus calculations
+- `sensor.electricity_planner_decision_diagnostics` - Complete decision reasoning and validation data
+
+### Control Sensors
+- **`sensor.electricity_planner_car_charger_limit`** - Recommended car charger power limit (W)
+  - 1400W when grid charging not allowed
+  - Up to max_car_power when allowed
+- **`sensor.electricity_planner_grid_setpoint`** - Recommended grid power setpoint (W)
+  - Attributes: `grid_setpoint_reason` - Explanation of calculation
+
+### Threshold Visibility Sensors
+- `sensor.electricity_planner_min_soc_threshold` - Configured minimum SOC threshold
+- `sensor.electricity_planner_max_soc_threshold` - Configured maximum SOC threshold
+- `sensor.electricity_planner_emergency_soc_threshold` - Configured emergency SOC threshold
 
 ## 🔧 Integration with External Systems
 
