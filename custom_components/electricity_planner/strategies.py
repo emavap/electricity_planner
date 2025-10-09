@@ -5,15 +5,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Tuple
 import logging
 
-from .defaults import (
-    DEFAULT_ALGORITHM_THRESHOLDS,
-    DEFAULT_TIME_SCHEDULE,
-    DEFAULT_POWER_ESTIMATES,
-)
-from .dynamic_threshold import (
-    DynamicThresholdAnalyzer,
-    PriceRankingStrategy,
-)
+from .defaults import DEFAULT_ALGORITHM_THRESHOLDS
+from .dynamic_threshold import DynamicThresholdAnalyzer
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -159,15 +152,17 @@ class SolarAwareChargingStrategy(ChargingStrategy):
         solar_factor = solar.get("solar_production_factor", 0.5)
 
         # During solar peak hours with good forecast - wait for solar unless emergency
-        if is_solar_peak and average_soc > DEFAULT_ALGORITHM_THRESHOLDS.critical_low_soc:
-            if solar_factor > DEFAULT_ALGORITHM_THRESHOLDS.moderate_solar_threshold:
-                solar_peak_emergency = config.get("solar_peak_emergency_soc", 25)
-                if average_soc < solar_peak_emergency:
-                    return True, (f"Emergency override during solar peak - SOC {average_soc:.0f}% < "
-                                f"{solar_peak_emergency}% too low to wait for solar")
+        solar_peak_emergency = config.get("solar_peak_emergency_soc", 25)
 
-                return False, (f"Solar peak hours - SOC {average_soc:.0f}% sufficient, awaiting solar production "
-                             f"(forecast: {solar_factor:.0%})")
+        if is_solar_peak and solar_factor > DEFAULT_ALGORITHM_THRESHOLDS.moderate_solar_threshold:
+            # Emergency override if SOC too low
+            if average_soc < solar_peak_emergency:
+                return True, (f"Emergency override during solar peak - SOC {average_soc:.0f}% < "
+                            f"{solar_peak_emergency}% too low to wait for solar")
+
+            # Wait for solar if SOC is sufficient
+            return False, (f"Solar peak hours - SOC {average_soc:.0f}% sufficient, awaiting solar production "
+                         f"(forecast: {solar_factor:.0%})")
 
         return False, ""
 
@@ -223,7 +218,6 @@ class DynamicPriceStrategy(ChargingStrategy):
     def __init__(self):
         """Initialize dynamic price strategy."""
         self.dynamic_analyzer = None
-        self.ranking_strategy = PriceRankingStrategy(window_hours=24)
     
     def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
         """Check if charging should occur based on dynamic price analysis."""
