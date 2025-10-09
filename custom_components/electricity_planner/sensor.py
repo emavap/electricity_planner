@@ -1,7 +1,6 @@
 """Sensor platform for Electricity Planner."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
@@ -9,6 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
@@ -278,10 +278,10 @@ class DataAvailabilitySensor(ElectricityPlannerSensorBase):
     @property
     def native_value(self) -> int | None:
         """Return the duration in seconds that data has been unavailable."""
-        if not hasattr(self.coordinator, '_data_unavailable_since') or not self.coordinator._data_unavailable_since:
+        if not self.coordinator.data_unavailable_since:
             return 0  # Data is available or never was unavailable
 
-        unavailable_duration = datetime.now() - self.coordinator._data_unavailable_since
+        unavailable_duration = dt_util.utcnow() - self.coordinator.data_unavailable_since
         return int(unavailable_duration.total_seconds())
 
     @property
@@ -293,15 +293,15 @@ class DataAvailabilitySensor(ElectricityPlannerSensorBase):
         attributes = {}
 
         # Add availability information
-        if hasattr(self.coordinator, '_last_successful_update'):
-            attributes["last_successful_update"] = self.coordinator._last_successful_update.isoformat()
+        if self.coordinator.last_successful_update:
+            attributes["last_successful_update"] = self.coordinator.last_successful_update.isoformat()
 
-        if hasattr(self.coordinator, '_data_unavailable_since') and self.coordinator._data_unavailable_since:
-            attributes["data_unavailable_since"] = self.coordinator._data_unavailable_since.isoformat()
+        if self.coordinator.data_unavailable_since:
+            attributes["data_unavailable_since"] = self.coordinator.data_unavailable_since.isoformat()
 
         attributes.update({
-            "notification_sent": getattr(self.coordinator, '_notification_sent', False),
-            "data_currently_available": self.coordinator.data.get("price_analysis", {}).get("data_available", False),
+            "notification_sent": self.coordinator.notification_sent,
+            "data_currently_available": self.coordinator.is_data_available(),
         })
 
         return attributes

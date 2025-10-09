@@ -356,8 +356,15 @@ class StrategyManager:
 
         # Default decision if no strategy provided a reason
         battery = context.get("battery_analysis", {})
-        position = price.get("price_position", 0.5)
+        position = price.get("price_position")
         average_soc = battery.get("average_soc", 0)
 
-        return False, (f"Price not favorable ({current_price:.3f}€/kWh, "
-                      f"{position:.0%} of daily range) for SOC {average_soc:.0f}%")
+        price_fragment = (
+            f"{current_price:.3f}€/kWh" if current_price is not None else "unknown price"
+        )
+        position_fragment = (
+            f"{position:.0%} of daily range" if position is not None else "unknown price position"
+        )
+
+        return False, (f"Price not favorable ({price_fragment}, "
+                      f"{position_fragment}) for SOC {average_soc:.0f}%")
