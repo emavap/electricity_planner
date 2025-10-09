@@ -34,7 +34,6 @@ class AlgorithmThresholds:
     """Algorithm decision thresholds."""
     soc_safety_margin: int = 5  # % - Safety margin to prevent waste
     soc_buffer: int = 10  # % - Buffer for various SOC checks
-    critical_low_soc: int = 30  # % - Always charge below this
     low_soc_threshold: int = 40  # % - Low SOC for decision logic
     medium_soc_threshold: int = 50  # % - Medium SOC charging threshold
     high_soc_threshold: int = 60  # % - High SOC threshold for time-based
