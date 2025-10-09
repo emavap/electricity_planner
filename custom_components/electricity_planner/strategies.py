@@ -84,53 +84,27 @@ class SolarPriorityStrategy(ChargingStrategy):
 
 class VeryLowPriceStrategy(ChargingStrategy):
     """Charge when price is in bottom percentage of daily range."""
-    
+
     def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
         """Check if price is very low."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
-        solar = context.get("solar_forecast", {})
         config = context.get("config", {})
-        allocation = context.get("power_allocation", {})
-        
+
         if not price.get("very_low_price", False):
             return False, ""
-        
+
+        # Simple logic: Very low price → charge (unless battery is full)
+        max_soc = battery.get("max_soc_threshold", 90)
+        average_soc = battery.get("average_soc", 0)
+
+        if average_soc >= max_soc:
+            return False, ""  # Let other strategies handle full battery
+
         current_price = price.get("current_price", 0)
         very_low_threshold = config.get("very_low_price_threshold", 30)
-        grid_charging_limit = config.get("grid_battery_charging_limit_soc", 80)
-        average_soc = battery.get("average_soc", 0)
-        remaining_solar = allocation.get("remaining_solar", 0)
-        
-        # Check if we should skip charging despite very low price
-        if average_soc >= grid_charging_limit:
-            # Check current solar
-            if remaining_solar > 0:
-                return False, (f"Battery above grid charging limit ({average_soc:.0f}% ≥ {grid_charging_limit}%) "
-                             f"with {remaining_solar}W solar surplus - avoid grid charging despite very low price")
-            
-            # Check solar forecast
-            forecast_remaining = solar.get("forecast_remaining_today_kwh")
-            if forecast_remaining is not None:
-                estimated_surplus = forecast_remaining * DEFAULT_POWER_ESTIMATES.house_consumption_factor
-                max_soc = battery.get("max_soc_threshold", 90)
-                target_soc = min(max_soc, DEFAULT_ALGORITHM_THRESHOLDS.max_target_soc)
-                soc_deficit = max(0, target_soc - average_soc)
-                kwh_needed = soc_deficit * DEFAULT_POWER_ESTIMATES.kwh_per_soc_percent
-                
-                if estimated_surplus >= kwh_needed:
-                    return False, (f"Battery {average_soc:.0f}% with {forecast_remaining:.1f}kWh solar remaining "
-                                 f"(≈{estimated_surplus:.1f}kWh surplus) - sufficient to reach {target_soc}% - "
-                                 f"skip grid charging")
-            
-            # Check if tomorrow has excellent solar
-            solar_factor = solar.get("solar_production_factor", 0.5)
-            if solar_factor > DEFAULT_ALGORITHM_THRESHOLDS.excellent_solar_threshold:
-                return False, (f"Battery above grid charging limit ({average_soc:.0f}% ≥ {grid_charging_limit}%) "
-                             f"+ excellent solar forecast ({solar_factor:.0%}) - skip charging despite very low price")
-        
         return True, f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_threshold}% of daily range"
-    
+
     def get_priority(self) -> int:
         return 3
 
@@ -203,47 +177,42 @@ class SolarAwareChargingStrategy(ChargingStrategy):
 
 class SOCBasedChargingStrategy(ChargingStrategy):
     """Charging based on SOC levels and solar forecast."""
-    
+
     def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
         """Check SOC-based charging conditions."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
         solar = context.get("solar_forecast", {})
         config = context.get("config", {})
-        
+
         if not price.get("is_low_price", False):
             return False, ""
-        
+
         average_soc = battery.get("average_soc", 0)
         solar_factor = solar.get("solar_production_factor", 0.5)
         poor_threshold = config.get("poor_solar_forecast_threshold", 40) / 100
         excellent_threshold = config.get("excellent_solar_forecast_threshold", 80) / 100
         expected_solar = solar.get("expected_solar_production", "moderate")
-        
-        # Critical low - always charge
-        if average_soc < DEFAULT_ALGORITHM_THRESHOLDS.critical_low_soc:
-            return True, (f"Critical SOC {average_soc:.0f}% < {DEFAULT_ALGORITHM_THRESHOLDS.critical_low_soc}% - "
-                         f"charge despite {expected_solar} solar forecast")
-        
-        # Low + poor forecast
+
+        # Low SOC + poor solar forecast → charge
         if average_soc < DEFAULT_ALGORITHM_THRESHOLDS.low_soc_threshold and solar_factor < poor_threshold:
             return True, (f"Low SOC {average_soc:.0f}% + {expected_solar} solar forecast "
                          f"({solar_factor:.0%} < {poor_threshold:.0%}) - charge while price low")
-        
-        # Medium + excellent forecast - skip
-        if (DEFAULT_ALGORITHM_THRESHOLDS.critical_low_soc <= average_soc <= 
-            DEFAULT_ALGORITHM_THRESHOLDS.high_soc_threshold and 
+
+        # Medium SOC + excellent solar forecast → skip and wait for solar
+        if (average_soc >= DEFAULT_ALGORITHM_THRESHOLDS.low_soc_threshold and
+            average_soc <= DEFAULT_ALGORITHM_THRESHOLDS.high_soc_threshold and
             solar_factor > excellent_threshold):
             return False, (f"SOC {average_soc:.0f}% sufficient + {expected_solar} solar forecast "
                           f"({solar_factor:.0%} > {excellent_threshold:.0%})")
-        
-        # Medium SOC - charge
+
+        # Medium SOC → charge at low price
         if average_soc < DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold:
             return True, (f"Medium SOC {average_soc:.0f}% < {DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold}% + "
                          f"{expected_solar} conditions - charge at low price")
-        
+
         return False, ""
-    
+
     def get_priority(self) -> int:
         return 6
 
