@@ -70,7 +70,7 @@ from .const import (
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Electricity Planner."""
 
-    VERSION = 3
+    VERSION = 4
 
     def __init__(self):
         """Initialize the config flow."""

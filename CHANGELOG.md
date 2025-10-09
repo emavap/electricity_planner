@@ -5,6 +5,31 @@ All notable changes to the Electricity Planner integration will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2024-01-10
+
+### Changed
+- **Refactored Charging Strategies** - Removed redundant time-based logic
+  - Charging decisions now rely purely on Nord Pool price data
+  - Removed night/winter charging overrides (price data is more accurate)
+  - Renamed TimeBasedChargingStrategy → SolarAwareChargingStrategy
+  - Only solar peak timing is relevant (wait for free solar vs cheap grid)
+
+### Removed
+- **Deprecated Config Options**:
+  - `emergency_soc_override` - No longer needed with price-based logic
+  - `winter_night_soc_override` - Price data already reflects night/winter patterns
+
+### Fixed
+- **Critical Bug**: Night time detection logic (midnight-spanning windows)
+
+### Improved
+- **Simpler Logic** - Price data-driven decisions are clearer and more accurate
+- **Better Adaptation** - Responds to actual market conditions, not time assumptions
+- **Cleaner Code** - Removed 78 lines of redundant time-based checks
+
+### Migration
+- **v3 → v4**: Automatic migration removes deprecated time-based config options
+
 ## [2.1.0] - 2024-01-10
 
 ### Added

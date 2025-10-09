@@ -21,7 +21,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 # Current config version
-CURRENT_VERSION = 3
+CURRENT_VERSION = 4
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -73,6 +73,31 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         _LOGGER.info("Migration to version 3 complete")
 
+    if entry.version == 3:
+        # Migrate from version 3 to version 4
+        new_data = {**entry.data}
+
+        # Remove deprecated time-based config options (no longer used)
+        deprecated_keys = ["emergency_soc_override", "winter_night_soc_override"]
+        removed_count = 0
+        for key in deprecated_keys:
+            if key in new_data:
+                del new_data[key]
+                removed_count += 1
+                _LOGGER.info("Removed deprecated config option: %s", key)
+
+        if removed_count > 0:
+            _LOGGER.info("Removed %d deprecated time-based config options", removed_count)
+
+        # Update entry with cleaned data
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=4
+        )
+
+        _LOGGER.info("Migration to version 4 complete")
+
     return True
 
 
@@ -95,6 +120,12 @@ def migrate_config_data(old_data: Dict[str, Any], from_version: int) -> Dict[str
 
         if CONF_DYNAMIC_THRESHOLD_CONFIDENCE not in new_data:
             new_data[CONF_DYNAMIC_THRESHOLD_CONFIDENCE] = DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE
+
+    if from_version < 4:
+        # Remove deprecated time-based config options
+        deprecated_keys = ["emergency_soc_override", "winter_night_soc_override"]
+        for key in deprecated_keys:
+            new_data.pop(key, None)
 
     return new_data
 
