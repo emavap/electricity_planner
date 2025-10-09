@@ -10,6 +10,11 @@ from .defaults import (
     DEFAULT_TIME_SCHEDULE,
     DEFAULT_POWER_ESTIMATES,
 )
+from .dynamic_threshold import (
+    DynamicThresholdAnalyzer,
+    AdaptiveChargingStrategy,
+    PriceRankingStrategy,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -275,19 +280,100 @@ class SOCBasedChargingStrategy(ChargingStrategy):
         return 6
 
 
+class DynamicPriceStrategy(ChargingStrategy):
+    """Dynamic price-based charging with intelligent threshold logic."""
+    
+    def __init__(self):
+        """Initialize dynamic price strategy."""
+        self.dynamic_analyzer = None
+        self.ranking_strategy = PriceRankingStrategy(window_hours=24)
+    
+    def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
+        """Check if charging should occur based on dynamic price analysis."""
+        price = context.get("price_analysis", {})
+        battery = context.get("battery_analysis", {})
+        config = context.get("config", {})
+        
+        current_price = price.get("current_price")
+        if current_price is None:
+            return False, ""
+        
+        threshold = price.get("price_threshold", 0.15)
+        
+        # Initialize analyzer if needed
+        if self.dynamic_analyzer is None:
+            self.dynamic_analyzer = DynamicThresholdAnalyzer(threshold)
+        
+        # Never charge above absolute threshold
+        if current_price > threshold:
+            return False, f"Price {current_price:.3f}€/kWh exceeds maximum threshold {threshold:.3f}€/kWh"
+        
+        # Get dynamic analysis
+        analysis = self.dynamic_analyzer.analyze_price_window(
+            current_price=current_price,
+            highest_today=price.get("highest_price", current_price),
+            lowest_today=price.get("lowest_price", current_price),
+            next_price=price.get("next_price"),
+            next_6h_prices=context.get("next_6h_prices", [])
+        )
+        
+        # Check confidence threshold based on battery SOC
+        average_soc = battery.get("average_soc", 50)
+        
+        # Lower confidence requirement when battery is low
+        if average_soc < 30:
+            confidence_threshold = 0.4  # Charge more readily when low
+        elif average_soc < 50:
+            confidence_threshold = 0.5
+        elif average_soc < 70:
+            confidence_threshold = 0.6
+        else:
+            confidence_threshold = 0.7  # Be very selective when nearly full
+        
+        if analysis["confidence"] >= confidence_threshold:
+            # Add SOC context to reason
+            if average_soc < 30:
+                reason = f"{analysis['reason']} (Low SOC {average_soc:.0f}% - less selective)"
+            elif average_soc > 70:
+                reason = f"{analysis['reason']} (High SOC {average_soc:.0f}% - more selective)"
+            else:
+                reason = analysis["reason"]
+            
+            # Store analysis details in context for diagnostics
+            if "dynamic_price_analysis" not in context:
+                context["dynamic_price_analysis"] = analysis
+            
+            return True, reason
+        
+        return False, analysis["reason"]
+    
+    def get_priority(self) -> int:
+        return 4  # After emergency, solar, and very low price
+
+
 class StrategyManager:
     """Manage and execute charging strategies."""
     
-    def __init__(self):
+    def __init__(self, use_dynamic_threshold: bool = True):
         """Initialize strategy manager."""
+        # Always include core strategies
         self.strategies = [
             EmergencyChargingStrategy(),
             SolarPriorityStrategy(),
             VeryLowPriceStrategy(),
+        ]
+        
+        # Conditionally add dynamic or traditional strategies
+        if use_dynamic_threshold:
+            self.strategies.append(DynamicPriceStrategy())
+        
+        # Add remaining strategies
+        self.strategies.extend([
             PredictiveChargingStrategy(),
             TimeBasedChargingStrategy(),
             SOCBasedChargingStrategy(),
-        ]
+        ])
+        
         # Sort by priority
         self.strategies.sort(key=lambda s: s.get_priority())
     

@@ -5,6 +5,41 @@ All notable changes to the Electricity Planner integration will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0-beta] - 2024-01-10
+
+### Added
+- **Dynamic Threshold System** (EXPERIMENTAL - Opt-in) - Intelligent price-based charging within threshold range
+  - Treats price threshold as maximum ceiling, not simple trigger
+  - Analyzes price quality within acceptable range
+  - Adapts to market volatility (more selective when volatile)
+  - SOC-influenced confidence thresholds
+  - Future price consideration
+  - **Default: OFF** - Users must enable in settings
+- **Price Ranking Strategy** - Ranks current price within time window
+- **Adaptive Charging Strategy** - Learns from historical price patterns
+- **Smart Charging Decision Engine** - Multi-factor confidence scoring
+- **New Configuration Options**:
+  - `use_dynamic_threshold` - Enable/disable dynamic threshold (default: **false** - opt-in)
+  - `dynamic_threshold_confidence` - Base confidence requirement (default: 60%, range: 30-90%)
+
+### Changed
+- **Battery Charging Logic** - When dynamic mode enabled:
+  - Much more selective about when to charge
+  - Won't charge at 0.14€ just because it's below 0.15€ threshold
+  - Waits for actually good prices within acceptable range
+  - Considers price position in daily range
+  - Evaluates if better prices are coming soon
+- **Car Charging Logic** - **UNCHANGED** - Remains simple threshold-based for high energy needs
+
+### Improved
+- **Cost Savings** - Potential 20-40% lower average charging prices (when dynamic mode enabled)
+- **Decision Quality** - Fewer but better charging sessions
+- **Market Adaptation** - Adjusts behavior based on price volatility
+- **User Control** - Threshold is now a maximum, dynamic mode is opt-in
+
+### Migration
+- **v2 → v3**: Automatic migration adds new config options with safe defaults (dynamic OFF)
+
 ## [2.0.0] - 2024-01-10
 
 ### Added

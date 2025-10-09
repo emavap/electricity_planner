@@ -10,14 +10,18 @@ from homeassistant.core import HomeAssistant
 from .const import (
     CONF_GRID_BATTERY_CHARGING_LIMIT_SOC,
     CONF_BASE_GRID_SETPOINT,
+    CONF_USE_DYNAMIC_THRESHOLD,
+    CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_USE_DYNAMIC_THRESHOLD,
+    DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 # Current config version
-CURRENT_VERSION = 2
+CURRENT_VERSION = 3
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -46,27 +50,52 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         
         _LOGGER.info("Migration to version 2 complete")
-    
-    # Future migrations would go here
-    # elif entry.version == 2:
-    #     # Migrate from version 2 to version 3
-    #     ...
-    
+
+    if entry.version == 2:
+        # Migrate from version 2 to version 3
+        new_data = {**entry.data}
+
+        # Add dynamic threshold configuration options
+        if CONF_USE_DYNAMIC_THRESHOLD not in new_data:
+            new_data[CONF_USE_DYNAMIC_THRESHOLD] = DEFAULT_USE_DYNAMIC_THRESHOLD
+            _LOGGER.info("Added use_dynamic_threshold: %s", DEFAULT_USE_DYNAMIC_THRESHOLD)
+
+        if CONF_DYNAMIC_THRESHOLD_CONFIDENCE not in new_data:
+            new_data[CONF_DYNAMIC_THRESHOLD_CONFIDENCE] = DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE
+            _LOGGER.info("Added dynamic_threshold_confidence: %s%%", DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE)
+
+        # Update entry with new data
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=3
+        )
+
+        _LOGGER.info("Migration to version 3 complete")
+
     return True
 
 
 def migrate_config_data(old_data: Dict[str, Any], from_version: int) -> Dict[str, Any]:
     """Migrate configuration data structure (for testing)."""
     new_data = {**old_data}
-    
+
     if from_version < 2:
         # Add v2 fields if not present
         if CONF_GRID_BATTERY_CHARGING_LIMIT_SOC not in new_data:
             new_data[CONF_GRID_BATTERY_CHARGING_LIMIT_SOC] = DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC
-        
+
         if CONF_BASE_GRID_SETPOINT not in new_data:
             new_data[CONF_BASE_GRID_SETPOINT] = DEFAULT_BASE_GRID_SETPOINT
-    
+
+    if from_version < 3:
+        # Add v3 fields if not present
+        if CONF_USE_DYNAMIC_THRESHOLD not in new_data:
+            new_data[CONF_USE_DYNAMIC_THRESHOLD] = DEFAULT_USE_DYNAMIC_THRESHOLD
+
+        if CONF_DYNAMIC_THRESHOLD_CONFIDENCE not in new_data:
+            new_data[CONF_DYNAMIC_THRESHOLD_CONFIDENCE] = DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE
+
     return new_data
 
 

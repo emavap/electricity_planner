@@ -39,6 +39,8 @@ CONF_SOLAR_PEAK_EMERGENCY_SOC = "solar_peak_emergency_soc"
 CONF_PREDICTIVE_CHARGING_MIN_SOC = "predictive_charging_min_soc"
 CONF_GRID_BATTERY_CHARGING_LIMIT_SOC = "grid_battery_charging_limit_soc"
 CONF_BASE_GRID_SETPOINT = "base_grid_setpoint"
+CONF_USE_DYNAMIC_THRESHOLD = "use_dynamic_threshold"
+CONF_DYNAMIC_THRESHOLD_CONFIDENCE = "dynamic_threshold_confidence"
 
 # Default Threshold Values
 DEFAULT_MIN_SOC = 20
@@ -61,6 +63,8 @@ DEFAULT_WINTER_NIGHT_SOC_OVERRIDE = 40  # SOC threshold for winter night emergen
 DEFAULT_SOLAR_PEAK_EMERGENCY_SOC = 25  # SOC below which to charge even during solar peak
 DEFAULT_PREDICTIVE_CHARGING_MIN_SOC = 30  # Minimum SOC for predictive charging logic
 DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC = 80  # SOC above which grid battery charging becomes very selective
+DEFAULT_USE_DYNAMIC_THRESHOLD = False  # Use intelligent dynamic threshold logic (opt-in)
+DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE = 60  # Default confidence threshold (60%)
 
 # Algorithm Constants
 DEFAULT_SIGNIFICANT_PRICE_DROP_THRESHOLD = 0.15  # 15% price drop threshold

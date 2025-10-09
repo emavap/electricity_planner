@@ -45,6 +45,8 @@ from .const import (
     CONF_SOLAR_PEAK_EMERGENCY_SOC,
     CONF_PREDICTIVE_CHARGING_MIN_SOC,
     CONF_BASE_GRID_SETPOINT,
+    CONF_USE_DYNAMIC_THRESHOLD,
+    CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
@@ -64,13 +66,15 @@ from .const import (
     DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_USE_DYNAMIC_THRESHOLD,
+    DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
 )
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Electricity Planner."""
 
-    VERSION = 2
+    VERSION = 3
 
     def __init__(self):
         """Initialize the config flow."""
@@ -291,6 +295,18 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     min=0.0, max=1.0, step=0.01, unit_of_measurement="€/kWh"
                 )
             ),
+            vol.Optional(
+                CONF_USE_DYNAMIC_THRESHOLD,
+                default=DEFAULT_USE_DYNAMIC_THRESHOLD
+            ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+                default=DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=30, max=90, step=5, unit_of_measurement="%"
+                )
+            ),
         })
 
         return self.async_show_form(
@@ -299,12 +315,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "min_soc": "Minimum battery charge level to maintain",
                 "max_soc": "Maximum battery charge level target",
-                "price_threshold": "Price threshold for charging decisions",
+                "price_threshold": "Price threshold for charging decisions (maximum ceiling)",
                 "emergency_soc": "Emergency SOC level that triggers charging regardless of price",
                 "very_low_price": "Percentage threshold for 'very low' price in daily range",
                 "significant_solar": "Solar surplus threshold considered significant",
                 "poor_forecast": "Solar forecast below this percentage is considered poor",
                 "excellent_forecast": "Solar forecast above this percentage is considered excellent",
+                "use_dynamic_threshold": "Enable intelligent price analysis (more selective, better prices)",
+                "dynamic_threshold_confidence": "Confidence required for dynamic charging (higher = more selective)",
             },
         )
 
@@ -610,6 +628,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0.0, max=1.0, step=0.01, unit_of_measurement="€/kWh"
+                )
+            ),
+            vol.Optional(
+                CONF_USE_DYNAMIC_THRESHOLD,
+                default=current_config.get(CONF_USE_DYNAMIC_THRESHOLD, DEFAULT_USE_DYNAMIC_THRESHOLD)
+            ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+                default=current_config.get(CONF_DYNAMIC_THRESHOLD_CONFIDENCE, DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=30, max=90, step=5, unit_of_measurement="%"
                 )
             ),
             vol.Optional(

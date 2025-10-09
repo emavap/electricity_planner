@@ -33,6 +33,8 @@ from .const import (
     CONF_PREDICTIVE_CHARGING_MIN_SOC,
     CONF_GRID_BATTERY_CHARGING_LIMIT_SOC,
     CONF_BASE_GRID_SETPOINT,
+    CONF_USE_DYNAMIC_THRESHOLD,
+    CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
@@ -52,6 +54,8 @@ from .const import (
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
     DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_USE_DYNAMIC_THRESHOLD,
+    DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN,
 )
 
@@ -84,7 +88,11 @@ class ChargingDecisionEngine:
         self.config = config
         self.validator = DataValidator()
         self.price_calculator = PriceCalculator()
-        self.strategy_manager = StrategyManager()
+        
+        # Initialize strategy manager with dynamic threshold configuration
+        use_dynamic = config.get(CONF_USE_DYNAMIC_THRESHOLD, DEFAULT_USE_DYNAMIC_THRESHOLD)
+        self.strategy_manager = StrategyManager(use_dynamic_threshold=use_dynamic)
+        
         self.power_validator = PowerAllocationValidator()
 
     def _get_max_grid_power(self) -> int:
