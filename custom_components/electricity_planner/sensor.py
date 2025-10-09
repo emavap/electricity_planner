@@ -644,8 +644,6 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "max_car_power": config.get("max_car_power", 11000),
                 "max_grid_power": config.get("max_grid_power", 15000),
                 "min_car_charging_threshold": config.get("min_car_charging_threshold", 100),
-                "emergency_soc_override": config.get("emergency_soc_override", 25),
-                "winter_night_soc_override": config.get("winter_night_soc_override", 40),
                 "solar_peak_emergency_soc": config.get("solar_peak_emergency_soc", 25),
                 "predictive_charging_min_soc": config.get("predictive_charging_min_soc", 30),
                 "significant_solar_threshold": config.get("significant_solar_threshold", 1000),
@@ -675,18 +673,11 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
             return False
 
         emergency_soc = config.get("emergency_soc_threshold", 15)
-        emergency_soc_override = config.get("emergency_soc_override", 25)
-        winter_night_soc_override = config.get("winter_night_soc_override", 40)
         solar_peak_emergency_soc = config.get("solar_peak_emergency_soc", 25)
-
-        is_night = time_context.get("is_night", False)
-        winter_season = time_context.get("winter_season", False)
         is_solar_peak = time_context.get("is_solar_peak", False)
 
         return (
             average_soc < emergency_soc or
-            average_soc < emergency_soc_override or
-            (is_night and winter_season and average_soc < winter_night_soc_override) or
             (is_solar_peak and average_soc < solar_peak_emergency_soc)
         )
 

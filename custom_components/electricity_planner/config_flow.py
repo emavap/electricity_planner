@@ -40,8 +40,6 @@ from .const import (
     CONF_MAX_CAR_POWER,
     CONF_MAX_GRID_POWER,
     CONF_MIN_CAR_CHARGING_THRESHOLD,
-    CONF_EMERGENCY_SOC_OVERRIDE,
-    CONF_WINTER_NIGHT_SOC_OVERRIDE,
     CONF_SOLAR_PEAK_EMERGENCY_SOC,
     CONF_PREDICTIVE_CHARGING_MIN_SOC,
     CONF_BASE_GRID_SETPOINT,
@@ -61,8 +59,6 @@ from .const import (
     DEFAULT_MAX_CAR_POWER,
     DEFAULT_MAX_GRID_POWER,
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
-    DEFAULT_EMERGENCY_SOC_OVERRIDE,
-    DEFAULT_WINTER_NIGHT_SOC_OVERRIDE,
     DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
@@ -371,22 +367,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             ),
             vol.Optional(
-                CONF_EMERGENCY_SOC_OVERRIDE,
-                default=DEFAULT_EMERGENCY_SOC_OVERRIDE
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=15, max=50, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_WINTER_NIGHT_SOC_OVERRIDE,
-                default=DEFAULT_WINTER_NIGHT_SOC_OVERRIDE
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=20, max=70, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
                 CONF_SOLAR_PEAK_EMERGENCY_SOC,
                 default=DEFAULT_SOLAR_PEAK_EMERGENCY_SOC
             ): selector.NumberSelector(
@@ -420,8 +400,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "max_car_power": "Maximum power limit for car charging",
                 "max_grid_power": "Maximum power limit from grid (safety limit)",
                 "min_car_charging_threshold": "Minimum power to consider car 'charging'",
-                "emergency_soc_override": "SOC below which emergency overrides apply",
-                "winter_night_soc_override": "SOC threshold for winter night emergency charging",
                 "solar_peak_emergency_soc": "SOC below which to charge even during solar peak",
                 "predictive_charging_min_soc": "Minimum SOC for predictive charging logic",
                 "base_grid_setpoint": "Base minimum grid setpoint when no monthly peak data available",
@@ -672,22 +650,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=50, max=500, step=50, unit_of_measurement="W"
-                )
-            ),
-            vol.Optional(
-                CONF_EMERGENCY_SOC_OVERRIDE,
-                default=current_config.get(CONF_EMERGENCY_SOC_OVERRIDE, DEFAULT_EMERGENCY_SOC_OVERRIDE)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=15, max=50, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_WINTER_NIGHT_SOC_OVERRIDE,
-                default=current_config.get(CONF_WINTER_NIGHT_SOC_OVERRIDE, DEFAULT_WINTER_NIGHT_SOC_OVERRIDE)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=20, max=70, unit_of_measurement="%"
                 )
             ),
             vol.Optional(

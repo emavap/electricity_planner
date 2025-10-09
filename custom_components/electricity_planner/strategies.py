@@ -137,97 +137,66 @@ class VeryLowPriceStrategy(ChargingStrategy):
 
 class PredictiveChargingStrategy(ChargingStrategy):
     """Skip charging if significant price drop is expected."""
-    
+
     def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
         """Check if we should wait for better prices."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
         config = context.get("config", {})
-        time_ctx = context.get("time_context", {})
-        
+
         if not price.get("is_low_price", False):
             return False, ""
-        
+
         if not price.get("significant_price_drop", False):
             return False, ""
-        
+
         average_soc = battery.get("average_soc", 0)
         predictive_min = config.get("predictive_charging_min_soc", 30)
-        
+
+        # Too low to wait - let other strategies handle it
         if average_soc <= predictive_min:
-            return False, ""  # Too low to wait
-        
-        # Check for emergency overrides
-        emergency_override = config.get("emergency_soc_override", 25)
-        winter_night_override = config.get("winter_night_soc_override", 40)
-        is_night = time_ctx.get("is_night", False)
-        is_winter = time_ctx.get("winter_season", False)
-        
-        if average_soc < emergency_override:
-            return True, f"Emergency override - SOC {average_soc:.0f}% too low to wait for price drop"
-        
-        if is_night and is_winter and average_soc < winter_night_override:
-            return True, (f"Emergency override - SOC {average_soc:.0f}% too low to wait for price drop "
-                         f"(winter night: True)")
-        
+            return False, ""
+
+        # Wait for the price drop
         next_price = price.get("next_price", 0)
         return False, (f"SOC {average_soc:.0f}% sufficient - waiting for significant price drop "
                       f"next hour ({next_price:.3f}€/kWh)")
-    
+
     def get_priority(self) -> int:
         return 4
 
 
-class TimeBasedChargingStrategy(ChargingStrategy):
-    """Time-aware charging based on time of day and season."""
-    
+class SolarAwareChargingStrategy(ChargingStrategy):
+    """Solar-aware charging that waits for solar production when forecasted."""
+
     def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
-        """Check time-based charging conditions."""
+        """Check if we should wait for solar production instead of grid charging."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
         solar = context.get("solar_forecast", {})
         config = context.get("config", {})
         time_ctx = context.get("time_context", {})
-        
+
         if not price.get("is_low_price", False):
             return False, ""
-        
+
         average_soc = battery.get("average_soc", 0)
-        current_price = price.get("current_price", 0)
-        is_night = time_ctx.get("is_night", False)
         is_solar_peak = time_ctx.get("is_solar_peak", False)
-        is_winter = time_ctx.get("winter_season", False)
         solar_factor = solar.get("solar_production_factor", 0.5)
-        
-        # Solar peak hours - be conservative
+
+        # During solar peak hours with good forecast - wait for solar unless emergency
         if is_solar_peak and average_soc > DEFAULT_ALGORITHM_THRESHOLDS.critical_low_soc:
             if solar_factor > DEFAULT_ALGORITHM_THRESHOLDS.moderate_solar_threshold:
                 solar_peak_emergency = config.get("solar_peak_emergency_soc", 25)
                 if average_soc < solar_peak_emergency:
                     return True, (f"Emergency override during solar peak - SOC {average_soc:.0f}% < "
                                 f"{solar_peak_emergency}% too low to wait for solar")
-                
+
                 return False, (f"Solar peak hours - SOC {average_soc:.0f}% sufficient, awaiting solar production "
                              f"(forecast: {solar_factor:.0%})")
-        
-        # Night + Winter
-        if is_night and is_winter and average_soc < DEFAULT_ALGORITHM_THRESHOLDS.high_soc_threshold:
-            return True, (f"Night + Winter charging - SOC {average_soc:.0f}% at low price "
-                         f"({current_price:.3f}€/kWh) during off-peak winter hours")
-        
-        # Night only
-        if is_night and average_soc < DEFAULT_ALGORITHM_THRESHOLDS.high_soc_threshold:
-            return True, (f"Night charging - SOC {average_soc:.0f}% at low price "
-                         f"({current_price:.3f}€/kWh) during off-peak hours")
-        
-        # Winter only (daytime)
-        if is_winter and average_soc < DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold:
-            return True, (f"Winter season - SOC {average_soc:.0f}% < "
-                         f"{DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold}% with low price "
-                         f"({current_price:.3f}€/kWh)")
-        
+
         return False, ""
-    
+
     def get_priority(self) -> int:
         return 5
 
@@ -369,7 +338,7 @@ class StrategyManager:
         # Add remaining strategies
         self.strategies.extend([
             PredictiveChargingStrategy(),
-            TimeBasedChargingStrategy(),
+            SolarAwareChargingStrategy(),
             SOCBasedChargingStrategy(),
         ])
         
