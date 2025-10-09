@@ -234,10 +234,9 @@ class DynamicPriceStrategy(ChargingStrategy):
         # Initialize analyzer if needed
         if self.dynamic_analyzer is None:
             self.dynamic_analyzer = DynamicThresholdAnalyzer(threshold)
-        
-        # Never charge above absolute threshold
-        if current_price > threshold:
-            return False, f"Price {current_price:.3f}€/kWh exceeds maximum threshold {threshold:.3f}€/kWh"
+
+        # Price threshold check is now handled in StrategyManager.evaluate()
+        # This strategy only runs if price is below threshold
         
         # Get dynamic analysis
         analysis = self.dynamic_analyzer.analyze_price_window(
@@ -309,25 +308,56 @@ class StrategyManager:
         self.strategies.sort(key=lambda s: s.get_priority())
     
     def evaluate(self, context: Dict[str, Any]) -> Tuple[bool, str]:
-        """Evaluate all strategies and return decision."""
+        """Evaluate all strategies and return decision.
+
+        Strategies are evaluated in priority order:
+        - If a strategy returns True (charge), evaluation stops immediately
+        - If a strategy returns False with a reason, the reason is saved but evaluation continues
+        - This allows lower-priority safety nets (SOCBased) to override advisory decisions
+
+        Exception: EmergencyChargingStrategy can override price threshold check.
+        """
+        # Hard stop: Price too high (unless emergency overrides it)
+        price = context.get("price_analysis", {})
+        current_price = price.get("current_price")
+        threshold = price.get("price_threshold", 0.15)
+
+        if current_price is not None and current_price > threshold:
+            # Check if emergency charging applies
+            battery = context.get("battery_analysis", {})
+            config = context.get("config", {})
+            average_soc = battery.get("average_soc", 100)
+            emergency_threshold = config.get("emergency_soc_threshold", 15)
+
+            if average_soc < emergency_threshold:
+                return True, (f"Emergency charge - SOC {average_soc:.0f}% < {emergency_threshold}% threshold, "
+                            f"charging regardless of price ({current_price:.3f}€/kWh)")
+            else:
+                return False, f"Price {current_price:.3f}€/kWh exceeds maximum threshold {threshold:.3f}€/kWh"
+
+        last_reason = ""
+
         for strategy in self.strategies:
             should_charge, reason = strategy.should_charge(context)
-            
+
             if should_charge:
                 _LOGGER.debug("Strategy %s decided to charge: %s",
                             strategy.__class__.__name__, reason)
                 return True, reason
-            elif reason:  # Strategy made a decision not to charge
-                _LOGGER.debug("Strategy %s decided not to charge: %s",
+            elif reason:  # Strategy made a decision not to charge, but continue checking
+                _LOGGER.debug("Strategy %s suggests not charging: %s (continuing evaluation)",
                             strategy.__class__.__name__, reason)
-                return False, reason
-        
-        # Default decision if no strategy applies
-        price = context.get("price_analysis", {})
+                last_reason = reason
+
+        # If we got here, no strategy said to charge
+        # Use the last reason provided, or generate default
+        if last_reason:
+            return False, last_reason
+
+        # Default decision if no strategy provided a reason
         battery = context.get("battery_analysis", {})
-        current_price = price.get("current_price", 0)
         position = price.get("price_position", 0.5)
         average_soc = battery.get("average_soc", 0)
-        
+
         return False, (f"Price not favorable ({current_price:.3f}€/kWh, "
                       f"{position:.0%} of daily range) for SOC {average_soc:.0f}%")
