@@ -26,8 +26,11 @@ from .const import (
     CONF_SOLAR_FORECAST_TODAY_ENTITY,
     CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY,
     CONF_SOLAR_FORECAST_TOMORROW_ENTITY,
+    CONF_MIN_SOC_THRESHOLD,
+    CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
     CONF_EMERGENCY_SOC_THRESHOLD,
+    CONF_GRID_BATTERY_CHARGING_LIMIT_SOC,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
     CONF_POOR_SOLAR_FORECAST_THRESHOLD,
@@ -42,8 +45,11 @@ from .const import (
     CONF_BASE_GRID_SETPOINT,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+    DEFAULT_MIN_SOC,
+    DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_EMERGENCY_SOC,
+    DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
     DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
     DEFAULT_POOR_SOLAR_FORECAST,
@@ -64,7 +70,7 @@ from .const import (
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Electricity Planner."""
 
-    VERSION = 5
+    VERSION = 4
 
     def __init__(self):
         """Initialize the config flow."""
@@ -213,6 +219,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_safety_limits()
 
         schema = vol.Schema({
+            vol.Optional(
+                CONF_MIN_SOC_THRESHOLD,
+                default=DEFAULT_MIN_SOC
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=100, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_MAX_SOC_THRESHOLD,
+                default=DEFAULT_MAX_SOC
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=100, unit_of_measurement="%"
+                )
+            ),
             vol.Optional(
                 CONF_PRICE_THRESHOLD,
                 default=DEFAULT_PRICE_THRESHOLD
@@ -536,6 +558,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=5, max=50, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_GRID_BATTERY_CHARGING_LIMIT_SOC,
+                default=current_config.get(CONF_GRID_BATTERY_CHARGING_LIMIT_SOC, DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=60, max=95, unit_of_measurement="%"
                 )
             ),
             vol.Optional(

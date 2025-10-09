@@ -17,11 +17,13 @@ from .const import (
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
     CONF_EMERGENCY_SOC_THRESHOLD,
+    CONF_GRID_BATTERY_CHARGING_LIMIT_SOC,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
     DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
     DEFAULT_EMERGENCY_SOC,
+    DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC,
 )
 from .coordinator import ElectricityPlannerCoordinator
 
@@ -54,6 +56,7 @@ async def async_setup_entry(
         VeryLowPriceThresholdSensor(coordinator, entry, "_diagnostic"),
         SignificantSolarThresholdSensor(coordinator, entry, "_diagnostic"),
         EmergencySOCThresholdSensor(coordinator, entry, "_diagnostic"),
+        GridBatteryChargingLimitSOCSensor(coordinator, entry, "_diagnostic"),
     ]
 
     entities = automation_entities + diagnostic_entities
@@ -862,5 +865,40 @@ class EmergencySOCThresholdSensor(ElectricityPlannerSensorBase):
             "description": "SOC level below which emergency charging is triggered regardless of price",
             "average_soc": average_soc,
             "is_emergency": is_emergency,
+            "margin": average_soc - self.native_value if average_soc is not None else None,
+        }
+
+
+class GridBatteryChargingLimitSOCSensor(ElectricityPlannerSensorBase):
+    """Sensor displaying the grid battery charging limit SOC."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        """Initialize the grid battery charging limit SOC sensor."""
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Grid Battery Charging Limit SOC"
+        self._attr_unique_id = f"{entry.entry_id}_grid_battery_charging_limit_soc"
+        self._attr_icon = "mdi:battery-charging-80"
+        self._attr_device_class = None
+        self._attr_unit_of_measurement = "%"
+
+    @property
+    def native_value(self) -> int:
+        """Return the configured grid battery charging limit SOC."""
+        return self.coordinator.config.get(CONF_GRID_BATTERY_CHARGING_LIMIT_SOC, DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        if not self.coordinator.data:
+            return {}
+
+        battery_analysis = self.coordinator.data.get("battery_analysis", {})
+        average_soc = battery_analysis.get("average_soc")
+        above_limit = average_soc >= self.native_value if average_soc is not None else None
+
+        return {
+            "description": "SOC level above which grid battery charging becomes very selective - prefers solar over grid",
+            "average_soc": average_soc,
+            "above_limit": above_limit,
             "margin": average_soc - self.native_value if average_soc is not None else None,
         }

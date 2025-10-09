@@ -18,6 +18,8 @@ CONF_SOLAR_FORECAST_TODAY_ENTITY = "solar_forecast_today_entity"
 CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY = "solar_forecast_remaining_today_entity"
 CONF_SOLAR_FORECAST_TOMORROW_ENTITY = "solar_forecast_tomorrow_entity"
 
+CONF_MIN_SOC_THRESHOLD = "min_soc_threshold"
+CONF_MAX_SOC_THRESHOLD = "max_soc_threshold"
 CONF_PRICE_THRESHOLD = "price_threshold"
 CONF_EMERGENCY_SOC_THRESHOLD = "emergency_soc_threshold"
 CONF_VERY_LOW_PRICE_THRESHOLD = "very_low_price_threshold"
@@ -33,11 +35,14 @@ CONF_MAX_GRID_POWER = "max_grid_power"
 CONF_MIN_CAR_CHARGING_THRESHOLD = "min_car_charging_threshold"
 CONF_SOLAR_PEAK_EMERGENCY_SOC = "solar_peak_emergency_soc"
 CONF_PREDICTIVE_CHARGING_MIN_SOC = "predictive_charging_min_soc"
+CONF_GRID_BATTERY_CHARGING_LIMIT_SOC = "grid_battery_charging_limit_soc"
 CONF_BASE_GRID_SETPOINT = "base_grid_setpoint"
 CONF_USE_DYNAMIC_THRESHOLD = "use_dynamic_threshold"
 CONF_DYNAMIC_THRESHOLD_CONFIDENCE = "dynamic_threshold_confidence"
 
 # Default Threshold Values
+DEFAULT_MIN_SOC = 20
+DEFAULT_MAX_SOC = 90
 DEFAULT_PRICE_THRESHOLD = 0.15
 DEFAULT_EMERGENCY_SOC = 15
 DEFAULT_VERY_LOW_PRICE_THRESHOLD = 30  # Bottom 30% of daily range
@@ -53,6 +58,7 @@ DEFAULT_MAX_GRID_POWER = 15000  # 15kW typical home grid connection limit
 DEFAULT_MIN_CAR_CHARGING_THRESHOLD = 100  # Minimum power to consider car "charging"
 DEFAULT_SOLAR_PEAK_EMERGENCY_SOC = 25  # SOC below which to charge even during solar peak
 DEFAULT_PREDICTIVE_CHARGING_MIN_SOC = 30  # Minimum SOC for predictive charging logic
+DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC = 80  # SOC above which grid battery charging becomes very selective
 DEFAULT_USE_DYNAMIC_THRESHOLD = False  # Use intelligent dynamic threshold logic (opt-in)
 DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE = 60  # Default confidence threshold (60%)
 
