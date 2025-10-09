@@ -154,10 +154,10 @@ class BatteryAnalysisSensor(ElectricityPlannerSensorBase):
     def native_value(self) -> float | None:
         """Return the average battery SOC."""
         if not self.coordinator.data or "battery_analysis" not in self.coordinator.data:
-            return 0  # Return 0 instead of None when no data
+            return None
 
         avg_soc = self.coordinator.data["battery_analysis"].get("average_soc")
-        return avg_soc if avg_soc is not None else 0  # Return 0 if no batteries configured
+        return avg_soc
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -193,10 +193,10 @@ class PriceAnalysisSensor(ElectricityPlannerSensorBase):
     def native_value(self) -> float | None:
         """Return the current electricity price."""
         if not self.coordinator.data or "price_analysis" not in self.coordinator.data:
-            return 0.0  # Return 0 instead of None when no data
+            return None
 
         current_price = self.coordinator.data["price_analysis"].get("current_price")
-        return current_price if current_price is not None else 0.0  # Return 0 if no price data
+        return current_price
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -235,10 +235,9 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
     def native_value(self) -> float | None:
         """Return the solar surplus."""
         if not self.coordinator.data or "power_analysis" not in self.coordinator.data:
-            return 0.0  # Return 0 instead of None when no data
+            return None
 
-        solar_surplus = self.coordinator.data["power_analysis"].get("solar_surplus")
-        return solar_surplus if solar_surplus is not None else 0.0  # Return 0 if no power data
+        return self.coordinator.data["power_analysis"].get("solar_surplus")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
