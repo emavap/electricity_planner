@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Optional
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
@@ -51,7 +52,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self.decision_engine = ChargingDecisionEngine(hass, self.config)
 
         # Data availability tracking
-        self._last_successful_update = datetime.now()
+        self._last_successful_update = dt_util.utcnow()
         self._data_unavailable_since = None
         self._notification_sent = False
 
@@ -69,10 +70,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._setup_entity_listeners()
 
     def _is_data_available(self, data: dict[str, Any]) -> bool:
-        """Check if critical data is available for decisions."""
+        """Check if critical price data is available for decisions."""
         price_available = data.get("current_price") is not None
-        price_analysis_available = data.get("price_analysis", {}).get("data_available", False)
-        return price_available and price_analysis_available
+        price_range_available = (
+            data.get("highest_price") is not None
+            and data.get("lowest_price") is not None
+        )
+        # Allow price analysis to mark availability once decision engine runs
+        price_analysis_available = data.get("price_analysis", {}).get("data_available")
+        return bool(price_available and (price_range_available or price_analysis_available))
 
     def _setup_entity_listeners(self):
         """Set up listeners for entity state changes."""
@@ -122,7 +128,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         battery_entities = self.config.get(CONF_BATTERY_SOC_ENTITIES, [])
 
         if entity_id in critical_entities or entity_id in battery_entities:
-            now = datetime.now()
+            now = dt_util.utcnow()
 
             # Apply minimum interval throttling
             if (self._last_entity_update is None or
@@ -260,7 +266,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
     async def _check_data_availability(self, data: dict[str, Any]) -> None:
         """Check data availability and send notifications if needed."""
-        now = datetime.now()
+        now = dt_util.utcnow()
 
         # Check if critical data is available
         data_is_available = self._is_data_available(data)
@@ -317,6 +323,27 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error("Failed to send notification: %s", err)
 
+    def is_data_available(self) -> bool:
+        """Public helper for consumers needing availability."""
+        if not self.data:
+            return False
+        return self._is_data_available(self.data)
+
+    @property
+    def last_successful_update(self) -> Optional[datetime]:
+        """Expose last successful update timestamp."""
+        return self._last_successful_update
+
+    @property
+    def data_unavailable_since(self) -> Optional[datetime]:
+        """Expose when data became unavailable."""
+        return self._data_unavailable_since
+
+    @property
+    def notification_sent(self) -> bool:
+        """Expose notification flag."""
+        return self._notification_sent
+
     @property
     def min_soc_threshold(self) -> float:
         """Get minimum SOC threshold."""
@@ -331,4 +358,3 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
     def price_threshold(self) -> float:
         """Get price threshold."""
         return self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
-
