@@ -8,11 +8,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import (
-    CONF_GRID_BATTERY_CHARGING_LIMIT_SOC,
     CONF_BASE_GRID_SETPOINT,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
-    DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
@@ -21,7 +19,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 # Current config version
-CURRENT_VERSION = 4
+CURRENT_VERSION = 5
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -31,24 +29,19 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if entry.version == 1:
         # Migrate from version 1 to version 2
         new_data = {**entry.data}
-        
+
         # Add new configuration options introduced in v2
-        if CONF_GRID_BATTERY_CHARGING_LIMIT_SOC not in new_data:
-            new_data[CONF_GRID_BATTERY_CHARGING_LIMIT_SOC] = DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC
-            _LOGGER.info("Added grid battery charging limit SOC: %s%%", 
-                        DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC)
-        
         if CONF_BASE_GRID_SETPOINT not in new_data:
             new_data[CONF_BASE_GRID_SETPOINT] = DEFAULT_BASE_GRID_SETPOINT
             _LOGGER.info("Added base grid setpoint: %sW", DEFAULT_BASE_GRID_SETPOINT)
-        
+
         # Update entry with new data
         hass.config_entries.async_update_entry(
             entry,
             data=new_data,
             version=2
         )
-        
+
         _LOGGER.info("Migration to version 2 complete")
 
     if entry.version == 2:
@@ -98,6 +91,35 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         _LOGGER.info("Migration to version 4 complete")
 
+    if entry.version == 4:
+        # Migrate from version 4 to version 5
+        new_data = {**entry.data}
+
+        # Remove unused config options that were never actually used in decision logic
+        deprecated_keys = [
+            "min_soc_threshold",
+            "max_soc_threshold",
+            "grid_battery_charging_limit_soc"
+        ]
+        removed_count = 0
+        for key in deprecated_keys:
+            if key in new_data:
+                del new_data[key]
+                removed_count += 1
+                _LOGGER.info("Removed unused config option: %s", key)
+
+        if removed_count > 0:
+            _LOGGER.info("Removed %d unused config options", removed_count)
+
+        # Update entry with cleaned data
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=5
+        )
+
+        _LOGGER.info("Migration to version 5 complete")
+
     return True
 
 
@@ -107,9 +129,6 @@ def migrate_config_data(old_data: Dict[str, Any], from_version: int) -> Dict[str
 
     if from_version < 2:
         # Add v2 fields if not present
-        if CONF_GRID_BATTERY_CHARGING_LIMIT_SOC not in new_data:
-            new_data[CONF_GRID_BATTERY_CHARGING_LIMIT_SOC] = DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC
-
         if CONF_BASE_GRID_SETPOINT not in new_data:
             new_data[CONF_BASE_GRID_SETPOINT] = DEFAULT_BASE_GRID_SETPOINT
 
@@ -124,6 +143,16 @@ def migrate_config_data(old_data: Dict[str, Any], from_version: int) -> Dict[str
     if from_version < 4:
         # Remove deprecated time-based config options
         deprecated_keys = ["emergency_soc_override", "winter_night_soc_override"]
+        for key in deprecated_keys:
+            new_data.pop(key, None)
+
+    if from_version < 5:
+        # Remove unused config options
+        deprecated_keys = [
+            "min_soc_threshold",
+            "max_soc_threshold",
+            "grid_battery_charging_limit_soc"
+        ]
         for key in deprecated_keys:
             new_data.pop(key, None)
 

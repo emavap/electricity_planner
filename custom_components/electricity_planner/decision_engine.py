@@ -8,8 +8,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from homeassistant.core import HomeAssistant
 
 from .const import (
-    CONF_MIN_SOC_THRESHOLD,
-    CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
     CONF_SOLAR_FORECAST_CURRENT_ENTITY,
     CONF_SOLAR_FORECAST_NEXT_ENTITY,
@@ -29,12 +27,9 @@ from .const import (
     CONF_MIN_CAR_CHARGING_THRESHOLD,
     CONF_SOLAR_PEAK_EMERGENCY_SOC,
     CONF_PREDICTIVE_CHARGING_MIN_SOC,
-    CONF_GRID_BATTERY_CHARGING_LIMIT_SOC,
     CONF_BASE_GRID_SETPOINT,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
-    DEFAULT_MIN_SOC,
-    DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_EMERGENCY_SOC,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
@@ -48,7 +43,6 @@ from .const import (
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
     DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
-    DEFAULT_GRID_BATTERY_CHARGING_LIMIT_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
@@ -663,17 +657,16 @@ class ChargingDecisionEngine:
         
         # Calculate weighted average if capacities configured
         average_soc = self._calculate_weighted_average_soc(valid_batteries)
-        
-        min_threshold = self.config.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)
-        max_threshold = self.config.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
-        
+
+        # Use hardcoded max SOC (90%) - strategies use their own thresholds
+        max_threshold = DEFAULT_ALGORITHM_THRESHOLDS.max_target_soc
+
         return {
             "average_soc": average_soc,
             "min_soc": min_soc,
             "max_soc": max_soc,
             "batteries_count": len(soc_values),
             "batteries_full": min_soc >= max_threshold,
-            "min_soc_threshold": min_threshold,
             "max_soc_threshold": max_threshold,
             "remaining_capacity_percent": max_threshold - average_soc,
             "batteries_available": True,
