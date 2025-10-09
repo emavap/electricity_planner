@@ -47,7 +47,6 @@ async def async_setup_entry(
         PriceAnalysisSensor(coordinator, entry, "_diagnostic"),
         PowerAnalysisSensor(coordinator, entry, "_diagnostic"),
         DataAvailabilitySensor(coordinator, entry, "_diagnostic"),
-        HourlyDecisionHistorySensor(coordinator, entry, "_diagnostic"),
         DecisionDiagnosticsSensor(coordinator, entry, "_diagnostic"),
         PriceThresholdSensor(coordinator, entry, "_diagnostic"),
         FeedinPriceThresholdSensor(coordinator, entry, "_diagnostic"),
@@ -306,128 +305,6 @@ class DataAvailabilitySensor(ElectricityPlannerSensorBase):
         })
 
         return attributes
-
-
-class HourlyDecisionHistorySensor(ElectricityPlannerSensorBase):
-    """Sensor for hourly price and decision history data."""
-
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
-        """Initialize the hourly decision history sensor."""
-        super().__init__(coordinator, entry, device_suffix)
-        self._attr_name = "Hourly Price & Decision History"
-        self._attr_unique_id = f"{entry.entry_id}_hourly_decision_history"
-        self._attr_icon = "mdi:chart-timeline-variant"
-        self._attr_native_unit_of_measurement = "€/kWh"
-        self._attr_device_class = SensorDeviceClass.MONETARY
-        self._history_data = []
-        self._last_hour_recorded = None
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the current electricity price for compatibility."""
-        if not self.coordinator.data or "price_analysis" not in self.coordinator.data:
-            return 0.0
-
-        current_price = self.coordinator.data["price_analysis"].get("current_price")
-        return current_price if current_price is not None else 0.0
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the hourly history data as attributes."""
-        if not self.coordinator.data:
-            return self._cached_attributes if hasattr(self, '_cached_attributes') else {}
-
-        # Check if price or decisions have changed since last update
-        current_price = self.coordinator.data.get("price_analysis", {}).get("current_price")
-        battery_charging = self.coordinator.data.get("battery_grid_charging", False)
-        car_charging = self.coordinator.data.get("car_grid_charging", False)
-
-        # Create state signature to detect changes
-        current_state = (current_price, battery_charging, car_charging)
-
-        # Only update when price or decisions change, or first time
-        if not hasattr(self, '_last_state') or self._last_state != current_state:
-            self._update_history()
-
-            # Cache formatted data - only recalculate when data changes
-            recent_data = self._history_data[-48:] if self._history_data else []
-            self._cached_formatted_data = self._format_for_apex_charts(recent_data)
-            self._cached_attributes = {
-                "hourly_data": recent_data,
-                "total_records": len(self._history_data),
-                "last_updated": datetime.now().isoformat(),
-                "price_data": self._cached_formatted_data.get("price_data", []),
-                "battery_charging_data": self._cached_formatted_data.get("battery_charging_data", []),
-                "car_charging_data": self._cached_formatted_data.get("car_charging_data", []),
-            }
-            self._last_state = current_state
-
-        # Return cached attributes to avoid processing on every access
-        return self._cached_attributes if hasattr(self, '_cached_attributes') else {}
-
-    def _update_history(self):
-        """Update the hourly history data."""
-        if not self.coordinator.data:
-            return
-
-        current_hour = datetime.now().replace(minute=0, second=0, microsecond=0)
-
-        # Only record once per hour
-        if self._last_hour_recorded == current_hour:
-            return
-
-        price_analysis = self.coordinator.data.get("price_analysis", {})
-        current_price = price_analysis.get("current_price")
-
-        if current_price is None:
-            return
-
-        # Get decision data
-        battery_charging = self.coordinator.data.get("battery_grid_charging", False)
-        car_charging = self.coordinator.data.get("car_grid_charging", False)
-        price_position = price_analysis.get("price_position", 0)
-        is_low_price = price_analysis.get("very_low_price", False)
-
-        # Create hourly record
-        hourly_record = {
-            "timestamp": current_hour.isoformat(),
-            "hour": current_hour.hour,
-            "price": round(current_price, 4),
-            "battery_charging": battery_charging,
-            "car_charging": car_charging,
-            "price_position": round(price_position, 2) if price_position else 0,
-            "is_low_price": is_low_price,
-            "charging_decision": "both" if battery_charging and car_charging else "battery" if battery_charging else "car" if car_charging else "none",
-        }
-
-        # Add to history
-        self._history_data.append(hourly_record)
-        self._last_hour_recorded = current_hour
-
-        # Keep only last 7 days (168 hours)
-        if len(self._history_data) > 168:
-            self._history_data = self._history_data[-168:]
-
-    def _format_for_apex_charts(self, data):
-        """Format data specifically for ApexCharts integration."""
-        if not data:
-            return {}
-
-        price_series = []
-        battery_series = []
-        car_series = []
-
-        for record in data:
-            timestamp = record["timestamp"]
-            price_series.append([timestamp, record["price"]])
-            battery_series.append([timestamp, 1 if record["battery_charging"] else 0])
-            car_series.append([timestamp, 1 if record["car_charging"] else 0])
-
-        return {
-            "price_data": price_series,
-            "battery_charging_data": battery_series,
-            "car_charging_data": car_series,
-        }
 
 
 class ChargerLimitSensor(ElectricityPlannerSensorBase):
