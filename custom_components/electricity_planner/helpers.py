@@ -120,10 +120,10 @@ class TimeContext:
         """Get time-of-day context for charging decisions."""
         now = datetime.now()
         hour = now.hour
-        
+
         return {
             "current_hour": hour,
-            "is_night": night_start <= hour or hour <= night_end,
+            "is_night": hour >= night_start or hour <= night_end,
             "is_early_morning": night_end < hour <= 9,
             "is_solar_peak": solar_peak_start <= hour <= solar_peak_end,
             "is_evening": evening_start <= hour <= evening_end,
