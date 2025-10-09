@@ -5,10 +5,10 @@ All notable changes to the Electricity Planner integration will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.1.0-beta] - 2024-01-10
+## [2.1.0] - 2024-01-10
 
 ### Added
-- **Dynamic Threshold System** (EXPERIMENTAL - Opt-in) - Intelligent price-based charging within threshold range
+- **Dynamic Threshold System** (Opt-in) - Intelligent price-based charging within threshold range
   - Treats price threshold as maximum ceiling, not simple trigger
   - Analyzes price quality within acceptable range
   - Adapts to market volatility (more selective when volatile)
