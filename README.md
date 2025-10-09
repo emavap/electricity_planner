@@ -139,42 +139,18 @@ if price_position <= (very_low_price_threshold / 100):
     return CHARGE  # Bottom X% of daily price range
 ```
 
-#### 4. **PREDICTIVE CHARGING** (with Emergency Overrides)
+#### 4. **PREDICTIVE CHARGING**
 ```python
 if is_low_price AND significant_price_drop AND average_soc > predictive_charging_min_soc:
-    # Check emergency overrides
-    if average_soc < emergency_soc_override OR 
-       (is_night AND winter_season AND average_soc < winter_night_soc_override):
-        return CHARGE  # Emergency override
     return NO_CHARGE  # Wait for better price
 ```
 
-#### 5. **TIME-AWARE CHARGING** (During Low Price Periods)
-
-**Solar Peak Hours Logic:**
+#### 5. **SOLAR PEAK AWARENESS**
 ```python
 if is_solar_peak AND average_soc > 30 AND solar_forecast_factor > 0.6:
     if average_soc < solar_peak_emergency_soc:
         return CHARGE  # Emergency override
     return NO_CHARGE  # Wait for solar
-```
-
-**Winter Night Logic:**
-```python
-if is_night AND winter_season AND average_soc < 60:
-    return CHARGE  # Aggressive winter charging
-```
-
-**Standard Night Logic:**
-```python
-if is_night AND average_soc < 60:
-    return CHARGE  # Off-peak charging
-```
-
-**Winter Day Logic:**
-```python
-if winter_season AND average_soc < 50:
-    return CHARGE  # Compensate for shorter days
 ```
 
 #### 6. **SOC-BASED CHARGING** (During Low Price Periods)
@@ -334,9 +310,10 @@ sensor.electricity_planner_decision_diagnostics:
 **Time Periods Defined:**
 - **Night**: 22:00 - 06:00 (off-peak grid rates)
 - **Early Morning**: 06:00 - 09:00 (pre-solar period)
-- **Solar Peak**: 10:00 - 16:00 (maximum solar production)
+- **Solar Peak**: 10:00 - 16:00 (maximum solar production, used for solar peak emergency logic)
 - **Evening**: 17:00 - 21:00 (peak consumption period)
-- **Winter Season**: November, December, January, February
+
+**Note**: Time context is tracked for diagnostic purposes. The only active time-based logic is **Solar Peak Emergency SOC** which prevents charging during peak solar hours unless SOC is critically low.
 
 ## 🔧 Configuration Through Home Assistant UI
 
@@ -350,30 +327,30 @@ All parameters are reconfigurable through Home Assistant's integration options w
 
 ## 🎯 Decision Examples
 
-### Emergency Override Examples
+### Emergency Charging Examples
 
-#### Winter Night Emergency Override
+#### True Emergency Charging
 ```
-Conditions: 02:00 AM, December, SOC 35%, Low price with significant drop expected
-Normal Logic: Wait for price drop
-Emergency Override: SOC 35% < 40% (winter_night_soc_override) → CHARGE
-Reason: "Emergency override - SOC 35% too low to wait for price drop (winter night: true)"
+Conditions: SOC 10%, Price high (€0.25/kWh)
+Normal Logic: Don't charge (price too high)
+Emergency Override: SOC 10% < 15% (emergency_soc_threshold) → CHARGE
+Reason: "Emergency charging - SOC below critical threshold"
 ```
 
 #### Solar Peak Conservation
 ```
 Conditions: 12:00 PM, SOC 35%, Low price, Excellent solar forecast (85%)
 Solar Peak Logic: Normally wait for solar
-Emergency Override: SOC 35% > 25% (solar_peak_emergency_soc) → NO CHARGE
-Reason: "Solar peak hours - SOC 35% sufficient, awaiting solar production (forecast: 85%)"
+Decision: SOC 35% > 25% (solar_peak_emergency_soc) → NO CHARGE, wait for solar
+Reason: "Solar peak hours - SOC sufficient, awaiting solar production (forecast: 85%)"
 ```
 
-#### Predictive Charging with Emergency Override
+#### Solar Peak Emergency Override
 ```
-Conditions: 23:00 PM, SOC 20%, Low price (€0.10/kWh), Next hour: €0.05/kWh
-Predictive Logic: Would normally wait for better price
-Emergency Override: SOC 20% < 25% (emergency_soc_override) → CHARGE
-Reason: "Emergency override - SOC 20% too low to wait for price drop"
+Conditions: 12:00 PM, SOC 20%, Excellent solar forecast (85%)
+Solar Peak Logic: Normally wait for solar
+Emergency Override: SOC 20% < 25% (solar_peak_emergency_soc) → CHARGE
+Reason: "Solar peak emergency - SOC too low to wait for solar production"
 ```
 
 ### Power Allocation Examples
@@ -623,8 +600,6 @@ Decision:
 | Min SOC Threshold | 20% | Minimum battery level to maintain |
 | Max SOC Threshold | 90% | Target maximum battery level |
 | Emergency SOC Threshold | 15% | True emergency - charge regardless of price |
-| Emergency SOC Override | 25% | Override predictive logic when below this SOC |
-| Winter Night SOC Override | 40% | Winter night emergency charging threshold |
 | Solar Peak Emergency SOC | 25% | Minimum SOC during solar peak hours |
 | Predictive Charging Min SOC | 30% | Minimum SOC for predictive charging logic |
 
