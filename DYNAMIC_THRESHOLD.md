@@ -159,33 +159,35 @@ price_threshold: 0.15  # Never charge above this
 
 ## 📊 Monitoring
 
-### New Diagnostic Information
-The Decision Diagnostics sensor now includes:
-- `dynamic_threshold`: Current dynamic threshold based on volatility
-- `confidence`: Confidence score for current decision
-- `price_quality`: How good the current price is (0-100%)
-- `factors`: Individual confidence factors
+### Diagnostic Information
+The **Decision Diagnostics** sensor (`sensor.electricity_planner_decision_diagnostics`) provides comprehensive visibility into all decision factors:
 
-### Example Diagnostic Output
-```json
-{
-  "dynamic_price_analysis": {
-    "should_charge": false,
-    "confidence": 0.45,
-    "reason": "Price 0.14€/kWh above dynamic threshold 0.09€/kWh",
-    "price_quality": 0.23,
-    "dynamic_threshold": 0.09,
-    "price_volatility": 0.67,
-    "factors": {
-      "price_quality": 0.23,
-      "below_dynamic": 0.3,
-      "not_improving": 1.0,
-      "better_than_future": 0.5,
-      "absolute_level": 0.65
-    }
-  }
-}
+**Main sections:**
+- `decisions` - Current charging decisions and their reasons
+- `price_analysis` - Current price, thresholds, position in daily range
+- `battery_analysis` - SOC levels, battery count, full status
+- `power_analysis` - Solar surplus, car charging power
+- `solar_forecast` - Forecast availability, production factor, expected production
+- `time_context` - Current hour, time of day flags (night, solar peak, etc.)
+
+**Key attributes for monitoring dynamic threshold:**
+- `decisions.battery_reason` - Full explanation including price confidence and solar context
+- `price_analysis.current_price` - Current electricity price
+- `price_analysis.price_position` - Where current price sits in daily range (0-100%)
+- `price_analysis.is_low_price` - Whether price is below threshold
+- `solar_forecast.solar_production_factor` - Solar forecast quality (0-100%)
+
+### Example Decision Reason
 ```
+Good price 0.070€/kWh - in bottom 40% of acceptable range
+(SOC: 60%, excellent solar forecast - waiting for better prices)
+```
+
+This shows:
+- Price quality assessment
+- Battery SOC
+- Solar forecast influence on selectivity
+- Why the decision was made
 
 ## 🔄 Migration
 

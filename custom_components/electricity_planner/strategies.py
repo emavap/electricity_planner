@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 import logging
 
 from .defaults import DEFAULT_ALGORITHM_THRESHOLDS
@@ -130,7 +130,7 @@ class PredictiveChargingStrategy(ChargingStrategy):
                       f"next hour ({next_price:.3f}€/kWh)")
 
     def get_priority(self) -> int:
-        return 4
+        return 5  # After DynamicPriceStrategy
 
 
 class SolarAwareChargingStrategy(ChargingStrategy):
@@ -167,7 +167,7 @@ class SolarAwareChargingStrategy(ChargingStrategy):
         return False, ""
 
     def get_priority(self) -> int:
-        return 5
+        return 6  # After PredictiveChargingStrategy
 
 
 class SOCBasedChargingStrategy(ChargingStrategy):
@@ -187,29 +187,28 @@ class SOCBasedChargingStrategy(ChargingStrategy):
         solar_factor = solar.get("solar_production_factor", 0.5)
         poor_threshold = config.get("poor_solar_forecast_threshold", 40) / 100
         excellent_threshold = config.get("excellent_solar_forecast_threshold", 80) / 100
-        expected_solar = solar.get("expected_solar_production", "moderate")
 
         # Low SOC + poor solar forecast → charge
         if average_soc < DEFAULT_ALGORITHM_THRESHOLDS.low_soc_threshold and solar_factor < poor_threshold:
-            return True, (f"Low SOC {average_soc:.0f}% + {expected_solar} solar forecast "
+            return True, (f"Low SOC {average_soc:.0f}% + poor solar forecast "
                          f"({solar_factor:.0%} < {poor_threshold:.0%}) - charge while price low")
 
         # Medium SOC + excellent solar forecast → skip and wait for solar
         if (average_soc >= DEFAULT_ALGORITHM_THRESHOLDS.low_soc_threshold and
             average_soc <= DEFAULT_ALGORITHM_THRESHOLDS.high_soc_threshold and
             solar_factor > excellent_threshold):
-            return False, (f"SOC {average_soc:.0f}% sufficient + {expected_solar} solar forecast "
-                          f"({solar_factor:.0%} > {excellent_threshold:.0%})")
+            return False, (f"SOC {average_soc:.0f}% sufficient + excellent solar forecast "
+                          f"({solar_factor:.0%}) - waiting for solar instead of grid")
 
         # Medium SOC → charge at low price
         if average_soc < DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold:
-            return True, (f"Medium SOC {average_soc:.0f}% < {DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold}% + "
-                         f"{expected_solar} conditions - charge at low price")
+            return True, (f"Medium SOC {average_soc:.0f}% < {DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold}% - "
+                         f"charge at low price")
 
         return False, ""
 
     def get_priority(self) -> int:
-        return 6
+        return 7  # Last - safety net
 
 
 class DynamicPriceStrategy(ChargingStrategy):
@@ -223,59 +222,84 @@ class DynamicPriceStrategy(ChargingStrategy):
         """Check if charging should occur based on dynamic price analysis."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
+        solar = context.get("solar_forecast", {})
         config = context.get("config", {})
-        
+
         current_price = price.get("current_price")
         if current_price is None:
             return False, ""
-        
-        threshold = price.get("price_threshold", 0.15)
-        
-        # Initialize analyzer if needed
-        if self.dynamic_analyzer is None:
-            self.dynamic_analyzer = DynamicThresholdAnalyzer(threshold)
 
-        # Price threshold check is now handled in StrategyManager.evaluate()
-        # This strategy only runs if price is below threshold
-        
-        # Get dynamic analysis
+        threshold = price.get("price_threshold", 0.15)
+
+        # Get base confidence from config (default 60%) and clamp to sensible range
+        config_confidence = config.get("dynamic_threshold_confidence", 60)
+        try:
+            config_confidence = float(config_confidence) / 100.0
+        except (TypeError, ValueError):
+            config_confidence = 0.6
+        config_confidence = min(max(config_confidence, 0.3), 0.9)
+
+        # Prepare SOC/solar adjustments before running the analyzer so reasons align
+        average_soc = battery.get("average_soc", 50)
+        solar_factor = solar.get("solar_production_factor", 0.5)  # From real forecast data
+
+        confidence_threshold = config_confidence
+
+        # Adjust based on SOC (make it easier to charge when battery is low)
+        if average_soc < 40:
+            confidence_threshold = max(0.3, confidence_threshold - 0.1)
+        elif average_soc >= 70:
+            confidence_threshold = min(0.9, confidence_threshold + 0.1)
+
+        # Adjust based on solar forecast
+        # Good solar (>80%) → need +10% more confidence (be picky)
+        # Poor solar (<40%) → need -10% less confidence (less picky)
+        excellent_threshold = config.get("excellent_solar_forecast_threshold", 80) / 100
+        poor_threshold = config.get("poor_solar_forecast_threshold", 40) / 100
+
+        if solar_factor > excellent_threshold:
+            confidence_threshold = min(0.9, confidence_threshold + 0.1)
+            solar_context = "excellent solar forecast - waiting for better prices"
+        elif solar_factor < poor_threshold:
+            confidence_threshold = max(0.3, confidence_threshold - 0.1)
+            solar_context = "poor solar forecast - accepting okay prices"
+        else:
+            solar_context = f"solar forecast {solar_factor:.0%}"
+
+        # Initialize analyzer if needed, or update threshold if config changed
+        if self.dynamic_analyzer is None:
+            self.dynamic_analyzer = DynamicThresholdAnalyzer(threshold, confidence_threshold)
+        else:
+            # Update threshold and confidence in case user changed config at runtime
+            self.dynamic_analyzer.max_threshold = threshold
+            self.dynamic_analyzer.base_confidence = confidence_threshold
+
+        # Get price data (handle None during Nord Pool refresh)
+        # IMPORTANT: Use explicit None checks since 0.0 and negative prices are valid
+        highest_price = price.get("highest_price")
+        if highest_price is None:
+            highest_price = current_price
+
+        lowest_price = price.get("lowest_price")
+        if lowest_price is None:
+            lowest_price = current_price
+
+        next_price = price.get("next_price")  # Can be None
+
+        # Get dynamic analysis (only uses real Nord Pool data)
         analysis = self.dynamic_analyzer.analyze_price_window(
             current_price=current_price,
-            highest_today=price.get("highest_price", current_price),
-            lowest_today=price.get("lowest_price", current_price),
-            next_price=price.get("next_price"),
-            next_6h_prices=context.get("next_6h_prices", [])
+            highest_today=highest_price,
+            lowest_today=lowest_price,
+            next_price=next_price
         )
-        
-        # Check confidence threshold based on battery SOC
-        average_soc = battery.get("average_soc", 50)
-        
-        # Lower confidence requirement when battery is low
-        if average_soc < 30:
-            confidence_threshold = 0.4  # Charge more readily when low
-        elif average_soc < 50:
-            confidence_threshold = 0.5
-        elif average_soc < 70:
-            confidence_threshold = 0.6
-        else:
-            confidence_threshold = 0.7  # Be very selective when nearly full
-        
+
+        # Simple decision: does price analysis meet confidence requirement?
         if analysis["confidence"] >= confidence_threshold:
-            # Add SOC context to reason
-            if average_soc < 30:
-                reason = f"{analysis['reason']} (Low SOC {average_soc:.0f}% - less selective)"
-            elif average_soc > 70:
-                reason = f"{analysis['reason']} (High SOC {average_soc:.0f}% - more selective)"
-            else:
-                reason = analysis["reason"]
-            
-            # Store analysis details in context for diagnostics
-            if "dynamic_price_analysis" not in context:
-                context["dynamic_price_analysis"] = analysis
-            
+            reason = f"{analysis['reason']} (SOC: {average_soc:.0f}%, {solar_context})"
             return True, reason
-        
-        return False, analysis["reason"]
+
+        return False, f"{analysis['reason']} (Need {confidence_threshold:.0%} confidence, have {analysis['confidence']:.0%})"
     
     def get_priority(self) -> int:
         return 4  # After emergency, solar, and very low price

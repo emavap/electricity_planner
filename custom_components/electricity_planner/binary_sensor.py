@@ -1,7 +1,6 @@
 """Binary sensor platform for Electricity Planner."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from homeassistant.components.binary_sensor import (
@@ -12,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
 from .coordinator import ElectricityPlannerCoordinator
@@ -208,8 +208,7 @@ class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
         if not self.coordinator.data:
             return False
 
-        # Use coordinator's data availability check
-        return self.coordinator._is_data_available(self.coordinator.data)
+        return self.coordinator.is_data_available()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -224,12 +223,12 @@ class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
         attributes = {}
 
         # Add availability timestamps from coordinator
-        if hasattr(self.coordinator, '_last_successful_update'):
-            attributes["last_successful_update"] = self.coordinator._last_successful_update.isoformat()
+        if self.coordinator.last_successful_update:
+            attributes["last_successful_update"] = self.coordinator.last_successful_update.isoformat()
 
-        if hasattr(self.coordinator, '_data_unavailable_since') and self.coordinator._data_unavailable_since:
-            attributes["data_unavailable_since"] = self.coordinator._data_unavailable_since.isoformat()
-            unavailable_duration = (datetime.now() - self.coordinator._data_unavailable_since).total_seconds()
+        if self.coordinator.data_unavailable_since:
+            attributes["data_unavailable_since"] = self.coordinator.data_unavailable_since.isoformat()
+            unavailable_duration = (dt_util.utcnow() - self.coordinator.data_unavailable_since).total_seconds()
             attributes["unavailable_duration_seconds"] = int(unavailable_duration)
 
         # Add data source status
@@ -240,7 +239,7 @@ class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
             "lowest_price_available": self.coordinator.data.get("lowest_price") is not None,
             "next_price_available": self.coordinator.data.get("next_price") is not None,
             "price_analysis_available": price_analysis.get("data_available", False),
-            "notification_sent": getattr(self.coordinator, '_notification_sent', False),
+            "notification_sent": self.coordinator.notification_sent,
         })
 
         return attributes
@@ -278,5 +277,3 @@ class FeedinSolarBinarySensor(ElectricityPlannerBinarySensorBase):
             "remaining_solar": power_allocation.get("remaining_solar", 0),
             "total_solar_allocated": power_allocation.get("total_allocated", 0),
         }
-
-

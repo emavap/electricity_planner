@@ -177,7 +177,6 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         data["next_price"] = await self._get_state_value(
             self.config.get(CONF_NEXT_PRICE_ENTITY)
         )
-
         # Battery SOC data
         battery_soc_entities = self.config.get(CONF_BATTERY_SOC_ENTITIES, [])
         battery_soc_values = []

@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
 
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.util import dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,11 +24,11 @@ class DataValidator:
     ) -> float:
         """Validate and clamp power values to safe ranges."""
         if power < min_value:
-            _LOGGER.warning("%s value %dW below minimum, clamping to %dW", 
+            _LOGGER.warning("%s value %sW below minimum, clamping to %sW", 
                           name, power, min_value)
             return min_value
-        if max_value and power > max_value:
-            _LOGGER.warning("%s value %dW above maximum, clamping to %dW", 
+        if max_value is not None and power > max_value:
+            _LOGGER.warning("%s value %sW above maximum, clamping to %sW", 
                           name, power, max_value)
             return max_value
         return power
@@ -118,7 +119,7 @@ class TimeContext:
         evening_end: int = 21
     ) -> Dict[str, Any]:
         """Get time-of-day context for charging decisions."""
-        now = datetime.now()
+        now = dt_util.now()
         hour = now.hour
 
         return {
@@ -140,7 +141,7 @@ class TimeContext:
     ) -> bool:
         """Check if current time is within specified window."""
         if current_hour is None:
-            current_hour = datetime.now().hour
+            current_hour = dt_util.now().hour
         
         if start_hour <= end_hour:
             return start_hour <= current_hour <= end_hour
@@ -186,7 +187,7 @@ class CircuitBreaker:
         """Check if enough time has passed to attempt reset."""
         if self.last_failure_time is None:
             return False
-        return (datetime.now() - self.last_failure_time).seconds >= self.recovery_timeout
+        return (dt_util.utcnow() - self.last_failure_time).seconds >= self.recovery_timeout
     
     def _on_success(self):
         """Handle successful call."""
@@ -198,7 +199,7 @@ class CircuitBreaker:
     def _on_failure(self):
         """Handle failed call."""
         self.failure_count += 1
-        self.last_failure_time = datetime.now()
+        self.last_failure_time = dt_util.utcnow()
         
         if self.failure_count >= self.failure_threshold:
             self.state = "open"

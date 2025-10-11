@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_MIN_SOC_THRESHOLD,
@@ -209,7 +210,7 @@ class ChargingDecisionEngine:
             "grid_setpoint_reason": "No decision made",
             "feedin_solar": False,
             "feedin_solar_reason": "No decision made",
-            "next_evaluation": datetime.now() + timedelta(minutes=DEFAULT_SYSTEM_LIMITS.evaluation_interval),
+            "next_evaluation": dt_util.utcnow() + timedelta(minutes=DEFAULT_SYSTEM_LIMITS.evaluation_interval),
             "price_analysis": {},
             "power_analysis": {},
             "battery_analysis": {},
