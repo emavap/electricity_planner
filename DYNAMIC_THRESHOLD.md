@@ -47,25 +47,23 @@ Price Quality = (Threshold - Current Price) / (Threshold - Daily Lowest)
 | **Medium** (30-50%) | Moderate - bottom 60% of acceptable range |
 | **Low** (<30%) | Less selective - bottom 80% of acceptable range |
 
-### 3. **SOC-Influenced Confidence**
+### 3. **Config + SOC/Solar Confidence**
 
-| Battery SOC | Required Confidence | Behavior |
-|------------|-------------------|----------|
-| <30% | 40% | Charge more readily |
-| 30-50% | 50% | Moderately selective |
-| 50-70% | 60% | More selective |
-| >70% | 70% | Very selective |
+- Start with the configured `dynamic_threshold_confidence` (30‑90%, defaults to 60%)
+- If SOC is **low (<40%)** → relax confidence by 10 percentage points
+- If SOC is **high (≥70%)** → tighten confidence by 10 percentage points
+- If solar forecast is **excellent (>80%)** → tighten confidence by 10 percentage points
+- If solar forecast is **poor (<40%)** → relax confidence by 10 percentage points
+- The final requirement always stays between 30% and 90%
 
-### 4. **Multi-Factor Confidence Score**
+### 4. **Three-Factor Confidence Score**
 
-The system calculates confidence based on:
-- **25%** - Price quality within range
-- **25%** - Below dynamic threshold
-- **20%** - No better prices coming soon
-- **15%** - Better than future average
-- **15%** - Absolute price level
+Confidence is calculated from:
+- **40%** – Price quality within the acceptable range
+- **40%** – Whether the price is below the dynamic threshold
+- **20%** – Whether a significantly better price arrives next hour
 
-**Decision: Charge if confidence ≥ threshold (based on SOC)**
+**Decision: Charge when confidence ≥ adjusted requirement**
 
 ## 📈 Real-World Scenarios
 
