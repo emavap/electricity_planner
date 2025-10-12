@@ -91,6 +91,14 @@ views:
                 show_name: true
                 show_state: true
 
+          - type: gauge
+            name: Battery SOC
+            entity: sensor.electricity_planner_battery_soc_average
+            min: 0
+            max: 100
+            unit: "%"
+            needle: true
+
           - type: entities
             title: Charging decisions
             show_header_toggle: false
@@ -174,14 +182,6 @@ views:
                 min: 0
                 max: 8000
                 unit: W
-                needle: true
-
-              - type: gauge
-                name: Battery SOC
-                entity: sensor.electricity_planner_battery_soc_average
-                min: 0
-                max: 100
-                unit: "%"
                 needle: true
 
               - type: entities
