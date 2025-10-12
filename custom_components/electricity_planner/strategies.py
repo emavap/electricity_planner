@@ -299,7 +299,11 @@ class DynamicPriceStrategy(ChargingStrategy):
             reason = f"{analysis['reason']} (SOC: {average_soc:.0f}%, {solar_context})"
             return True, reason
 
-        return False, f"{analysis['reason']} (Need {confidence_threshold:.0%} confidence, have {analysis['confidence']:.0%})"
+        return False, (
+            f"{analysis['reason']} "
+            f"(Need {confidence_threshold:.0%} confidence, have {analysis['confidence']:.0%}; "
+            f"{solar_context})"
+        )
     
     def get_priority(self) -> int:
         return 4  # After emergency, solar, and very low price
