@@ -11,10 +11,15 @@ views:
               ## ⚡ Electricity Planner Dashboard
               Net contract prices, charging recommendations, and live power context – all in one place.
 
+              **Note:** Gauge colors are configured based on your thresholds. If you change your price/feed-in thresholds in the integration config, update the gauge severity values in this dashboard YAML to match.
+
           - type: grid
             square: false
             columns: 3
             cards:
+              # Buy price gauge - adjust yellow/red based on YOUR configured thresholds
+              # yellow: your price_threshold (current: 0.10)
+              # red: your price_threshold × 1.5 (current: 0.15)
               - type: gauge
                 entity: sensor.electricity_planner_current_electricity_price
                 name: Buy price
@@ -27,6 +32,8 @@ views:
                   yellow: 0.10
                   red: 0.15
 
+              # Feed-in price gauge - adjust based on YOUR configured feed-in threshold
+              # Orange starts at 0, green starts at your feedin_threshold (current: 0.01)
               - type: gauge
                 entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
                 name: Feed-in price
