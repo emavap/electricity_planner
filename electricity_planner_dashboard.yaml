@@ -98,6 +98,10 @@ views:
             max: 100
             unit: "%"
             needle: true
+            severity:
+              red: 0
+              yellow: 30
+              green: 70
 
           - type: entities
             title: Charging decisions
