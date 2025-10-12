@@ -955,12 +955,14 @@ class ChargingDecisionEngine:
             adjusted_feed_price = current_price
         
         if adjustments_active:
-            enable_feedin = adjusted_feed_price > 0
-            comparator = ">" if enable_feedin else "≤"
+            effective_threshold = feedin_threshold
+            enable_feedin = adjusted_feed_price >= effective_threshold
+            comparator = "≥" if enable_feedin else "<"
             action = "enable" if enable_feedin else "disable"
             reason = (
-                f"Net feed-in price {adjusted_feed_price:.3f}€/kWh {comparator} 0€/kWh - "
-                f"{action} solar export (surplus: {remaining_solar}W)"
+                f"Net feed-in price {adjusted_feed_price:.3f}€/kWh {comparator} "
+                f"{effective_threshold:.3f}€/kWh - {action} solar export "
+                f"(surplus: {remaining_solar}W)"
             )
         else:
             enable_feedin = current_price >= feedin_threshold

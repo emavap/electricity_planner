@@ -166,6 +166,25 @@ def test_feed_in_uses_adjustment_negative():
     assert "disable" in result["feedin_solar_reason"]
 
 
+def test_feed_in_adjustment_respects_threshold():
+    engine = _engine({
+        CONF_FEEDIN_ADJUSTMENT_MULTIPLIER: 0.7,
+        CONF_FEEDIN_ADJUSTMENT_OFFSET: -0.01,
+        CONF_FEEDIN_PRICE_THRESHOLD: 0.02,
+    })
+    price_analysis = {
+        "data_available": True,
+        "current_price": 0.05,
+        "raw_current_price": 0.05,
+    }
+
+    result = engine._decide_feedin_solar(price_analysis, {"remaining_solar": 800})
+
+    assert result["feedin_effective_price"] == pytest.approx(0.05 * 0.7 - 0.01)
+    assert result["feedin_solar"] is True
+    assert "0.020" in result["feedin_solar_reason"]
+
+
 def test_charger_limit_enforces_restrictions():
     engine = _engine()
     price_analysis = {}
