@@ -14,11 +14,15 @@ from .const import (
     DOMAIN,
     CONF_PRICE_THRESHOLD,
     CONF_FEEDIN_PRICE_THRESHOLD,
+    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    CONF_FEEDIN_ADJUSTMENT_OFFSET,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
     CONF_EMERGENCY_SOC_THRESHOLD,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
+    DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
     DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
     DEFAULT_EMERGENCY_SOC,
@@ -50,6 +54,7 @@ async def async_setup_entry(
         DecisionDiagnosticsSensor(coordinator, entry, "_diagnostic"),
         PriceThresholdSensor(coordinator, entry, "_diagnostic"),
         FeedinPriceThresholdSensor(coordinator, entry, "_diagnostic"),
+        FeedinPriceSensor(coordinator, entry, "_diagnostic"),
         VeryLowPriceThresholdSensor(coordinator, entry, "_diagnostic"),
         SignificantSolarThresholdSensor(coordinator, entry, "_diagnostic"),
         EmergencySOCThresholdSensor(coordinator, entry, "_diagnostic"),
@@ -645,6 +650,52 @@ class FeedinPriceThresholdSensor(ElectricityPlannerSensorBase):
             "price_above_threshold": current_price >= threshold if current_price else None,
             "margin": round(current_price - threshold, 3) if current_price else None,
             "feedin_enabled": self.coordinator.data.get("feedin_solar", False),
+        }
+
+
+class FeedinPriceSensor(ElectricityPlannerSensorBase):
+    """Sensor showing the effective feed-in price used for decisions."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Current Feed-in Price"
+        self._attr_unique_id = f"{entry.entry_id}_feedin_price"
+        self._attr_icon = "mdi:solar-power"
+        self._attr_device_class = SensorDeviceClass.MONETARY
+        self._attr_native_unit_of_measurement = "€/kWh"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the effective feed-in price (after adjustments)."""
+        if not self.coordinator.data:
+            return None
+        return self.coordinator.data.get("feedin_effective_price")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return diagnostic information for feed-in pricing."""
+        if not self.coordinator.data:
+            return {}
+
+        price_analysis = self.coordinator.data.get("price_analysis", {})
+        power_allocation = self.coordinator.data.get("power_allocation", {})
+
+        return {
+            "raw_market_price": price_analysis.get("raw_current_price"),
+            "consumption_multiplier": price_analysis.get("price_adjustment_multiplier"),
+            "consumption_offset": price_analysis.get("price_adjustment_offset"),
+            "feedin_multiplier": self.coordinator.config.get(
+                CONF_FEEDIN_ADJUSTMENT_MULTIPLIER, DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER
+            ),
+            "feedin_offset": self.coordinator.config.get(
+                CONF_FEEDIN_ADJUSTMENT_OFFSET, DEFAULT_FEEDIN_ADJUSTMENT_OFFSET
+            ),
+            "feedin_threshold": self.coordinator.config.get(
+                CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
+            ),
+            "feedin_enabled": self.coordinator.data.get("feedin_solar", False),
+            "feedin_reason": self.coordinator.data.get("feedin_solar_reason", ""),
+            "remaining_solar": power_allocation.get("remaining_solar"),
         }
 
 
