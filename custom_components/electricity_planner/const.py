@@ -38,6 +38,10 @@ CONF_PREDICTIVE_CHARGING_MIN_SOC = "predictive_charging_min_soc"
 CONF_BASE_GRID_SETPOINT = "base_grid_setpoint"
 CONF_USE_DYNAMIC_THRESHOLD = "use_dynamic_threshold"
 CONF_DYNAMIC_THRESHOLD_CONFIDENCE = "dynamic_threshold_confidence"
+CONF_PRICE_ADJUSTMENT_MULTIPLIER = "price_adjustment_multiplier"
+CONF_PRICE_ADJUSTMENT_OFFSET = "price_adjustment_offset"
+CONF_FEEDIN_ADJUSTMENT_MULTIPLIER = "feedin_adjustment_multiplier"
+CONF_FEEDIN_ADJUSTMENT_OFFSET = "feedin_adjustment_offset"
 
 # Default Threshold Values
 DEFAULT_MIN_SOC = 20
@@ -59,6 +63,10 @@ DEFAULT_SOLAR_PEAK_EMERGENCY_SOC = 25  # SOC below which to charge even during s
 DEFAULT_PREDICTIVE_CHARGING_MIN_SOC = 30  # Minimum SOC for predictive charging logic
 DEFAULT_USE_DYNAMIC_THRESHOLD = False  # Use intelligent dynamic threshold logic (opt-in)
 DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE = 60  # Default confidence threshold (60%)
+DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER = 1.0  # No adjustment by default
+DEFAULT_PRICE_ADJUSTMENT_OFFSET = 0.0  # €/kWh offset
+DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER = 1.0  # No adjustment by default
+DEFAULT_FEEDIN_ADJUSTMENT_OFFSET = 0.0  # €/kWh offset
 
 # Algorithm Constants
 DEFAULT_SIGNIFICANT_PRICE_DROP_THRESHOLD = 0.15  # 15% price drop threshold

@@ -11,15 +11,23 @@ from .const import (
     CONF_BASE_GRID_SETPOINT,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+    CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+    CONF_PRICE_ADJUSTMENT_OFFSET,
+    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    CONF_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
+    DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_PRICE_ADJUSTMENT_OFFSET,
+    DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 # Current config version
-CURRENT_VERSION = 5
+CURRENT_VERSION = 6
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -109,6 +117,30 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         _LOGGER.info("Migration to version 5 complete")
 
+    if entry.version == 5:
+        # Migrate from version 5 to version 6
+        new_data = {**entry.data}
+
+        if CONF_PRICE_ADJUSTMENT_MULTIPLIER not in new_data:
+            new_data[CONF_PRICE_ADJUSTMENT_MULTIPLIER] = DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+
+        if CONF_PRICE_ADJUSTMENT_OFFSET not in new_data:
+            new_data[CONF_PRICE_ADJUSTMENT_OFFSET] = DEFAULT_PRICE_ADJUSTMENT_OFFSET
+
+        if CONF_FEEDIN_ADJUSTMENT_MULTIPLIER not in new_data:
+            new_data[CONF_FEEDIN_ADJUSTMENT_MULTIPLIER] = DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER
+
+        if CONF_FEEDIN_ADJUSTMENT_OFFSET not in new_data:
+            new_data[CONF_FEEDIN_ADJUSTMENT_OFFSET] = DEFAULT_FEEDIN_ADJUSTMENT_OFFSET
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=6
+        )
+
+        _LOGGER.info("Migration to version 6 complete")
+
     return True
 
 
@@ -138,6 +170,12 @@ def migrate_config_data(old_data: Dict[str, Any], from_version: int) -> Dict[str
     if from_version < 5:
         # Remove unused config option
         new_data.pop("grid_battery_charging_limit_soc", None)
+
+    if from_version < 6:
+        new_data.setdefault(CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER)
+        new_data.setdefault(CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET)
+        new_data.setdefault(CONF_FEEDIN_ADJUSTMENT_MULTIPLIER, DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER)
+        new_data.setdefault(CONF_FEEDIN_ADJUSTMENT_OFFSET, DEFAULT_FEEDIN_ADJUSTMENT_OFFSET)
 
     return new_data
 

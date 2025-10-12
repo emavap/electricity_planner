@@ -8,6 +8,7 @@ This is a Home Assistant custom integration that analyses live Nord Pool prices,
 - Produces **separate decisions** for home batteries and electric vehicles, keeping batteries first in line while allowing solar surplus to top up cars only when storage is already near full.
 - Optional **dynamic price threshold** mode helps you target the most economical hours inside your maximum price ceiling.
 - Publishes a **Decision Diagnostics sensor** with the full analysis, so you can see exactly why a recommendation changed.
+- Contract-specific pricing: configure multiplier/offset adjustments for both consumption and feed-in so the planner works with the exact €/kWh that appear on your bill.
 
 ## Documentation Map
 

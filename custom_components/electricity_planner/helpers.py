@@ -79,6 +79,21 @@ class DataValidator:
         return state not in (None, STATE_UNAVAILABLE, STATE_UNKNOWN, "")
 
 
+def apply_price_adjustment(
+    price: Optional[float],
+    multiplier: float = 1.0,
+    offset: float = 0.0
+) -> Optional[float]:
+    """Apply a simple affine transformation to a price value."""
+    if price is None:
+        return None
+    try:
+        return (float(price) * float(multiplier)) + float(offset)
+    except (TypeError, ValueError):
+        _LOGGER.error("Invalid price adjustment: price=%s, multiplier=%s, offset=%s", price, multiplier, offset)
+        return None
+
+
 class PriceCalculator:
     """Price-related calculations."""
     

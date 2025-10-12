@@ -44,6 +44,10 @@ from .const import (
     CONF_BASE_GRID_SETPOINT,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+    CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+    CONF_PRICE_ADJUSTMENT_OFFSET,
+    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    CONF_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
@@ -62,13 +66,17 @@ from .const import (
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
+    DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_PRICE_ADJUSTMENT_OFFSET,
+    DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
 )
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Electricity Planner."""
 
-    VERSION = 5
+    VERSION = 6
 
     def __init__(self):
         """Initialize the config flow."""
@@ -242,6 +250,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             ),
             vol.Optional(
+                CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+                default=DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=5, step=0.01
+                )
+            ),
+            vol.Optional(
+                CONF_PRICE_ADJUSTMENT_OFFSET,
+                default=DEFAULT_PRICE_ADJUSTMENT_OFFSET
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
+                )
+            ),
+            vol.Optional(
                 CONF_EMERGENCY_SOC_THRESHOLD,
                 default=DEFAULT_EMERGENCY_SOC
             ): selector.NumberSelector(
@@ -290,6 +314,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             ),
             vol.Optional(
+                CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+                default=DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=-1, max=5, step=0.01
+                )
+            ),
+            vol.Optional(
+                CONF_FEEDIN_ADJUSTMENT_OFFSET,
+                default=DEFAULT_FEEDIN_ADJUSTMENT_OFFSET
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
+                )
+            ),
+            vol.Optional(
                 CONF_USE_DYNAMIC_THRESHOLD,
                 default=DEFAULT_USE_DYNAMIC_THRESHOLD
             ): selector.BooleanSelector(),
@@ -310,6 +350,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "min_soc": "Minimum battery charge level to maintain",
                 "max_soc": "Maximum battery charge level target",
                 "price_threshold": "Price threshold for charging decisions (maximum ceiling)",
+                "price_adjustment_multiplier": "Multiplier applied to raw price (set 1.12 for the Belgian example)",
+                "price_adjustment_offset": "Fixed €/kWh offset added after multiplier (e.g. 0.008 for 0.8 c€)",
                 "emergency_soc": "Emergency SOC level that triggers charging regardless of price",
                 "very_low_price": "Percentage threshold for 'very low' price in daily range",
                 "significant_solar": "Solar surplus threshold considered significant",
@@ -317,6 +359,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "excellent_forecast": "Solar forecast above this percentage is considered excellent",
                 "use_dynamic_threshold": "Enable intelligent price analysis (more selective, better prices)",
                 "dynamic_threshold_confidence": "Confidence required for dynamic charging (higher = more selective)",
+                "feedin_price_threshold": "Minimum export price required when no adjustment is set",
+                "feedin_adjustment_multiplier": "Multiplier applied to raw price when calculating net feed-in value",
+                "feedin_adjustment_offset": "Fixed €/kWh offset added to feed-in price (negative values model costs)",
             },
         )
 
@@ -525,6 +570,54 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 default=current_config.get(CONF_SOLAR_FORECAST_TOMORROW_ENTITY)
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+                default=current_config.get(
+                    CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+                )
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=5, step=0.01
+                )
+            ),
+            vol.Optional(
+                CONF_PRICE_ADJUSTMENT_OFFSET,
+                default=current_config.get(
+                    CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
+                )
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
+                )
+            ),
+            vol.Optional(
+                CONF_FEEDIN_PRICE_THRESHOLD,
+                default=current_config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.0, max=1.0, step=0.01, unit_of_measurement="€/kWh"
+                )
+            ),
+            vol.Optional(
+                CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+                default=current_config.get(
+                    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER, DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER
+                )
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=-1, max=5, step=0.01
+                )
+            ),
+            vol.Optional(
+                CONF_FEEDIN_ADJUSTMENT_OFFSET,
+                default=current_config.get(
+                    CONF_FEEDIN_ADJUSTMENT_OFFSET, DEFAULT_FEEDIN_ADJUSTMENT_OFFSET
+                )
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
+                )
             ),
             vol.Optional(
                 CONF_MIN_SOC_THRESHOLD,

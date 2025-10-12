@@ -33,6 +33,10 @@ from .const import (
     CONF_BASE_GRID_SETPOINT,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+    CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+    CONF_PRICE_ADJUSTMENT_OFFSET,
+    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    CONF_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
@@ -51,6 +55,10 @@ from .const import (
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
+    DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_PRICE_ADJUSTMENT_OFFSET,
+    DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN,
 )
 
@@ -67,6 +75,7 @@ from .helpers import (
     TimeContext,
     PowerAllocationValidator,
     format_reason,
+    apply_price_adjustment,
 )
 
 from .strategies import StrategyManager
@@ -230,17 +239,35 @@ class ChargingDecisionEngine:
 
     def _analyze_comprehensive_pricing(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze comprehensive pricing data from Nord Pool."""
-        current_price = data.get("current_price")
-        highest_price = data.get("highest_price")
-        lowest_price = data.get("lowest_price")
-        next_price = data.get("next_price")
+        raw_current_price = data.get("current_price")
+        raw_highest_price = data.get("highest_price")
+        raw_lowest_price = data.get("lowest_price")
+        raw_next_price = data.get("next_price")
+        
+        price_multiplier = self.config.get(
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+        )
+        price_offset = self.config.get(
+            CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
+        )
+
+        current_price = apply_price_adjustment(raw_current_price, price_multiplier, price_offset)
+        highest_price = apply_price_adjustment(raw_highest_price, price_multiplier, price_offset)
+        lowest_price = apply_price_adjustment(raw_lowest_price, price_multiplier, price_offset)
+        next_price = apply_price_adjustment(raw_next_price, price_multiplier, price_offset)
+
+        # Fall back to raw values if adjustment failed
+        current_price = raw_current_price if current_price is None else current_price
+        highest_price = raw_highest_price if highest_price is None else highest_price
+        lowest_price = raw_lowest_price if lowest_price is None else lowest_price
+        next_price = raw_next_price if next_price is None else next_price
         
         price_threshold = self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
         very_low_threshold = self.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD) / 100.0
         
         if current_price is None:
             return self._create_unavailable_price_analysis(
-                highest_price, lowest_price, next_price, price_threshold
+                raw_highest_price, raw_lowest_price, raw_next_price, price_threshold
             )
         
         # Use cached price position calculation
@@ -260,6 +287,12 @@ class ChargingDecisionEngine:
             "highest_price": highest_price,
             "lowest_price": lowest_price,
             "next_price": next_price,
+            "raw_current_price": raw_current_price,
+            "raw_highest_price": raw_highest_price,
+            "raw_lowest_price": raw_lowest_price,
+            "raw_next_price": raw_next_price,
+            "price_adjustment_multiplier": price_multiplier,
+            "price_adjustment_offset": price_offset,
             "price_threshold": price_threshold,
             "is_low_price": current_price <= price_threshold,
             "is_lowest_price": lowest_price is not None and current_price == lowest_price,
@@ -293,6 +326,16 @@ class ChargingDecisionEngine:
             "significant_price_drop": False,
             "very_low_price": False,
             "data_available": False,
+            "raw_current_price": None,
+            "raw_highest_price": highest_price,
+            "raw_lowest_price": lowest_price,
+            "raw_next_price": next_price,
+            "price_adjustment_multiplier": self.config.get(
+                CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+            ),
+            "price_adjustment_offset": self.config.get(
+                CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
+            ),
         }
 
     def _analyze_power_flow(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -886,20 +929,52 @@ class ChargingDecisionEngine:
             return {
                 "feedin_solar": False,
                 "feedin_solar_reason": "No price data available",
+                "feedin_effective_price": None,
             }
         
-        current_price = price_analysis.get("current_price", 0)
-        feedin_threshold = self.config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
+        current_price = price_analysis.get("current_price", 0) or 0
+        raw_price = price_analysis.get("raw_current_price", current_price)
+        
+        feed_multiplier = self.config.get(
+            CONF_FEEDIN_ADJUSTMENT_MULTIPLIER, DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER
+        )
+        feed_offset = self.config.get(
+            CONF_FEEDIN_ADJUSTMENT_OFFSET, DEFAULT_FEEDIN_ADJUSTMENT_OFFSET
+        )
+        feedin_threshold = self.config.get(
+            CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
+        )
         remaining_solar = power_allocation.get("remaining_solar", 0)
         
-        enable_feedin = current_price >= feedin_threshold
-        action = "enable" if enable_feedin else "disable"
+        adjustments_active = (
+            feed_multiplier != DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER
+            or feed_offset != DEFAULT_FEEDIN_ADJUSTMENT_OFFSET
+        )
+        adjusted_feed_price = apply_price_adjustment(raw_price, feed_multiplier, feed_offset)
+        if adjusted_feed_price is None:
+            adjusted_feed_price = current_price
+        
+        if adjustments_active:
+            enable_feedin = adjusted_feed_price > 0
+            comparator = ">" if enable_feedin else "≤"
+            action = "enable" if enable_feedin else "disable"
+            reason = (
+                f"Net feed-in price {adjusted_feed_price:.3f}€/kWh {comparator} 0€/kWh - "
+                f"{action} solar export (surplus: {remaining_solar}W)"
+            )
+        else:
+            enable_feedin = current_price >= feedin_threshold
+            comparator = "≥" if enable_feedin else "<"
+            action = "enable" if enable_feedin else "disable"
+            reason = (
+                f"Price {current_price:.3f}€/kWh {comparator} {feedin_threshold:.3f}€/kWh - "
+                f"{action} solar export (surplus: {remaining_solar}W)"
+            )
         
         return {
             "feedin_solar": enable_feedin,
-            "feedin_solar_reason": (f"Price {current_price:.3f}€/kWh {'≥' if enable_feedin else '<'} "
-                                   f"{feedin_threshold:.3f}€/kWh - {action} solar export "
-                                   f"(surplus: {remaining_solar}W)"),
+            "feedin_solar_reason": reason,
+            "feedin_effective_price": adjusted_feed_price,
         }
 
     def _calculate_charger_limit(

@@ -13,6 +13,7 @@ Smart charging decisions for batteries and electric vehicles inside Home Assista
 - **Battery-first philosophy** – multiple batteries are monitored simultaneously, prioritising SOC recovery and respecting per-device power limits.
 - **EV-ready** – plans car charging from the grid only when prices are attractive, but still allows solar surplus to top up the car once all batteries are nearly full.
 - **Dynamic pricing intelligence** – optional adaptive thresholding (see [Dynamic Threshold](DYNAMIC_THRESHOLD.md)) finds the best price windows instead of charging at the first “cheap” slot.
+- **Contract-aware pricing** – configure multiplier/offset adjustments to mirror local tariffs (e.g. Belgian Belpex formulas for both consumption and feed-in).
 - **Rich diagnostics** – sensors expose raw analyses, chosen strategies, safety caps, and human-readable reasons for each decision.
 - **Home Assistant native** – configuration, options and diagnostics live entirely in the UI; no YAML required.
 
@@ -88,6 +89,8 @@ Use these entities directly in automations or dashboards—see [DASHBOARD.md](DA
 | `min_soc_threshold` | 20 % | Lower bound for routine battery charging decisions |
 | `max_soc_threshold` | 90 % | Target SOC ceiling used before diverting solar elsewhere |
 | `price_threshold` | 0.15 €/kWh | Never charge from grid above this price |
+| `price_adjustment_multiplier` | 1.0 | Multiplier applied before decisions (set 1.12 for the Belgian formula) |
+| `price_adjustment_offset` | 0.000 €/kWh | Fixed offset added after the multiplier (0.008 for 0.8 c€/kWh) |
 | `very_low_price_threshold` | 30 % | “Bottom X% of day” that always triggers charging |
 | `max_battery_power` | 3000 W | Caps grid allocation for batteries |
 | `max_car_power` | 11000 W | Caps combined solar + grid allocation for the car |
@@ -97,6 +100,9 @@ Use these entities directly in automations or dashboards—see [DASHBOARD.md](DA
 | `solar_peak_emergency_soc` | 25 % | Allow charging during solar peak only if SOC is below this |
 | `use_dynamic_threshold` | false | Enables the adaptive price logic |
 | `dynamic_threshold_confidence` | 60 % | Baseline “confidence” required before charging (see below) |
+| `feedin_price_threshold` | 0.05 €/kWh | Legacy fallback when no feed-in adjustment is set |
+| `feedin_adjustment_multiplier` | 1.0 | Multiplier applied to raw price for feed-in (0.70 for the Belgian formula) |
+| `feedin_adjustment_offset` | 0.000 €/kWh | Offset added to feed-in price (-0.010 for the Belgian formula) |
 
 Re-run the integration’s **Configure** flow anytime to adjust these values without restarting Home Assistant.
 
@@ -113,6 +119,17 @@ Electricity Planner supports two price modes:
    - tighten or relax confidence based on SOC and solar forecast.
 
 The dynamic mode is described in depth in [DYNAMIC_THRESHOLD.md](DYNAMIC_THRESHOLD.md). It is disabled by default but highly recommended once you are comfortable with the integration.
+
+Both modes work on the *adjusted* price if you provide a multiplier/offset. Leave the defaults (`1.0` / `0.0`) to use the raw feed from Nord Pool, or enter your contract’s coefficients to model grid fees transparently.
+
+### Contract Example (Belgium)
+
+The Flemish supplier formula provided in Dutch translates to:
+
+- Consumption: `(1.12 × Belpex + 0.8) c€/kWh` → set `price_adjustment_multiplier = 1.12` and `price_adjustment_offset = 0.008` (because 0.8 c€ = €0.008).
+- Feed-in: `(0.70 × Belpex – 1) c€/kWh` → set `feedin_adjustment_multiplier = 0.70` and `feedin_adjustment_offset = -0.010`.
+
+With those values the integration works directly with the net €/kWh rates. The feed-in threshold becomes redundant: the planner will export solar only when the adjusted price is positive.
 
 ---
 
