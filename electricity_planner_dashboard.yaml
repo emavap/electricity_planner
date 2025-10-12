@@ -134,7 +134,7 @@ views:
                 entity: sensor.electricity_planner_battery_soc_average
                 min: 0
                 max: 100
-                unit: %
+                unit: "%"
                 needle: true
 
               - type: entities
