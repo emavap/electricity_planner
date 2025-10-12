@@ -21,7 +21,7 @@ views:
 
           - type: grid
             square: false
-            columns: 3
+            columns: 2
             cards:
               - type: custom:gauge-card-pro
                 entity: sensor.electricity_planner_current_electricity_price
@@ -31,7 +31,7 @@ views:
                 unit: "€/kWh"
                 needle: true
                 scale: "50px"
-                title: Buy price
+                card_title: Buy price
                 segments: |-
                   {% set dynamic_threshold = state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') %}
                   {% set max_threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float %}
@@ -56,7 +56,7 @@ views:
                 unit: "€/kWh"
                 needle: true
                 scale: "50px"
-                title: Feed-in price
+                card_title: Feed-in price
                 segments: |-
                   {% set threshold = states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float %}
                   {{
@@ -67,35 +67,35 @@ views:
                     ]
                   }}
 
-              - type: grid
-                square: true
-                columns: 3
-                cards:
-                  - type: tile
-                    entity: binary_sensor.electricity_planner_battery_charge_from_grid
-                    name: Battery
-                    icon: mdi:battery-charging
-                    color: green
-                    show_entity_picture: false
-                    vertical: true
+          - type: grid
+            square: true
+            columns: 3
+            cards:
+              - type: tile
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                name: Battery
+                icon: mdi:battery-charging
+                color: green
+                show_entity_picture: false
+                vertical: true
 
-                  - type: tile
-                    entity: binary_sensor.electricity_planner_car_charge_from_grid
-                    name: Car
-                    icon: mdi:car-electric
-                    color: green
-                    show_entity_picture: false
-                    vertical: true
-                    tap_action:
-                      action: more-info
+              - type: tile
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
+                name: Car
+                icon: mdi:car-electric
+                color: green
+                show_entity_picture: false
+                vertical: true
+                tap_action:
+                  action: more-info
 
-                  - type: tile
-                    entity: binary_sensor.electricity_planner_data_nord_pool_available
-                    name: Data OK
-                    icon: mdi:database-check
-                    color: blue
-                    show_entity_picture: false
-                    vertical: true
+              - type: tile
+                entity: binary_sensor.electricity_planner_data_nord_pool_available
+                name: Data OK
+                icon: mdi:database-check
+                color: blue
+                show_entity_picture: false
+                vertical: true
 
           - type: entities
             title: Charging decisions
