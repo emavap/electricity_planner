@@ -58,11 +58,11 @@ views:
                   - entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
                     type: attribute
                     name: Feed-in multiplier
-                    attribute: feedin_adjustment_multiplier
+                    attribute: feedin_multiplier
                   - entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
                     type: attribute
                     name: Feed-in offset
-                    attribute: feedin_adjustment_offset
+                    attribute: feedin_offset
                   - entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
                     name: Feed-in threshold
 
