@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -54,6 +54,8 @@ async def async_setup_entry(
         DecisionDiagnosticsSensor(coordinator, entry, "_diagnostic"),
         PriceThresholdSensor(coordinator, entry, "_diagnostic"),
         FeedinPriceThresholdSensor(coordinator, entry, "_diagnostic"),
+        BuyPriceMarginSensor(coordinator, entry, "_diagnostic"),
+        FeedinPriceMarginSensor(coordinator, entry, "_diagnostic"),
         FeedinPriceSensor(coordinator, entry, "_diagnostic"),
         VeryLowPriceThresholdSensor(coordinator, entry, "_diagnostic"),
         SignificantSolarThresholdSensor(coordinator, entry, "_diagnostic"),
@@ -696,6 +698,89 @@ class FeedinPriceSensor(ElectricityPlannerSensorBase):
             "feedin_enabled": self.coordinator.data.get("feedin_solar", False),
             "feedin_reason": self.coordinator.data.get("feedin_solar_reason", ""),
             "remaining_solar": power_allocation.get("remaining_solar"),
+        }
+
+
+class BuyPriceMarginSensor(ElectricityPlannerSensorBase):
+    """Sensor exposing the difference between current price and threshold."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Buy Price Margin"
+        self._attr_unique_id = f"{entry.entry_id}_buy_price_margin"
+        self._attr_icon = "mdi:currency-eur"
+        self._attr_native_unit_of_measurement = None
+        self._attr_device_class = None
+        self._attr_state_class = None
+
+    @property
+    def native_value(self) -> str | None:
+        price_analysis = self.coordinator.data.get("price_analysis", {})
+        current_price = price_analysis.get("current_price")
+        threshold = price_analysis.get("price_threshold")
+
+        if current_price is None or threshold is None:
+            return None
+        margin = current_price - threshold
+        if current_price <= threshold:
+            return "favorable"
+        if margin <= 0.02:
+            return "watch"
+        return "expensive"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        price_analysis = self.coordinator.data.get("price_analysis", {})
+        threshold = price_analysis.get("price_threshold")
+        current_price = price_analysis.get("current_price")
+        margin = (current_price - threshold) if (current_price is not None and threshold is not None) else None
+        return {
+            "current_price": current_price,
+            "price_threshold": threshold,
+            "margin": round(margin, 4) if margin is not None else None,
+            "very_low_price": price_analysis.get("very_low_price"),
+        }
+
+
+class FeedinPriceMarginSensor(ElectricityPlannerSensorBase):
+    """Sensor exposing the difference between feed-in price and threshold."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Feed-in Price Margin"
+        self._attr_unique_id = f"{entry.entry_id}_feedin_price_margin"
+        self._attr_icon = "mdi:solar-power"
+        self._attr_native_unit_of_measurement = None
+        self._attr_device_class = None
+        self._attr_state_class = None
+
+    @property
+    def native_value(self) -> str | None:
+        threshold = self.coordinator.config.get(
+            CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
+        )
+        effective_price = self.coordinator.data.get("feedin_effective_price")
+
+        if effective_price is None:
+            return None
+        margin = threshold - effective_price
+        if effective_price >= threshold:
+            return "profitable"
+        if margin <= 0.02:
+            return "near"
+        return "loss"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        threshold = self.coordinator.config.get(
+            CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
+        )
+        effective_price = self.coordinator.data.get("feedin_effective_price")
+        margin = (threshold - effective_price) if effective_price is not None else None
+        return {
+            "threshold": threshold,
+            "effective_price": effective_price,
+            "margin": round(margin, 4) if margin is not None else None,
         }
 
 

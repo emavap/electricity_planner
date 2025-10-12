@@ -15,29 +15,43 @@ views:
             square: false
             columns: 3
             cards:
-              - type: gauge
-                name: Buy price
-                entity: sensor.electricity_planner_current_electricity_price
-                min: 0
-                max: 0.40
-                unit: "€/kWh"
-                needle: true
-                severity:
-                  green: 0
-                  yellow: 0.15
-                  red: 0.25
+          - type: tile
+            entity: sensor.electricity_planner_diagnostics_monitoring_buy_price_margin
+            name: Buy price
+            icon: mdi:currency-eur
+            vertical: false
+            state_content:
+              - attribute: current_price
+              - attribute: price_threshold
+            state:
+              - value: favorable
+                color: green
+                name: "≤ threshold"
+              - value: watch
+                color: amber
+                name: "close"
+              - value: expensive
+                color: red
+                name: expensive
 
-              - type: gauge
-                name: Feed-in price
-                entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
-                min: -0.20
-                max: 0.20
-                unit: "€/kWh"
-                needle: true
-                severity:
-                  red: 0
-                  yellow: 0.02
-                  green: 0.05
+          - type: tile
+            entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_margin
+            name: Feed-in price
+            icon: mdi:solar-power
+            vertical: false
+            state_content:
+              - attribute: effective_price
+              - attribute: threshold
+            state:
+              - value: profitable
+                color: green
+                name: profitable
+              - value: near
+                color: amber
+                name: "near threshold"
+              - value: loss
+                color: red
+                name: loss
 
               - type: entities
                 title: Price adjustments
