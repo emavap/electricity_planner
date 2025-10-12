@@ -29,7 +29,7 @@ views:
 
               - type: gauge
                 name: Feed-in price
-                entity: sensor.electricity_planner_current_feed_in_price
+                entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
                 min: -0.20
                 max: 0.20
                 unit: "€/kWh"
@@ -55,67 +55,59 @@ views:
                     type: attribute
                     name: Consumption offset
                     attribute: price_adjustment_offset
-                  - entity: sensor.electricity_planner_current_feed_in_price
+                  - entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
                     type: attribute
                     name: Feed-in multiplier
                     attribute: feedin_adjustment_multiplier
-                  - entity: sensor.electricity_planner_current_feed_in_price
+                  - entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
                     type: attribute
                     name: Feed-in offset
                     attribute: feedin_adjustment_offset
-                  - entity: sensor.electricity_planner_current_feed_in_price
-                    type: attribute
+                  - entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
                     name: Feed-in threshold
-                    attribute: feedin_threshold
 
           - type: horizontal-stack
             cards:
               - type: button
                 name: Battery
-                entity: binary_sensor.electricity_planner_battery_grid_charging
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
                 icon: mdi:battery-charging
                 show_state: true
 
               - type: button
                 name: Car
-                entity: binary_sensor.electricity_planner_car_grid_charging
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
                 icon: mdi:car-electric
                 show_state: true
                 tap_action:
                   action: more-info
 
               - type: button
-                name: Feed-in
-                entity: sensor.electricity_planner_current_feed_in_price
-                icon: mdi:solar-power
+                name: Data OK
+                entity: binary_sensor.electricity_planner_data_nord_pool_available
+                icon: mdi:database-check
                 show_state: true
 
           - type: entities
-            title: Decision reasons
+            title: Decision reasons & controls
             show_header_toggle: false
             entities:
-              - entity: binary_sensor.electricity_planner_battery_grid_charging
-                name: Battery reason
+              - entity: sensor.electricity_planner_charging_recommendation_reason
+                name: Overall decision
+
+              - entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                name: Battery charging
                 secondary_info: last-changed
 
-              - entity: binary_sensor.electricity_planner_car_grid_charging
-                name: Car reason
+              - entity: binary_sensor.electricity_planner_car_charge_from_grid
+                name: Car charging
                 secondary_info: last-changed
 
-              - entity: sensor.electricity_planner_current_feed_in_price
-                type: attribute
-                name: Feed-in reason
-                attribute: feedin_solar_reason
+              - entity: sensor.electricity_planner_car_charger_limit
+                name: Car charger limit
 
-              - entity: sensor.electricity_planner_decision_diagnostics
-                type: attribute
-                name: Charger limit (W)
-                attribute: charger_limit
-
-              - entity: sensor.electricity_planner_decision_diagnostics
-                type: attribute
-                name: Grid setpoint (W)
-                attribute: grid_setpoint
+              - entity: sensor.electricity_planner_grid_setpoint
+                name: Grid setpoint
 
           - type: grid
             square: false
@@ -138,28 +130,39 @@ views:
                 needle: true
 
               - type: entities
-                title: Power breakdown
+                title: Power & status
                 show_header_toggle: false
                 entities:
                   - entity: sensor.electricity_planner_solar_surplus_power
-                    type: attribute
-                    name: Solar production
-                    attribute: solar_production
+                    name: Solar surplus
 
-                  - entity: sensor.electricity_planner_solar_surplus_power
-                    type: attribute
-                    name: House consumption
-                    attribute: house_consumption
+                  - entity: binary_sensor.electricity_planner_solar_producing_power
+                    name: Solar producing
 
-                  - entity: sensor.electricity_planner_solar_surplus_power
-                    type: attribute
-                    name: Car charging power
-                    attribute: car_charging_power
+                  - entity: binary_sensor.electricity_planner_price_below_threshold
+                    name: Price below threshold
 
-                  - entity: sensor.electricity_planner_current_feed_in_price
-                    type: attribute
-                    name: Remaining solar
-                    attribute: remaining_solar
+                  - entity: sensor.electricity_planner_data_unavailable_duration
+                    name: Data unavailable time
+
+          - type: entities
+            title: Configuration thresholds
+            show_header_toggle: false
+            entities:
+              - entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
+                name: Price threshold
+
+              - entity: sensor.electricity_planner_diagnostics_monitoring_very_low_price_threshold
+                name: Very low price %
+
+              - entity: sensor.electricity_planner_diagnostics_monitoring_emergency_soc_threshold
+                name: Emergency SOC
+
+              - entity: sensor.electricity_planner_diagnostics_monitoring_significant_solar_threshold
+                name: Significant solar
+
+              - entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
+                name: Feed-in threshold
 
           - type: history-graph
             title: Price vs decisions (48h)
@@ -168,9 +171,9 @@ views:
             entities:
               - entity: sensor.electricity_planner_current_electricity_price
                 name: Buy price
-              - entity: sensor.electricity_planner_current_feed_in_price
+              - entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
                 name: Feed-in price
-              - entity: binary_sensor.electricity_planner_battery_grid_charging
+              - entity: binary_sensor.electricity_planner_battery_charge_from_grid
                 name: Battery charging
-              - entity: binary_sensor.electricity_planner_car_grid_charging
+              - entity: binary_sensor.electricity_planner_car_charge_from_grid
                 name: Car charging
