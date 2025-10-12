@@ -24,8 +24,8 @@ views:
                 needle: true
                 severity:
                   green: 0
-                  yellow: 0.18
-                  red: 0.28
+                  yellow: 0.15
+                  red: 0.25
 
               - type: gauge
                 name: Feed-in price
@@ -35,8 +35,8 @@ views:
                 unit: "€/kWh"
                 needle: true
                 severity:
-                  red: -0.05
-                  yellow: 0.00
+                  red: 0
+                  yellow: 0.02
                   green: 0.05
 
               - type: entities
