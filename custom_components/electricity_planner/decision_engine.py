@@ -179,7 +179,20 @@ class ChargingDecisionEngine:
             price_analysis, battery_analysis, power_allocation, solar_forecast, time_context
         )
         decision_data.update(battery_decision)
-        
+
+        # Get dynamic threshold from strategy manager (if dynamic pricing enabled)
+        context = {
+            "price_analysis": price_analysis,
+            "battery_analysis": battery_analysis,
+            "power_allocation": power_allocation,
+            "solar_forecast": solar_forecast,
+            "time_context": time_context,
+            "config": self.config,
+        }
+        dynamic_threshold = self.strategy_manager.get_dynamic_threshold(context)
+        if dynamic_threshold is not None:
+            price_analysis["dynamic_threshold"] = dynamic_threshold
+
         car_decision = self._decide_car_grid_charging(
             price_analysis, battery_analysis, power_allocation
         )

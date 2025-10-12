@@ -223,6 +223,7 @@ class PriceAnalysisSensor(ElectricityPlannerSensorBase):
             "price_adjustment_multiplier": price_analysis.get("price_adjustment_multiplier"),
             "price_adjustment_offset": price_analysis.get("price_adjustment_offset"),
             "price_threshold": price_analysis.get("price_threshold"),
+            "dynamic_threshold": price_analysis.get("dynamic_threshold"),
             "is_low_price": price_analysis.get("is_low_price"),
             "is_lowest_price": price_analysis.get("is_lowest_price"),
             "price_position": price_analysis.get("price_position"),

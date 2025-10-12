@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 import logging
 
 from .defaults import DEFAULT_ALGORITHM_THRESHOLDS
@@ -320,18 +320,21 @@ class StrategyManager:
             SolarPriorityStrategy(),
             VeryLowPriceStrategy(),
         ]
-        
+
         # Conditionally add dynamic or traditional strategies
         if use_dynamic_threshold:
-            self.strategies.append(DynamicPriceStrategy())
-        
+            self.dynamic_price_strategy = DynamicPriceStrategy()
+            self.strategies.append(self.dynamic_price_strategy)
+        else:
+            self.dynamic_price_strategy = None
+
         # Add remaining strategies
         self.strategies.extend([
             PredictiveChargingStrategy(),
             SolarAwareChargingStrategy(),
             SOCBasedChargingStrategy(),
         ])
-        
+
         # Sort by priority
         self.strategies.sort(key=lambda s: s.get_priority())
     
@@ -396,3 +399,35 @@ class StrategyManager:
 
         return False, (f"Price not favorable ({price_fragment}, "
                       f"{position_fragment}) for SOC {average_soc:.0f}%")
+
+    def get_dynamic_threshold(self, context: Dict[str, Any]) -> Optional[float]:
+        """Get the current dynamic threshold if dynamic pricing is enabled.
+
+        Returns None if dynamic threshold is not active or cannot be calculated.
+        """
+        if self.dynamic_price_strategy is None:
+            return None
+
+        if self.dynamic_price_strategy.dynamic_analyzer is None:
+            return None
+
+        # Get price data from context
+        price = context.get("price_analysis", {})
+        current_price = price.get("current_price")
+        highest_price = price.get("highest_price")
+        lowest_price = price.get("lowest_price")
+        next_price = price.get("next_price")
+
+        # Need at least current and highest/lowest to calculate
+        if current_price is None or highest_price is None or lowest_price is None:
+            return None
+
+        # Get the analysis which includes dynamic_threshold
+        analysis = self.dynamic_price_strategy.dynamic_analyzer.analyze_price_window(
+            current_price=current_price,
+            highest_today=highest_price,
+            lowest_today=lowest_price,
+            next_price=next_price
+        )
+
+        return analysis.get("dynamic_threshold")

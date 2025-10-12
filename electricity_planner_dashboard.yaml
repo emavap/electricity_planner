@@ -1,6 +1,8 @@
 # REQUIRED: Install "Gauge Card Pro" from HACS
 # https://github.com/benjamin-dcs/gauge-card-pro
-# This dashboard uses dynamic thresholds that update based on your configuration
+# This dashboard uses dynamic thresholds that update in real-time:
+# - Buy price gauge: green → yellow (dynamic threshold) → red (max threshold)
+# - Feed-in price gauge: red (negative) → yellow (zero) → green (feed-in threshold)
 
 views:
   - title: Electricity Planner
@@ -30,12 +32,18 @@ views:
                 needle: true
                 scale: "50px"
                 segments: |-
-                  {% set threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float %}
+                  {% set dynamic_threshold = state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') %}
+                  {% set max_threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float %}
+                  {% if dynamic_threshold != None %}
+                    {% set threshold = dynamic_threshold | float %}
+                  {% else %}
+                    {% set threshold = max_threshold %}
+                  {% endif %}
                   {{
                     [
                       { "from": -0.9, "color": "green" },
                       { "from": threshold, "color": "yellow" },
-                      { "from": threshold * 1.2, "color": "red" }
+                      { "from": max_threshold, "color": "red" }
                     ]
                   }}
 
