@@ -482,8 +482,11 @@ class ChargingDecisionEngine:
     ) -> int:
         """Calculate solar allocation for batteries."""
         batteries_full = battery_analysis.get("batteries_full", False)
-        average_soc = battery_analysis.get("average_soc", 0)
-        max_soc = battery_analysis.get("max_soc_threshold", 80)
+        average_soc = battery_analysis.get("average_soc")
+        max_soc = battery_analysis.get("max_soc_threshold", DEFAULT_MAX_SOC)
+        
+        if average_soc is None or max_soc is None:
+            return 0
         
         if (not batteries_full and
             average_soc < max_soc - DEFAULT_ALGORITHM_THRESHOLDS.soc_safety_margin and
