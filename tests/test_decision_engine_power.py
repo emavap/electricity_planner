@@ -10,6 +10,8 @@ from custom_components.electricity_planner.const import (
     CONF_FEEDIN_PRICE_THRESHOLD,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
+    CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+    CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_VERY_LOW_PRICE_THRESHOLD,
 )
 from custom_components.electricity_planner.decision_engine import ChargingDecisionEngine
@@ -226,3 +228,47 @@ def test_charger_limit_for_solar_only_car():
 
     assert result["charger_limit"] == 2500
     assert "Solar-only car charging" in result["charger_limit_reason"]
+
+
+def test_price_adjustment_failure_disables_charging():
+    """If price adjustments are configured but fail, charging must be disabled for safety."""
+    engine = _engine({
+        CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.12,
+        CONF_PRICE_ADJUSTMENT_OFFSET: 0.008,
+    })
+
+    # Simulate adjustment failure by passing invalid data that will cause apply_price_adjustment to return None
+    # In practice this would be a bug in apply_price_adjustment, but we test the safety behavior
+    data = {
+        "current_price": None,  # This will cause adjustment to return None
+        "highest_price": 0.20,
+        "lowest_price": 0.05,
+        "next_price": 0.09,
+    }
+
+    price_analysis = engine._analyze_comprehensive_pricing(data)
+
+    # When adjustments are configured and fail, data should be treated as unavailable
+    assert price_analysis["data_available"] is False
+    assert price_analysis["current_price"] is None
+
+
+def test_price_adjustment_fallback_only_when_no_adjustment():
+    """Without configured adjustments, fallback to raw prices is safe."""
+    engine = _engine({
+        CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.0,  # Default = no adjustment
+        CONF_PRICE_ADJUSTMENT_OFFSET: 0.0,      # Default = no adjustment
+    })
+
+    data = {
+        "current_price": 0.08,
+        "highest_price": 0.20,
+        "lowest_price": 0.05,
+        "next_price": 0.09,
+    }
+
+    price_analysis = engine._analyze_comprehensive_pricing(data)
+
+    # Without adjustments configured, raw prices are used normally
+    assert price_analysis["data_available"] is True
+    assert price_analysis["current_price"] == 0.08
