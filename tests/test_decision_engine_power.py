@@ -215,6 +215,22 @@ def test_price_analysis_unavailable_when_adjustment_missing_data():
     assert analysis["data_available"] is False
 
 
+def test_transport_cost_added_to_pricing():
+    engine = _engine()
+    analysis = engine._analyze_comprehensive_pricing(
+        {
+            "current_price": 0.10,
+            "highest_price": 0.20,
+            "lowest_price": 0.05,
+            "next_price": 0.12,
+            "transport_cost": 0.02,
+        }
+    )
+
+    assert analysis["current_price"] == pytest.approx(0.12)
+    assert analysis["transport_cost"] == pytest.approx(0.02)
+
+
 def test_charger_limit_enforces_restrictions():
     engine = _engine()
     price_analysis = {}

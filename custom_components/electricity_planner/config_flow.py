@@ -137,6 +137,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_SOLAR_FORECAST_TOMORROW_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
+            vol.Optional(CONF_TRANSPORT_COST_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
         })
 
         return self.async_show_form(
@@ -157,6 +160,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "solar_forecast_today": "Total solar forecast for today (kWh) (optional)",
                 "solar_forecast_remaining": "Remaining solar forecast for today (kWh) (optional)",
                 "solar_forecast_tomorrow": "Solar forecast for tomorrow (kWh) (optional)",
+                "transport_cost": "Optional transport cost sensor (€/kWh) added to buy price",
             },
         )
 
@@ -568,6 +572,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(
                 CONF_SOLAR_FORECAST_TOMORROW_ENTITY,
                 default=current_config.get(CONF_SOLAR_FORECAST_TOMORROW_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_TRANSPORT_COST_ENTITY,
+                default=current_config.get(CONF_TRANSPORT_COST_ENTITY)
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),

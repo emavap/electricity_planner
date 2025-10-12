@@ -28,6 +28,7 @@ from .const import (
     CONF_SOLAR_FORECAST_TODAY_ENTITY,
     CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY,
     CONF_SOLAR_FORECAST_TOMORROW_ENTITY,
+    CONF_TRANSPORT_COST_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
@@ -244,6 +245,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         )
         data["solar_forecast_tomorrow"] = await self._get_state_value(
             self.config.get(CONF_SOLAR_FORECAST_TOMORROW_ENTITY)
+        )
+
+        data["transport_cost"] = await self._get_state_value(
+            self.config.get(CONF_TRANSPORT_COST_ENTITY)
         )
 
         return data

@@ -17,6 +17,7 @@ CONF_SOLAR_FORECAST_NEXT_ENTITY = "solar_forecast_next_entity"
 CONF_SOLAR_FORECAST_TODAY_ENTITY = "solar_forecast_today_entity"
 CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY = "solar_forecast_remaining_today_entity"
 CONF_SOLAR_FORECAST_TOMORROW_ENTITY = "solar_forecast_tomorrow_entity"
+CONF_TRANSPORT_COST_ENTITY = "transport_cost_entity"
 
 CONF_MIN_SOC_THRESHOLD = "min_soc_threshold"
 CONF_MAX_SOC_THRESHOLD = "max_soc_threshold"

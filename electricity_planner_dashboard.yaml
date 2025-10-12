@@ -107,6 +107,8 @@ views:
             title: Charging decisions
             show_header_toggle: false
             entities:
+              - entity: sensor.energie_prijs
+                name: Energie prijs
               - entity: binary_sensor.electricity_planner_battery_charge_from_grid
                 name: Battery charging
                 secondary_info: last-changed

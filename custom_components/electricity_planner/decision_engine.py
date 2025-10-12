@@ -269,6 +269,8 @@ class ChargingDecisionEngine:
         lowest_price = apply_price_adjustment(raw_lowest_price, price_multiplier, price_offset)
         next_price = apply_price_adjustment(raw_next_price, price_multiplier, price_offset)
 
+        transport_cost = data.get("transport_cost") or 0
+
         if current_price is None:
             _LOGGER.error(
                 "Current price unavailable after adjustment (raw=%s, multiplier=%s, offset=%s) - "
@@ -277,17 +279,21 @@ class ChargingDecisionEngine:
             )
             return self._create_unavailable_price_analysis(
                 raw_highest_price, raw_lowest_price, raw_next_price,
-                self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
+                self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD),
+                transport_cost,
             )
+
+        if highest_price is not None:
+            highest_price += transport_cost
+        if lowest_price is not None:
+            lowest_price += transport_cost
+        if next_price is not None:
+            next_price += transport_cost
+        current_price += transport_cost
 
         price_threshold = self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
         very_low_threshold = self.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD) / 100.0
 
-        if current_price is None:
-            return self._create_unavailable_price_analysis(
-                raw_highest_price, raw_lowest_price, raw_next_price, price_threshold
-            )
-        
         # Use cached price position calculation
         price_position = self.price_calculator.calculate_price_position(
             current_price, highest_price or current_price, lowest_price or current_price
@@ -311,6 +317,7 @@ class ChargingDecisionEngine:
             "raw_next_price": raw_next_price,
             "price_adjustment_multiplier": price_multiplier,
             "price_adjustment_offset": price_offset,
+            "transport_cost": transport_cost,
             "price_threshold": price_threshold,
             "is_low_price": current_price <= price_threshold,
             "is_lowest_price": lowest_price is not None and current_price == lowest_price,
@@ -327,7 +334,8 @@ class ChargingDecisionEngine:
         highest_price: Optional[float],
         lowest_price: Optional[float],
         next_price: Optional[float],
-        price_threshold: float
+        price_threshold: float,
+        transport_cost: float = 0.0,
     ) -> Dict[str, Any]:
         """Create price analysis when current price is unavailable."""
         return {
@@ -354,6 +362,7 @@ class ChargingDecisionEngine:
             "price_adjustment_offset": self.config.get(
                 CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
             ),
+            "transport_cost": transport_cost,
         }
 
     def _analyze_power_flow(self, data: Dict[str, Any]) -> Dict[str, Any]:
