@@ -136,6 +136,10 @@ views:
                     attribute: raw_current_price
                   - entity: sensor.electricity_planner_current_electricity_price
                     type: attribute
+                    name: Transport cost
+                    attribute: transport_cost
+                  - entity: sensor.electricity_planner_current_electricity_price
+                    type: attribute
                     name: Consumption multiplier
                     attribute: price_adjustment_multiplier
                   - entity: sensor.electricity_planner_current_electricity_price
