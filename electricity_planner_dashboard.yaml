@@ -122,28 +122,35 @@ views:
                   - entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
                     name: Feed-in threshold
 
-          - type: glance
-            show_name: true
-            show_state: true
+          - type: grid
+            square: false
             columns: 3
-            entities:
-              - entity: binary_sensor.electricity_planner_battery_charge_from_grid
+            cards:
+              - type: tile
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
                 name: Battery
                 icon: mdi:battery-charging
-                tap_action:
-                  action: more-info
+                color: green
+                show_entity_picture: false
+                vertical: false
 
-              - entity: binary_sensor.electricity_planner_car_charge_from_grid
+              - type: tile
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
                 name: Car
                 icon: mdi:car-electric
+                color: green
+                show_entity_picture: false
+                vertical: false
                 tap_action:
                   action: more-info
 
-              - entity: binary_sensor.electricity_planner_data_nord_pool_available
+              - type: tile
+                entity: binary_sensor.electricity_planner_data_nord_pool_available
                 name: Data OK
                 icon: mdi:database-check
-                tap_action:
-                  action: more-info
+                color: blue
+                show_entity_picture: false
+                vertical: false
 
           - type: entities
             title: Power controls
