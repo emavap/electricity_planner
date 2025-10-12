@@ -15,10 +15,6 @@ views:
           - type: markdown
             content: |
               ## ⚡ Electricity Planner Dashboard
-              Net contract prices, charging recommendations, and live power context – all in one place.
-
-              Gauge colors automatically adapt to your configured thresholds!
-
           - type: grid
             square: false
             columns: 2
