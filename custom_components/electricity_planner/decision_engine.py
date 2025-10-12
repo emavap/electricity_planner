@@ -505,10 +505,26 @@ class ChargingDecisionEngine:
         battery_analysis: Dict[str, Any]
     ) -> int:
         """Calculate solar allocation for car."""
-        average_soc = battery_analysis.get("average_soc", 0)
-        max_soc = battery_analysis.get("max_soc_threshold", 80)
+        if available_solar <= 0:
+            return 0
         
-        if available_solar > 0 and average_soc >= max_soc - DEFAULT_ALGORITHM_THRESHOLDS.soc_buffer:
+        max_soc = battery_analysis.get("max_soc_threshold", DEFAULT_MAX_SOC)
+        average_soc = battery_analysis.get("average_soc")
+        min_soc = battery_analysis.get("min_soc")
+        batteries_full = battery_analysis.get("batteries_full", False)
+        
+        # Treat solar as a bonus: only allocate it to the car when every battery is already near full.
+        solar_ready_threshold = max_soc - DEFAULT_ALGORITHM_THRESHOLDS.soc_buffer
+        if batteries_full:
+            return min(
+                available_solar,
+                self.config.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)
+            )
+        
+        if average_soc is None or min_soc is None:
+            return 0
+        
+        if average_soc >= solar_ready_threshold and min_soc >= solar_ready_threshold:
             return min(
                 available_solar,
                 self.config.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)
@@ -805,52 +821,56 @@ class ChargingDecisionEngine:
             }
         
         allocated_solar = power_allocation.get("solar_for_car", 0)
+        current_price = price_analysis.get("current_price", 0)
+        threshold = price_analysis.get("price_threshold", 0.15)
         
-        # Solar-only charging
+        # Prioritise very low prices regardless of solar forecast
+        if price_analysis.get("very_low_price"):
+            very_low_percent = self.config.get(
+                CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD
+            )
+            reason = (
+                f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_percent}% of daily range"
+            )
+            if allocated_solar > 0:
+                reason += f", solar available ({allocated_solar}W)"
+            return {
+                "car_grid_charging": True,
+                "car_grid_charging_reason": reason,
+            }
+        
+        # Allow grid charging whenever the current price is already acceptable.
+        if price_analysis.get("is_low_price"):
+            if allocated_solar > 0:
+                reason = (
+                    f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) "
+                    f"with solar support ({allocated_solar}W) - allowing grid + solar"
+                )
+            else:
+                reason = (
+                    f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) - charging car from grid"
+                )
+            return {
+                "car_grid_charging": True,
+                "car_grid_charging_reason": reason,
+            }
+        
+        # For higher prices fall back to solar-only if available, otherwise skip grid charging.
         if allocated_solar > 0:
             return {
                 "car_grid_charging": True,
                 "car_solar_only": True,
-                "car_grid_charging_reason": f"Using allocated solar power ({allocated_solar}W) for car charging, no grid usage",
+                "car_grid_charging_reason": (
+                    f"Price too high ({current_price:.3f}€/kWh > {threshold:.3f}€/kWh) - "
+                    f"using allocated solar power only ({allocated_solar}W)"
+                ),
             }
         
-        # Check predictive logic
-        if price_analysis.get("is_low_price") and price_analysis.get("significant_price_drop"):
-            next_price = price_analysis.get("next_price", 0)
-            current_price = price_analysis.get("current_price", 0)
-            return {
-                "car_grid_charging": False,
-                "car_grid_charging_reason": f"Waiting for significant price drop next hour ({next_price:.3f}€/kWh) - better than current ({current_price:.3f}€/kWh)",
-            }
-        
-        # Price-based decisions
-        if not price_analysis.get("is_low_price"):
-            current = price_analysis.get("current_price", 0)
-            threshold = price_analysis.get("price_threshold", 0.15)
-            return {
-                "car_grid_charging": False,
-                "car_grid_charging_reason": f"Price too high ({current:.3f}€/kWh) - threshold: {threshold:.3f}€/kWh",
-            }
-        
-        if price_analysis.get("very_low_price"):
-            current = price_analysis.get("current_price", 0)
-            very_low_percent = self.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
-            return {
-                "car_grid_charging": True,
-                "car_grid_charging_reason": f"Very low price ({current:.3f}€/kWh) - bottom {very_low_percent}% of daily range",
-            }
-        
-        if price_analysis.get("price_trend_improving"):
-            next_price = price_analysis.get("next_price", 0)
-            return {
-                "car_grid_charging": False,
-                "car_grid_charging_reason": f"Price improving next hour ({next_price:.3f}€/kWh) - wait for better price",
-            }
-        
-        current = price_analysis.get("current_price", 0)
         return {
-            "car_grid_charging": True,
-            "car_grid_charging_reason": f"Low price ({current:.3f}€/kWh) - below threshold",
+            "car_grid_charging": False,
+            "car_grid_charging_reason": (
+                f"Price too high ({current_price:.3f}€/kWh > {threshold:.3f}€/kWh)"
+            ),
         }
 
     def _decide_feedin_solar(
