@@ -184,9 +184,13 @@ views:
                 name: Solar surplus
                 entity: sensor.electricity_planner_solar_surplus_power
                 min: 0
-                max: 8000
+                max: 5000
                 unit: W
                 needle: true
+                severity:
+                  green: 0
+                  yellow: 2000
+                  red: 4000
 
               - type: entities
                 title: Power & status
