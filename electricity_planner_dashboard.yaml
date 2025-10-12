@@ -65,24 +65,54 @@ views:
                     ]
                   }}
 
-              - type: entities
-                title: Charging decisions
-                show_header_toggle: false
-                entities:
-                  - entity: binary_sensor.electricity_planner_battery_charge_from_grid
-                    name: Battery charging
-                    secondary_info: last-changed
-                  - type: attribute
+              - type: grid
+                square: false
+                columns: 3
+                cards:
+                  - type: tile
                     entity: binary_sensor.electricity_planner_battery_charge_from_grid
-                    attribute: reason
-                    name: Battery reason
-                  - entity: binary_sensor.electricity_planner_car_charge_from_grid
-                    name: Car charging
-                    secondary_info: last-changed
-                  - type: attribute
+                    name: Battery
+                    icon: mdi:battery-charging
+                    color: green
+                    show_entity_picture: false
+                    vertical: false
+
+                  - type: tile
                     entity: binary_sensor.electricity_planner_car_charge_from_grid
-                    attribute: reason
-                    name: Car reason
+                    name: Car
+                    icon: mdi:car-electric
+                    color: green
+                    show_entity_picture: false
+                    vertical: false
+                    tap_action:
+                      action: more-info
+
+                  - type: tile
+                    entity: binary_sensor.electricity_planner_data_nord_pool_available
+                    name: Data OK
+                    icon: mdi:database-check
+                    color: blue
+                    show_entity_picture: false
+                    vertical: false
+
+          - type: entities
+            title: Charging decisions
+            show_header_toggle: false
+            entities:
+              - entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                name: Battery charging
+                secondary_info: last-changed
+              - type: attribute
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                attribute: reason
+                name: Battery reason
+              - entity: binary_sensor.electricity_planner_car_charge_from_grid
+                name: Car charging
+                secondary_info: last-changed
+              - type: attribute
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
+                attribute: reason
+                name: Car reason
 
           - type: grid
             square: false
@@ -127,36 +157,6 @@ views:
                     attribute: dynamic_threshold
                   - entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
                     name: Feed-in threshold
-
-          - type: grid
-            square: false
-            columns: 3
-            cards:
-              - type: tile
-                entity: binary_sensor.electricity_planner_battery_charge_from_grid
-                name: Battery
-                icon: mdi:battery-charging
-                color: green
-                show_entity_picture: false
-                vertical: false
-
-              - type: tile
-                entity: binary_sensor.electricity_planner_car_charge_from_grid
-                name: Car
-                icon: mdi:car-electric
-                color: green
-                show_entity_picture: false
-                vertical: false
-                tap_action:
-                  action: more-info
-
-              - type: tile
-                entity: binary_sensor.electricity_planner_data_nord_pool_available
-                name: Data OK
-                icon: mdi:database-check
-                color: blue
-                show_entity_picture: false
-                vertical: false
 
           - type: entities
             title: Power controls
