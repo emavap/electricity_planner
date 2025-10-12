@@ -1,7 +1,3 @@
-# REQUIRED: Install "Gauge Card Pro" from HACS
-# https://github.com/custom-cards/gauge-card-pro
-# This dashboard uses dynamic thresholds that update based on configuration
-
 views:
   - title: Electricity Planner
     path: electricity-planner
@@ -19,37 +15,32 @@ views:
             square: false
             columns: 3
             cards:
-              - type: custom:gauge-card-pro
+              - type: gauge
                 entity: sensor.electricity_planner_current_electricity_price
                 name: Buy price
-                unit: "€/kWh"
                 min: 0
                 max: 0.40
+                unit: "€/kWh"
                 needle: true
-                scale: 50px
-                segments:
-                  - color: "#43a047"
-                    value: 0
-                  - color: "#ffa600"
-                    value: "{{ states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float }}"
-                  - color: "#db4437"
-                    value: "{{ states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float * 1.2 }}"
+                severity:
+                  green: 0
+                  yellow: 0.10
+                  red: 0.15
 
-              - type: custom:gauge-card-pro
+              - type: gauge
                 entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
                 name: Feed-in price
+                min: -0.10
+                max: 0.15
                 unit: "€/kWh"
-                min: -0.20
-                max: 0.20
                 needle: true
-                scale: 50px
                 segments:
-                  - color: "#db4437"
-                    value: -0.20
-                  - color: "#ffa600"
-                    value: 0
-                  - color: "#43a047"
-                    value: "{{ states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float }}"
+                  - from: -0.10
+                    color: "#db4437"
+                  - from: 0
+                    color: "#ffa600"
+                  - from: 0.01
+                    color: "#43a047"
 
               - type: entities
                 title: Price adjustments
