@@ -72,11 +72,17 @@ views:
                   - entity: binary_sensor.electricity_planner_battery_charge_from_grid
                     name: Battery charging
                     secondary_info: last-changed
+                  - type: attribute
+                    entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                    attribute: reason
+                    name: Battery reason
                   - entity: binary_sensor.electricity_planner_car_charge_from_grid
                     name: Car charging
                     secondary_info: last-changed
-                  - entity: sensor.electricity_planner_charging_recommendation_reason
-                    name: Decision reason
+                  - type: attribute
+                    entity: binary_sensor.electricity_planner_car_charge_from_grid
+                    attribute: reason
+                    name: Car reason
 
           - type: grid
             square: false
