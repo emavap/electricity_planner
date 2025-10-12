@@ -27,21 +27,13 @@ views:
                 max: 0.40
                 needle: true
                 scale: 50px
-                severity:
+                segments:
                   - color: "#43a047"
-                    from: 0
-                    to_entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
+                    value: 0
                   - color: "#ffa600"
-                    from_entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
-                    to_entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
-                    to_entity_multiplier: 1.15
+                    value: "{{ states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float }}"
                   - color: "#db4437"
-                    from_entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
-                    from_entity_multiplier: 1.15
-                    to: 0.40
-                threshold:
-                  - value_entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
-                    color: "#000000"
+                    value: "{{ states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float * 1.2 }}"
 
               - type: custom:gauge-card-pro
                 entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
@@ -51,21 +43,13 @@ views:
                 max: 0.20
                 needle: true
                 scale: 50px
-                severity:
+                segments:
                   - color: "#db4437"
-                    from: -0.20
-                    to_entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
+                    value: -0.20
                   - color: "#ffa600"
-                    from_entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
-                    to_entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
-                    to_entity_multiplier: 1.5
+                    value: 0
                   - color: "#43a047"
-                    from_entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
-                    from_entity_multiplier: 1.5
-                    to: 0.20
-                threshold:
-                  - value_entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
-                    color: "#000000"
+                    value: "{{ states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float }}"
 
               - type: entities
                 title: Price adjustments
