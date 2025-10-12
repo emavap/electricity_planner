@@ -1,3 +1,7 @@
+# REQUIRED: Install "Gauge Card Pro" from HACS
+# https://github.com/custom-cards/gauge-card-pro
+# This dashboard uses dynamic thresholds that update based on configuration
+
 views:
   - title: Electricity Planner
     path: electricity-planner
@@ -15,32 +19,45 @@ views:
             square: false
             columns: 3
             cards:
-              - type: gauge
-                name: Buy price
+              - type: custom:gauge-card-pro
                 entity: sensor.electricity_planner_current_electricity_price
+                name: Buy price
+                unit: "€/kWh"
                 min: 0
                 max: 0.40
-                unit: "€/kWh"
                 needle: true
+                scale: 50px
                 severity:
-                  green: 0
-                  yellow: 0.18
-                  red: 0.28
+                  - color: "#43a047"
+                    from: 0
+                    to_entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
+                  - color: "#ffa600"
+                    from_entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
+                    to_entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
+                    to_entity_multiplier: 1.2
+                  - color: "#db4437"
+                    from_entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
+                    from_entity_multiplier: 1.2
+                    to: 0.40
 
-              - type: gauge
-                name: Feed-in price
+              - type: custom:gauge-card-pro
                 entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
+                name: Feed-in price
+                unit: "€/kWh"
                 min: -0.20
                 max: 0.20
-                unit: "€/kWh"
                 needle: true
-                segments:
-                  - from: -0.20
-                    color: "#db4437"
-                  - from: 0
-                    color: "#ffa600"
-                  - from: 0.05
-                    color: "#43a047"
+                scale: 50px
+                severity:
+                  - color: "#db4437"
+                    from: -0.20
+                    to: 0
+                  - color: "#ffa600"
+                    from: 0
+                    to_entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
+                  - color: "#43a047"
+                    from_entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
+                    to: 0.20
 
               - type: entities
                 title: Price adjustments
