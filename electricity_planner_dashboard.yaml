@@ -1,3 +1,7 @@
+# REQUIRED: Install "Gauge Card Pro" from HACS
+# https://github.com/benjamin-dcs/gauge-card-pro
+# This dashboard uses dynamic thresholds that update based on your configuration
+
 views:
   - title: Electricity Planner
     path: electricity-planner
@@ -11,43 +15,43 @@ views:
               ## ⚡ Electricity Planner Dashboard
               Net contract prices, charging recommendations, and live power context – all in one place.
 
-              **Note:** Gauge colors are configured based on your thresholds. If you change your price/feed-in thresholds in the integration config, update the gauge severity values in this dashboard YAML to match.
+              Gauge colors automatically adapt to your configured thresholds!
 
           - type: grid
             square: false
             columns: 3
             cards:
-              # Buy price gauge - adjust yellow/red based on YOUR configured thresholds
-              # yellow: your price_threshold (current: 0.10)
-              # red: your price_threshold × 1.5 (current: 0.15)
-              - type: gauge
+              - type: custom:gauge-card-pro
                 entity: sensor.electricity_planner_current_electricity_price
                 name: Buy price
                 min: 0
                 max: 0.40
                 unit: "€/kWh"
                 needle: true
-                severity:
-                  green: 0
-                  yellow: 0.10
-                  red: 0.15
+                scale: "50px"
+                segments:
+                  - color: green
+                    value: 0
+                  - color: yellow
+                    value: ${ states['sensor.electricity_planner_diagnostics_monitoring_price_threshold'].state }
+                  - color: red
+                    value: ${ parseFloat(states['sensor.electricity_planner_diagnostics_monitoring_price_threshold'].state) * 1.2 }
 
-              # Feed-in price gauge - adjust based on YOUR configured feed-in threshold
-              # Orange starts at 0, green starts at your feedin_threshold (current: 0.01)
-              - type: gauge
+              - type: custom:gauge-card-pro
                 entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
                 name: Feed-in price
                 min: -0.10
                 max: 0.15
                 unit: "€/kWh"
                 needle: true
+                scale: "50px"
                 segments:
-                  - from: -0.10
-                    color: "#db4437"
-                  - from: 0
-                    color: "#ffa600"
-                  - from: 0.01
-                    color: "#43a047"
+                  - color: red
+                    value: -0.10
+                  - color: yellow
+                    value: 0
+                  - color: green
+                    value: ${ states['sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold'].state }
 
               - type: entities
                 title: Price adjustments
