@@ -256,28 +256,16 @@ class ChargingDecisionEngine:
         lowest_price = apply_price_adjustment(raw_lowest_price, price_multiplier, price_offset)
         next_price = apply_price_adjustment(raw_next_price, price_multiplier, price_offset)
 
-        # Check if adjustments are configured
-        adjustments_active = (
-            price_multiplier != DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
-            or price_offset != DEFAULT_PRICE_ADJUSTMENT_OFFSET
-        )
-
-        # Safety: If adjustments are active but failed, treat as data unavailable
-        if adjustments_active and current_price is None:
+        if current_price is None:
             _LOGGER.error(
-                "Price adjustment failed with configured multiplier=%s, offset=%s - "
-                "disabling charging for safety", price_multiplier, price_offset
+                "Current price unavailable after adjustment (raw=%s, multiplier=%s, offset=%s) - "
+                "disabling charging decisions for safety",
+                raw_current_price, price_multiplier, price_offset
             )
             return self._create_unavailable_price_analysis(
                 raw_highest_price, raw_lowest_price, raw_next_price,
                 self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
             )
-
-        # Fallback to raw values only if no adjustments configured
-        current_price = raw_current_price if current_price is None else current_price
-        highest_price = raw_highest_price if highest_price is None else highest_price
-        lowest_price = raw_lowest_price if lowest_price is None else lowest_price
-        next_price = raw_next_price if next_price is None else next_price
 
         price_threshold = self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
         very_low_threshold = self.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD) / 100.0
@@ -949,8 +937,15 @@ class ChargingDecisionEngine:
                 "feedin_effective_price": None,
             }
         
-        current_price = price_analysis.get("current_price", 0) or 0
+        current_price = price_analysis.get("current_price")
         raw_price = price_analysis.get("raw_current_price", current_price)
+
+        if current_price is None:
+            return {
+                "feedin_solar": False,
+                "feedin_solar_reason": "No adjusted price available for feed-in",
+                "feedin_effective_price": None,
+            }
         
         feed_multiplier = self.config.get(
             CONF_FEEDIN_ADJUSTMENT_MULTIPLIER, DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER

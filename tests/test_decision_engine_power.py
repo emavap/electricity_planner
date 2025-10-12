@@ -168,6 +168,17 @@ def test_feed_in_uses_adjustment_negative():
     assert "disable" in result["feedin_solar_reason"]
 
 
+def test_feed_in_no_price_disables():
+    engine = _engine()
+    price_analysis = {"data_available": True, "current_price": None}
+
+    result = engine._decide_feedin_solar(price_analysis, {"remaining_solar": 500})
+
+    assert result["feedin_solar"] is False
+    assert result["feedin_effective_price"] is None
+    assert "No adjusted price available" in result["feedin_solar_reason"]
+
+
 def test_feed_in_adjustment_respects_threshold():
     engine = _engine({
         CONF_FEEDIN_ADJUSTMENT_MULTIPLIER: 0.7,
@@ -185,6 +196,23 @@ def test_feed_in_adjustment_respects_threshold():
     assert result["feedin_effective_price"] == pytest.approx(0.05 * 0.7 - 0.01)
     assert result["feedin_solar"] is True
     assert "0.020" in result["feedin_solar_reason"]
+
+
+def test_price_analysis_unavailable_when_adjustment_missing_data():
+    engine = _engine({
+        CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.12,
+        CONF_PRICE_ADJUSTMENT_OFFSET: 0.008,
+    })
+    analysis = engine._analyze_comprehensive_pricing(
+        {
+            "current_price": None,
+            "highest_price": 0.20,
+            "lowest_price": 0.05,
+            "next_price": 0.10,
+        }
+    )
+
+    assert analysis["data_available"] is False
 
 
 def test_charger_limit_enforces_restrictions():
