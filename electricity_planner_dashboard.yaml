@@ -24,34 +24,38 @@ views:
               - type: custom:gauge-card-pro
                 entity: sensor.electricity_planner_current_electricity_price
                 name: Buy price
-                min: 0
-                max: 0.40
+                min: -0.9
+                max: 0.9
                 unit: "€/kWh"
                 needle: true
                 scale: "50px"
-                segments:
-                  - color: green
-                    value: 0
-                  - color: yellow
-                    value: ${ states['sensor.electricity_planner_diagnostics_monitoring_price_threshold'].state }
-                  - color: red
-                    value: ${ parseFloat(states['sensor.electricity_planner_diagnostics_monitoring_price_threshold'].state) * 1.2 }
+                segments: |-
+                  {% set threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float %}
+                  {{
+                    [
+                      { "from": -0.9, "color": "green" },
+                      { "from": threshold, "color": "yellow" },
+                      { "from": threshold * 1.2, "color": "red" }
+                    ]
+                  }}
 
               - type: custom:gauge-card-pro
                 entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
                 name: Feed-in price
-                min: -0.10
-                max: 0.15
+                min: -0.9
+                max: 0.9
                 unit: "€/kWh"
                 needle: true
                 scale: "50px"
-                segments:
-                  - color: red
-                    value: -0.10
-                  - color: yellow
-                    value: 0
-                  - color: green
-                    value: ${ states['sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold'].state }
+                segments: |-
+                  {% set threshold = states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float %}
+                  {{
+                    [
+                      { "from": -0.9, "color": "red" },
+                      { "from": 0, "color": "yellow" },
+                      { "from": threshold, "color": "green" }
+                    ]
+                  }}
 
               - type: entities
                 title: Price adjustments
