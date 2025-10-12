@@ -132,6 +132,14 @@ views:
                 entities:
                   - entity: sensor.electricity_planner_current_electricity_price
                     type: attribute
+                    name: Highest price today
+                    attribute: highest_price
+                  - entity: sensor.electricity_planner_current_electricity_price
+                    type: attribute
+                    name: Lowest price today
+                    attribute: lowest_price
+                  - entity: sensor.electricity_planner_current_electricity_price
+                    type: attribute
                     name: Raw Nord Pool price
                     attribute: raw_current_price
                   - entity: sensor.electricity_planner_current_electricity_price
