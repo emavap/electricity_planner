@@ -115,6 +115,28 @@ def test_normalize_price_interval_returns_none_for_invalid(fake_coordinator, fak
     assert sensor._normalize_price_interval({"start": "2025-10-14T00:00:00+00:00"}) is None
 
 
+def test_normalize_price_interval_applies_adjustments(fake_coordinator, fake_entry):
+    """Test that _normalize_price_interval applies multiplier and offset."""
+    # Configure adjustment: price × 1.21 + 0.05 (e.g., VAT + surcharge)
+    fake_coordinator.config = {
+        "price_adjustment_multiplier": 1.21,
+        "price_adjustment_offset": 0.05
+    }
+    sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
+
+    interval = {
+        "start": "2025-10-14T00:00:00+00:00",
+        "end": "2025-10-14T00:15:00+00:00",
+        "value": 100.0  # 100 €/MWh = 0.1 €/kWh
+    }
+
+    result = sensor._normalize_price_interval(interval)
+
+    assert result is not None
+    # Expected: (100/1000 × 1.21) + 0.05 = 0.1 × 1.21 + 0.05 = 0.121 + 0.05 = 0.171
+    assert result["price"] == 0.171
+
+
 def test_native_value_unavailable_when_no_data(fake_coordinator, fake_entry):
     """Test that sensor shows unavailable when no data."""
     sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")

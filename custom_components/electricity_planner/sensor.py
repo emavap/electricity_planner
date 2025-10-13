@@ -16,6 +16,8 @@ from .const import (
     CONF_FEEDIN_PRICE_THRESHOLD,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
+    CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+    CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
     CONF_EMERGENCY_SOC_THRESHOLD,
@@ -23,6 +25,8 @@ from .const import (
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
+    DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
     DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
     DEFAULT_EMERGENCY_SOC,
@@ -993,7 +997,9 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
     def _normalize_price_interval(self, interval: Any) -> dict[str, Any] | None:
         """Return a normalized interval dict with a guaranteed price key.
 
-        Converts price from €/MWh to €/kWh (divides by 1000).
+        Converts price from €/MWh to €/kWh and applies contract adjustments
+        (multiplier and offset) but NOT transport cost, so prices align with
+        the buy price threshold logic.
         """
         if not isinstance(interval, dict):
             return None
@@ -1002,7 +1008,20 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         if price_value is None:
             return None
 
+        # Convert from €/MWh to €/kWh
+        price_kwh = price_value / 1000
+
+        # Apply the same multiplier and offset as the decision engine
+        # (but NOT transport cost, so prices are comparable to thresholds)
+        multiplier = self.coordinator.config.get(
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+        )
+        offset = self.coordinator.config.get(
+            CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
+        )
+
+        adjusted_price = (price_kwh * multiplier) + offset
+
         normalized = dict(interval)
-        # Convert from €/MWh (or basis points) to €/kWh
-        normalized["price"] = price_value / 1000
+        normalized["price"] = adjusted_price
         return normalized

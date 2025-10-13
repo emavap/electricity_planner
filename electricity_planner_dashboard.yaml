@@ -275,7 +275,7 @@ views:
                       return value.toFixed(2) + ' €/kWh';
                     }
             series:
-              - entity: sensor.electricity_planner_diagnostics_monitoring_nordpool_prices
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
                 name: Electricity Price
                 type: column
                 color: "#3498db"
