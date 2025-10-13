@@ -133,8 +133,8 @@ def test_normalize_price_interval_applies_adjustments(fake_coordinator, fake_ent
     result = sensor._normalize_price_interval(interval)
 
     assert result is not None
-    # Expected: (100/1000 × 1.21) + 0.05 = 0.1 × 1.21 + 0.05 = 0.121 + 0.05 = 0.171
-    assert result["price"] == 0.171
+    # Expected: (100/1000 × 1.21) + 0.05 ≈ 0.171
+    assert result["price"] == pytest.approx(0.171, rel=1e-6)
 
 
 def test_native_value_unavailable_when_no_data(fake_coordinator, fake_entry):
