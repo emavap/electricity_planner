@@ -4,6 +4,16 @@ This document provides comprehensive dashboard card configurations for visualizi
 
 ## 📊 Available Dashboard Cards
 
+### NEW: **Nord Pool Price Visualization** - Full interval pricing (requires config)
+- Displays available electricity prices from now into the future at full interval granularity
+- Shows remaining prices for today + tomorrow's prices (when available after ~13:00 CET)
+- Column chart showing all price intervals (adapts to Nord Pool's interval duration)
+- Dynamic threshold lines (max threshold + intelligent dynamic threshold)
+- "Now" marker at the start showing current time position
+- Graph span adjusts automatically based on available data (max: until midnight tomorrow)
+- Requires Nord Pool config entry configured in Electricity Planner settings
+- Uses ApexCharts for professional visualization
+
 ### 1. **Main Decision Overview** - Essential charging decisions
 - Current battery and car grid charging status
 - Low price indicator and solar production status
@@ -86,14 +96,14 @@ Before using these cards, ensure you have:
 3. **Battery entities** configured in Home Assistant
 4. **Power monitoring entities** for house consumption and solar
 
-### Step 2: Install Required Custom Cards (Optional)
+### Step 2: Install Required Custom Cards
 Some advanced visualizations require custom cards:
 
-1. **ApexCharts Card** (Recommended)
+1. **ApexCharts Card** (Required for Nord Pool price visualization)
    ```
    Install via HACS: https://github.com/RomRider/apexcharts-card
    ```
-   - Required for: Price trends, battery analysis, power flow, price position charts
+   - Required for: Nord Pool price chart, price trends, battery analysis, power flow, price position charts
 
 2. **Button Card** (Optional)
    ```
@@ -101,7 +111,15 @@ Some advanced visualizations require custom cards:
    ```
    - Required for: Manual override buttons
 
-### Step 3: Configure Entity Names
+### Step 3: Configure Nord Pool Integration (Required for price chart)
+To enable the Nord Pool price visualization:
+
+1. Open Electricity Planner integration settings in Home Assistant
+2. Configure your Nord Pool config entry ID (from Nord Pool integration)
+3. This enables fetching of full interval prices for today and tomorrow
+4. The sensor `sensor.electricity_planner_diagnostics_monitoring_nordpool_prices` will be created
+
+### Step 4: Configure Entity Names
 Update the YAML configurations to match your actual entity names:
 
 **Electricity Planner Entities:**
@@ -109,6 +127,7 @@ Update the YAML configurations to match your actual entity names:
 - `sensor.electricity_planner_battery_analysis`
 - `sensor.electricity_planner_power_analysis`
 - `sensor.electricity_planner_grid_charging_decision`
+- `sensor.electricity_planner_diagnostics_monitoring_nordpool_prices` (NEW - for price chart)
 - `binary_sensor.electricity_planner_battery_grid_charging`
 - `binary_sensor.electricity_planner_car_grid_charging`
 - `binary_sensor.electricity_planner_low_electricity_price`
@@ -124,7 +143,7 @@ Update the YAML configurations to match your actual entity names:
 - `sensor.solar_surplus` → Your solar surplus entity
 - `sensor.car_charging_power` → Your car charging power entity
 
-### Step 4: Add Cards to Dashboard
+### Step 5: Add Cards to Dashboard
 1. Open Home Assistant
 2. Go to **Overview** (main dashboard)
 3. Click the **3-dot menu** (top right)
@@ -135,6 +154,8 @@ Update the YAML configurations to match your actual entity names:
 8. Paste it into the card editor
 9. **Update entity names** to match your setup
 10. Click **SAVE**
+
+**Note**: The Nord Pool price chart requires ApexCharts Card to be installed and the Nord Pool config entry to be configured in Electricity Planner settings.
 
 ## 📱 Mobile Optimization
 

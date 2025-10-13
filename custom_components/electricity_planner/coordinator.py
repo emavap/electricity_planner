@@ -14,6 +14,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
+    CONF_NORDPOOL_CONFIG_ENTRY,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
     CONF_LOWEST_PRICE_ENTITY,
@@ -60,6 +61,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Update throttling
         self._last_entity_update = None
         self._min_update_interval = timedelta(seconds=10)  # Minimum 10s between entity-triggered updates
+
+        # Nord Pool price caching (prices only update hourly)
+        self._nordpool_cache = {}
+        self._nordpool_cache_time = {}
 
         super().__init__(
             hass,
@@ -251,6 +256,17 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             self.config.get(CONF_TRANSPORT_COST_ENTITY)
         )
 
+        # Fetch full day price data if Nord Pool config entry is configured
+        # This retrieves all price intervals for today and tomorrow at whatever
+        # granularity Nord Pool provides (currently 15-min, but flexible)
+        nordpool_config_entry = self.config.get(CONF_NORDPOOL_CONFIG_ENTRY)
+        if nordpool_config_entry:
+            data["nordpool_prices_today"] = await self._fetch_nordpool_prices(nordpool_config_entry, "today")
+            data["nordpool_prices_tomorrow"] = await self._fetch_nordpool_prices(nordpool_config_entry, "tomorrow")
+        else:
+            data["nordpool_prices_today"] = None
+            data["nordpool_prices_tomorrow"] = None
+
         return data
 
     async def _get_state_value(self, entity_id: str | None) -> float | None:
@@ -266,6 +282,79 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             return float(state.state)
         except (ValueError, TypeError):
             _LOGGER.warning("Could not convert state to float: %s = %s", entity_id, state.state)
+            return None
+
+    async def _fetch_nordpool_prices(self, config_entry_id: str, day: str) -> dict[str, Any] | None:
+        """Fetch Nord Pool prices for a specific date using the service call.
+
+        Args:
+            config_entry_id: The Nord Pool config entry ID
+            day: Either "today" or "tomorrow"
+
+        Returns:
+            Dict with raw price data organized by area, or None if unavailable.
+            The response structure is:
+            {
+                "AREA_CODE": [
+                    {"start": "ISO timestamp", "end": "ISO timestamp", "price": float},
+                    ...
+                ]
+            }
+            Note: Interval duration is determined by Nord Pool and extracted from timestamps.
+        """
+        # Check cache first - prices only update hourly, no need to fetch every 30s
+        now = dt_util.utcnow()
+        cache_key = f"{day}_{config_entry_id}"
+
+        if cache_key in self._nordpool_cache:
+            cache_age = now - self._nordpool_cache_time.get(cache_key, now)
+            # Cache for 5 minutes (prices change hourly, tomorrow appears at 13:00)
+            if cache_age < timedelta(minutes=5):
+                _LOGGER.debug("Using cached Nord Pool prices for %s (age: %.1f minutes)",
+                            day, cache_age.total_seconds() / 60)
+                return self._nordpool_cache[cache_key]
+
+        try:
+            # Calculate the target date
+            now = dt_util.now()
+            if day == "today":
+                target_date = now.date()
+            elif day == "tomorrow":
+                target_date = (now + timedelta(days=1)).date()
+            else:
+                _LOGGER.error("Invalid day parameter: %s (expected 'today' or 'tomorrow')", day)
+                return None
+
+            # Call the Nord Pool service
+            response = await self.hass.services.async_call(
+                "nordpool",
+                "get_prices_for_date",
+                {
+                    "config_entry": config_entry_id,
+                    "date": target_date.isoformat()
+                },
+                blocking=True,
+                return_response=True
+            )
+
+            # The service returns a dict with area-based price data
+            if response and isinstance(response, dict):
+                # Count total entries across all areas for logging
+                total_entries = sum(len(v) for v in response.values() if isinstance(v, list))
+                _LOGGER.debug("Fetched Nord Pool prices for %s (%s): %d entries across %d area(s)",
+                            day, target_date.isoformat(), total_entries, len(response))
+
+                # Cache the response
+                self._nordpool_cache[cache_key] = response
+                self._nordpool_cache_time[cache_key] = dt_util.utcnow()
+
+                return response
+            else:
+                _LOGGER.warning("Nord Pool service returned unexpected format for %s", day)
+                return None
+
+        except Exception as err:
+            _LOGGER.warning("Failed to fetch Nord Pool prices for %s: %s", day, err)
             return None
 
     async def _check_data_availability(self, data: dict[str, Any]) -> None:

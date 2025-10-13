@@ -2,6 +2,7 @@
 
 DOMAIN = "electricity_planner"
 
+CONF_NORDPOOL_CONFIG_ENTRY = "nordpool_config_entry"
 CONF_CURRENT_PRICE_ENTITY = "current_price_entity"
 CONF_HIGHEST_PRICE_ENTITY = "highest_price_entity"
 CONF_LOWEST_PRICE_ENTITY = "lowest_price_entity"

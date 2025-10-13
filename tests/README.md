@@ -17,6 +17,17 @@ PYTHONPATH=. pytest tests/test_strategies_smoke.py -v
 
 **Note:** The integration uses relative imports (e.g., `from .defaults import ...`) which require the full Home Assistant environment. Standalone tests without HA are not possible due to this design.
 
+### Running Tests with Docker
+
+You can run the full test suite inside Docker without installing any Python dependencies locally:
+
+```bash
+docker build -f Dockerfile.tests -t electricity-planner-tests .
+docker run --rm -v "$(pwd)":/app electricity-planner-tests
+```
+
+The image installs the development dependencies declared in `requirements-dev.txt` and executes `pytest tests -v`. Mounting the repository into `/app` lets you iterate on code without rebuilding unless dependencies change.
+
 ## Test Files
 
 - **`test_strategies_smoke.py`** - Basic smoke tests for all charging strategies

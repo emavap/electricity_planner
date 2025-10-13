@@ -19,7 +19,7 @@ PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Electricity Planner from a config entry."""
     # Perform migration if needed
-    if entry.version < 4:
+    if entry.version < 7:
         await async_migrate_entry(hass, entry)
     
     coordinator = ElectricityPlannerCoordinator(hass, entry)

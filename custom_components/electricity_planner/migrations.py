@@ -27,7 +27,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 # Current config version
-CURRENT_VERSION = 6
+CURRENT_VERSION = 7
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -141,6 +141,17 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         _LOGGER.info("Migration to version 6 complete")
 
+    if entry.version == 6:
+        # Migrate from version 6 to version 7
+        # No data changes needed - only adds optional nordpool_config_entry field
+        # which will be added through UI if user chooses to configure it
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data},
+            version=7
+        )
+        _LOGGER.info("Migration to version 7 complete")
+
     return True
 
 
@@ -176,6 +187,10 @@ def migrate_config_data(old_data: Dict[str, Any], from_version: int) -> Dict[str
         new_data.setdefault(CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET)
         new_data.setdefault(CONF_FEEDIN_ADJUSTMENT_MULTIPLIER, DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER)
         new_data.setdefault(CONF_FEEDIN_ADJUSTMENT_OFFSET, DEFAULT_FEEDIN_ADJUSTMENT_OFFSET)
+
+    if from_version < 7:
+        # Version 7 adds optional nordpool_config_entry - no automatic migration needed
+        pass
 
     return new_data
 

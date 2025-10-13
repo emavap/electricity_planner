@@ -11,6 +11,7 @@ from homeassistant.helpers.entity_registry import async_get as async_get_entity_
 
 from .const import (
     DOMAIN,
+    CONF_NORDPOOL_CONFIG_ENTRY,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
     CONF_LOWEST_PRICE_ENTITY,
@@ -77,7 +78,7 @@ from .const import (
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Electricity Planner."""
 
-    VERSION = 6
+    VERSION = 7
 
     def __init__(self):
         """Initialize the config flow."""
@@ -93,6 +94,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
         schema = vol.Schema({
+            vol.Optional(CONF_NORDPOOL_CONFIG_ENTRY): selector.ConfigEntrySelector(
+                selector.ConfigEntrySelectorConfig(integration="nordpool")
+            ),
             vol.Required(CONF_CURRENT_PRICE_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
@@ -147,6 +151,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=schema,
             description_placeholders={
+                "nordpool_config_entry": "Nord Pool config entry (optional, enables full day price data)",
                 "current_price": "Current electricity price from Nord Pool",
                 "highest_price": "Highest price today from Nord Pool",
                 "lowest_price": "Lowest price today from Nord Pool",
@@ -497,6 +502,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         current_capacities = current_config.get(CONF_BATTERY_CAPACITIES, {})
 
         schema_dict = {
+            vol.Optional(
+                CONF_NORDPOOL_CONFIG_ENTRY,
+                default=current_config.get(CONF_NORDPOOL_CONFIG_ENTRY)
+            ): selector.ConfigEntrySelector(
+                selector.ConfigEntrySelectorConfig(integration="nordpool")
+            ),
             vol.Required(
                 CONF_BATTERY_SOC_ENTITIES,
                 default=battery_entities

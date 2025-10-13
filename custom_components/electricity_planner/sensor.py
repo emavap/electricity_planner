@@ -60,6 +60,7 @@ async def async_setup_entry(
         VeryLowPriceThresholdSensor(coordinator, entry, "_diagnostic"),
         SignificantSolarThresholdSensor(coordinator, entry, "_diagnostic"),
         EmergencySOCThresholdSensor(coordinator, entry, "_diagnostic"),
+        NordPoolPricesSensor(coordinator, entry, "_diagnostic"),
     ]
 
     entities = automation_entities + diagnostic_entities
@@ -890,3 +891,118 @@ class EmergencySOCThresholdSensor(ElectricityPlannerSensorBase):
             "is_emergency": is_emergency,
             "margin": average_soc - self.native_value if average_soc is not None else None,
         }
+
+
+class NordPoolPricesSensor(ElectricityPlannerSensorBase):
+    """Sensor exposing Nord Pool prices for today and tomorrow for dashboard visualization."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        """Initialize the Nord Pool prices sensor."""
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Nord Pool Prices"
+        self._attr_unique_id = f"{entry.entry_id}_nordpool_prices"
+        self._attr_icon = "mdi:chart-line"
+        self._attr_device_class = None
+        self._attr_native_unit_of_measurement = None
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the sensor state (summary of available data)."""
+        prices_today = self.coordinator.data.get("nordpool_prices_today")
+        prices_tomorrow = self.coordinator.data.get("nordpool_prices_tomorrow")
+
+        if not prices_today and not prices_tomorrow:
+            return "unavailable"
+
+        # Count total entries across all areas
+        today_count = sum(len(v) for v in prices_today.values() if isinstance(v, list)) if prices_today else 0
+        tomorrow_count = sum(len(v) for v in prices_tomorrow.values() if isinstance(v, list)) if prices_tomorrow else 0
+
+        if today_count > 0 and tomorrow_count > 0:
+            return f"today+tomorrow ({today_count + tomorrow_count} intervals)"
+        elif today_count > 0:
+            return f"today only ({today_count} intervals)"
+        elif tomorrow_count > 0:
+            return f"tomorrow only ({tomorrow_count} intervals)"
+        return "unavailable"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return price data as attributes for use in dashboard cards."""
+        prices_today = self.coordinator.data.get("nordpool_prices_today")
+        prices_tomorrow = self.coordinator.data.get("nordpool_prices_tomorrow")
+
+        # Combine today and tomorrow prices into a single list for easier dashboard usage
+        combined_prices: list[dict[str, Any]] = []
+
+        if prices_today:
+            # Get first area (or you could make this configurable)
+            area_code = next(iter(prices_today.keys()), None)
+            if area_code:
+                for interval in prices_today[area_code]:
+                    normalized = self._normalize_price_interval(interval)
+                    if normalized:
+                        combined_prices.append(normalized)
+
+        if prices_tomorrow:
+            area_code = next(iter(prices_tomorrow.keys()), None)
+            if area_code:
+                for interval in prices_tomorrow[area_code]:
+                    normalized = self._normalize_price_interval(interval)
+                    if normalized:
+                        combined_prices.append(normalized)
+
+        # Calculate some useful statistics
+        price_values = [price_entry["price"] for price_entry in combined_prices]
+
+        if price_values:
+            min_price = min(price_values)
+            max_price = max(price_values)
+            avg_price = sum(price_values) / len(price_values)
+        else:
+            min_price = max_price = avg_price = None
+
+        return {
+            "data": combined_prices,  # Full price data for ApexCharts (already in €/kWh)
+            "today_available": prices_today is not None,
+            "tomorrow_available": prices_tomorrow is not None,
+            "total_intervals": len(combined_prices),
+            "min_price": round(min_price, 4) if min_price is not None else None,
+            "max_price": round(max_price, 4) if max_price is not None else None,
+            "avg_price": round(avg_price, 4) if avg_price is not None else None,
+            "price_range": round(max_price - min_price, 4) if (max_price is not None and min_price is not None) else None,
+            "last_update": dt_util.now().isoformat(),
+        }
+
+    @staticmethod
+    def _extract_price_value(data: dict[str, Any]) -> float | None:
+        """Return a numeric price from the Nord Pool entry dict."""
+        for key in ("value", "value_exc_vat", "price"):
+            value = data.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+
+            if isinstance(value, str):
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    continue
+
+        return None
+
+    def _normalize_price_interval(self, interval: Any) -> dict[str, Any] | None:
+        """Return a normalized interval dict with a guaranteed price key.
+
+        Converts price from €/MWh to €/kWh (divides by 1000).
+        """
+        if not isinstance(interval, dict):
+            return None
+
+        price_value = self._extract_price_value(interval)
+        if price_value is None:
+            return None
+
+        normalized = dict(interval)
+        # Convert from €/MWh (or basis points) to €/kWh
+        normalized["price"] = price_value / 1000
+        return normalized
