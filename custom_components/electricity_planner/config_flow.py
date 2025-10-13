@@ -509,6 +509,30 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 selector.ConfigEntrySelectorConfig(integration="nordpool")
             ),
             vol.Required(
+                CONF_CURRENT_PRICE_ENTITY,
+                default=current_config.get(CONF_CURRENT_PRICE_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(
+                CONF_HIGHEST_PRICE_ENTITY,
+                default=current_config.get(CONF_HIGHEST_PRICE_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(
+                CONF_LOWEST_PRICE_ENTITY,
+                default=current_config.get(CONF_LOWEST_PRICE_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(
+                CONF_NEXT_PRICE_ENTITY,
+                default=current_config.get(CONF_NEXT_PRICE_ENTITY)
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(
                 CONF_BATTERY_SOC_ENTITIES,
                 default=battery_entities
             ): selector.EntitySelector(
