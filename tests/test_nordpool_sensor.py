@@ -93,10 +93,12 @@ def test_normalize_price_interval_adds_price_key(fake_coordinator, fake_entry):
         "value": 104.85  # In €/MWh
     }
 
-    result = sensor._normalize_price_interval(interval)
+    # No transport cost lookup provided
+    result = sensor._normalize_price_interval(interval, transport_cost_lookup=None)
 
     assert result is not None
     assert result["price"] == 0.10485  # Converted to €/kWh (divided by 1000)
+    assert result["transport_cost"] == 0.0  # No transport cost
     assert result["start"] == "2025-10-14T00:00:00+00:00"
     assert result["end"] == "2025-10-14T00:15:00+00:00"
     assert "value" in result  # Original key preserved
@@ -130,11 +132,51 @@ def test_normalize_price_interval_applies_adjustments(fake_coordinator, fake_ent
         "value": 100.0  # 100 €/MWh = 0.1 €/kWh
     }
 
-    result = sensor._normalize_price_interval(interval)
+    result = sensor._normalize_price_interval(interval, transport_cost_lookup=None)
 
     assert result is not None
     # Expected: (100/1000 × 1.21) + 0.05 ≈ 0.171
     assert result["price"] == pytest.approx(0.171, rel=1e-6)
+    assert result["transport_cost"] == 0.0
+
+
+def test_normalize_price_interval_applies_transport_cost(fake_coordinator, fake_entry):
+    """Test that _normalize_price_interval applies transport cost based on hour."""
+    fake_coordinator.config = {
+        "price_adjustment_multiplier": 1.0,
+        "price_adjustment_offset": 0.0
+    }
+    sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
+
+    # Transport cost: 0.03 at night (00:00), 0.05 during day (14:00)
+    transport_lookup = {
+        0: 0.03,  # Night rate
+        14: 0.05  # Day rate
+    }
+
+    # Night interval
+    night_interval = {
+        "start": "2025-10-14T00:00:00+00:00",
+        "end": "2025-10-14T00:15:00+00:00",
+        "value": 100.0  # 100 €/MWh = 0.1 €/kWh
+    }
+
+    result_night = sensor._normalize_price_interval(night_interval, transport_lookup)
+    assert result_night is not None
+    assert result_night["price"] == pytest.approx(0.13, rel=1e-6)  # 0.1 + 0.03
+    assert result_night["transport_cost"] == 0.03
+
+    # Day interval
+    day_interval = {
+        "start": "2025-10-14T14:00:00+00:00",
+        "end": "2025-10-14T14:15:00+00:00",
+        "value": 100.0  # 100 €/MWh = 0.1 €/kWh
+    }
+
+    result_day = sensor._normalize_price_interval(day_interval, transport_lookup)
+    assert result_day is not None
+    assert result_day["price"] == pytest.approx(0.15, rel=1e-6)  # 0.1 + 0.05
+    assert result_day["transport_cost"] == 0.05
 
 
 def test_native_value_unavailable_when_no_data(fake_coordinator, fake_entry):

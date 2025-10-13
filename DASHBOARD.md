@@ -8,7 +8,8 @@ This document provides comprehensive dashboard card configurations for visualizi
 - Displays available electricity prices from now into the future at full interval granularity
 - Shows remaining prices for today + tomorrow's prices (when available after ~13:00 CET)
 - Column chart showing all price intervals (adapts to Nord Pool's interval duration)
-- **Prices are adjusted with your contract multiplier and offset** (excludes transport cost for comparability)
+- **Prices include full buy price**: contract adjustments (multiplier + offset) + transport cost
+- **Transport cost automatically determined** from 7-day history (handles day/night tariffs)
 - Dynamic threshold lines (max threshold + intelligent dynamic threshold)
 - "Now" marker at the start showing current time position
 - Graph span adjusts automatically based on available data (max: until midnight tomorrow)

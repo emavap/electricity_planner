@@ -1,6 +1,7 @@
 """Sensor platform for Electricity Planner."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
@@ -18,6 +19,7 @@ from .const import (
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
+    CONF_TRANSPORT_COST_ENTITY,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
     CONF_EMERGENCY_SOC_THRESHOLD,
@@ -32,6 +34,8 @@ from .const import (
     DEFAULT_EMERGENCY_SOC,
 )
 from .coordinator import ElectricityPlannerCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -930,11 +934,100 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             return f"tomorrow only ({tomorrow_count} intervals)"
         return "unavailable"
 
+    def _build_transport_cost_lookup(self) -> dict[int, float]:
+        """Build a lookup table of transport costs by hour from 7-day history.
+
+        Looks at the transport cost entity's history for the past 7 days to determine
+        what the transport cost typically is at each hour. This automatically handles
+        day/night tariffs without explicit configuration.
+        """
+        transport_entity = self.coordinator.config.get(CONF_TRANSPORT_COST_ENTITY)
+        if not transport_entity:
+            return {}
+
+        try:
+            from homeassistant.components.recorder.history import get_significant_states
+            from datetime import datetime, timedelta
+
+            # Get history from past 7 days
+            end_time = dt_util.now()
+            start_time = end_time - timedelta(days=7)
+
+            # Get historical states (this is blocking, but should be fast for one entity over 7 days)
+            states = get_significant_states(
+                self.coordinator.hass,
+                start_time,
+                end_time,
+                [transport_entity],
+                significant_changes_only=True
+            )
+
+            if not states or transport_entity not in states:
+                # Fallback to current transport cost
+                transport_state = self.coordinator.hass.states.get(transport_entity)
+                if transport_state and transport_state.state not in ("unknown", "unavailable"):
+                    try:
+                        current_cost = float(transport_state.state)
+                        return {hour: current_cost for hour in range(24)}
+                    except (ValueError, TypeError):
+                        pass
+                return {}
+
+            # Build a dictionary of transport costs by hour
+            # For each hour, collect all values and take the most common one
+            hour_costs: dict[int, list[float]] = {hour: [] for hour in range(24)}
+
+            for state in states[transport_entity]:
+                if state.state in ("unknown", "unavailable"):
+                    continue
+
+                try:
+                    cost = float(state.state)
+                    hour = state.last_changed.hour
+                    hour_costs[hour].append(cost)
+                except (ValueError, TypeError, AttributeError):
+                    continue
+
+            # For each hour, use the most common cost value (mode)
+            transport_lookup = {}
+            for hour in range(24):
+                if hour_costs[hour]:
+                    # Use most recent value as representative
+                    transport_lookup[hour] = hour_costs[hour][-1]
+
+            # Fill in missing hours with neighboring values
+            for hour in range(24):
+                if hour not in transport_lookup:
+                    # Try next hour
+                    if (hour + 1) % 24 in transport_lookup:
+                        transport_lookup[hour] = transport_lookup[(hour + 1) % 24]
+                    # Try previous hour
+                    elif (hour - 1) % 24 in transport_lookup:
+                        transport_lookup[hour] = transport_lookup[(hour - 1) % 24]
+
+            return transport_lookup
+
+        except Exception as err:
+            # If anything fails, fallback to current transport cost
+            _LOGGER.debug("Failed to build transport cost lookup from history: %s", err)
+            transport_state = self.coordinator.hass.states.get(transport_entity)
+            if transport_state and transport_state.state not in ("unknown", "unavailable"):
+                try:
+                    current_cost = float(transport_state.state)
+                    return {hour: current_cost for hour in range(24)}
+                except (ValueError, TypeError):
+                    pass
+
+        return {}
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return price data as attributes for use in dashboard cards."""
         prices_today = self.coordinator.data.get("nordpool_prices_today")
         prices_tomorrow = self.coordinator.data.get("nordpool_prices_tomorrow")
+
+        # Build transport cost lookup table from historical data
+        transport_lookup = self._build_transport_cost_lookup()
 
         # Combine today and tomorrow prices into a single list for easier dashboard usage
         combined_prices: list[dict[str, Any]] = []
@@ -944,7 +1037,7 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             area_code = next(iter(prices_today.keys()), None)
             if area_code:
                 for interval in prices_today[area_code]:
-                    normalized = self._normalize_price_interval(interval)
+                    normalized = self._normalize_price_interval(interval, transport_lookup)
                     if normalized:
                         combined_prices.append(normalized)
 
@@ -952,7 +1045,7 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             area_code = next(iter(prices_tomorrow.keys()), None)
             if area_code:
                 for interval in prices_tomorrow[area_code]:
-                    normalized = self._normalize_price_interval(interval)
+                    normalized = self._normalize_price_interval(interval, transport_lookup)
                     if normalized:
                         combined_prices.append(normalized)
 
@@ -994,12 +1087,11 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
 
         return None
 
-    def _normalize_price_interval(self, interval: Any) -> dict[str, Any] | None:
+    def _normalize_price_interval(self, interval: Any, transport_cost_lookup: dict[int, float] | None = None) -> dict[str, Any] | None:
         """Return a normalized interval dict with a guaranteed price key.
 
         Converts price from €/MWh to €/kWh and applies contract adjustments
-        (multiplier and offset) but NOT transport cost, so prices align with
-        the buy price threshold logic.
+        (multiplier and offset) and transport cost for the complete buy price.
         """
         if not isinstance(interval, dict):
             return None
@@ -1012,7 +1104,6 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         price_kwh = price_value / 1000
 
         # Apply the same multiplier and offset as the decision engine
-        # (but NOT transport cost, so prices are comparable to thresholds)
         multiplier = self.coordinator.config.get(
             CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
         )
@@ -1022,6 +1113,25 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
 
         adjusted_price = (price_kwh * multiplier) + offset
 
+        # Add transport cost based on the interval's hour
+        # Use lookup table built from historical data
+        transport_cost = 0.0
+
+        if transport_cost_lookup:
+            start_time_str = interval.get("start")
+            if start_time_str:
+                try:
+                    # Parse ISO format timestamp
+                    from datetime import datetime
+                    start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+                    hour = start_time.hour
+                    transport_cost = transport_cost_lookup.get(hour, 0.0)
+                except Exception:
+                    pass
+
+        final_price = adjusted_price + transport_cost
+
         normalized = dict(interval)
-        normalized["price"] = adjusted_price
+        normalized["price"] = final_price
+        normalized["transport_cost"] = transport_cost
         return normalized
