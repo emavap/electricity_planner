@@ -66,6 +66,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._nordpool_cache = {}
         self._nordpool_cache_time = {}
 
+        # Transport cost lookup caching (expensive recorder query)
+        self._transport_cost_lookup: dict[int, float] = {}
+        self._transport_cost_lookup_time: datetime | None = None
+        self._transport_cost_status: str = "not_configured"
+        self._transport_cost_last_log: str | None = None
+
         super().__init__(
             hass,
             _LOGGER,
@@ -267,6 +273,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             data["nordpool_prices_today"] = None
             data["nordpool_prices_tomorrow"] = None
 
+        transport_lookup, transport_status = await self._get_transport_cost_lookup()
+        data["transport_cost_lookup"] = transport_lookup
+        data["transport_cost_status"] = transport_status
+
         return data
 
     async def _get_state_value(self, entity_id: str | None) -> float | None:
@@ -356,6 +366,113 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.warning("Failed to fetch Nord Pool prices for %s: %s", day, err)
             return None
+
+    async def _get_transport_cost_lookup(self) -> tuple[dict[int, float], str]:
+        """Return cached transport cost lookup built from recorder history."""
+        transport_entity = self.config.get(CONF_TRANSPORT_COST_ENTITY)
+        if not transport_entity:
+            self._transport_cost_lookup = {}
+            self._transport_cost_status = "not_configured"
+            return {}, "not_configured"
+
+        now = dt_util.utcnow()
+        # Refresh every 30 minutes at most
+        if (
+            self._transport_cost_lookup_time
+            and now - self._transport_cost_lookup_time < timedelta(minutes=30)
+        ):
+            return self._transport_cost_lookup, self._transport_cost_status
+
+        try:
+            from homeassistant.components.recorder.history import get_significant_states
+
+            end_time = dt_util.now()
+            start_time = end_time - timedelta(days=7)
+
+            states = await self.hass.async_add_executor_job(
+                get_significant_states,
+                self.hass,
+                start_time,
+                end_time,
+                [transport_entity],
+            )
+
+            if not states or transport_entity not in states:
+                self._transport_cost_lookup = {}
+                self._transport_cost_status = "pending_history"
+                self._maybe_log_transport_status(
+                    "pending_history",
+                    "No transport cost history available for %s. "
+                    "Nord Pool prices will exclude transport cost until 7 days of history accumulate.",
+                    transport_entity,
+                )
+                self._transport_cost_lookup_time = now
+                return self._transport_cost_lookup, self._transport_cost_status
+
+            hour_costs: dict[int, list[float]] = {hour: [] for hour in range(24)}
+            for state in states[transport_entity]:
+                value = state.state
+                if value in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                    continue
+                try:
+                    cost = float(value)
+                    hour = state.last_changed.hour
+                    hour_costs[hour].append(cost)
+                except (ValueError, TypeError, AttributeError):
+                    continue
+
+            lookup: dict[int, float] = {}
+            for hour, values in hour_costs.items():
+                if values:
+                    lookup[hour] = values[-1]
+
+            # Fill gaps with neighboring hours
+            for hour in range(24):
+                if hour not in lookup:
+                    next_hour = (hour + 1) % 24
+                    prev_hour = (hour - 1) % 24
+                    if next_hour in lookup:
+                        lookup[hour] = lookup[next_hour]
+                    elif prev_hour in lookup:
+                        lookup[hour] = lookup[prev_hour]
+
+            self._transport_cost_lookup = lookup
+            self._transport_cost_status = "applied" if lookup else "pending_history"
+            self._transport_cost_lookup_time = now
+
+            if self._transport_cost_status == "pending_history":
+                self._maybe_log_transport_status(
+                    "pending_history",
+                    "Transport cost history for %s is incomplete. "
+                    "Nord Pool prices will exclude transport cost until 7 days of history accumulate.",
+                    transport_entity,
+                )
+            else:
+                self._maybe_log_transport_status("applied", None)
+
+            return self._transport_cost_lookup, self._transport_cost_status
+
+        except Exception as err:
+            self._transport_cost_lookup = {}
+            self._transport_cost_status = "error"
+            self._transport_cost_lookup_time = now
+            self._maybe_log_transport_status(
+                "error",
+                "Failed to build transport cost lookup from history for %s: %s. "
+                "Nord Pool prices will exclude transport cost.",
+                transport_entity,
+                err,
+            )
+            return self._transport_cost_lookup, self._transport_cost_status
+
+    def _maybe_log_transport_status(self, status: str, message: str | None, *args) -> None:
+        """Log transport cost status changes without spamming."""
+        if status == self._transport_cost_last_log or message is None:
+            self._transport_cost_last_log = status
+            return
+
+        _LOGGER.warning(message, *args)
+        self._transport_cost_last_log = status
 
     async def _check_data_availability(self, data: dict[str, Any]) -> None:
         """Check data availability and send notifications if needed."""

@@ -235,7 +235,9 @@ def test_extra_state_attributes_combines_prices(fake_coordinator, fake_entry):
             "BE": [
                 {"start": "2025-10-15T10:00:00+00:00", "end": "2025-10-15T10:15:00+00:00", "price": 110.0},  # In €/MWh
             ]
-        }
+        },
+        "transport_cost_lookup": {},
+        "transport_cost_status": "not_configured",
     }
 
     sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
@@ -251,6 +253,8 @@ def test_extra_state_attributes_combines_prices(fake_coordinator, fake_entry):
     assert attrs["max_price"] == 0.11
     assert attrs["avg_price"] == 0.105
     assert attrs["price_range"] == 0.01
+    assert attrs["transport_cost_applied"] is None
+    assert attrs["transport_cost_status"] == "not_configured"
 
 
 def test_extra_state_attributes_handles_different_price_keys(fake_coordinator, fake_entry):
@@ -262,7 +266,9 @@ def test_extra_state_attributes_handles_different_price_keys(fake_coordinator, f
                 {"start": "2025-10-14T10:15:00+00:00", "end": "2025-10-14T10:30:00+00:00", "value_exc_vat": 90.0},  # In €/MWh
             ]
         },
-        "nordpool_prices_tomorrow": None
+        "nordpool_prices_tomorrow": None,
+        "transport_cost_lookup": {},
+        "transport_cost_status": "pending_history",
     }
 
     sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
@@ -274,6 +280,8 @@ def test_extra_state_attributes_handles_different_price_keys(fake_coordinator, f
     assert attrs["data"][1]["price"] == 0.09  # Converted to €/kWh
     assert attrs["min_price"] == 0.09
     assert attrs["max_price"] == 0.1
+    assert attrs["transport_cost_applied"] is False
+    assert attrs["transport_cost_status"] == "pending_history"
 
 
 def test_extra_state_attributes_skips_invalid_intervals(fake_coordinator, fake_entry):
@@ -286,7 +294,9 @@ def test_extra_state_attributes_skips_invalid_intervals(fake_coordinator, fake_e
                 {"start": "2025-10-14T10:30:00+00:00", "end": "2025-10-14T10:45:00+00:00", "price": 110.0},  # In €/MWh
             ]
         },
-        "nordpool_prices_tomorrow": None
+        "nordpool_prices_tomorrow": None,
+        "transport_cost_lookup": {},
+        "transport_cost_status": "not_configured",
     }
 
     sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
@@ -297,3 +307,4 @@ def test_extra_state_attributes_skips_invalid_intervals(fake_coordinator, fake_e
     assert attrs["data"][0]["price"] == 0.1  # Converted to €/kWh
     assert attrs["data"][1]["price"] == 0.11  # Converted to €/kWh
     assert attrs["total_intervals"] == 2
+    assert attrs["transport_cost_applied"] is None

@@ -934,97 +934,15 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             return f"tomorrow only ({tomorrow_count} intervals)"
         return "unavailable"
 
-    def _build_transport_cost_lookup(self) -> dict[int, float]:
-        """Build a lookup table of transport costs by hour from 7-day history.
-
-        Looks at the transport cost entity's history for the past 7 days to determine
-        what the transport cost typically is at each hour. This automatically handles
-        day/night tariffs without explicit configuration.
-        """
-        transport_entity = self.coordinator.config.get(CONF_TRANSPORT_COST_ENTITY)
-        if not transport_entity:
-            return {}
-
-        try:
-            from homeassistant.components.recorder.history import get_significant_states
-            from datetime import datetime, timedelta
-
-            # Get history from past 7 days
-            end_time = dt_util.now()
-            start_time = end_time - timedelta(days=7)
-
-            # Get historical states (this is blocking, but should be fast for one entity over 7 days)
-            states = get_significant_states(
-                self.coordinator.hass,
-                start_time,
-                end_time,
-                [transport_entity],
-                significant_changes_only=True
-            )
-
-            if not states or transport_entity not in states:
-                # No history available - cannot determine hour-specific transport costs
-                # Return empty dict so prices show without transport cost
-                _LOGGER.warning(
-                    "No transport cost history available for %s. "
-                    "Nord Pool prices will exclude transport cost until sufficient history accumulates (need 7 days). "
-                    "This is normal for new installations.",
-                    transport_entity
-                )
-                return {}
-
-            # Build a dictionary of transport costs by hour
-            # For each hour, collect all values and take the most common one
-            hour_costs: dict[int, list[float]] = {hour: [] for hour in range(24)}
-
-            for state in states[transport_entity]:
-                if state.state in ("unknown", "unavailable"):
-                    continue
-
-                try:
-                    cost = float(state.state)
-                    hour = state.last_changed.hour
-                    hour_costs[hour].append(cost)
-                except (ValueError, TypeError, AttributeError):
-                    continue
-
-            # For each hour, use the most common cost value (mode)
-            transport_lookup = {}
-            for hour in range(24):
-                if hour_costs[hour]:
-                    # Use most recent value as representative
-                    transport_lookup[hour] = hour_costs[hour][-1]
-
-            # Fill in missing hours with neighboring values
-            for hour in range(24):
-                if hour not in transport_lookup:
-                    # Try next hour
-                    if (hour + 1) % 24 in transport_lookup:
-                        transport_lookup[hour] = transport_lookup[(hour + 1) % 24]
-                    # Try previous hour
-                    elif (hour - 1) % 24 in transport_lookup:
-                        transport_lookup[hour] = transport_lookup[(hour - 1) % 24]
-
-            return transport_lookup
-
-        except Exception as err:
-            # If anything fails, don't apply transport cost
-            _LOGGER.warning(
-                "Failed to build transport cost lookup from history: %s. "
-                "Nord Pool prices will exclude transport cost.",
-                err
-            )
-
-        return {}
-
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return price data as attributes for use in dashboard cards."""
         prices_today = self.coordinator.data.get("nordpool_prices_today")
         prices_tomorrow = self.coordinator.data.get("nordpool_prices_tomorrow")
 
-        # Build transport cost lookup table from historical data
-        transport_lookup = self._build_transport_cost_lookup()
+        # Transport cost lookup/status provided by coordinator
+        transport_lookup = self.coordinator.data.get("transport_cost_lookup") or {}
+        transport_status = self.coordinator.data.get("transport_cost_status", "not_configured")
 
         # Combine today and tomorrow prices into a single list for easier dashboard usage
         combined_prices: list[dict[str, Any]] = []
@@ -1065,7 +983,10 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             "max_price": round(max_price, 4) if max_price is not None else None,
             "avg_price": round(avg_price, 4) if avg_price is not None else None,
             "price_range": round(max_price - min_price, 4) if (max_price is not None and min_price is not None) else None,
-            "transport_cost_applied": bool(transport_lookup),  # True if transport costs included
+            "transport_cost_applied": (
+                True if transport_status == "applied" else False if transport_status in ("pending_history", "error") else None
+            ),
+            "transport_cost_status": transport_status,
             "last_update": dt_util.now().isoformat(),
         }
 
