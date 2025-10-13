@@ -247,24 +247,6 @@ views:
               - entity: binary_sensor.electricity_planner_car_charge_from_grid
                 name: Car charging
 
-          - type: conditional
-            conditions:
-              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
-                state_not: unavailable
-            card:
-              type: markdown
-              content: |-
-                {% if state_attr('sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices', 'transport_cost_applied') == false %}
-                ⚠️ **Warning**: Prices shown WITHOUT transport cost (need 7 days of history).
-                Threshold lines include transport cost and are NOT directly comparable to prices.
-                {% endif %}
-              card_mod:
-                style: |
-                  ha-card {
-                    background-color: var(--warning-color);
-                    color: var(--text-primary-color);
-                  }
-
           - type: custom:apexcharts-card
             header:
               title: Nord Pool Electricity Prices (Now → Future)
@@ -279,19 +261,14 @@ views:
               chart:
                 height: 350
               tooltip:
-                x:
-                  format: "ddd HH:mm"
-                y:
-                  formatter: |
-                    EVAL:function(value) {
-                      return value.toFixed(4) + ' €/kWh';
-                    }
+                enabled: false
               xaxis:
                 labels:
                   datetimeFormatter:
                     hour: "HH:mm"
               yaxis:
                 decimalsInFloat: 4
+                tickAmount: 20
                 labels:
                   formatter: |
                     EVAL:function(value) {
@@ -314,11 +291,5 @@ views:
                 stroke_width: 2
                 color: "#e74c3c"
                 curve: straight
-                stroke_dasharray: |-
-                  {% if state_attr('sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices', 'transport_cost_applied') == false %}
-                  5
-                  {% else %}
-                  0
-                  {% endif %}
                 show:
                   legend_value: false
