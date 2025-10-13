@@ -963,14 +963,14 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             )
 
             if not states or transport_entity not in states:
-                # Fallback to current transport cost
-                transport_state = self.coordinator.hass.states.get(transport_entity)
-                if transport_state and transport_state.state not in ("unknown", "unavailable"):
-                    try:
-                        current_cost = float(transport_state.state)
-                        return {hour: current_cost for hour in range(24)}
-                    except (ValueError, TypeError):
-                        pass
+                # No history available - cannot determine hour-specific transport costs
+                # Return empty dict so prices show without transport cost
+                _LOGGER.warning(
+                    "No transport cost history available for %s. "
+                    "Nord Pool prices will exclude transport cost until sufficient history accumulates (need 7 days). "
+                    "This is normal for new installations.",
+                    transport_entity
+                )
                 return {}
 
             # Build a dictionary of transport costs by hour
@@ -1008,15 +1008,12 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             return transport_lookup
 
         except Exception as err:
-            # If anything fails, fallback to current transport cost
-            _LOGGER.debug("Failed to build transport cost lookup from history: %s", err)
-            transport_state = self.coordinator.hass.states.get(transport_entity)
-            if transport_state and transport_state.state not in ("unknown", "unavailable"):
-                try:
-                    current_cost = float(transport_state.state)
-                    return {hour: current_cost for hour in range(24)}
-                except (ValueError, TypeError):
-                    pass
+            # If anything fails, don't apply transport cost
+            _LOGGER.warning(
+                "Failed to build transport cost lookup from history: %s. "
+                "Nord Pool prices will exclude transport cost.",
+                err
+            )
 
         return {}
 
@@ -1068,6 +1065,7 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             "max_price": round(max_price, 4) if max_price is not None else None,
             "avg_price": round(avg_price, 4) if avg_price is not None else None,
             "price_range": round(max_price - min_price, 4) if (max_price is not None and min_price is not None) else None,
+            "transport_cost_applied": bool(transport_lookup),  # True if transport costs included
             "last_update": dt_util.now().isoformat(),
         }
 
