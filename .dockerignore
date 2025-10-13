@@ -1,0 +1,16 @@
+.git
+.gitignore
+.claude
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
+dist/
+build/

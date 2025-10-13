@@ -1,0 +1,295 @@
+# REQUIRED: Install "Gauge Card Pro" from HACS
+# https://github.com/benjamin-dcs/gauge-card-pro
+# This dashboard uses dynamic thresholds that update in real-time:
+# - Buy price gauge: green → yellow (dynamic threshold) → red (max threshold)
+# - Feed-in price gauge: red (negative) → yellow (zero) → green (feed-in threshold)
+
+views:
+  - title: Electricity Planner
+    path: electricity-planner
+    icon: mdi:lightning-bolt
+    panel: true
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: markdown
+            content: |
+              ## ⚡ Electricity Planner Dashboard
+          - type: grid
+            square: false
+            columns: 2
+            cards:
+              - type: custom:gauge-card-pro
+                entity: sensor.electricity_planner_current_electricity_price
+                header: Buy price
+                min: -0.9
+                max: 0.9
+                unit: "€/kWh"
+                needle: true
+                scale: "50px"
+                segments: |-
+                  {% set dynamic_threshold = state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') %}
+                  {% set max_threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float %}
+                  {% if dynamic_threshold != None %}
+                    {% set threshold = dynamic_threshold | float %}
+                  {% else %}
+                    {% set threshold = max_threshold %}
+                  {% endif %}
+                  {{
+                    [
+                      { "from": -0.9, "color": "green" },
+                      { "from": threshold, "color": "yellow" },
+                      { "from": max_threshold, "color": "red" }
+                    ]
+                  }}
+
+              - type: custom:gauge-card-pro
+                entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
+                header: Feed-in price
+                min: -0.9
+                max: 0.9
+                unit: "€/kWh"
+                needle: true
+                scale: "50px"
+                segments: |-
+                  {% set threshold = states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float %}
+                  {{
+                    [
+                      { "from": -0.9, "color": "red" },
+                      { "from": 0, "color": "yellow" },
+                      { "from": threshold, "color": "green" }
+                    ]
+                  }}
+
+          - type: grid
+            square: false
+            columns: 3
+            cards:
+              - type: button
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                name: Battery
+                icon: mdi:battery-charging
+                icon_height: 60px
+                show_name: true
+                show_state: true
+
+              - type: button
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
+                name: Car
+                icon: mdi:car-electric
+                icon_height: 60px
+                show_name: true
+                show_state: true
+                tap_action:
+                  action: more-info
+
+              - type: button
+                entity: binary_sensor.electricity_planner_data_nord_pool_available
+                name: Data OK
+                icon: mdi:database-check
+                icon_height: 60px
+                show_name: true
+                show_state: true
+
+          - type: gauge
+            name: Battery SOC
+            entity: sensor.electricity_planner_battery_soc_average
+            min: 0
+            max: 100
+            unit: "%"
+            needle: true
+            severity:
+              red: 0
+              yellow: 30
+              green: 70
+
+          - type: entities
+            title: Charging decisions
+            show_header_toggle: false
+            entities:
+              - entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                name: Battery charging
+                secondary_info: last-changed
+              - type: attribute
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                attribute: reason
+                name: Battery reason
+              - entity: binary_sensor.electricity_planner_car_charge_from_grid
+                name: Car charging
+                secondary_info: last-changed
+              - type: attribute
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
+                attribute: reason
+                name: Car reason
+
+          - type: grid
+            square: false
+            columns: 2
+            cards:
+              - type: entities
+                title: Price adjustments
+                show_header_toggle: false
+                entities:
+                  - entity: sensor.electricity_planner_current_electricity_price
+                    type: attribute
+                    name: Highest price today
+                    attribute: highest_price
+                  - entity: sensor.electricity_planner_current_electricity_price
+                    type: attribute
+                    name: Lowest price today
+                    attribute: lowest_price
+                  - entity: sensor.electricity_planner_current_electricity_price
+                    type: attribute
+                    name: Raw Nord Pool price
+                    attribute: raw_current_price
+                  - entity: sensor.electricity_planner_current_electricity_price
+                    type: attribute
+                    name: Transport cost
+                    attribute: transport_cost
+                  - entity: sensor.electricity_planner_current_electricity_price
+                    type: attribute
+                    name: Consumption multiplier
+                    attribute: price_adjustment_multiplier
+                  - entity: sensor.electricity_planner_current_electricity_price
+                    type: attribute
+                    name: Consumption offset
+                    attribute: price_adjustment_offset
+                  - entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
+                    type: attribute
+                    name: Feed-in multiplier
+                    attribute: feedin_multiplier
+                  - entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
+                    type: attribute
+                    name: Feed-in offset
+                    attribute: feedin_offset
+                  - entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
+                    name: Feed-in threshold
+
+              - type: entities
+                title: Thresholds
+                show_header_toggle: false
+                entities:
+                  - entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
+                    name: Max price threshold
+                  - entity: sensor.electricity_planner_current_electricity_price
+                    type: attribute
+                    name: Dynamic threshold
+                    attribute: dynamic_threshold
+                  - entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
+                    name: Feed-in threshold
+
+          - type: entities
+            title: Power controls
+            show_header_toggle: false
+            entities:
+              - entity: sensor.electricity_planner_car_charger_limit
+                name: Car charger limit
+
+              - entity: sensor.electricity_planner_grid_setpoint
+                name: Grid setpoint
+
+          - type: grid
+            square: false
+            columns: 2
+            cards:
+              - type: gauge
+                name: Solar surplus
+                entity: sensor.electricity_planner_solar_surplus_power
+                min: 0
+                max: 5000
+                unit: W
+                needle: true
+                severity:
+                  red: 0
+                  yellow: 2000
+                  green: 4000
+
+              - type: entities
+                title: Power & status
+                show_header_toggle: false
+                entities:
+                  - entity: sensor.electricity_planner_solar_surplus_power
+                    name: Solar surplus
+
+                  - entity: binary_sensor.electricity_planner_solar_producing_power
+                    name: Solar producing
+
+                  - entity: binary_sensor.electricity_planner_price_below_threshold
+                    name: Price below threshold
+
+                  - entity: sensor.electricity_planner_data_unavailable_duration
+                    name: Data unavailable time
+
+          - type: entities
+            title: Algorithm thresholds
+            show_header_toggle: false
+            entities:
+              - entity: sensor.electricity_planner_diagnostics_monitoring_very_low_price_threshold
+                name: Very low price %
+
+              - entity: sensor.electricity_planner_diagnostics_monitoring_emergency_soc_threshold
+                name: Emergency SOC
+
+              - entity: sensor.electricity_planner_diagnostics_monitoring_significant_solar_threshold
+                name: Significant solar
+
+          - type: history-graph
+            title: Price vs decisions (48h)
+            hours_to_show: 48
+            refresh_interval: 300
+            entities:
+              - entity: sensor.electricity_planner_current_electricity_price
+                name: Buy price
+              - entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
+                name: Feed-in price
+              - entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                name: Battery charging
+              - entity: binary_sensor.electricity_planner_car_charge_from_grid
+                name: Car charging
+
+          - type: custom:apexcharts-card
+            header:
+              title: Nord Pool Electricity Prices (Now → Future)
+              show: true
+            graph_span: 36h
+            span:
+              start: minute
+            now:
+              show: true
+              label: Now
+            apex_config:
+              chart:
+                height: 350
+              tooltip:
+                enabled: false
+              xaxis:
+                labels:
+                  datetimeFormatter:
+                    hour: "HH:mm"
+              yaxis:
+                decimalsInFloat: 4
+                tickAmount: 20
+                labels:
+                  formatter: |
+                    EVAL:function(value) {
+                      return value.toFixed(4) + ' €/kWh';
+                    }
+            series:
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Electricity Price
+                type: column
+                color: "#3498db"
+                data_generator: |
+                  return entity.attributes.data.map((interval) => {
+                    return [new Date(interval.start).getTime(), interval.price];
+                  });
+                show:
+                  legend_value: false
+              - entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
+                name: Max Threshold
+                type: line
+                stroke_width: 2
+                color: "#e74c3c"
+                curve: straight
+                show:
+                  legend_value: false
