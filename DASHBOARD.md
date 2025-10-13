@@ -10,6 +10,10 @@ This document provides comprehensive dashboard card configurations for visualizi
 - Column chart showing all price intervals (adapts to Nord Pool's interval duration)
 - **Prices include full buy price**: contract adjustments (multiplier + offset) + transport cost
 - **Transport cost automatically determined** from 7-day history (handles day/night tariffs)
+- **Visual warnings when transport cost unavailable**:
+  - Warning banner above chart (need 7 days of history)
+  - Threshold lines shown as dashed (not directly comparable without transport cost)
+  - Solid threshold lines once transport cost history available
 - Dynamic threshold lines (max threshold + intelligent dynamic threshold)
 - "Now" marker at the start showing current time position
 - Graph span adjusts automatically based on available data (max: until midnight tomorrow)
