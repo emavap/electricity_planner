@@ -84,8 +84,8 @@ Enable `use_dynamic_threshold` to turn the static ceiling into a hard cap and le
 
 `very_low_price_threshold` (default 30 %) marks the bottom slice of each day’s range. Whenever price slips into that band:
 
-- **Batteries** still honour storage headroom. If SOC ≥ 50 % and significant solar surplus exists, grid charging stays off to preserve space for free solar.
-- **EVs** charge immediately (subject to hysteresis window) regardless of surplus. You’re paid to fill the car; the planner honours that opportunity.
+- **Batteries** always prioritize free solar over grid. If SOC ≥ 50 % and significant solar surplus exists, grid charging is blocked (even at very low prices) to preserve space for free solar.
+- **EVs** charge immediately (subject to hysteresis window) regardless of surplus. Very low prices override solar preference for cars since they need more energy.
 
 ---
 
@@ -93,8 +93,8 @@ Enable `use_dynamic_threshold` to turn the static ceiling into a hard cap and le
 
 | Situation | Battery decision | Car decision |
 |-----------|------------------|--------------|
-| **Significant surplus, SOC ≥ 50 %** | Grid charging blocked. Reason: “Significant solar surplus … waiting for solar.” | If price conditions allow, cars can still draw grid power; very-low windows always permitted. |
-| **Significant surplus, SOC low** | Grid used only if strategies approve (e.g. emergency or very-low price) | Same as above |
+| **Significant surplus, SOC ≥ 50 %** | Grid charging always blocked to preserve space for free solar (even at very low prices). | Very-low prices always permitted for cars regardless of solar. |
+| **Significant surplus, SOC low** | Grid used only if strategies approve (e.g. emergency) | Same as above |
 | **No surplus** | Normal price/SOC strategies apply | Hysteresis + price logic |
 | **Emergency SOC (< `emergency_soc_threshold`)** | Always charge, price ignored | N/A – car still obeys its own logic |
 | **Solar peak (10–16 by default)** | If SOC > `solar_peak_emergency_soc`, grid charging pauses in favour of live solar | Car follows global logic; can remain in solar-only mode when flagged |
@@ -119,7 +119,7 @@ Key attribute groups:
 
 ### Example Reason Strings
 
-- `battery_grid_charging_reason`: “Significant solar surplus (2800W) available – SOC 62% ≥ 50% so waiting for solar”
+- `battery_grid_charging_reason`: "Significant solar surplus (2800W) available – SOC 62% ≥ 50% so waiting for free solar (even at very low prices)"
 - `car_grid_charging_reason`: “Very low price (0.062€/kWh) – bottom 30% of daily range (2h+ window available)”
 - `feedin_solar_reason`: “Net feed-in price 0.125€/kWh ≥ 0.050€/kWh – enable solar export (surplus: 1800W)”
 

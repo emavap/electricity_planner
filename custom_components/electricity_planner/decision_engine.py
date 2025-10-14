@@ -738,26 +738,24 @@ class ChargingDecisionEngine:
                 "battery_grid_charging_reason": "No price data available",
             }
 
-        # Early return: If significant solar available + medium/high SOC + price not very low
-        # → Skip grid charging and wait for solar instead
-        # Exception: Very low prices (bottom 30%) should still trigger charging
+        # Early return: If significant solar available + medium/high SOC
+        # → Skip grid charging and wait for solar instead (always prefer free solar)
         significant_solar = power_analysis.get("significant_solar_surplus", False)
         solar_surplus = power_analysis.get("solar_surplus", 0)
         average_soc = battery_analysis.get("average_soc")
         surplus_block_soc = DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold
-        very_low_price = price_analysis.get("very_low_price", False)
 
         if (
             significant_solar
             and average_soc is not None
             and average_soc >= surplus_block_soc
-            and not very_low_price  # Don't block very low price opportunities!
         ):
             return {
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": (
                     f"Significant solar surplus ({solar_surplus:.0f}W) available - "
-                    f"SOC {average_soc:.0f}% ≥ {surplus_block_soc}% so waiting for solar"
+                    f"SOC {average_soc:.0f}% ≥ {surplus_block_soc}% so waiting for free solar "
+                    f"(even at very low prices)"
                 ),
             }
 
