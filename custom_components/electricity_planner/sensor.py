@@ -523,13 +523,10 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "allocation_reason": power_allocation.get("allocation_reason", ""),
             },
 
-            # Solar forecast (for validation)
+            # Solar forecast (simplified - decisions use actual surplus)
             "solar_forecast": {
-                "forecast_available": solar_forecast.get("forecast_available", False),
-                "solar_production_factor": solar_forecast.get("solar_production_factor"),
-                "expected_solar_production": solar_forecast.get("expected_solar_production", "unknown"),
-                "sunny_hours": solar_forecast.get("sunny_hours", 0),
-                "cloudy_hours": solar_forecast.get("cloudy_hours", 0),
+                "forecast_available": False,
+                "reason": "Using actual solar surplus for decisions",
             },
 
             # Time context (for validation)
@@ -565,7 +562,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "power_allocation_valid": power_allocation.get("total_allocated", 0) <= power_analysis.get("solar_surplus", 0),
                 "emergency_override_active": self._check_emergency_override(battery_analysis, time_context, config),
                 "predictive_logic_active": self._check_predictive_logic(price_analysis, battery_analysis, config),
-                "solar_forecast_influencing": solar_forecast.get("forecast_available", False) and solar_forecast.get("solar_production_factor", 0.5) != 0.5,
+                "solar_forecast_influencing": False,  # Forecast no longer influences decisions
             },
 
             # Last update

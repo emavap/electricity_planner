@@ -12,17 +12,10 @@ from .const import (
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
-    CONF_SOLAR_FORECAST_CURRENT_ENTITY,
-    CONF_SOLAR_FORECAST_NEXT_ENTITY,
-    CONF_SOLAR_FORECAST_TODAY_ENTITY,
-    CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY,
-    CONF_SOLAR_FORECAST_TOMORROW_ENTITY,
     CONF_BATTERY_CAPACITIES,
     CONF_EMERGENCY_SOC_THRESHOLD,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
-    CONF_POOR_SOLAR_FORECAST_THRESHOLD,
-    CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD,
     CONF_FEEDIN_PRICE_THRESHOLD,
     CONF_MAX_BATTERY_POWER,
     CONF_MAX_CAR_POWER,
@@ -617,50 +610,16 @@ class ChargingDecisionEngine:
         return 0
 
     async def _analyze_solar_forecast(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Simplified solar forecast analysis - just returns forecast data without complex scoring.
+        """Simplified solar forecast analysis - returns neutral values.
 
-        Decision-making now relies primarily on actual solar surplus vs significant_solar_threshold
-        rather than trying to predict future production with complex multi-factor analysis.
+        Decision-making relies on actual solar surplus vs significant_solar_threshold
+        rather than trying to predict future production.
         """
-        forecast_current = data.get("solar_forecast_current")
-        forecast_next = data.get("solar_forecast_next")
-        forecast_today = data.get("solar_forecast_today")
-        forecast_remaining = data.get("solar_forecast_remaining_today")
-        forecast_tomorrow = data.get("solar_forecast_tomorrow")
-
-        # Check if any forecast entities are configured
-        has_forecast = any([
-            self.config.get(CONF_SOLAR_FORECAST_CURRENT_ENTITY),
-            self.config.get(CONF_SOLAR_FORECAST_NEXT_ENTITY),
-            self.config.get(CONF_SOLAR_FORECAST_TODAY_ENTITY),
-            self.config.get(CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY),
-            self.config.get(CONF_SOLAR_FORECAST_TOMORROW_ENTITY)
-        ])
-
-        if not has_forecast:
-            return self._create_no_forecast_result()
-
-        # Simply return forecast data without complex analysis
-        # Strategies will use actual solar surplus instead
-        return {
-            "forecast_available": True,
-            "solar_production_factor": DEFAULT_ALGORITHM_THRESHOLDS.neutral_price_position,
-            "expected_solar_production": "neutral",
-            "forecast_current_kwh": forecast_current,
-            "forecast_next_kwh": forecast_next,
-            "forecast_today_kwh": forecast_today,
-            "forecast_remaining_today_kwh": forecast_remaining,
-            "forecast_tomorrow_kwh": forecast_tomorrow,
-            "reason": "Using actual solar surplus for decisions"
-        }
-
-    def _create_no_forecast_result(self) -> Dict[str, Any]:
-        """Create result when no forecast entities are configured."""
         return {
             "forecast_available": False,
             "solar_production_factor": DEFAULT_ALGORITHM_THRESHOLDS.neutral_price_position,
             "expected_solar_production": "neutral",
-            "reason": "No solar forecast entities configured"
+            "reason": "Using actual solar surplus for decisions"
         }
 
     def _analyze_battery_status(self, battery_soc_data: List[Dict[str, Any]]) -> Dict[str, Any]:

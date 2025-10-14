@@ -553,36 +553,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Optional(
-                CONF_SOLAR_FORECAST_CURRENT_ENTITY,
-                default=current_config.get(CONF_SOLAR_FORECAST_CURRENT_ENTITY)
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(
-                CONF_SOLAR_FORECAST_NEXT_ENTITY,
-                default=current_config.get(CONF_SOLAR_FORECAST_NEXT_ENTITY)
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(
-                CONF_SOLAR_FORECAST_TODAY_ENTITY,
-                default=current_config.get(CONF_SOLAR_FORECAST_TODAY_ENTITY)
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(
-                CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY,
-                default=current_config.get(CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY)
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(
-                CONF_SOLAR_FORECAST_TOMORROW_ENTITY,
-                default=current_config.get(CONF_SOLAR_FORECAST_TOMORROW_ENTITY)
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(
                 CONF_TRANSPORT_COST_ENTITY,
                 default=current_config.get(CONF_TRANSPORT_COST_ENTITY)
             ): selector.EntitySelector(
@@ -682,22 +652,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=500, max=5000, step=100, unit_of_measurement="W"
-                )
-            ),
-            vol.Optional(
-                CONF_POOR_SOLAR_FORECAST_THRESHOLD,
-                default=current_config.get(CONF_POOR_SOLAR_FORECAST_THRESHOLD, DEFAULT_POOR_SOLAR_FORECAST)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=10, max=60, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD,
-                default=current_config.get(CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD, DEFAULT_EXCELLENT_SOLAR_FORECAST)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=60, max=95, unit_of_measurement="%"
                 )
             ),
             vol.Optional(

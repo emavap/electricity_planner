@@ -24,11 +24,6 @@ from .const import (
     CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MONTHLY_GRID_PEAK_ENTITY,
-    CONF_SOLAR_FORECAST_CURRENT_ENTITY,
-    CONF_SOLAR_FORECAST_NEXT_ENTITY,
-    CONF_SOLAR_FORECAST_TODAY_ENTITY,
-    CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY,
-    CONF_SOLAR_FORECAST_TOMORROW_ENTITY,
     CONF_TRANSPORT_COST_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
@@ -122,12 +117,6 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             if self.config.get(entity_key):
                 entities_to_track.append(self.config[entity_key])
 
-        # Solar forecast entities
-        for entity_key in [CONF_SOLAR_FORECAST_CURRENT_ENTITY, CONF_SOLAR_FORECAST_NEXT_ENTITY,
-                          CONF_SOLAR_FORECAST_TODAY_ENTITY, CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY,
-                          CONF_SOLAR_FORECAST_TOMORROW_ENTITY]:
-            if self.config.get(entity_key):
-                entities_to_track.append(self.config[entity_key])
 
         if entities_to_track:
             async_track_state_change_event(
@@ -258,22 +247,6 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         )
 
 
-        # Solar forecast data
-        data["solar_forecast_current"] = await self._get_state_value(
-            self.config.get(CONF_SOLAR_FORECAST_CURRENT_ENTITY)
-        )
-        data["solar_forecast_next"] = await self._get_state_value(
-            self.config.get(CONF_SOLAR_FORECAST_NEXT_ENTITY)  
-        )
-        data["solar_forecast_today"] = await self._get_state_value(
-            self.config.get(CONF_SOLAR_FORECAST_TODAY_ENTITY)
-        )
-        data["solar_forecast_remaining_today"] = await self._get_state_value(
-            self.config.get(CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY)
-        )
-        data["solar_forecast_tomorrow"] = await self._get_state_value(
-            self.config.get(CONF_SOLAR_FORECAST_TOMORROW_ENTITY)
-        )
 
         data["transport_cost"] = await self._get_state_value(
             self.config.get(CONF_TRANSPORT_COST_ENTITY)
