@@ -466,7 +466,7 @@ def test_check_minimum_charging_window(fake_hass, monkeypatch, use_average):
     prices_today = {"BE": intervals}
 
     # Average threshold ≈ 0.075 -> qualifies when using average, fails fixed (0.07)
-    result = coordinator._check_minimum_charging_window(prices_today, None, transport_lookup)
+    result = coordinator._check_minimum_charging_window(prices_today, None, transport_lookup, None)
 
     if use_average:
         assert result is True
@@ -496,7 +496,7 @@ def test_check_minimum_charging_window_respects_duration(fake_hass, monkeypatch)
     ]
     prices_today = {"BE": intervals}
 
-    result = coordinator._check_minimum_charging_window(prices_today, None, None)
+    result = coordinator._check_minimum_charging_window(prices_today, None, None, None)
     assert result is False
 
 
@@ -521,5 +521,5 @@ def test_check_minimum_charging_window_single_interval_too_short(fake_hass, monk
     ]
     prices_today = {"BE": intervals}
 
-    result = coordinator._check_minimum_charging_window(prices_today, None, None)
+    result = coordinator._check_minimum_charging_window(prices_today, None, None, None)
     assert result is False
