@@ -290,7 +290,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             data["nordpool_prices_today"] = None
             data["nordpool_prices_tomorrow"] = None
 
-        transport_lookup, transport_status = await self._get_transport_cost_lookup()
+        transport_lookup, transport_status = await self._get_transport_cost_lookup(
+            data.get("transport_cost")
+        )
         data["transport_cost_lookup"] = transport_lookup
         data["transport_cost_status"] = transport_status
 
@@ -305,7 +307,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         data["has_min_charging_window"] = self._check_minimum_charging_window(
             data.get("nordpool_prices_today"),
             data.get("nordpool_prices_tomorrow"),
-            transport_lookup
+            transport_lookup,
+            data.get("transport_cost")
         )
 
         return data
@@ -502,7 +505,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self,
         prices_today: dict[str, Any] | None,
         prices_tomorrow: dict[str, Any] | None,
-        transport_lookup: dict[int, float] | None
+        transport_lookup: dict[int, float] | None,
+        current_transport_cost: float | None
     ) -> bool:
         """Check if there are at least 2 consecutive hours of low prices starting now.
 
@@ -579,9 +583,11 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
                     # Add transport cost
                     transport_cost = 0.0
-                    if transport_lookup:
-                        hour = start_time.hour
-                        transport_cost = transport_lookup.get(hour, 0.0)
+                    hour = start_time.hour
+                    if transport_lookup and hour in transport_lookup:
+                        transport_cost = transport_lookup[hour]
+                    elif current_transport_cost is not None:
+                        transport_cost = current_transport_cost
 
                     final_price = adjusted_price + transport_cost
                     future_intervals.append((start_time, end_time, final_price))
@@ -657,7 +663,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         )
         return False
 
-    async def _get_transport_cost_lookup(self) -> tuple[dict[int, float], str]:
+    async def _get_transport_cost_lookup(
+        self, current_transport_cost: float | None = None
+    ) -> tuple[dict[int, float], str]:
         """Return cached transport cost lookup built from recorder history."""
         transport_entity = self.config.get(CONF_TRANSPORT_COST_ENTITY)
         if not transport_entity:
@@ -688,14 +696,25 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             )
 
             if not states or transport_entity not in states:
-                self._transport_cost_lookup = {}
-                self._transport_cost_status = "pending_history"
-                self._maybe_log_transport_status(
-                    "pending_history",
-                    "No transport cost history available for %s. "
-                    "Nord Pool prices will exclude transport cost until 7 days of history accumulate.",
-                    transport_entity,
+                fallback_lookup = self._build_fallback_transport_lookup(
+                    current_transport_cost
                 )
+                self._transport_cost_lookup = fallback_lookup
+                if fallback_lookup:
+                    self._transport_cost_status = "fallback_current"
+                    self._maybe_log_transport_status(
+                        "fallback_current",
+                        "Using current transport cost value for all hours due to missing history on %s.",
+                        transport_entity,
+                    )
+                else:
+                    self._transport_cost_status = "pending_history"
+                    self._maybe_log_transport_status(
+                        "pending_history",
+                        "No transport cost history available for %s. "
+                        "Nord Pool prices will exclude transport cost until 7 days of history accumulate.",
+                        transport_entity,
+                    )
                 self._transport_cost_lookup_time = now
                 return self._transport_cost_lookup, self._transport_cost_status
 
@@ -743,16 +762,27 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             return self._transport_cost_lookup, self._transport_cost_status
 
         except Exception as err:
-            self._transport_cost_lookup = {}
-            self._transport_cost_status = "error"
-            self._transport_cost_lookup_time = now
-            self._maybe_log_transport_status(
-                "error",
-                "Failed to build transport cost lookup from history for %s: %s. "
-                "Nord Pool prices will exclude transport cost.",
-                transport_entity,
-                err,
+            fallback_lookup = self._build_fallback_transport_lookup(
+                current_transport_cost
             )
+            self._transport_cost_lookup = fallback_lookup
+            if fallback_lookup:
+                self._transport_cost_status = "fallback_current"
+                self._maybe_log_transport_status(
+                    "fallback_current",
+                    "Using current transport cost value for all hours after history lookup failure on %s.",
+                    transport_entity,
+                )
+            else:
+                self._transport_cost_status = "error"
+                self._maybe_log_transport_status(
+                    "error",
+                    "Failed to build transport cost lookup from history for %s: %s. "
+                    "Nord Pool prices will exclude transport cost.",
+                    transport_entity,
+                    err,
+                )
+            self._transport_cost_lookup_time = now
             return self._transport_cost_lookup, self._transport_cost_status
 
     def _maybe_log_transport_status(self, status: str, message: str | None, *args) -> None:
@@ -763,6 +793,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         _LOGGER.warning(message, *args)
         self._transport_cost_last_log = status
+
+    def _build_fallback_transport_lookup(
+        self, current_transport_cost: float | None
+    ) -> dict[int, float]:
+        """Build a lookup that uses the current transport cost for all hours."""
+        if current_transport_cost is None:
+            return {}
+        return {hour: current_transport_cost for hour in range(24)}
 
     async def _check_data_availability(self, data: dict[str, Any]) -> None:
         """Check data availability and send notifications if needed."""

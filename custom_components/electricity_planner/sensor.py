@@ -986,7 +986,11 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             "avg_price": round(avg_price, 4) if avg_price is not None else None,
             "price_range": round(max_price - min_price, 4) if (max_price is not None and min_price is not None) else None,
             "transport_cost_applied": (
-                True if transport_status == "applied" else False if transport_status in ("pending_history", "error") else None
+                True
+                if transport_status in ("applied", "fallback_current")
+                else False
+                if transport_status in ("pending_history", "error")
+                else None
             ),
             "transport_cost_status": transport_status,
             "last_update": dt_util.now().isoformat(),
@@ -1037,6 +1041,8 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         # Add transport cost based on the interval's hour
         # Use lookup table built from historical data
         transport_cost = 0.0
+        fallback_transport = self.coordinator.data.get("transport_cost")
+        applied_lookup_cost = False
 
         if transport_cost_lookup:
             start_time_str = interval.get("start")
@@ -1046,9 +1052,14 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
                     from datetime import datetime
                     start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
                     hour = start_time.hour
-                    transport_cost = transport_cost_lookup.get(hour, 0.0)
+                    if hour in transport_cost_lookup:
+                        transport_cost = transport_cost_lookup[hour]
+                        applied_lookup_cost = True
                 except Exception:
                     pass
+
+        if not applied_lookup_cost and fallback_transport is not None:
+            transport_cost = fallback_transport
 
         final_price = adjusted_price + transport_cost
 
