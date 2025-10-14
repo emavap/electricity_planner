@@ -154,7 +154,7 @@ views:
 
                   **Dynamic threshold:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') | float | round(4) if state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') != None else 'Not active' }}
 
-                  **Average threshold:** {{ state_attr('sensor.electricity_planner_decision_diagnostics', 'average_threshold') | float | round(4) if state_attr('sensor.electricity_planner_decision_diagnostics', 'average_threshold') != None else 'Not available' }}
+                  **Average threshold:** {% set price_analysis = state_attr('sensor.electricity_planner_decision_diagnostics', 'price_analysis') %}{{ price_analysis['average_threshold'] | float | round(4) if price_analysis and price_analysis.get('average_threshold') != None else 'Not available' }}
 
                   **Feed-in threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float | round(4) }} €/kWh
 
@@ -211,7 +211,7 @@ views:
 
               **Significant solar:** {{ states('sensor.electricity_planner_diagnostics_monitoring_significant_solar_threshold') }}W
 
-              **Min car charging duration:** {{ (state_attr('sensor.electricity_planner_decision_diagnostics', 'configured_limits') or {}).get('min_car_charging_duration', 'unknown') }} hours
+              **Min car charging duration:** {% set config_limits = state_attr('sensor.electricity_planner_decision_diagnostics', 'configured_limits') %}{{ config_limits.get('min_car_charging_duration', 'unknown') if config_limits else 'unknown' }} hours
 
               _Note: To change car charging duration, go to Settings → Devices & Services → Electricity Planner → Configure_
 
