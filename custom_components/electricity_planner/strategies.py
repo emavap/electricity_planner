@@ -140,7 +140,7 @@ class SolarAwareChargingStrategy(ChargingStrategy):
         """Check if we should wait for solar production instead of grid charging."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
-        solar = context.get("solar_forecast", {})
+        power = context.get("power_analysis", {})
         config = context.get("config", {})
         time_ctx = context.get("time_context", {})
 
@@ -149,20 +149,21 @@ class SolarAwareChargingStrategy(ChargingStrategy):
 
         average_soc = battery.get("average_soc", 0)
         is_solar_peak = time_ctx.get("is_solar_peak", False)
-        solar_factor = solar.get("solar_production_factor", 0.5)
+        has_significant_solar = power.get("significant_solar_surplus", False)
 
-        # During solar peak hours with good forecast - wait for solar unless emergency
+        # During solar peak hours with significant solar - wait for solar unless emergency
         solar_peak_emergency = config.get("solar_peak_emergency_soc", 25)
 
-        if is_solar_peak and solar_factor > DEFAULT_ALGORITHM_THRESHOLDS.moderate_solar_threshold:
+        if is_solar_peak and has_significant_solar:
             # Emergency override if SOC too low
             if average_soc < solar_peak_emergency:
                 return True, (f"Emergency override during solar peak - SOC {average_soc:.0f}% < "
                             f"{solar_peak_emergency}% too low to wait for solar")
 
             # Wait for solar if SOC is sufficient
+            solar_surplus = power.get("solar_surplus", 0)
             return False, (f"Solar peak hours - SOC {average_soc:.0f}% sufficient, awaiting solar production "
-                         f"(forecast: {solar_factor:.0%})")
+                         f"(surplus: {solar_surplus}W)")
 
         return False, ""
 
@@ -177,28 +178,27 @@ class SOCBasedChargingStrategy(ChargingStrategy):
         """Check SOC-based charging conditions."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
-        solar = context.get("solar_forecast", {})
+        power = context.get("power_analysis", {})
         config = context.get("config", {})
 
         if not price.get("is_low_price", False):
             return False, ""
 
         average_soc = battery.get("average_soc", 0)
-        solar_factor = solar.get("solar_production_factor", 0.5)
-        poor_threshold = config.get("poor_solar_forecast_threshold", 40) / 100
-        excellent_threshold = config.get("excellent_solar_forecast_threshold", 80) / 100
+        has_significant_solar = power.get("significant_solar_surplus", False)
+        solar_surplus = power.get("solar_surplus", 0)
 
-        # Low SOC + poor solar forecast → charge
-        if average_soc < DEFAULT_ALGORITHM_THRESHOLDS.low_soc_threshold and solar_factor < poor_threshold:
-            return True, (f"Low SOC {average_soc:.0f}% + poor solar forecast "
-                         f"({solar_factor:.0%} < {poor_threshold:.0%}) - charge while price low")
+        # Low SOC + no solar → charge
+        if average_soc < DEFAULT_ALGORITHM_THRESHOLDS.low_soc_threshold and not has_significant_solar:
+            return True, (f"Low SOC {average_soc:.0f}% + no significant solar "
+                         f"(surplus: {solar_surplus}W) - charge while price low")
 
-        # Medium SOC + excellent solar forecast → skip and wait for solar
+        # Medium SOC + significant solar → skip and wait for solar
         if (average_soc >= DEFAULT_ALGORITHM_THRESHOLDS.low_soc_threshold and
             average_soc <= DEFAULT_ALGORITHM_THRESHOLDS.high_soc_threshold and
-            solar_factor > excellent_threshold):
-            return False, (f"SOC {average_soc:.0f}% sufficient + excellent solar forecast "
-                          f"({solar_factor:.0%}) - waiting for solar instead of grid")
+            has_significant_solar):
+            return False, (f"SOC {average_soc:.0f}% sufficient + significant solar "
+                          f"(surplus: {solar_surplus}W) - waiting for solar instead of grid")
 
         # Medium SOC → charge at low price
         if average_soc < DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold:
@@ -222,7 +222,6 @@ class DynamicPriceStrategy(ChargingStrategy):
         """Check if charging should occur based on dynamic price analysis."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
-        solar = context.get("solar_forecast", {})
         config = context.get("config", {})
 
         current_price = price.get("current_price")
@@ -241,7 +240,9 @@ class DynamicPriceStrategy(ChargingStrategy):
 
         # Prepare SOC/solar adjustments before running the analyzer so reasons align
         average_soc = battery.get("average_soc", 50)
-        solar_factor = solar.get("solar_production_factor", 0.5)  # From real forecast data
+        power = context.get("power_analysis", {})
+        has_significant_solar = power.get("significant_solar_surplus", False)
+        solar_surplus = power.get("solar_surplus", 0)
 
         confidence_threshold = config_confidence
 
@@ -251,20 +252,17 @@ class DynamicPriceStrategy(ChargingStrategy):
         elif average_soc >= 70:
             confidence_threshold = min(0.9, confidence_threshold + 0.1)
 
-        # Adjust based on solar forecast
-        # Good solar (>80%) → need +10% more confidence (be picky)
-        # Poor solar (<40%) → need -10% less confidence (less picky)
-        excellent_threshold = config.get("excellent_solar_forecast_threshold", 80) / 100
-        poor_threshold = config.get("poor_solar_forecast_threshold", 40) / 100
-
-        if solar_factor > excellent_threshold:
+        # Adjust based on actual solar surplus
+        # Significant surplus → need +10% more confidence (be picky, wait for solar)
+        # No surplus → need -10% less confidence (less picky, no solar available)
+        if has_significant_solar:
             confidence_threshold = min(0.9, confidence_threshold + 0.1)
-            solar_context = "excellent solar forecast - waiting for better prices"
-        elif solar_factor < poor_threshold:
-            confidence_threshold = max(0.3, confidence_threshold - 0.1)
-            solar_context = "poor solar forecast - accepting okay prices"
+            solar_context = f"significant solar surplus ({solar_surplus}W) - waiting for better prices"
+        elif solar_surplus > 0:
+            solar_context = f"minor solar surplus ({solar_surplus}W)"
         else:
-            solar_context = f"solar forecast {solar_factor:.0%}"
+            confidence_threshold = max(0.3, confidence_threshold - 0.1)
+            solar_context = "no solar surplus - accepting okay prices"
 
         # Initialize analyzer if needed, or update threshold if config changed
         if self.dynamic_analyzer is None:

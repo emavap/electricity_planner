@@ -38,8 +38,6 @@ from .const import (
     DEFAULT_EMERGENCY_SOC,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
     DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
-    DEFAULT_POOR_SOLAR_FORECAST,
-    DEFAULT_EXCELLENT_SOLAR_FORECAST,
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
     DEFAULT_MAX_BATTERY_POWER,
     DEFAULT_MAX_CAR_POWER,
@@ -141,10 +139,7 @@ class ChargingDecisionEngine:
         
         solar_analysis = self._analyze_solar_production(data)
         decision_data["solar_analysis"] = solar_analysis
-        
-        solar_forecast = await self._analyze_solar_forecast(data)
-        decision_data["solar_forecast"] = solar_forecast
-        
+
         time_context = TimeContext.get_current_context(
             night_start=DEFAULT_TIME_SCHEDULE.night_start,
             night_end=DEFAULT_TIME_SCHEDULE.night_end,
@@ -157,7 +152,7 @@ class ChargingDecisionEngine:
         
         # Allocate solar power
         power_allocation = self._allocate_solar_power(
-            power_analysis, battery_analysis, price_analysis, solar_forecast, time_context
+            power_analysis, battery_analysis, price_analysis, time_context
         )
         decision_data["power_allocation"] = power_allocation
         
@@ -173,7 +168,7 @@ class ChargingDecisionEngine:
         
         # Make charging decisions
         battery_decision = self._decide_battery_grid_charging(
-            price_analysis, battery_analysis, power_allocation, solar_forecast, time_context
+            price_analysis, battery_analysis, power_allocation, power_analysis, time_context
         )
         decision_data.update(battery_decision)
 
@@ -182,7 +177,7 @@ class ChargingDecisionEngine:
             "price_analysis": price_analysis,
             "battery_analysis": battery_analysis,
             "power_allocation": power_allocation,
-            "solar_forecast": solar_forecast,
+            "power_analysis": power_analysis,
             "time_context": time_context,
             "config": self.config,
         }
@@ -438,7 +433,6 @@ class ChargingDecisionEngine:
         power_analysis: Dict[str, Any],
         battery_analysis: Dict[str, Any],
         price_analysis: Dict[str, Any],
-        solar_forecast: Dict[str, Any],
         time_context: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Hierarchically allocate solar surplus."""
@@ -609,19 +603,6 @@ class ChargingDecisionEngine:
             )
         return 0
 
-    async def _analyze_solar_forecast(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Simplified solar forecast analysis - returns neutral values.
-
-        Decision-making relies on actual solar surplus vs significant_solar_threshold
-        rather than trying to predict future production.
-        """
-        return {
-            "forecast_available": False,
-            "solar_production_factor": DEFAULT_ALGORITHM_THRESHOLDS.neutral_price_position,
-            "expected_solar_production": "neutral",
-            "reason": "Using actual solar surplus for decisions"
-        }
-
     def _analyze_battery_status(self, battery_soc_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Analyze battery status for all configured batteries."""
         # Validate battery data
@@ -724,7 +705,7 @@ class ChargingDecisionEngine:
         price_analysis: Dict[str, Any],
         battery_analysis: Dict[str, Any],
         power_allocation: Dict[str, Any],
-        solar_forecast: Dict[str, Any],
+        power_analysis: Dict[str, Any],
         time_context: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Decide battery charging using strategy pattern."""
@@ -734,7 +715,7 @@ class ChargingDecisionEngine:
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": "No battery entities configured",
             }
-        
+
         if not battery_analysis.get("batteries_available", True):
             return {
                 "battery_grid_charging": False,
@@ -743,33 +724,33 @@ class ChargingDecisionEngine:
                     "Battery data unavailable"
                 ),
             }
-        
+
         if battery_analysis.get("batteries_full"):
             max_threshold = battery_analysis.get("max_soc_threshold", 90)
             return {
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": f"Batteries above {max_threshold}% SOC",
             }
-        
+
         if not price_analysis.get("data_available", True):
             return {
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": "No price data available",
             }
-        
+
         # Create context for strategies
         context = {
             "price_analysis": price_analysis,
             "battery_analysis": battery_analysis,
             "power_allocation": power_allocation,
-            "solar_forecast": solar_forecast,
+            "power_analysis": power_analysis,
             "time_context": time_context,
             "config": self.config,
         }
-        
+
         # Use strategy manager
         should_charge, reason = self.strategy_manager.evaluate(context)
-        
+
         return {
             "battery_grid_charging": should_charge,
             "battery_grid_charging_reason": reason,
