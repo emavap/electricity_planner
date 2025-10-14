@@ -35,11 +35,14 @@ from .const import (
     CONF_PRICE_THRESHOLD,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
+    CONF_USE_AVERAGE_THRESHOLD,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
+    DEFAULT_USE_AVERAGE_THRESHOLD,
+    DEFAULT_MIN_CAR_CHARGING_DURATION_HOURS,
 )
 from .decision_engine import ChargingDecisionEngine
 
@@ -75,6 +78,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._transport_cost_lookup_time: datetime | None = None
         self._transport_cost_status: str = "not_configured"
         self._transport_cost_last_log: str | None = None
+
+        # Car charging state tracking for hysteresis
+        self._previous_car_charging: bool = False
 
         super().__init__(
             hass,
@@ -164,9 +170,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         try:
             data = await self._fetch_all_data()
 
+            # Add previous car charging state for hysteresis logic
+            data["previous_car_charging"] = self._previous_car_charging
+
             charging_decision = await self.decision_engine.evaluate_charging_decision(data)
 
             data.update(charging_decision)
+
+            # Update previous car charging state
+            self._previous_car_charging = charging_decision.get("car_grid_charging", False)
 
             # Check data availability and handle notifications
             await self._check_data_availability(data)
@@ -283,6 +295,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         # Calculate average threshold if enabled
         data["average_threshold"] = self._calculate_average_threshold(
+            data.get("nordpool_prices_today"),
+            data.get("nordpool_prices_tomorrow"),
+            transport_lookup
+        )
+
+        # Calculate if we have at least 2 hours of low prices ahead for car charging
+        data["has_min_charging_window"] = self._check_minimum_charging_window(
             data.get("nordpool_prices_today"),
             data.get("nordpool_prices_tomorrow"),
             transport_lookup
@@ -477,6 +496,148 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             return round(average, 4)
 
         return None
+
+    def _check_minimum_charging_window(
+        self,
+        prices_today: dict[str, Any] | None,
+        prices_tomorrow: dict[str, Any] | None,
+        transport_lookup: dict[int, float] | None
+    ) -> bool:
+        """Check if there are at least 2 consecutive hours of low prices starting now.
+
+        Returns True if the current price and the next 2 hours are all below threshold.
+        This prevents car charging from starting for very short low-price periods.
+        """
+        if not prices_today and not prices_tomorrow:
+            return False
+
+        from datetime import datetime
+        now = dt_util.now()
+
+        # Get the threshold (either average or fixed)
+        use_average = self.config.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)
+        average_threshold = self._calculate_average_threshold(prices_today, prices_tomorrow, transport_lookup)
+
+        if use_average and average_threshold is not None:
+            threshold = average_threshold
+        else:
+            threshold = self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
+
+        # Get multiplier and offset for price adjustments
+        multiplier = self.config.get(
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+        )
+        offset = self.config.get(
+            CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
+        )
+
+        # Collect all future intervals with their prices
+        future_intervals: list[tuple[datetime, float]] = []
+
+        def process_intervals(intervals: list[dict[str, Any]]) -> None:
+            for interval in intervals:
+                try:
+                    start_time_str = interval.get("start")
+                    if not start_time_str:
+                        continue
+
+                    start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+                    if start_time < now:
+                        continue  # Skip past intervals
+
+                    # Extract and convert price
+                    price_value = None
+                    for key in ("value", "value_exc_vat", "price"):
+                        value = interval.get(key)
+                        if isinstance(value, (int, float)):
+                            price_value = float(value)
+                            break
+                        if isinstance(value, str):
+                            try:
+                                price_value = float(value)
+                                break
+                            except (ValueError, TypeError):
+                                continue
+
+                    if price_value is None:
+                        continue
+
+                    # Convert from €/MWh to €/kWh and apply adjustments
+                    price_kwh = price_value / 1000
+                    adjusted_price = (price_kwh * multiplier) + offset
+
+                    # Add transport cost
+                    transport_cost = 0.0
+                    if transport_lookup:
+                        hour = start_time.hour
+                        transport_cost = transport_lookup.get(hour, 0.0)
+
+                    final_price = adjusted_price + transport_cost
+                    future_intervals.append((start_time, final_price))
+
+                except Exception as err:
+                    _LOGGER.debug("Error processing interval for charging window check: %s", err)
+                    continue
+
+        # Process today's and tomorrow's prices
+        if prices_today:
+            area_code = next(iter(prices_today.keys()), None)
+            if area_code and isinstance(prices_today[area_code], list):
+                process_intervals(prices_today[area_code])
+
+        if prices_tomorrow:
+            area_code = next(iter(prices_tomorrow.keys()), None)
+            if area_code and isinstance(prices_tomorrow[area_code], list):
+                process_intervals(prices_tomorrow[area_code])
+
+        # Sort by time
+        future_intervals.sort(key=lambda x: x[0])
+
+        if not future_intervals:
+            return False
+
+        # Check if we have at least 2 hours of consecutive low prices
+        # We need the current interval + at least 2 more hours (depends on Nord Pool interval duration)
+        min_duration_hours = DEFAULT_MIN_CAR_CHARGING_DURATION_HOURS
+        current_time = now
+        low_price_duration = timedelta(hours=0)
+
+        for start_time, price in future_intervals:
+            if price > threshold:
+                # Hit a high price, reset counter
+                low_price_duration = timedelta(hours=0)
+                current_time = start_time
+                continue
+
+            # Check if this interval is continuous with our window
+            if low_price_duration == timedelta(hours=0):
+                # Starting a new window
+                current_time = start_time
+
+            # Calculate interval duration (look at next interval or assume standard duration)
+            idx = future_intervals.index((start_time, price))
+            if idx + 1 < len(future_intervals):
+                next_start = future_intervals[idx + 1][0]
+                interval_duration = next_start - start_time
+            else:
+                # Assume hourly intervals if we don't have next interval
+                interval_duration = timedelta(hours=1)
+
+            low_price_duration += interval_duration
+
+            # Check if we've accumulated enough low-price time
+            if low_price_duration >= timedelta(hours=min_duration_hours):
+                _LOGGER.debug(
+                    "Found minimum charging window: %.1f hours of prices below %.4f €/kWh",
+                    low_price_duration.total_seconds() / 3600, threshold
+                )
+                return True
+
+        _LOGGER.debug(
+            "No minimum charging window found: only %.1f hours of low prices (need %d)",
+            low_price_duration.total_seconds() / 3600, min_duration_hours
+        )
+        return False
 
     async def _get_transport_cost_lookup(self) -> tuple[dict[int, float], str]:
         """Return cached transport cost lookup built from recorder history."""

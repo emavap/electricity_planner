@@ -80,6 +80,7 @@ DEFAULT_CAR_PRIORITY_SOC_THRESHOLD = 70  # Above this SOC, car can use surplus
 DEFAULT_CRITICAL_SOC_THRESHOLD = 30  # Below this is considered critical
 DEFAULT_MEDIUM_SOC_THRESHOLD = 50  # Medium SOC charging threshold
 DEFAULT_HIGH_SOC_THRESHOLD = 60  # High SOC threshold for time-based charging
+DEFAULT_MIN_CAR_CHARGING_DURATION_HOURS = 2  # Minimum hours of low prices to start car charging
 
 ATTR_BATTERY_GRID_CHARGING = "battery_grid_charging"
 ATTR_CAR_GRID_CHARGING = "car_grid_charging"

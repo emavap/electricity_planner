@@ -196,7 +196,7 @@ class ChargingDecisionEngine:
             price_analysis["dynamic_threshold"] = dynamic_threshold
 
         car_decision = self._decide_car_grid_charging(
-            price_analysis, battery_analysis, power_allocation
+            price_analysis, battery_analysis, power_allocation, data
         )
         decision_data.update(car_decision)
         
@@ -895,49 +895,119 @@ class ChargingDecisionEngine:
         price_analysis: Dict[str, Any],
         battery_analysis: Dict[str, Any],
         power_allocation: Dict[str, Any],
+        data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Decide whether to charge car from grid."""
+        """Decide whether to charge car from grid with hysteresis.
+
+        Hysteresis logic:
+        - OFF → ON: Only if price is low AND we have at least 2 hours of low prices ahead
+        - ON → OFF: Only if price exceeds threshold (continues charging during low prices)
+
+        This prevents frequent on/off switching for short low-price periods.
+        """
         if not price_analysis.get("data_available", True):
             return {
                 "car_grid_charging": False,
                 "car_grid_charging_reason": "No price data available",
             }
-        
+
         allocated_solar = power_allocation.get("solar_for_car", 0)
         current_price = price_analysis.get("current_price", 0)
         threshold = price_analysis.get("price_threshold", 0.15)
-        
+        previous_car_charging = data.get("previous_car_charging", False)
+        has_min_charging_window = data.get("has_min_charging_window", False)
+
         # Prioritise very low prices regardless of solar forecast
+        # Very low prices always start charging (if window available) or continue charging
         if price_analysis.get("very_low_price"):
             very_low_percent = self.config.get(
                 CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD
             )
-            reason = (
-                f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_percent}% of daily range"
-            )
+
+            # If already charging, continue regardless of window
+            if previous_car_charging:
+                reason = (
+                    f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_percent}% "
+                    f"of daily range (continuing)"
+                )
+            # If not charging, only start if we have minimum window
+            elif has_min_charging_window:
+                reason = (
+                    f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_percent}% "
+                    f"of daily range (2+ hour window available)"
+                )
+            else:
+                # Very low price but insufficient window - don't start
+                return {
+                    "car_grid_charging": False,
+                    "car_grid_charging_reason": (
+                        f"Very low price ({current_price:.3f}€/kWh) but less than 2 hours "
+                        f"of low prices ahead - waiting for longer window"
+                    ),
+                }
+
             if allocated_solar > 0:
                 reason += f", solar available ({allocated_solar}W)"
             return {
                 "car_grid_charging": True,
                 "car_grid_charging_reason": reason,
             }
-        
-        # Allow grid charging whenever the current price is already acceptable.
+
+        # Check if price is low (below threshold)
         if price_analysis.get("is_low_price"):
-            if allocated_solar > 0:
-                reason = (
-                    f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) "
-                    f"with solar support ({allocated_solar}W) - allowing grid + solar"
-                )
+            # If already charging, continue
+            if previous_car_charging:
+                if allocated_solar > 0:
+                    reason = (
+                        f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) "
+                        f"with solar ({allocated_solar}W) - continuing"
+                    )
+                else:
+                    reason = (
+                        f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) - continuing"
+                    )
+                return {
+                    "car_grid_charging": True,
+                    "car_grid_charging_reason": reason,
+                }
+
+            # Not charging yet - only start if we have minimum window
+            if has_min_charging_window:
+                if allocated_solar > 0:
+                    reason = (
+                        f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) "
+                        f"with solar ({allocated_solar}W), 2+ hour window available - starting"
+                    )
+                else:
+                    reason = (
+                        f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh), "
+                        f"2+ hour window available - starting"
+                    )
+                return {
+                    "car_grid_charging": True,
+                    "car_grid_charging_reason": reason,
+                }
             else:
-                reason = (
-                    f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) - charging car from grid"
-                )
+                # Low price but insufficient window - don't start
+                return {
+                    "car_grid_charging": False,
+                    "car_grid_charging_reason": (
+                        f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) but less than 2 hours "
+                        f"of low prices ahead - waiting for longer window"
+                    ),
+                }
+
+        # Price is above threshold
+        # If we were charging, stop now (hysteresis OFF condition)
+        if previous_car_charging:
             return {
-                "car_grid_charging": True,
-                "car_grid_charging_reason": reason,
+                "car_grid_charging": False,
+                "car_grid_charging_reason": (
+                    f"Price exceeded threshold ({current_price:.3f}€/kWh > {threshold:.3f}€/kWh) - "
+                    f"stopping car charging"
+                ),
             }
-        
+
         # For higher prices fall back to solar-only if available, otherwise skip grid charging.
         if allocated_solar > 0:
             return {
@@ -948,7 +1018,7 @@ class ChargingDecisionEngine:
                     f"using allocated solar power only ({allocated_solar}W)"
                 ),
             }
-        
+
         return {
             "car_grid_charging": False,
             "car_grid_charging_reason": (
