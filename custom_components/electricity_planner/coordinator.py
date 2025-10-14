@@ -75,7 +75,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._nordpool_cache_time = {}
 
         # Transport cost lookup caching (expensive recorder query)
-        self._transport_cost_lookup: dict[int, float] = {}
+        self._transport_cost_lookup: list[dict[str, Any]] = []
         self._transport_cost_lookup_time: datetime | None = None
         self._transport_cost_status: str = "not_configured"
         self._transport_cost_last_log: str | None = None
@@ -405,7 +405,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self,
         prices_today: dict[str, Any] | None,
         prices_tomorrow: dict[str, Any] | None,
-        transport_lookup: dict[int, float] | None
+        transport_lookup: list[dict[str, Any]] | None
     ) -> float | None:
         """Calculate average of all future prices (from now onwards).
 
@@ -417,8 +417,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         if not prices_today and not prices_tomorrow:
             return None
 
-        from datetime import datetime
-        now = dt_util.now()
+        now = dt_util.utcnow()
         future_prices: list[float] = []
 
         # Get multiplier and offset for price adjustments
@@ -430,6 +429,57 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         )
 
         # Helper to process intervals
+        def resolve_transport_cost(start_time_utc: datetime) -> float:
+            """Get transport cost for future time using week-old pattern if available."""
+            if not transport_lookup:
+                return 0.0
+
+            # For future times, look for the same hour from 1 week ago
+            now = dt_util.utcnow()
+            if start_time_utc > now:
+                week_ago = start_time_utc - timedelta(days=7)
+                # Find the cost that was active at this same time last week
+                cost_from_pattern: float | None = None
+                for entry in transport_lookup:
+                    entry_cost = entry.get("cost")
+                    if entry_cost is None:
+                        continue
+                    entry_start_str = entry.get("start")
+                    if entry_start_str is None:
+                        cost_from_pattern = float(entry_cost)
+                        continue
+                    entry_start = dt_util.parse_datetime(entry_start_str)
+                    if entry_start is None:
+                        continue
+                    entry_start_utc = dt_util.as_utc(entry_start)
+                    if entry_start_utc <= week_ago:
+                        cost_from_pattern = float(entry_cost)
+                    else:
+                        break
+
+                if cost_from_pattern is not None:
+                    return cost_from_pattern
+
+            # For past/current times or if no week-old data, use most recent cost
+            cost: float | None = None
+            for entry in transport_lookup:
+                entry_cost = entry.get("cost")
+                if entry_cost is None:
+                    continue
+                entry_start_str = entry.get("start")
+                if entry_start_str is None:
+                    cost = float(entry_cost)
+                    continue
+                entry_start = dt_util.parse_datetime(entry_start_str)
+                if entry_start is None:
+                    continue
+                entry_start_utc = dt_util.as_utc(entry_start)
+                if entry_start_utc <= start_time_utc:
+                    cost = float(entry_cost)
+                else:
+                    break
+            return cost if cost is not None else 0.0
+
         def process_intervals(intervals: list[dict[str, Any]]) -> None:
             for interval in intervals:
                 try:
@@ -438,8 +488,11 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     if not start_time_str:
                         continue
 
-                    start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
-                    if start_time <= now:
+                    start_time = dt_util.parse_datetime(start_time_str)
+                    if start_time is None:
+                        continue
+                    start_time_utc = dt_util.as_utc(start_time)
+                    if start_time_utc <= now:
                         continue  # Skip past intervals
 
                     # Extract price (try different keys like Nord Pool sensor does)
@@ -467,9 +520,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
                     # Add transport cost
                     transport_cost = 0.0
-                    if transport_lookup:
-                        hour = start_time.hour
-                        transport_cost = transport_lookup.get(hour, 0.0)
+                    transport_cost = resolve_transport_cost(start_time_utc)
 
                     final_price = adjusted_price + transport_cost
                     future_prices.append(final_price)
@@ -505,7 +556,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self,
         prices_today: dict[str, Any] | None,
         prices_tomorrow: dict[str, Any] | None,
-        transport_lookup: dict[int, float] | None,
+        transport_lookup: list[dict[str, Any]] | None,
         current_transport_cost: float | None
     ) -> bool:
         """Check if there are at least 2 consecutive hours of low prices starting now.
@@ -516,8 +567,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         if not prices_today and not prices_tomorrow:
             return False
 
-        from datetime import datetime
-        now = dt_util.now()
+        now = dt_util.utcnow()
 
         # Get the threshold (either average or fixed)
         use_average = self.config.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)
@@ -539,6 +589,58 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Collect all future intervals with their prices
         future_intervals: list[tuple[datetime, datetime | None, float]] = []
 
+        def resolve_transport_cost(start_time_utc: datetime) -> float:
+            """Get transport cost for future time using week-old pattern if available."""
+            if transport_lookup:
+                # For future times, look for the same hour from 1 week ago
+                if start_time_utc > now:
+                    week_ago = start_time_utc - timedelta(days=7)
+                    # Find the cost that was active at this same time last week
+                    cost_from_pattern: float | None = None
+                    for entry in transport_lookup:
+                        entry_cost = entry.get("cost")
+                        if entry_cost is None:
+                            continue
+                        entry_start_str = entry.get("start")
+                        if entry_start_str is None:
+                            cost_from_pattern = float(entry_cost)
+                            continue
+                        entry_start = dt_util.parse_datetime(entry_start_str)
+                        if entry_start is None:
+                            continue
+                        entry_start_utc = dt_util.as_utc(entry_start)
+                        if entry_start_utc <= week_ago:
+                            cost_from_pattern = float(entry_cost)
+                        else:
+                            break
+
+                    if cost_from_pattern is not None:
+                        return cost_from_pattern
+
+                # For past/current times or if no week-old data, use most recent cost
+                cost: float | None = None
+                for entry in transport_lookup:
+                    entry_cost = entry.get("cost")
+                    if entry_cost is None:
+                        continue
+                    entry_start_str = entry.get("start")
+                    if entry_start_str is None:
+                        cost = float(entry_cost)
+                        continue
+                    entry_start = dt_util.parse_datetime(entry_start_str)
+                    if entry_start is None:
+                        continue
+                    entry_start_utc = dt_util.as_utc(entry_start)
+                    if entry_start_utc <= start_time_utc:
+                        cost = float(entry_cost)
+                    else:
+                        break
+                if cost is not None:
+                    return cost
+            if current_transport_cost is not None:
+                return current_transport_cost
+            return 0.0
+
         def process_intervals(intervals: list[dict[str, Any]]) -> None:
             for interval in intervals:
                 try:
@@ -546,15 +648,18 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     if not start_time_str:
                         continue
 
-                    start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
-                    if start_time < now:
+                    start_time = dt_util.parse_datetime(start_time_str)
+                    if start_time is None:
+                        continue
+                    start_time_utc = dt_util.as_utc(start_time)
+                    if start_time_utc < now:
                         continue  # Skip past intervals
 
                     end_time = None
                     end_time_str = interval.get("end")
                     if end_time_str:
                         try:
-                            end_time = datetime.fromisoformat(end_time_str.replace('Z', '+00:00'))
+                            end_time = dt_util.parse_datetime(end_time_str)
                             if end_time <= start_time:
                                 end_time = None
                         except Exception:
@@ -581,16 +686,11 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     price_kwh = price_value / 1000
                     adjusted_price = (price_kwh * multiplier) + offset
 
-                    # Add transport cost
-                    transport_cost = 0.0
-                    hour = start_time.hour
-                    if transport_lookup and hour in transport_lookup:
-                        transport_cost = transport_lookup[hour]
-                    elif current_transport_cost is not None:
-                        transport_cost = current_transport_cost
+                    # Add transport cost based on resolved change times
+                    transport_cost = resolve_transport_cost(start_time_utc)
 
                     final_price = adjusted_price + transport_cost
-                    future_intervals.append((start_time, end_time, final_price))
+                    future_intervals.append((start_time_utc, end_time, final_price))
 
                 except Exception as err:
                     _LOGGER.debug("Error processing interval for charging window check: %s", err)
@@ -665,13 +765,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
     async def _get_transport_cost_lookup(
         self, current_transport_cost: float | None = None
-    ) -> tuple[dict[int, float], str]:
+    ) -> tuple[list[dict[str, Any]], str]:
         """Return cached transport cost lookup built from recorder history."""
         transport_entity = self.config.get(CONF_TRANSPORT_COST_ENTITY)
         if not transport_entity:
-            self._transport_cost_lookup = {}
+            self._transport_cost_lookup = []
             self._transport_cost_status = "not_configured"
-            return {}, "not_configured"
+            return [], "not_configured"
 
         now = dt_util.utcnow()
         # Refresh every 30 minutes at most
@@ -718,36 +818,38 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 self._transport_cost_lookup_time = now
                 return self._transport_cost_lookup, self._transport_cost_status
 
-            hour_costs: dict[int, list[float]] = {hour: [] for hour in range(24)}
+            # First collect all valid cost changes with timestamps
+            raw_changes: list[dict[str, Any]] = []
             for state in states[transport_entity]:
                 value = state.state
                 if value in (STATE_UNAVAILABLE, STATE_UNKNOWN):
                     continue
                 try:
                     cost = float(value)
-                    local_changed = dt_util.as_local(state.last_changed)
-                    hour = local_changed.hour
-                    hour_costs[hour].append(cost)
+                    timestamp = dt_util.as_utc(state.last_changed)
+                    raw_changes.append(
+                        {
+                            "start": timestamp.isoformat(),
+                            "cost": cost,
+                        }
+                    )
                 except (ValueError, TypeError, AttributeError):
                     continue
 
-            lookup: dict[int, float] = {}
-            for hour, values in hour_costs.items():
-                if values:
-                    lookup[hour] = values[-1]
+            # Sort by timestamp first
+            raw_changes.sort(key=lambda entry: entry["start"])
 
-            # Fill gaps with neighboring hours
-            for hour in range(24):
-                if hour not in lookup:
-                    next_hour = (hour + 1) % 24
-                    prev_hour = (hour - 1) % 24
-                    if next_hour in lookup:
-                        lookup[hour] = lookup[next_hour]
-                    elif prev_hour in lookup:
-                        lookup[hour] = lookup[prev_hour]
+            # Then remove duplicate consecutive values
+            changes: list[dict[str, Any]] = []
+            last_cost: float | None = None
+            for change in raw_changes:
+                cost = change["cost"]
+                if last_cost is None or abs(cost - last_cost) > 1e-9:
+                    changes.append(change)
+                    last_cost = cost
 
-            self._transport_cost_lookup = lookup
-            self._transport_cost_status = "applied" if lookup else "pending_history"
+            self._transport_cost_lookup = changes
+            self._transport_cost_status = "applied" if changes else "pending_history"
             self._transport_cost_lookup_time = now
 
             if self._transport_cost_status == "pending_history":
@@ -797,11 +899,16 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
     def _build_fallback_transport_lookup(
         self, current_transport_cost: float | None
-    ) -> dict[int, float]:
+    ) -> list[dict[str, Any]]:
         """Build a lookup that uses the current transport cost for all hours."""
         if current_transport_cost is None:
-            return {}
-        return {hour: current_transport_cost for hour in range(24)}
+            return []
+        return [
+            {
+                "start": None,
+                "cost": current_transport_cost,
+            }
+        ]
 
     async def _check_data_availability(self, data: dict[str, Any]) -> None:
         """Check data availability and send notifications if needed."""

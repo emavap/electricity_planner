@@ -1,6 +1,7 @@
 """Sensor platform for Electricity Planner."""
 from __future__ import annotations
 
+from datetime import timedelta
 import logging
 from typing import Any
 
@@ -943,7 +944,7 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         prices_tomorrow = self.coordinator.data.get("nordpool_prices_tomorrow")
 
         # Transport cost lookup/status provided by coordinator
-        transport_lookup = self.coordinator.data.get("transport_cost_lookup") or {}
+        transport_lookup = self.coordinator.data.get("transport_cost_lookup") or []
         transport_status = self.coordinator.data.get("transport_cost_status", "not_configured")
 
         # Combine today and tomorrow prices into a single list for easier dashboard usage
@@ -1012,7 +1013,7 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
 
         return None
 
-    def _normalize_price_interval(self, interval: Any, transport_cost_lookup: dict[int, float] | None = None) -> dict[str, Any] | None:
+    def _normalize_price_interval(self, interval: Any, transport_cost_lookup: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
         """Return a normalized interval dict with a guaranteed price key.
 
         Converts price from €/MWh to €/kWh and applies contract adjustments
@@ -1046,21 +1047,63 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
 
         if transport_cost_lookup:
             start_time_str = interval.get("start")
-            if start_time_str:
-                try:
-                    # Parse ISO format timestamp and convert to local timezone
-                    start_time = dt_util.parse_datetime(start_time_str)
-                    if start_time is not None:
-                        hour = dt_util.as_local(start_time).hour
-                    else:
-                        hour = None
-                    if hour is None:
-                        raise ValueError("Invalid timestamp")
-                    if hour in transport_cost_lookup:
-                        transport_cost = transport_cost_lookup[hour]
-                        applied_lookup_cost = True
-                except Exception:
-                    pass
+            interval_start = dt_util.parse_datetime(start_time_str) if start_time_str else None
+            if interval_start is not None:
+                interval_start_utc = dt_util.as_utc(interval_start)
+            else:
+                interval_start_utc = None
+
+            if interval_start_utc is not None:
+                now = dt_util.utcnow()
+                effective_cost: float | None = None
+
+                # For future times, look for the same hour from 1 week ago
+                if interval_start_utc > now:
+                    week_ago = interval_start_utc - timedelta(days=7)
+                    # Find the cost that was active at this same time last week
+                    cost_from_pattern: float | None = None
+                    for change in transport_cost_lookup:
+                        change_start_str = change.get("start")
+                        change_cost = change.get("cost")
+                        if change_cost is None:
+                            continue
+                        if change_start_str is None:
+                            cost_from_pattern = float(change_cost)
+                            continue
+                        change_start = dt_util.parse_datetime(change_start_str)
+                        if change_start is None:
+                            continue
+                        change_start_utc = dt_util.as_utc(change_start)
+                        if change_start_utc <= week_ago:
+                            cost_from_pattern = float(change_cost)
+                        else:
+                            break
+
+                    if cost_from_pattern is not None:
+                        effective_cost = cost_from_pattern
+
+                # For past/current times or if no week-old data, use most recent cost
+                if effective_cost is None:
+                    for change in transport_cost_lookup:
+                        change_start_str = change.get("start")
+                        change_cost = change.get("cost")
+                        if change_cost is None:
+                            continue
+                        if change_start_str is None:
+                            effective_cost = float(change_cost)
+                            continue
+                        change_start = dt_util.parse_datetime(change_start_str)
+                        if change_start is None:
+                            continue
+                        change_start_utc = dt_util.as_utc(change_start)
+                        if change_start_utc <= interval_start_utc:
+                            effective_cost = float(change_cost)
+                        else:
+                            break
+
+                if effective_cost is not None:
+                    transport_cost = effective_cost
+                    applied_lookup_cost = True
 
         if not applied_lookup_cost and fallback_transport is not None:
             transport_cost = fallback_transport

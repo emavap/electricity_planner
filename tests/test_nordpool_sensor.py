@@ -143,21 +143,29 @@ def test_normalize_price_interval_applies_adjustments(fake_coordinator, fake_ent
     assert result["transport_cost"] == 0.0
 
 
-def test_normalize_price_interval_applies_transport_cost(fake_coordinator, fake_entry):
-    """Test that _normalize_price_interval applies transport cost based on hour."""
+def test_normalize_price_interval_applies_transport_cost(fake_coordinator, fake_entry, monkeypatch):
+    """Test that _normalize_price_interval applies week-old transport costs for future times."""
+    from datetime import datetime, timezone
+
+    # Freeze time to 2025-10-13 12:00 UTC so that 2025-10-14 intervals are in the future
+    frozen_now = datetime(2025, 10, 13, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "utcnow", lambda: frozen_now)
+
     fake_coordinator.config = {
         "price_adjustment_multiplier": 1.0,
         "price_adjustment_offset": 0.0
     }
+    fake_coordinator.data = {}  # Empty data to avoid interference
     sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
 
-    # Transport cost: 0.03 at night (00:00), 0.05 during day (14:00)
-    transport_lookup = {
-        0: 0.03,  # Night rate
-        14: 0.05  # Day rate
-    }
+    # Transport cost history from a week ago (2025-10-07)
+    # 0.03 at night (00:00), 0.05 during day (14:00)
+    transport_lookup = [
+        {"start": "2025-10-07T00:00:00+00:00", "cost": 0.03},
+        {"start": "2025-10-07T14:00:00+00:00", "cost": 0.05},
+    ]
 
-    # Night interval
+    # Future night interval (2025-10-14, should use week-old pattern)
     night_interval = {
         "start": "2025-10-14T00:00:00+00:00",
         "end": "2025-10-14T00:15:00+00:00",
@@ -169,7 +177,7 @@ def test_normalize_price_interval_applies_transport_cost(fake_coordinator, fake_
     assert result_night["price"] == pytest.approx(0.13, rel=1e-6)  # 0.1 + 0.03
     assert result_night["transport_cost"] == 0.03
 
-    # Day interval
+    # Future day interval (2025-10-14, should use week-old pattern)
     day_interval = {
         "start": "2025-10-14T14:00:00+00:00",
         "end": "2025-10-14T14:15:00+00:00",
@@ -182,8 +190,14 @@ def test_normalize_price_interval_applies_transport_cost(fake_coordinator, fake_
     assert result_day["transport_cost"] == 0.05
 
 
-def test_normalize_price_interval_uses_local_time_zone(fake_coordinator, fake_entry):
-    """Transport cost lookup should use the local hour rather than UTC."""
+def test_normalize_price_interval_uses_local_time_zone(fake_coordinator, fake_entry, monkeypatch):
+    """Transport cost lookup should work correctly regardless of timezone."""
+    from datetime import datetime, timezone
+
+    # Freeze time to 2025-10-13 12:00 UTC so that 2025-10-14 intervals are in the future
+    frozen_now = datetime(2025, 10, 13, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "utcnow", lambda: frozen_now)
+
     original_tz = dt_util.DEFAULT_TIME_ZONE
     dt_util.set_default_time_zone(pytz.timezone("Europe/Rome"))
     try:
@@ -191,15 +205,23 @@ def test_normalize_price_interval_uses_local_time_zone(fake_coordinator, fake_en
             "price_adjustment_multiplier": 1.0,
             "price_adjustment_offset": 0.0,
         }
+        fake_coordinator.data = {}
         sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
 
+        # Future interval (2025-10-14 00:00 UTC)
         interval = {
             "start": "2025-10-14T00:00:00+00:00",
             "end": "2025-10-14T00:15:00+00:00",
             "value": 100.0,
         }
-        local_hour = dt_util.as_local(dt_util.parse_datetime(interval["start"])).hour
-        transport_lookup = {local_hour: 0.04}
+
+        # Week-old transport cost at the same time
+        transport_lookup = [
+            {
+                "start": "2025-10-07T00:00:00+00:00",
+                "cost": 0.04,
+            }
+        ]
 
         result = sensor._normalize_price_interval(interval, transport_lookup)
 
@@ -268,7 +290,7 @@ def test_extra_state_attributes_combines_prices(fake_coordinator, fake_entry):
                 {"start": "2025-10-15T10:00:00+00:00", "end": "2025-10-15T10:15:00+00:00", "price": 110.0},  # In €/MWh
             ]
         },
-        "transport_cost_lookup": {},
+        "transport_cost_lookup": [],
         "transport_cost_status": "not_configured",
     }
 
@@ -299,7 +321,7 @@ def test_extra_state_attributes_handles_different_price_keys(fake_coordinator, f
             ]
         },
         "nordpool_prices_tomorrow": None,
-        "transport_cost_lookup": {},
+        "transport_cost_lookup": [],
         "transport_cost_status": "pending_history",
     }
 
@@ -327,7 +349,7 @@ def test_extra_state_attributes_skips_invalid_intervals(fake_coordinator, fake_e
             ]
         },
         "nordpool_prices_tomorrow": None,
-        "transport_cost_lookup": {},
+        "transport_cost_lookup": [],
         "transport_cost_status": "not_configured",
     }
 

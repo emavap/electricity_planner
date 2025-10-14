@@ -393,12 +393,30 @@ def _freeze_time(monkeypatch, base_time):
 @pytest.mark.parametrize(
     "multiplier,offset,transport_lookup,expected",
     [
-        (1.0, 0.0, {8: 0.02, 9: 0.03}, 0.135),
-        (1.1, 0.05, {8: 0.02, 9: 0.03}, 0.196),
+        (
+            1.0,
+            0.0,
+            [
+                # Week-old data: what transport cost was 7 days ago at 08:00 and 09:00
+                {"start": "2025-10-07T08:00:00+00:00", "cost": 0.02},
+                {"start": "2025-10-07T09:00:00+00:00", "cost": 0.03},
+            ],
+            0.135,
+        ),
+        (
+            1.1,
+            0.05,
+            [
+                # Week-old data: what transport cost was 7 days ago at 08:00 and 09:00
+                {"start": "2025-10-07T08:00:00+00:00", "cost": 0.02},
+                {"start": "2025-10-07T09:00:00+00:00", "cost": 0.03},
+            ],
+            0.196,
+        ),
     ],
 )
 def test_calculate_average_threshold(fake_hass, monkeypatch, multiplier, offset, transport_lookup, expected):
-    """Average threshold should reflect adjusted future prices (€/kWh)."""
+    """Average threshold should use week-old transport costs for future prices (€/kWh)."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
 
@@ -462,8 +480,12 @@ def test_check_minimum_charging_window(fake_hass, monkeypatch, use_average):
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
-    # Transport lookup: 0.01 €/kWh for 8-10h
-    transport_lookup = {8: 0.01, 9: 0.01, 10: 0.01}
+    # Transport lookup: 0.01 €/kWh for 8-10h (from week ago for pattern matching)
+    transport_lookup = [
+        {"start": "2025-10-07T08:00:00+00:00", "cost": 0.01},
+        {"start": "2025-10-07T09:00:00+00:00", "cost": 0.01},
+        {"start": "2025-10-07T10:00:00+00:00", "cost": 0.01},
+    ]
 
     # Eight consecutive prices = 0.065 €/kWh base + 0.01 transport = 0.075 final (2 hours total)
     intervals = [
@@ -568,7 +590,10 @@ async def test_transport_cost_lookup_uses_local_hour(fake_hass, monkeypatch):
         lookup, status = await coordinator._get_transport_cost_lookup(0.05)
 
         assert status == "applied"
-        # 00:00 UTC corresponds to 01:00 local in CET (UTC+1)
-        assert lookup[1] == pytest.approx(0.05, rel=1e-6)
+        assert len(lookup) == 1
+        change = lookup[0]
+        assert change["cost"] == pytest.approx(0.05, rel=1e-6)
+        change_start = dt_util.as_local(dt_util.parse_datetime(change["start"]))
+        assert change_start.hour == 1
     finally:
         dt_util.set_default_time_zone(original_tz)
