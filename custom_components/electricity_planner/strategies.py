@@ -55,11 +55,15 @@ class SolarPriorityStrategy(ChargingStrategy):
         """Check if solar should be used instead of grid."""
         allocation = context.get("power_allocation", {})
         battery = context.get("battery_analysis", {})
-        
+
         allocated_solar = allocation.get("solar_for_batteries", 0)
         remaining_solar = allocation.get("remaining_solar", 0)
-        average_soc = battery.get("average_soc", 0)
+        average_soc = battery.get("average_soc")
         max_soc = battery.get("max_soc_threshold", 90)
+
+        # If battery data unavailable, cannot determine solar priority
+        if average_soc is None:
+            return False, ""
         
         if allocated_solar > 0:
             return False, f"Using allocated solar power ({allocated_solar}W) for batteries instead of grid"
@@ -89,7 +93,13 @@ class VeryLowPriceStrategy(ChargingStrategy):
 
         # Simple logic: Very low price → charge (unless battery is full)
         max_soc = battery.get("max_soc_threshold", 90)
-        average_soc = battery.get("average_soc", 0)
+        average_soc = battery.get("average_soc")
+
+        # If battery data unavailable, default to charging (price is very low!)
+        if average_soc is None:
+            current_price = price.get("current_price", 0)
+            very_low_threshold = config.get("very_low_price_threshold", 30)
+            return True, f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_threshold}% (battery data unavailable, charging anyway)"
 
         if average_soc >= max_soc:
             return False, ""  # Let other strategies handle full battery
@@ -117,8 +127,12 @@ class PredictiveChargingStrategy(ChargingStrategy):
         if not price.get("significant_price_drop", False):
             return False, ""
 
-        average_soc = battery.get("average_soc", 0)
+        average_soc = battery.get("average_soc")
         predictive_min = config.get("predictive_charging_min_soc", 30)
+
+        # If battery data unavailable, cannot predict - let other strategies decide
+        if average_soc is None:
+            return False, ""
 
         # Too low to wait - let other strategies handle it
         if average_soc <= predictive_min:
@@ -133,46 +147,8 @@ class PredictiveChargingStrategy(ChargingStrategy):
         return 5  # After DynamicPriceStrategy
 
 
-class SolarAwareChargingStrategy(ChargingStrategy):
-    """Solar-aware charging that waits for solar production when forecasted."""
-
-    def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
-        """Check if we should wait for solar production instead of grid charging."""
-        price = context.get("price_analysis", {})
-        battery = context.get("battery_analysis", {})
-        power = context.get("power_analysis", {})
-        config = context.get("config", {})
-        time_ctx = context.get("time_context", {})
-
-        if not price.get("is_low_price", False):
-            return False, ""
-
-        average_soc = battery.get("average_soc", 0)
-        is_solar_peak = time_ctx.get("is_solar_peak", False)
-        has_significant_solar = power.get("significant_solar_surplus", False)
-
-        # During solar peak hours with significant solar - wait for solar unless emergency
-        solar_peak_emergency = config.get("solar_peak_emergency_soc", 25)
-
-        if is_solar_peak and has_significant_solar:
-            # Emergency override if SOC too low
-            if average_soc < solar_peak_emergency:
-                return True, (f"Emergency override during solar peak - SOC {average_soc:.0f}% < "
-                            f"{solar_peak_emergency}% too low to wait for solar")
-
-            # Wait for solar if SOC is sufficient
-            solar_surplus = power.get("solar_surplus", 0)
-            return False, (f"Solar peak hours - SOC {average_soc:.0f}% sufficient, awaiting solar production "
-                         f"(surplus: {solar_surplus}W)")
-
-        return False, ""
-
-    def get_priority(self) -> int:
-        return 6  # After PredictiveChargingStrategy
-
-
 class SOCBasedChargingStrategy(ChargingStrategy):
-    """Charging based on SOC levels and solar forecast."""
+    """Charging based on SOC levels and live solar availability."""
 
     def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
         """Check SOC-based charging conditions."""
@@ -184,9 +160,13 @@ class SOCBasedChargingStrategy(ChargingStrategy):
         if not price.get("is_low_price", False):
             return False, ""
 
-        average_soc = battery.get("average_soc", 0)
+        average_soc = battery.get("average_soc")
         has_significant_solar = power.get("significant_solar_surplus", False)
         solar_surplus = power.get("solar_surplus", 0)
+
+        # If battery data unavailable, cannot make SOC-based decision
+        if average_soc is None:
+            return False, ""
 
         # Low SOC + no solar → charge
         if average_soc < DEFAULT_ALGORITHM_THRESHOLDS.low_soc_threshold and not has_significant_solar:
@@ -208,7 +188,7 @@ class SOCBasedChargingStrategy(ChargingStrategy):
         return False, ""
 
     def get_priority(self) -> int:
-        return 7  # Last - safety net
+        return 6  # Last - safety net (was 7, now 6 after removing SolarAwareChargingStrategy)
 
 
 class DynamicPriceStrategy(ChargingStrategy):
@@ -329,7 +309,6 @@ class StrategyManager:
         # Add remaining strategies
         self.strategies.extend([
             PredictiveChargingStrategy(),
-            SolarAwareChargingStrategy(),
             SOCBasedChargingStrategy(),
         ])
 
@@ -386,7 +365,11 @@ class StrategyManager:
         # Default decision if no strategy provided a reason
         battery = context.get("battery_analysis", {})
         position = price.get("price_position")
-        average_soc = battery.get("average_soc", 0)
+        average_soc = battery.get("average_soc")
+
+        # Default to 0 for display purposes if None
+        if average_soc is None:
+            average_soc = 0
 
         price_fragment = (
             f"{current_price:.3f}€/kWh" if current_price is not None else "unknown price"
