@@ -1048,10 +1048,14 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             start_time_str = interval.get("start")
             if start_time_str:
                 try:
-                    # Parse ISO format timestamp
-                    from datetime import datetime
-                    start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
-                    hour = start_time.hour
+                    # Parse ISO format timestamp and convert to local timezone
+                    start_time = dt_util.parse_datetime(start_time_str)
+                    if start_time is not None:
+                        hour = dt_util.as_local(start_time).hour
+                    else:
+                        hour = None
+                    if hour is None:
+                        raise ValueError("Invalid timestamp")
                     if hour in transport_cost_lookup:
                         transport_cost = transport_cost_lookup[hour]
                         applied_lookup_cost = True

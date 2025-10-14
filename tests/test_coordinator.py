@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+import pytz
+
+from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner import coordinator as coordinator_module
 from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
@@ -62,6 +66,9 @@ class FakeHass:
 
     def async_create_task(self, coro):
         return self.loop.create_task(coro)
+
+    async def async_add_executor_job(self, func, *args, **kwargs):
+        return func(*args, **kwargs)
 
 
 @pytest.fixture
@@ -523,3 +530,45 @@ def test_check_minimum_charging_window_single_interval_too_short(fake_hass, monk
 
     result = coordinator._check_minimum_charging_window(prices_today, None, None, None)
     assert result is False
+
+
+@pytest.mark.asyncio
+async def test_transport_cost_lookup_uses_local_hour(fake_hass, monkeypatch):
+    """Recorded transport costs should map to local hours, not UTC."""
+    base_time = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config[CONF_TRANSPORT_COST_ENTITY] = "sensor.transport_cost"
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(pytz.timezone("Europe/Rome"))
+
+    try:
+        midnight_utc = datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc)
+        sample_state = SimpleNamespace(state="0.05", last_changed=midnight_utc)
+
+        def fake_history(hass, start_time, end_time, entities):
+            assert entities == ["sensor.transport_cost"]
+            return {"sensor.transport_cost": [sample_state]}
+
+        fake_recorder = ModuleType("homeassistant.components.recorder")
+        fake_history_module = ModuleType("homeassistant.components.recorder.history")
+        fake_history_module.get_significant_states = fake_history
+        fake_recorder.history = fake_history_module
+
+        monkeypatch.setitem(sys.modules, "homeassistant.components.recorder", fake_recorder)
+        monkeypatch.setitem(
+            sys.modules,
+            "homeassistant.components.recorder.history",
+            fake_history_module,
+        )
+
+        lookup, status = await coordinator._get_transport_cost_lookup(0.05)
+
+        assert status == "applied"
+        # 00:00 UTC corresponds to 01:00 local in CET (UTC+1)
+        assert lookup[1] == pytest.approx(0.05, rel=1e-6)
+    finally:
+        dt_util.set_default_time_zone(original_tz)

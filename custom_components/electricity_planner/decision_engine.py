@@ -667,12 +667,32 @@ class ChargingDecisionEngine:
         remaining: Optional[float]
     ) -> Dict[str, Any]:
         """Analyze daily solar forecast."""
-        if today > 0:
-            solar_factor = min(1.0, tomorrow / today)
+        if today <= 0 and tomorrow <= 0:
+            ratio_factor = 0.0
+        elif today > 0:
+            ratio_factor = min(1.0, max(tomorrow, 0.0) / today)
         else:
-            solar_factor = DEFAULT_ALGORITHM_THRESHOLDS.neutral_price_position
+            ratio_factor = DEFAULT_ALGORITHM_THRESHOLDS.neutral_price_position
         
+        typical_daily_min = DEFAULT_POWER_ESTIMATES.typical_daily_solar_min
+        max_daily_output = max(today, tomorrow, 0.0)
+        if typical_daily_min > 0:
+            absolute_factor = min(1.0, max_daily_output / typical_daily_min)
+        else:
+            absolute_factor = 1.0
+        
+        solar_factor = min(1.0, ratio_factor * absolute_factor)
         expected = self._categorize_solar_production(solar_factor)
+        
+        reason = (
+            f"Tomorrow {tomorrow:.1f}kWh vs today {today:.1f}kWh "
+            f"(relative {ratio_factor:.0%}, absolute {absolute_factor:.0%})"
+        )
+        if absolute_factor < DEFAULT_ALGORITHM_THRESHOLDS.moderate_solar_threshold:
+            reason += (
+                f", limited output (max {max_daily_output:.1f}kWh vs "
+                f"typical {typical_daily_min:.1f}kWh)"
+            )
         
         return {
             "forecast_available": True,
@@ -683,7 +703,7 @@ class ChargingDecisionEngine:
             "forecast_today_kwh": today,
             "forecast_remaining_today_kwh": remaining,
             "forecast_tomorrow_kwh": tomorrow,
-            "reason": f"Tomorrow {tomorrow:.1f}kWh vs today {today:.1f}kWh (factor: {solar_factor:.1%})"
+            "reason": reason
         }
 
     def _analyze_remaining_forecast(self, remaining: float) -> Dict[str, Any]:

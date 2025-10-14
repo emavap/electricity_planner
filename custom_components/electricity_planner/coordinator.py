@@ -725,7 +725,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     continue
                 try:
                     cost = float(value)
-                    hour = state.last_changed.hour
+                    local_changed = dt_util.as_local(state.last_changed)
+                    hour = local_changed.hour
                     hour_costs[hour].append(cost)
                 except (ValueError, TypeError, AttributeError):
                     continue

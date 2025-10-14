@@ -115,6 +115,23 @@ views:
               green: 70
 
           - type: entities
+            title: Price components
+            show_header_toggle: false
+            entities:
+              - entity: sensor.electricity_planner_current_electricity_price
+                name: Total price
+              - type: attribute
+                entity: sensor.electricity_planner_current_electricity_price
+                attribute: raw_current_price
+                name: Energy market price
+                unit: "€/kWh"
+              - type: attribute
+                entity: sensor.electricity_planner_current_electricity_price
+                attribute: transport_cost
+                name: Transport cost
+                unit: "€/kWh"
+
+          - type: entities
             title: Charging decisions
             show_header_toggle: false
             entities:
@@ -253,6 +270,7 @@ views:
             apex_config:
               chart:
                 height: 350
+                stacked: true
               tooltip:
                 enabled: false
               xaxis:
@@ -269,15 +287,40 @@ views:
                     }
             series:
               - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
-                name: Electricity Price
+                name: Transport cost
+                type: column
+                color: "#95a5a6"
+                data_generator: |
+                  return entity.attributes.data.map((interval) => {
+                    const transport = interval.transport_cost ?? 0;
+                    return [new Date(interval.start).getTime(), Math.max(transport, 0)];
+                  });
+                show:
+                  legend_value: false
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Energy price
                 type: column
                 color: "#3498db"
                 data_generator: |
                   return entity.attributes.data.map((interval) => {
-                    return [new Date(interval.start).getTime(), interval.price];
+                    const transport = interval.transport_cost ?? 0;
+                    const energy = (interval.price ?? 0) - transport;
+                    return [new Date(interval.start).getTime(), Math.max(energy, 0)];
                   });
                 show:
                   legend_value: false
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Total price
+                type: line
+                stroke_width: 2
+                color: "#2ecc71"
+                curve: straight
+                show:
+                  legend_value: false
+                data_generator: |
+                  return entity.attributes.data.map((interval) => {
+                    return [new Date(interval.start).getTime(), interval.price ?? 0];
+                  });
               - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
                 name: Max Threshold
                 type: line
