@@ -27,10 +27,14 @@ def test_car_uses_grid_when_price_low_even_with_solar_allocation():
             "batteries_full": True,
         },
         power_allocation={"solar_for_car": 1800},
+        data={"previous_car_charging": False, "has_min_charging_window": True},
     )
 
     assert decision["car_grid_charging"] is True
-    assert "grid + solar" in decision["car_grid_charging_reason"]
+    reason = decision["car_grid_charging_reason"]
+    assert "Low price" in reason
+    assert "solar" in reason
+    assert "starting" in reason
     assert "car_solar_only" not in decision
 
 
@@ -54,6 +58,7 @@ def test_car_limits_to_solar_only_when_price_high():
             "batteries_full": True,
         },
         power_allocation={"solar_for_car": 900},
+        data={"previous_car_charging": False, "has_min_charging_window": False},
     )
 
     assert decision["car_grid_charging"] is True
@@ -84,6 +89,7 @@ def test_car_does_not_wait_for_future_price_drop():
             "batteries_full": True,
         },
         power_allocation={"solar_for_car": 0},
+        data={"previous_car_charging": False, "has_min_charging_window": True},
     )
 
     assert decision["car_grid_charging"] is True

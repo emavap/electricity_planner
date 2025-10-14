@@ -34,6 +34,7 @@ from .const import (
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     CONF_USE_AVERAGE_THRESHOLD,
+    CONF_MIN_CAR_CHARGING_DURATION,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -57,6 +58,7 @@ from .const import (
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_USE_AVERAGE_THRESHOLD,
+    DEFAULT_MIN_CAR_CHARGING_DURATION,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -900,7 +902,7 @@ class ChargingDecisionEngine:
         """Decide whether to charge car from grid with hysteresis.
 
         Hysteresis logic:
-        - OFF → ON: Only if price is low AND we have at least 2 hours of low prices ahead
+        - OFF → ON: Only if price is low AND we have minimum hours of low prices ahead (configurable)
         - ON → OFF: Only if price exceeds threshold (continues charging during low prices)
 
         This prevents frequent on/off switching for short low-price periods.
@@ -916,6 +918,7 @@ class ChargingDecisionEngine:
         threshold = price_analysis.get("price_threshold", 0.15)
         previous_car_charging = data.get("previous_car_charging", False)
         has_min_charging_window = data.get("has_min_charging_window", False)
+        min_duration = self.config.get(CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION)
 
         # Prioritise very low prices regardless of solar forecast
         # Very low prices always start charging (if window available) or continue charging
@@ -934,14 +937,14 @@ class ChargingDecisionEngine:
             elif has_min_charging_window:
                 reason = (
                     f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_percent}% "
-                    f"of daily range (2+ hour window available)"
+                    f"of daily range ({min_duration}h+ window available)"
                 )
             else:
                 # Very low price but insufficient window - don't start
                 return {
                     "car_grid_charging": False,
                     "car_grid_charging_reason": (
-                        f"Very low price ({current_price:.3f}€/kWh) but less than 2 hours "
+                        f"Very low price ({current_price:.3f}€/kWh) but less than {min_duration}h "
                         f"of low prices ahead - waiting for longer window"
                     ),
                 }
@@ -976,12 +979,12 @@ class ChargingDecisionEngine:
                 if allocated_solar > 0:
                     reason = (
                         f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) "
-                        f"with solar ({allocated_solar}W), 2+ hour window available - starting"
+                        f"with solar ({allocated_solar}W), {min_duration}h+ window available - starting"
                     )
                 else:
                     reason = (
                         f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh), "
-                        f"2+ hour window available - starting"
+                        f"{min_duration}h+ window available - starting"
                     )
                 return {
                     "car_grid_charging": True,
@@ -992,7 +995,7 @@ class ChargingDecisionEngine:
                 return {
                     "car_grid_charging": False,
                     "car_grid_charging_reason": (
-                        f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) but less than 2 hours "
+                        f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) but less than {min_duration}h "
                         f"of low prices ahead - waiting for longer window"
                     ),
                 }

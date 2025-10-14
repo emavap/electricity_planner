@@ -154,7 +154,7 @@ views:
 
                   **Dynamic threshold:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') | float | round(4) if state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') != None else 'Not active' }}
 
-                  **Average threshold:** {{ state_attr('sensor.electricity_planner_diagnostics_monitoring_decision_diagnostics', 'average_threshold') | float | round(4) if state_attr('sensor.electricity_planner_diagnostics_monitoring_decision_diagnostics', 'average_threshold') != None else 'Not available' }}
+                  **Average threshold:** {{ state_attr('sensor.electricity_planner_decision_diagnostics', 'average_threshold') | float | round(4) if state_attr('sensor.electricity_planner_decision_diagnostics', 'average_threshold') != None else 'Not available' }}
 
                   **Feed-in threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float | round(4) }} €/kWh
 
@@ -202,18 +202,18 @@ views:
                   - entity: sensor.electricity_planner_data_unavailable_duration
                     name: Data unavailable time
 
-          - type: entities
+          - type: markdown
             title: Algorithm thresholds
-            show_header_toggle: false
-            entities:
-              - entity: sensor.electricity_planner_diagnostics_monitoring_very_low_price_threshold
-                name: Very low price %
+            content: |
+              **Very low price threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_very_low_price_threshold') }}%
 
-              - entity: sensor.electricity_planner_diagnostics_monitoring_emergency_soc_threshold
-                name: Emergency SOC
+              **Emergency SOC:** {{ states('sensor.electricity_planner_diagnostics_monitoring_emergency_soc_threshold') }}%
 
-              - entity: sensor.electricity_planner_diagnostics_monitoring_significant_solar_threshold
-                name: Significant solar
+              **Significant solar:** {{ states('sensor.electricity_planner_diagnostics_monitoring_significant_solar_threshold') }}W
+
+              **Min car charging duration:** {{ (state_attr('sensor.electricity_planner_decision_diagnostics', 'configured_limits') or {}).get('min_car_charging_duration', 'unknown') }} hours
+
+              _Note: To change car charging duration, go to Settings → Devices & Services → Electricity Planner → Configure_
 
           - type: history-graph
             title: Price vs decisions (48h)

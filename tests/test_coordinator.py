@@ -19,7 +19,11 @@ from custom_components.electricity_planner.const import (
     CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_LOWEST_PRICE_ENTITY,
     CONF_NEXT_PRICE_ENTITY,
+    CONF_PRICE_THRESHOLD,
     CONF_SOLAR_PRODUCTION_ENTITY,
+    CONF_TRANSPORT_COST_ENTITY,
+    CONF_USE_AVERAGE_THRESHOLD,
+    DEFAULT_MIN_CAR_CHARGING_DURATION,
     DOMAIN,
 )
 
@@ -364,3 +368,158 @@ async def test_fetch_all_data_includes_nordpool_prices(fake_hass, monkeypatch):
     assert "BE" in data["nordpool_prices_tomorrow"]
     assert data["nordpool_prices_today"]["BE"][0]["price"] == 100.0
     assert data["nordpool_prices_tomorrow"]["BE"][0]["price"] == 110.0
+
+
+def _make_price_interval(start, value):
+    return {
+        "start": start.isoformat(),
+        "end": (start + timedelta(minutes=15)).isoformat(),
+        "value": value,
+    }
+
+
+def _freeze_time(monkeypatch, base_time):
+    monkeypatch.setattr(coordinator_module.dt_util, "now", lambda: base_time, raising=False)
+    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+
+
+@pytest.mark.parametrize(
+    "multiplier,offset,transport_lookup,expected",
+    [
+        (1.0, 0.0, {8: 0.02, 9: 0.03}, 0.135),
+        (1.1, 0.05, {8: 0.02, 9: 0.03}, 0.196),
+    ],
+)
+def test_calculate_average_threshold(fake_hass, monkeypatch, multiplier, offset, transport_lookup, expected):
+    """Average threshold should reflect adjusted future prices (€/kWh)."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_TRANSPORT_COST_ENTITY: "sensor.transport_cost",
+            "price_adjustment_multiplier": multiplier,
+            "price_adjustment_offset": offset,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Two future intervals (15 and 60 minutes ahead)
+    prices_today = {
+        "BE": [
+            _make_price_interval(base_time + timedelta(minutes=15), 100.0),  # 0.1 €/kWh base
+            _make_price_interval(base_time + timedelta(hours=1), 120.0),      # 0.12 €/kWh base
+        ]
+    }
+
+    result = coordinator._calculate_average_threshold(prices_today, None, transport_lookup)
+    assert result == pytest.approx(expected, rel=1e-6)
+
+
+def test_calculate_average_threshold_skips_past(fake_hass, monkeypatch):
+    """Intervals in the past should be ignored."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    prices_today = {
+        "BE": [
+            _make_price_interval(base_time - timedelta(hours=1), 80.0),       # past interval
+            _make_price_interval(base_time + timedelta(minutes=30), 100.0),   # future interval
+        ]
+    }
+
+    result = coordinator._calculate_average_threshold(prices_today, None, None)
+    # Only the future interval remains: (100/1000) = 0.1
+    assert result == pytest.approx(0.1, rel=1e-6)
+
+
+@pytest.mark.parametrize("use_average", [True, False])
+def test_check_minimum_charging_window(fake_hass, monkeypatch, use_average):
+    """Charging window detection honors threshold selection and interval continuity."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_USE_AVERAGE_THRESHOLD: use_average,
+            "price_adjustment_multiplier": 1.0,
+            "price_adjustment_offset": 0.0,
+            CONF_TRANSPORT_COST_ENTITY: "sensor.transport_cost",
+            CONF_PRICE_THRESHOLD: 0.07,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Transport lookup: 0.01 €/kWh for 8-10h
+    transport_lookup = {8: 0.01, 9: 0.01, 10: 0.01}
+
+    # Eight consecutive prices = 0.065 €/kWh base + 0.01 transport = 0.075 final (2 hours total)
+    intervals = [
+        _make_price_interval(base_time + timedelta(minutes=15 * i), 65.0)
+        for i in range(8)
+    ]
+    prices_today = {"BE": intervals}
+
+    # Average threshold ≈ 0.075 -> qualifies when using average, fails fixed (0.07)
+    result = coordinator._check_minimum_charging_window(prices_today, None, transport_lookup)
+
+    if use_average:
+        assert result is True
+    else:
+        assert result is False
+
+
+def test_check_minimum_charging_window_respects_duration(fake_hass, monkeypatch):
+    """Charging window requires duration >= DEFAULT_MIN_CAR_CHARGING_DURATION."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_PRICE_THRESHOLD: 0.08,
+            "price_adjustment_multiplier": 1.0,
+            "price_adjustment_offset": 0.0,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Only one low-price interval (30 minutes) < required duration
+    intervals = [
+        _make_price_interval(base_time + timedelta(minutes=0), 60.0),
+        _make_price_interval(base_time + timedelta(minutes=30), 120.0),  # high price breaks window
+    ]
+    prices_today = {"BE": intervals}
+
+    result = coordinator._check_minimum_charging_window(prices_today, None, None)
+    assert result is False
+
+
+def test_check_minimum_charging_window_single_interval_too_short(fake_hass, monkeypatch):
+    """Single 15-minute low-price interval should not satisfy 2-hour requirement."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_PRICE_THRESHOLD: 0.09,
+            "price_adjustment_multiplier": 1.0,
+            "price_adjustment_offset": 0.0,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Only one 15-minute low price interval
+    intervals = [
+        _make_price_interval(base_time + timedelta(minutes=0), 80.0),
+    ]
+    prices_today = {"BE": intervals}
+
+    result = coordinator._check_minimum_charging_window(prices_today, None, None)
+    assert result is False

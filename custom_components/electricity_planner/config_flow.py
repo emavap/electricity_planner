@@ -47,6 +47,7 @@ from .const import (
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     CONF_USE_AVERAGE_THRESHOLD,
+    CONF_MIN_CAR_CHARGING_DURATION,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -70,6 +71,7 @@ from .const import (
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_USE_AVERAGE_THRESHOLD,
+    DEFAULT_MIN_CAR_CHARGING_DURATION,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -357,6 +359,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_USE_AVERAGE_THRESHOLD,
                 default=DEFAULT_USE_AVERAGE_THRESHOLD
             ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_MIN_CAR_CHARGING_DURATION,
+                default=DEFAULT_MIN_CAR_CHARGING_DURATION
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1, max=6, step=1, unit_of_measurement="hours"
+                )
+            ),
         })
 
         return self.async_show_form(
@@ -759,6 +769,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_USE_AVERAGE_THRESHOLD,
                 default=current_config.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)
             ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_MIN_CAR_CHARGING_DURATION,
+                default=current_config.get(CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1, max=6, step=1, unit_of_measurement="hours"
+                )
+            ),
             vol.Optional(
                 CONF_MAX_BATTERY_POWER,
                 default=current_config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)

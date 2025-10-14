@@ -36,13 +36,14 @@ from .const import (
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_USE_AVERAGE_THRESHOLD,
+    CONF_MIN_CAR_CHARGING_DURATION,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_USE_AVERAGE_THRESHOLD,
-    DEFAULT_MIN_CAR_CHARGING_DURATION_HOURS,
+    DEFAULT_MIN_CAR_CHARGING_DURATION,
 )
 from .decision_engine import ChargingDecisionEngine
 
@@ -532,7 +533,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         )
 
         # Collect all future intervals with their prices
-        future_intervals: list[tuple[datetime, float]] = []
+        future_intervals: list[tuple[datetime, datetime | None, float]] = []
 
         def process_intervals(intervals: list[dict[str, Any]]) -> None:
             for interval in intervals:
@@ -544,6 +545,16 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
                     if start_time < now:
                         continue  # Skip past intervals
+
+                    end_time = None
+                    end_time_str = interval.get("end")
+                    if end_time_str:
+                        try:
+                            end_time = datetime.fromisoformat(end_time_str.replace('Z', '+00:00'))
+                            if end_time <= start_time:
+                                end_time = None
+                        except Exception:
+                            end_time = None
 
                     # Extract and convert price
                     price_value = None
@@ -573,7 +584,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                         transport_cost = transport_lookup.get(hour, 0.0)
 
                     final_price = adjusted_price + transport_cost
-                    future_intervals.append((start_time, final_price))
+                    future_intervals.append((start_time, end_time, final_price))
 
                 except Exception as err:
                     _LOGGER.debug("Error processing interval for charging window check: %s", err)
@@ -591,18 +602,20 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 process_intervals(prices_tomorrow[area_code])
 
         # Sort by time
-        future_intervals.sort(key=lambda x: x[0])
+        future_intervals.sort(key=lambda item: item[0])
 
         if not future_intervals:
             return False
 
-        # Check if we have at least 2 hours of consecutive low prices
-        # We need the current interval + at least 2 more hours (depends on Nord Pool interval duration)
-        min_duration_hours = DEFAULT_MIN_CAR_CHARGING_DURATION_HOURS
+        # Check if we have at least N hours of consecutive low prices (configurable)
+        # We need the current interval + at least N more hours (depends on Nord Pool interval duration)
+        min_duration_hours = self.config.get(
+            CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION
+        )
         current_time = now
         low_price_duration = timedelta(hours=0)
 
-        for start_time, price in future_intervals:
+        for idx, (start_time, end_time, price) in enumerate(future_intervals):
             if price > threshold:
                 # Hit a high price, reset counter
                 low_price_duration = timedelta(hours=0)
@@ -615,13 +628,18 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 current_time = start_time
 
             # Calculate interval duration (look at next interval or assume standard duration)
-            idx = future_intervals.index((start_time, price))
-            if idx + 1 < len(future_intervals):
+            interval_duration: timedelta | None = None
+
+            if end_time:
+                interval_duration = end_time - start_time
+
+            if (interval_duration is None or interval_duration <= timedelta(0)) and idx + 1 < len(future_intervals):
                 next_start = future_intervals[idx + 1][0]
                 interval_duration = next_start - start_time
-            else:
-                # Assume hourly intervals if we don't have next interval
-                interval_duration = timedelta(hours=1)
+
+            if interval_duration is None or interval_duration <= timedelta(0):
+                # Could not determine duration safely, skip this interval
+                continue
 
             low_price_duration += interval_duration
 
