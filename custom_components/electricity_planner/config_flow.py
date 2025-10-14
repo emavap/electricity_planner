@@ -46,6 +46,7 @@ from .const import (
     CONF_BASE_GRID_SETPOINT,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+    CONF_USE_AVERAGE_THRESHOLD,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -68,6 +69,7 @@ from .const import (
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
+    DEFAULT_USE_AVERAGE_THRESHOLD,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -351,6 +353,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     min=30, max=90, step=5, unit_of_measurement="%"
                 )
             ),
+            vol.Optional(
+                CONF_USE_AVERAGE_THRESHOLD,
+                default=DEFAULT_USE_AVERAGE_THRESHOLD
+            ): selector.BooleanSelector(),
         })
 
         return self.async_show_form(
@@ -749,6 +755,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     min=30, max=90, step=5, unit_of_measurement="%"
                 )
             ),
+            vol.Optional(
+                CONF_USE_AVERAGE_THRESHOLD,
+                default=current_config.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)
+            ): selector.BooleanSelector(),
             vol.Optional(
                 CONF_MAX_BATTERY_POWER,
                 default=current_config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)

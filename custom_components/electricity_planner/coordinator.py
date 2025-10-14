@@ -33,9 +33,13 @@ from .const import (
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
+    CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+    CONF_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
+    DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_PRICE_ADJUSTMENT_OFFSET,
 )
 from .decision_engine import ChargingDecisionEngine
 
@@ -277,6 +281,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         data["transport_cost_lookup"] = transport_lookup
         data["transport_cost_status"] = transport_status
 
+        # Calculate average threshold if enabled
+        data["average_threshold"] = self._calculate_average_threshold(
+            data.get("nordpool_prices_today"),
+            data.get("nordpool_prices_tomorrow"),
+            transport_lookup
+        )
+
         return data
 
     async def _get_state_value(self, entity_id: str | None) -> float | None:
@@ -366,6 +377,106 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.warning("Failed to fetch Nord Pool prices for %s: %s", day, err)
             return None
+
+    def _calculate_average_threshold(
+        self,
+        prices_today: dict[str, Any] | None,
+        prices_tomorrow: dict[str, Any] | None,
+        transport_lookup: dict[int, float] | None
+    ) -> float | None:
+        """Calculate average of all future prices (from now onwards).
+
+        This provides a dynamic threshold that adapts to the available price data.
+        Prices include full adjustments (multiplier + offset + transport cost).
+
+        Returns None if no future prices are available.
+        """
+        if not prices_today and not prices_tomorrow:
+            return None
+
+        from datetime import datetime
+        now = dt_util.now()
+        future_prices: list[float] = []
+
+        # Get multiplier and offset for price adjustments
+        multiplier = self.config.get(
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+        )
+        offset = self.config.get(
+            CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
+        )
+
+        # Helper to process intervals
+        def process_intervals(intervals: list[dict[str, Any]]) -> None:
+            for interval in intervals:
+                try:
+                    # Check if interval is in the future
+                    start_time_str = interval.get("start")
+                    if not start_time_str:
+                        continue
+
+                    start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+                    if start_time <= now:
+                        continue  # Skip past intervals
+
+                    # Extract price (try different keys like Nord Pool sensor does)
+                    price_value = None
+                    for key in ("value", "value_exc_vat", "price"):
+                        value = interval.get(key)
+                        if isinstance(value, (int, float)):
+                            price_value = float(value)
+                            break
+                        if isinstance(value, str):
+                            try:
+                                price_value = float(value)
+                                break
+                            except (ValueError, TypeError):
+                                continue
+
+                    if price_value is None:
+                        continue
+
+                    # Convert from €/MWh to €/kWh
+                    price_kwh = price_value / 1000
+
+                    # Apply adjustments
+                    adjusted_price = (price_kwh * multiplier) + offset
+
+                    # Add transport cost
+                    transport_cost = 0.0
+                    if transport_lookup:
+                        hour = start_time.hour
+                        transport_cost = transport_lookup.get(hour, 0.0)
+
+                    final_price = adjusted_price + transport_cost
+                    future_prices.append(final_price)
+
+                except Exception as err:
+                    _LOGGER.debug("Error processing interval for average threshold: %s", err)
+                    continue
+
+        # Process today's prices
+        if prices_today:
+            area_code = next(iter(prices_today.keys()), None)
+            if area_code and isinstance(prices_today[area_code], list):
+                process_intervals(prices_today[area_code])
+
+        # Process tomorrow's prices
+        if prices_tomorrow:
+            area_code = next(iter(prices_tomorrow.keys()), None)
+            if area_code and isinstance(prices_tomorrow[area_code], list):
+                process_intervals(prices_tomorrow[area_code])
+
+        # Calculate average
+        if future_prices:
+            average = sum(future_prices) / len(future_prices)
+            _LOGGER.debug(
+                "Calculated average threshold from %d future prices: %.4f €/kWh",
+                len(future_prices), average
+            )
+            return round(average, 4)
+
+        return None
 
     async def _get_transport_cost_lookup(self) -> tuple[dict[int, float], str]:
         """Return cached transport cost lookup built from recorder history."""

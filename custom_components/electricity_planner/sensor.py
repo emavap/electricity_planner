@@ -483,6 +483,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "price_adjustment_multiplier": price_analysis.get("price_adjustment_multiplier"),
                 "price_adjustment_offset": price_analysis.get("price_adjustment_offset"),
                 "price_threshold": price_analysis.get("price_threshold"),
+                "average_threshold": self.coordinator.data.get("average_threshold"),
                 "is_low_price": price_analysis.get("is_low_price", False),
                 "very_low_price": price_analysis.get("very_low_price", False),
                 "price_position": price_analysis.get("price_position"),
