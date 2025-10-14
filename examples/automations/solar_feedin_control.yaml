@@ -1,0 +1,47 @@
+alias: Solar Feed-in Control
+description: Derate inverter when feeding to grid is not allowed
+triggers:
+  - entity_id:
+      - binary_sensor.electricity_planner_automation_controls_solar_feed_in_grid
+      - sensor.grid
+    trigger: state
+  - seconds: /30
+    trigger: time_pattern
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ grid_power > 50 }}"
+          - condition: state
+            entity_id: binary_sensor.electricity_planner_automation_controls_solar_feed_in_grid
+            state: "off"
+        sequence:
+          - target:
+              entity_id: number.huawei_inverter_power_limit
+            data:
+              value: >
+                {% set reduction = (grid_power * 1.2) | int %} {% set new_limit
+                = current_limit - reduction %} {{ [0, new_limit] | max | int }}
+            action: number.set_value
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: binary_sensor.electricity_planner_automation_controls_solar_feed_in_grid
+                state: "on"
+              - condition: template
+                value_template: "{{ grid_power < -50 }}"
+        sequence:
+          - target:
+              entity_id: number.huawei_inverter_power_limit
+            data:
+              value: >
+                {% set increase = 200 %} {% set new_limit = current_limit +
+                increase %} {{ [new_limit, 4400] | min | int }}
+            action: number.set_value
+variables:
+  grid_power: "{{ states('sensor.grid') | float(0) }}"
+  feed_allowed: "{{ is_state('binary_sensor.electricity_planner_automation_controls_solar_feed_in_grid', 'on') }}"
+  current_limit: "{{ states('number.huawei_inverter_power_limit') | float(4400) }}"
+mode: single
