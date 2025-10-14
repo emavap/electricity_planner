@@ -617,13 +617,17 @@ class ChargingDecisionEngine:
         return 0
 
     async def _analyze_solar_forecast(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze solar production potential based on dedicated forecast entities."""
+        """Simplified solar forecast analysis - just returns forecast data without complex scoring.
+
+        Decision-making now relies primarily on actual solar surplus vs significant_solar_threshold
+        rather than trying to predict future production with complex multi-factor analysis.
+        """
         forecast_current = data.get("solar_forecast_current")
         forecast_next = data.get("solar_forecast_next")
         forecast_today = data.get("solar_forecast_today")
         forecast_remaining = data.get("solar_forecast_remaining_today")
         forecast_tomorrow = data.get("solar_forecast_tomorrow")
-        
+
         # Check if any forecast entities are configured
         has_forecast = any([
             self.config.get(CONF_SOLAR_FORECAST_CURRENT_ENTITY),
@@ -632,132 +636,32 @@ class ChargingDecisionEngine:
             self.config.get(CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY),
             self.config.get(CONF_SOLAR_FORECAST_TOMORROW_ENTITY)
         ])
-        
+
         if not has_forecast:
             return self._create_no_forecast_result()
-        
-        # Analyze based on available data
-        if forecast_tomorrow is not None and forecast_today is not None:
-            return self._analyze_daily_forecast(
-                forecast_tomorrow, forecast_today, 
-                forecast_current, forecast_next, forecast_remaining
-            )
-        elif forecast_remaining is not None:
-            return self._analyze_remaining_forecast(forecast_remaining)
-        elif forecast_current is not None or forecast_next is not None:
-            return self._analyze_hourly_forecast(forecast_current, forecast_next)
-        
-        return self._create_no_data_forecast_result()
+
+        # Simply return forecast data without complex analysis
+        # Strategies will use actual solar surplus instead
+        return {
+            "forecast_available": True,
+            "solar_production_factor": DEFAULT_ALGORITHM_THRESHOLDS.neutral_price_position,
+            "expected_solar_production": "neutral",
+            "forecast_current_kwh": forecast_current,
+            "forecast_next_kwh": forecast_next,
+            "forecast_today_kwh": forecast_today,
+            "forecast_remaining_today_kwh": forecast_remaining,
+            "forecast_tomorrow_kwh": forecast_tomorrow,
+            "reason": "Using actual solar surplus for decisions"
+        }
 
     def _create_no_forecast_result(self) -> Dict[str, Any]:
         """Create result when no forecast entities are configured."""
         return {
             "forecast_available": False,
             "solar_production_factor": DEFAULT_ALGORITHM_THRESHOLDS.neutral_price_position,
-            "expected_solar_production": "unknown",
+            "expected_solar_production": "neutral",
             "reason": "No solar forecast entities configured"
         }
-
-    def _analyze_daily_forecast(
-        self,
-        tomorrow: float,
-        today: float,
-        current: Optional[float],
-        next_hour: Optional[float],
-        remaining: Optional[float]
-    ) -> Dict[str, Any]:
-        """Analyze daily solar forecast."""
-        if today <= 0 and tomorrow <= 0:
-            ratio_factor = 0.0
-        elif today > 0:
-            ratio_factor = min(1.0, max(tomorrow, 0.0) / today)
-        else:
-            ratio_factor = DEFAULT_ALGORITHM_THRESHOLDS.neutral_price_position
-        
-        typical_daily_min = DEFAULT_POWER_ESTIMATES.typical_daily_solar_min
-        max_daily_output = max(today, tomorrow, 0.0)
-        if typical_daily_min > 0:
-            absolute_factor = min(1.0, max_daily_output / typical_daily_min)
-        else:
-            absolute_factor = 1.0
-        
-        solar_factor = min(1.0, ratio_factor * absolute_factor)
-        expected = self._categorize_solar_production(solar_factor)
-        
-        reason = (
-            f"Tomorrow {tomorrow:.1f}kWh vs today {today:.1f}kWh "
-            f"(relative {ratio_factor:.0%}, absolute {absolute_factor:.0%})"
-        )
-        if absolute_factor < DEFAULT_ALGORITHM_THRESHOLDS.moderate_solar_threshold:
-            reason += (
-                f", limited output (max {max_daily_output:.1f}kWh vs "
-                f"typical {typical_daily_min:.1f}kWh)"
-            )
-        
-        return {
-            "forecast_available": True,
-            "solar_production_factor": solar_factor,
-            "expected_solar_production": expected,
-            "forecast_current_kwh": current,
-            "forecast_next_kwh": next_hour,
-            "forecast_today_kwh": today,
-            "forecast_remaining_today_kwh": remaining,
-            "forecast_tomorrow_kwh": tomorrow,
-            "reason": reason
-        }
-
-    def _analyze_remaining_forecast(self, remaining: float) -> Dict[str, Any]:
-        """Analyze remaining solar forecast."""
-        solar_factor = min(1.0, remaining / DEFAULT_POWER_ESTIMATES.typical_daily_solar_min)
-        expected = self._categorize_solar_production(solar_factor)
-        
-        return {
-            "forecast_available": True,
-            "solar_production_factor": solar_factor,
-            "expected_solar_production": expected,
-            "forecast_remaining_today_kwh": remaining,
-            "reason": f"Remaining today: {remaining:.1f}kWh"
-        }
-
-    def _analyze_hourly_forecast(
-        self,
-        current: Optional[float],
-        next_hour: Optional[float]
-    ) -> Dict[str, Any]:
-        """Analyze hourly solar forecast."""
-        current_kwh = current or 0
-        next_kwh = next_hour or 0
-        
-        solar_factor = min(1.0, max(current_kwh, next_kwh) / DEFAULT_POWER_ESTIMATES.good_hourly_solar)
-        expected = self._categorize_solar_production(solar_factor)
-        
-        return {
-            "forecast_available": True,
-            "solar_production_factor": solar_factor,
-            "expected_solar_production": expected,
-            "forecast_current_kwh": current_kwh,
-            "forecast_next_kwh": next_kwh,
-            "reason": f"Hourly: current {current_kwh:.1f}kWh, next {next_kwh:.1f}kWh"
-        }
-
-    def _create_no_data_forecast_result(self) -> Dict[str, Any]:
-        """Create result when forecast entities have no data."""
-        return {
-            "forecast_available": False,
-            "solar_production_factor": DEFAULT_ALGORITHM_THRESHOLDS.neutral_price_position,
-            "expected_solar_production": "unknown",
-            "reason": "Solar forecast entities configured but no data available"
-        }
-
-    def _categorize_solar_production(self, factor: float) -> str:
-        """Categorize solar production based on factor."""
-        if factor > DEFAULT_ALGORITHM_THRESHOLDS.excellent_solar_threshold:
-            return "excellent"
-        elif factor > DEFAULT_ALGORITHM_THRESHOLDS.moderate_solar_threshold:
-            return "good"
-        elif factor > DEFAULT_ALGORITHM_THRESHOLDS.poor_solar_threshold:
-            return "moderate"
-        return "poor"
 
     def _analyze_battery_status(self, battery_soc_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Analyze battery status for all configured batteries."""

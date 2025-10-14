@@ -198,36 +198,6 @@ def test_feed_in_adjustment_respects_threshold():
     assert "0.020" in result["feedin_solar_reason"]
 
 
-def test_daily_forecast_penalizes_low_absolute_production():
-    engine = _engine()
-
-    result = engine._analyze_daily_forecast(
-        tomorrow=1.5,
-        today=1.0,
-        current=None,
-        next_hour=None,
-        remaining=None,
-    )
-
-    assert result["solar_production_factor"] == pytest.approx(0.3, rel=1e-3)
-    assert result["expected_solar_production"] == "poor"
-    assert "limited output" in result["reason"]
-
-
-def test_daily_forecast_marks_strong_day_as_excellent():
-    engine = _engine()
-
-    result = engine._analyze_daily_forecast(
-        tomorrow=7.0,
-        today=5.5,
-        current=None,
-        next_hour=None,
-        remaining=None,
-    )
-
-    assert result["solar_production_factor"] == pytest.approx(1.0)
-    assert result["expected_solar_production"] == "excellent"
-    assert "relative 100%" in result["reason"]
 
 
 def test_price_analysis_unavailable_when_adjustment_missing_data():

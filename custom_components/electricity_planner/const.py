@@ -13,11 +13,6 @@ CONF_SOLAR_PRODUCTION_ENTITY = "solar_production_entity"
 CONF_HOUSE_CONSUMPTION_ENTITY = "house_consumption_entity"
 CONF_CAR_CHARGING_POWER_ENTITY = "car_charging_power_entity"
 CONF_MONTHLY_GRID_PEAK_ENTITY = "monthly_grid_peak_entity"
-CONF_SOLAR_FORECAST_CURRENT_ENTITY = "solar_forecast_current_entity"
-CONF_SOLAR_FORECAST_NEXT_ENTITY = "solar_forecast_next_entity" 
-CONF_SOLAR_FORECAST_TODAY_ENTITY = "solar_forecast_today_entity"
-CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY = "solar_forecast_remaining_today_entity"
-CONF_SOLAR_FORECAST_TOMORROW_ENTITY = "solar_forecast_tomorrow_entity"
 CONF_TRANSPORT_COST_ENTITY = "transport_cost_entity"
 
 CONF_MIN_SOC_THRESHOLD = "min_soc_threshold"
@@ -26,8 +21,6 @@ CONF_PRICE_THRESHOLD = "price_threshold"
 CONF_EMERGENCY_SOC_THRESHOLD = "emergency_soc_threshold"
 CONF_VERY_LOW_PRICE_THRESHOLD = "very_low_price_threshold"
 CONF_SIGNIFICANT_SOLAR_THRESHOLD = "significant_solar_threshold"
-CONF_POOR_SOLAR_FORECAST_THRESHOLD = "poor_solar_forecast_threshold"
-CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD = "excellent_solar_forecast_threshold"
 CONF_FEEDIN_PRICE_THRESHOLD = "feedin_price_threshold"
 
 # Safety Limits Configuration Keys
@@ -54,8 +47,6 @@ DEFAULT_PRICE_THRESHOLD = 0.15
 DEFAULT_EMERGENCY_SOC = 15
 DEFAULT_VERY_LOW_PRICE_THRESHOLD = 30  # Bottom 30% of daily range
 DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD = 1000  # 1kW
-DEFAULT_POOR_SOLAR_FORECAST = 40  # Below 40% = poor forecast
-DEFAULT_EXCELLENT_SOLAR_FORECAST = 80  # Above 80% = excellent forecast
 DEFAULT_FEEDIN_PRICE_THRESHOLD = 0.05  # €0.05/kWh - export only above this price
 
 # Default Safety Limits (W)

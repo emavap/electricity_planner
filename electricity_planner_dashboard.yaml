@@ -259,11 +259,12 @@ views:
 
           - type: custom:apexcharts-card
             header:
-              title: Nord Pool Electricity Prices (Now → Future)
+              title: Nord Pool Electricity Prices (History + Future)
               show: true
-            graph_span: 36h
+            graph_span: 38h
             span:
-              start: minute
+              start: hour
+              offset: -2h
             now:
               show: true
               label: Now
