@@ -29,9 +29,13 @@ views:
                 scale: "50px"
                 segments: |-
                   {% set dynamic_threshold = state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') %}
+                  {% set price_analysis = state_attr('sensor.electricity_planner_decision_diagnostics', 'price_analysis') %}
+                  {% set average_threshold = price_analysis.average_threshold if price_analysis else None %}
                   {% set max_threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float %}
                   {% if dynamic_threshold != None %}
                     {% set threshold = dynamic_threshold | float %}
+                  {% elif average_threshold != None %}
+                    {% set threshold = average_threshold | float %}
                   {% else %}
                     {% set threshold = max_threshold %}
                   {% endif %}
@@ -267,7 +271,7 @@ views:
                   });
                 show:
                   legend_value: false
-              - entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
                 name: Max Threshold
                 type: line
                 stroke_width: 2
@@ -275,3 +279,64 @@ views:
                 curve: straight
                 show:
                   legend_value: false
+                data_generator: |
+                  // Show the base max threshold (average or fixed)
+                  const diagnosticsEntity = hass.states['sensor.electricity_planner_decision_diagnostics'];
+                  const priceAnalysis = diagnosticsEntity?.attributes?.price_analysis;
+                  const averageThreshold = priceAnalysis?.average_threshold;
+
+                  const maxThresholdEntity = hass.states['sensor.electricity_planner_diagnostics_monitoring_price_threshold'];
+                  const fixedThreshold = maxThresholdEntity ? parseFloat(maxThresholdEntity.state) : 0.15;
+
+                  // Use average if enabled, otherwise fixed
+                  let maxThreshold = fixedThreshold;
+                  if (averageThreshold != null && averageThreshold !== undefined) {
+                    maxThreshold = parseFloat(averageThreshold);
+                  }
+
+                  // Get time range from price data
+                  if (!entity.attributes.data || entity.attributes.data.length === 0) {
+                    return [];
+                  }
+
+                  const intervals = entity.attributes.data;
+                  const startTime = new Date(intervals[0].start).getTime();
+                  const endTime = new Date(intervals[intervals.length - 1].start).getTime();
+
+                  return [
+                    [startTime, maxThreshold],
+                    [endTime, maxThreshold]
+                  ];
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Dynamic Threshold
+                type: line
+                stroke_width: 3
+                color: "#f39c12"
+                curve: straight
+                show:
+                  legend_value: false
+                data_generator: |
+                  // Only show dynamic threshold when it's active (more strict than max)
+                  const currentPriceEntity = hass.states['sensor.electricity_planner_current_electricity_price'];
+                  const dynamicThreshold = currentPriceEntity?.attributes?.dynamic_threshold;
+
+                  // If no dynamic threshold, don't show this line
+                  if (dynamicThreshold == null || dynamicThreshold === undefined) {
+                    return [];
+                  }
+
+                  const threshold = parseFloat(dynamicThreshold);
+
+                  // Get time range from price data
+                  if (!entity.attributes.data || entity.attributes.data.length === 0) {
+                    return [];
+                  }
+
+                  const intervals = entity.attributes.data;
+                  const startTime = new Date(intervals[0].start).getTime();
+                  const endTime = new Date(intervals[intervals.length - 1].start).getTime();
+
+                  return [
+                    [startTime, threshold],
+                    [endTime, threshold]
+                  ];
