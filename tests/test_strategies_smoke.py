@@ -5,7 +5,6 @@ from custom_components.electricity_planner.strategies import (
     VeryLowPriceStrategy,
     DynamicPriceStrategy,
     PredictiveChargingStrategy,
-    SolarAwareChargingStrategy,
     SOCBasedChargingStrategy,
     StrategyManager,
 )
@@ -78,11 +77,11 @@ def test_dynamic_price_handles_none_prices_gracefully():
             "price_threshold": 0.15,
         },
         "battery_analysis": {"average_soc": 50},
-        "solar_forecast": {"solar_production_factor": 0.5},
-        "config": {
-            "excellent_solar_forecast_threshold": 80,
-            "poor_solar_forecast_threshold": 40,
+        "power_analysis": {
+            "solar_surplus": 0,
+            "significant_solar_surplus": False,
         },
+        "config": {},
     }
 
     # Should not crash with TypeError
@@ -105,11 +104,11 @@ def test_dynamic_price_handles_zero_and_negative_prices():
             "price_threshold": 0.15,
         },
         "battery_analysis": {"average_soc": 50},
-        "solar_forecast": {"solar_production_factor": 0.5},
-        "config": {
-            "excellent_solar_forecast_threshold": 80,
-            "poor_solar_forecast_threshold": 40,
+        "power_analysis": {
+            "solar_surplus": 0,
+            "significant_solar_surplus": False,
         },
+        "config": {},
     }
 
     should_charge, reason = strategy.should_charge(context_zero)
@@ -127,11 +126,11 @@ def test_dynamic_price_handles_zero_and_negative_prices():
             "price_threshold": 0.15,
         },
         "battery_analysis": {"average_soc": 50},
-        "solar_forecast": {"solar_production_factor": 0.5},
-        "config": {
-            "excellent_solar_forecast_threshold": 80,
-            "poor_solar_forecast_threshold": 40,
+        "power_analysis": {
+            "solar_surplus": 0,
+            "significant_solar_surplus": False,
         },
+        "config": {},
     }
 
     should_charge, reason = strategy.should_charge(context_negative)
@@ -141,10 +140,10 @@ def test_dynamic_price_handles_zero_and_negative_prices():
 
 
 def test_dynamic_price_with_excellent_solar_is_selective():
-    """Test dynamic price strategy is more selective with excellent solar forecast."""
+    """Test dynamic price strategy is more selective with significant solar surplus."""
     strategy = DynamicPriceStrategy()
 
-    # Same price, different solar forecasts
+    # Same price, different solar surplus states
     base_context = {
         "price_analysis": {
             "current_price": 0.10,
@@ -154,42 +153,51 @@ def test_dynamic_price_with_excellent_solar_is_selective():
             "price_threshold": 0.15,
         },
         "battery_analysis": {"average_soc": 60},
-        "config": {
-            "excellent_solar_forecast_threshold": 80,
-            "poor_solar_forecast_threshold": 40,
-        },
+        "config": {},
     }
 
-    # Excellent solar - should be picky
-    excellent_context = {**base_context, "solar_forecast": {"solar_production_factor": 0.85}}
+    # Significant solar surplus - should be picky
+    excellent_context = {
+        **base_context,
+        "power_analysis": {
+            "solar_surplus": 3200,
+            "significant_solar_surplus": True,
+        },
+    }
     should_charge_excellent, reason_excellent = strategy.should_charge(excellent_context)
 
     # Poor solar - should be less picky
-    poor_context = {**base_context, "solar_forecast": {"solar_production_factor": 0.30}}
+    poor_context = {
+        **base_context,
+        "power_analysis": {
+            "solar_surplus": 0,
+            "significant_solar_surplus": False,
+        },
+    }
     should_charge_poor, reason_poor = strategy.should_charge(poor_context)
 
-    # With excellent solar, it should be harder to charge (more selective)
-    assert "excellent solar forecast" in reason_excellent.lower()
-    assert "poor solar forecast" in reason_poor.lower()
+    # With significant solar, it should be harder to charge (more selective)
+    assert "significant solar surplus" in reason_excellent.lower()
+    assert "no solar surplus" in reason_poor.lower()
     assert should_charge_poor in (True, False)  # Sanity check returned bool
 
 
-def test_soc_based_charges_when_low_soc_and_poor_solar():
-    """Test SOC-based strategy charges when SOC is low and solar forecast is poor."""
+def test_soc_based_charges_when_low_soc_and_no_solar():
+    """Test SOC-based strategy charges when SOC is low and no solar surplus is available."""
     strategy = SOCBasedChargingStrategy()
     context = {
         "price_analysis": {"is_low_price": True},
         "battery_analysis": {"average_soc": 30},
-        "solar_forecast": {"solar_production_factor": 0.25},
-        "config": {
-            "poor_solar_forecast_threshold": 40,
-            "excellent_solar_forecast_threshold": 80,
+        "power_analysis": {
+            "solar_surplus": 0,
+            "significant_solar_surplus": False,
         },
+        "config": {},
     }
 
     should_charge, reason = strategy.should_charge(context)
     assert should_charge is True
-    assert "Low SOC" in reason or "poor solar" in reason.lower()
+    assert "Low SOC" in reason or "no significant solar" in reason.lower()
 
 
 def test_strategy_manager_sorts_by_priority():
@@ -247,7 +255,7 @@ if __name__ == "__main__":
     test_dynamic_price_handles_none_prices_gracefully()
     test_dynamic_price_handles_zero_and_negative_prices()
     test_dynamic_price_with_excellent_solar_is_selective()
-    test_soc_based_charges_when_low_soc_and_poor_solar()
+    test_soc_based_charges_when_low_soc_and_no_solar()
     test_strategy_manager_sorts_by_priority()
     test_strategy_manager_emergency_overrides_high_price()
     test_strategy_manager_respects_price_threshold()
