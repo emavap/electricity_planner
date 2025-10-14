@@ -10,7 +10,7 @@ This is a Home Assistant custom integration called "Electricity Planner" - a sma
 
 ### Core Components
 
-- **Decision Engine** (`decision_engine.py`): Multi-factor algorithm that evaluates price positioning, battery status, and solar forecasts
+- **Decision Engine** (`decision_engine.py`): Multi-factor algorithm that evaluates price positioning, battery status, and live solar production
   - 29 methods for comprehensive decision logic
   - 17 validation checks for data integrity
   - Uses strategy pattern for extensible decision making
@@ -123,7 +123,7 @@ The integration is designed for dynamic electricity markets:
 2. **SOC Thresholds**: Min/max SOC, emergency overrides, predictive logic thresholds
 3. **Price Thresholds**: Price threshold, very low price %, feed-in threshold
 4. **Power Limits**: Max battery/car/grid power, charging thresholds
-5. **Solar Parameters**: Forecast thresholds, significant solar threshold
+5. **Solar Parameters**: Significant solar surplus threshold configuration
 
 ### Recent Changes (v2.3.0)
 - **Removed**: `grid_battery_charging_limit_soc` (unused config option)

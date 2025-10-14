@@ -336,8 +336,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "emergency_soc": "Emergency SOC level that triggers charging regardless of price",
                 "very_low_price": "Percentage threshold for 'very low' price in daily range",
                 "significant_solar": "Solar surplus threshold considered significant",
-                "poor_forecast": "Solar forecast below this percentage is considered poor",
-                "excellent_forecast": "Solar forecast above this percentage is considered excellent",
                 "use_dynamic_threshold": "Enable intelligent price analysis (more selective, better prices)",
                 "dynamic_threshold_confidence": "Confidence required for dynamic charging (higher = more selective)",
                 "feedin_price_threshold": "Minimum export price required when no adjustment is set",

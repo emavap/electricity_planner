@@ -41,7 +41,7 @@ These tests verify that:
 1. **None price handling works** - Nord Pool sensors sometimes return `unknown` during refresh
 2. **Priority order is correct** - No duplicate priorities, strategies run in correct order
 3. **Emergency charging overrides high prices** - Safety feature works
-4. **Solar forecast affects selectivity** - Excellent solar makes dynamic pricing more selective
+4. **Solar surplus affects selectivity** - Significant surplus makes dynamic pricing more selective
 
 ## Manual Testing
 
@@ -51,9 +51,9 @@ If you can't run automated tests, manually verify:
    - Watch logs when Nord Pool updates (usually around midnight)
    - Check that binary sensors still update properly
 
-2. **Solar forecast affects charging decisions**
-   - With excellent solar forecast (>80%), check that charging only happens at very low prices
-   - With poor solar forecast (<40%), check that charging happens at okay prices
+2. **Solar surplus affects charging decisions**
+   - With significant surplus (>1 kW), check that charging only happens at very low prices
+   - With little or no surplus, check that charging happens when prices are merely okay
 
 3. **Priority order is respected**
    - Emergency SOC (<15%) should charge regardless of price

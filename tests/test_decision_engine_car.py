@@ -112,7 +112,6 @@ def test_solar_not_allocated_to_car_until_batteries_high_soc():
         power_analysis=power_analysis,
         battery_analysis=battery_analysis,
         price_analysis={},
-        solar_forecast={},
         time_context={},
     )
 
@@ -135,7 +134,6 @@ def test_solar_allocated_to_car_when_batteries_full():
         power_analysis=power_analysis,
         battery_analysis=battery_analysis,
         price_analysis={},
-        solar_forecast={},
         time_context={},
     )
 
@@ -158,7 +156,6 @@ def test_solar_allocation_requires_all_batteries_high():
         power_analysis=power_analysis,
         battery_analysis=battery_analysis,
         price_analysis={},
-        solar_forecast={},
         time_context={},
     )
 
@@ -181,7 +178,6 @@ def test_solar_allocation_without_battery_data_skips_car():
         power_analysis=power_analysis,
         battery_analysis=battery_analysis,
         price_analysis={},
-        solar_forecast={},
         time_context={},
     )
 

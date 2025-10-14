@@ -1,6 +1,6 @@
 # Electricity Planner – Project Summary
 
-This is a Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, solar production and forecast data to recommend when you should charge from the grid. It never controls hardware directly; instead it exposes boolean decisions, grid power limits and human-readable reasons that you can feed into your own automations.
+This is a Home Assistant custom integration that analyses live Nord Pool prices, battery SOC and solar production to recommend when you should charge from the grid. It never controls hardware directly; instead it exposes boolean decisions, grid power limits and human-readable reasons that you can feed into your own automations.
 
 ## Quick Facts
 

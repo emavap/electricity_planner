@@ -186,8 +186,9 @@ class SolarProductionBinarySensor(ElectricityPlannerBinarySensorBase):
         solar_analysis = self.coordinator.data["solar_analysis"]
         return {
             "current_production": solar_analysis.get("current_production"),
-            "forecast": solar_analysis.get("forecast"),
-            "has_good_forecast": solar_analysis.get("has_good_forecast"),
+            "house_consumption": solar_analysis.get("house_consumption"),
+            "available_surplus": solar_analysis.get("available_surplus"),
+            "production_efficiency": solar_analysis.get("production_efficiency"),
         }
 
 
