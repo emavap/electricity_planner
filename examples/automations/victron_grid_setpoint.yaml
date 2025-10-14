@@ -1,7 +1,7 @@
 alias: Update Victron Grid Setpoint from Electricity Planner
 description: Update Victron ESS setpoint on change or every 5 minutes
 triggers:
-  - entity_id: sensor.electricity_planner_automation_controls_grid_setpoint
+  - entity_id: sensor.electricity_planner_grid_setpoint
     trigger: state
   - minutes: /5
     trigger: time_pattern
@@ -9,15 +9,15 @@ conditions:
   - condition: not
     conditions:
       - condition: state
-        entity_id: sensor.electricity_planner_automation_controls_grid_setpoint
+        entity_id: sensor.electricity_planner_grid_setpoint
         state: unknown
       - condition: state
-        entity_id: sensor.electricity_planner_automation_controls_grid_setpoint
+        entity_id: sensor.electricity_planner_grid_setpoint
         state: unavailable
 actions:
   - target:
       entity_id: number.victron_victron_system_ess_acpowersetpoint
     data:
-      value: "{{ states('sensor.electricity_planner_automation_controls_grid_setpoint') | float(0) }}"
+      value: "{{ states('sensor.electricity_planner_grid_setpoint') | float(0) }}"
     action: number.set_value
 mode: single

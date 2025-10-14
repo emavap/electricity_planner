@@ -14,7 +14,7 @@ actions:
           - condition: template
             value_template: "{{ grid_power > 50 }}"
           - condition: state
-            entity_id: binary_sensor.electricity_planner_automation_controls_solar_feed_in_grid
+            entity_id: binary_sensor.electricity_planner_solar_feed_in_grid
             state: "off"
         sequence:
           - target:
@@ -28,7 +28,7 @@ actions:
           - condition: or
             conditions:
               - condition: state
-                entity_id: binary_sensor.electricity_planner_automation_controls_solar_feed_in_grid
+                entity_id: binary_sensor.electricity_planner_solar_feed_in_grid
                 state: "on"
               - condition: template
                 value_template: "{{ grid_power < -50 }}"
@@ -42,6 +42,6 @@ actions:
             action: number.set_value
 variables:
   grid_power: "{{ states('sensor.grid') | float(0) }}"
-  feed_allowed: "{{ is_state('binary_sensor.electricity_planner_automation_controls_solar_feed_in_grid', 'on') }}"
+  feed_allowed: "{{ is_state('binary_sensor.electricity_planner_solar_feed_in_grid', 'on') }}"
   current_limit: "{{ states('number.huawei_inverter_power_limit') | float(4400) }}"
 mode: single

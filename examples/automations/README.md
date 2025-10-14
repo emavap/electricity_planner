@@ -16,9 +16,9 @@ This folder contains example Home Assistant automations that integrate with the 
 - Supports solar surplus charging
 
 **Required Entities**:
-- `binary_sensor.electricity_planner_automation_controls_car_charge_from_grid` - Charging decision
-- `sensor.electricity_planner_automation_controls_car_charger_limit` - Power limit
-- `sensor.electricity_planner_diagnostics_monitoring_current_electricity_price` - Current price
+- `binary_sensor.electricity_planner_car_charge_from_grid` - Charging decision
+- `sensor.electricity_planner_car_charger_limit` - Power limit
+- `sensor.electricity_planner_current_electricity_price` - Current price
 - `input_number.car_charger_price_threshold` - User-defined price cutoff
 - `sensor.huawei_charger_plugged_in` - Car connection status
 - `switch.evcharger` - Charger on/off control
@@ -43,7 +43,7 @@ This folder contains example Home Assistant automations that integrate with the 
 - Protects against excessive grid export
 
 **Required Entities**:
-- `binary_sensor.electricity_planner_automation_controls_solar_feed_in_grid` - Feed-in decision
+- `binary_sensor.electricity_planner_solar_feed_in_grid` - Feed-in decision
 - `sensor.grid` - Grid power (positive = importing, negative = exporting)
 - `number.huawei_inverter_power_limit` - Inverter power limit control
 
@@ -68,7 +68,7 @@ This folder contains example Home Assistant automations that integrate with the 
 - Immediate updates on planner changes
 
 **Required Entities**:
-- `sensor.electricity_planner_automation_controls_grid_setpoint` - Target grid power
+- `sensor.electricity_planner_grid_setpoint` - Target grid power
 - `number.victron_victron_system_ess_acpowersetpoint` - Victron ESS setpoint control
 
 **Triggers**:
@@ -91,20 +91,22 @@ This folder contains example Home Assistant automations that integrate with the 
 
 ### Automation Control Entities (Essential)
 These are the primary entities your automations should monitor:
-- `binary_sensor.electricity_planner_automation_controls_battery_charge_from_grid`
-- `binary_sensor.electricity_planner_automation_controls_car_charge_from_grid`
-- `binary_sensor.electricity_planner_automation_controls_solar_feed_in_grid`
-- `sensor.electricity_planner_automation_controls_car_charger_limit`
-- `sensor.electricity_planner_automation_controls_grid_setpoint`
+- `binary_sensor.electricity_planner_battery_charge_from_grid`
+- `binary_sensor.electricity_planner_car_charge_from_grid`
+- `binary_sensor.electricity_planner_solar_feed_in_grid` (not yet created by code)
+- `sensor.electricity_planner_car_charger_limit`
+- `sensor.electricity_planner_grid_setpoint`
 
 ### Diagnostic/Monitoring Entities (Optional)
 These provide additional data for advanced logic:
-- `sensor.electricity_planner_diagnostics_monitoring_current_electricity_price`
-- `sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price`
-- `sensor.electricity_planner_diagnostics_monitoring_solar_surplus_power`
-- `sensor.electricity_planner_diagnostics_monitoring_battery_soc_average`
-- `binary_sensor.electricity_planner_diagnostics_monitoring_price_below_threshold`
-- And many more... (see dashboard for complete list)
+- `sensor.electricity_planner_current_electricity_price`
+- `sensor.electricity_planner_battery_soc_average`
+- `sensor.electricity_planner_solar_surplus_power`
+- `sensor.electricity_planner_decision_diagnostics`
+- `binary_sensor.electricity_planner_price_below_threshold`
+- `binary_sensor.electricity_planner_solar_producing_power`
+- `binary_sensor.electricity_planner_data_nord_pool_available`
+- And many more with `diagnostics_monitoring_` prefix (see dashboard for complete list)
 
 ## Customization Tips
 
@@ -149,10 +151,6 @@ For issues with:
 
 ## Version
 
-These examples are for **Electricity Planner v2.5.0+** with the corrected entity naming scheme.
+These examples are for **Electricity Planner v2.5.0+**.
 
-If you're upgrading from an older version, make sure to update all entity IDs from:
-- ❌ `sensor.electricity_planner_car_charger_limit`
-- ✅ `sensor.electricity_planner_automation_controls_car_charger_limit`
-
-See the main README for migration instructions.
+**Note on Entity Naming**: Most entities use simple names like `sensor.electricity_planner_current_electricity_price`. Some newer threshold/margin sensors use longer names with `diagnostics_monitoring_` prefix (e.g., `sensor.electricity_planner_diagnostics_monitoring_price_threshold`). Check Developer Tools → States to see the exact entity IDs in your installation.

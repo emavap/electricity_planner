@@ -2,9 +2,9 @@ alias: Car Charger Dynamic Control
 description: Control car charging only when car is plugged in with price-based cutoff
 triggers:
   - entity_id:
-      - binary_sensor.electricity_planner_automation_controls_car_charge_from_grid
-      - sensor.electricity_planner_automation_controls_car_charger_limit
-      - sensor.electricity_planner_diagnostics_monitoring_current_electricity_price
+      - binary_sensor.electricity_planner_car_charge_from_grid
+      - sensor.electricity_planner_car_charger_limit
+      - sensor.electricity_planner_current_electricity_price
       - input_number.car_charger_price_threshold
     for: "00:02:00"
     trigger: state
@@ -22,11 +22,11 @@ actions:
   - variables:
       charger_is_off: "{{ is_state('switch.evcharger', 'off') }}"
       charge_from_grid: >-
-        {{ is_state('binary_sensor.electricity_planner_automation_controls_car_charge_from_grid',
+        {{ is_state('binary_sensor.electricity_planner_car_charge_from_grid',
         'on') }}
       price_threshold: "{{ states('input_number.car_charger_price_threshold') | float(0.15) }}"
       current_price: >-
-        {{ states('sensor.electricity_planner_diagnostics_monitoring_current_electricity_price') |
+        {{ states('sensor.electricity_planner_current_electricity_price') |
         float(0) }}
       price_too_high: "{{ current_price > price_threshold }}"
       charger_recently_turned_on: |
@@ -104,7 +104,7 @@ actions:
                       current_limit_w: "{{ current_limit_kw * 1000 }}"
                       planner_limit_w: >-
                         {{
-                        states('sensor.electricity_planner_automation_controls_car_charger_limit') |
+                        states('sensor.electricity_planner_car_charger_limit') |
                         float(0) }}
                       target_limit_w: "{{ planner_limit_w }}"
                       target_limit_kw: "{{ (target_limit_w / 1000) | round(2) }}"
