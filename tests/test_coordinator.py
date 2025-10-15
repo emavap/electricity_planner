@@ -772,8 +772,8 @@ def test_forecast_summary_handles_negative_prices(fake_hass, monkeypatch):
     assert summary["best_window_start"] == expected_start
 
 
-def test_missing_price_data_clears_forecast(fake_hass, monkeypatch):
-    """Stale price timelines must be cleared when price data becomes unavailable."""
+def test_missing_price_data_marks_forecast_stale(fake_hass, monkeypatch):
+    """When price data disappears temporarily, reuse cached forecast but mark it stale."""
     base_time = datetime(2025, 11, 6, 7, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
 
@@ -797,7 +797,7 @@ def test_missing_price_data_clears_forecast(fake_hass, monkeypatch):
     )
     assert coordinator._last_price_timeline is not None
 
-    # Price data disappears — cached forecast must not be reused
+    # Price data disappears — decisions fall back but timeline is still cached
     window_result = coordinator._check_minimum_charging_window(
         None,
         None,
@@ -806,7 +806,7 @@ def test_missing_price_data_clears_forecast(fake_hass, monkeypatch):
         None,
     )
     assert window_result is False
-    assert coordinator._last_price_timeline is None
+    assert coordinator._last_price_timeline is not None
 
     summary = coordinator._calculate_forecast_summary(
         None,
@@ -815,8 +815,10 @@ def test_missing_price_data_clears_forecast(fake_hass, monkeypatch):
         None,
         None,
     )
-    assert summary == {"available": False}
-    assert coordinator._last_price_timeline is None
+    assert summary["available"] is True
+    assert summary.get("stale") is True
+    assert summary["cheapest_interval_price"] == pytest.approx(0.05, rel=1e-6)
+    assert "timeline_generated_at" in summary
 
 
 class FakeServiceCall:

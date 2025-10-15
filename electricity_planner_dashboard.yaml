@@ -150,116 +150,6 @@ views:
                 attribute: reason
                 name: Car reason
 
-          - type: markdown
-            title: Manual override status
-            content: >
-              {% set overrides = state_attr('sensor.electricity_planner_decision_diagnostics',
-              'manual_overrides') %}
-              {% if overrides and overrides | length > 0 %}
-              {% for key, value in overrides.items() %}
-              **{{ key | replace('_', ' ') | title }}:** {{ 'charging' if value.value
-              else 'waiting' }}{% if value.expires_at %} (until {{
-              as_datetime(value.expires_at).astimezone().strftime('%H:%M') }}){% endif
-              %}{% if value.reason %} — {{ value.reason }}{% endif %}
-
-              {% endfor %}
-              {% else %}
-              _No manual overrides active_
-              {% endif %}
-
-          - type: grid
-            square: false
-            columns: 3
-            cards:
-              - type: custom:button-card
-                name: Battery charge
-                icon: mdi:battery-arrow-up
-                tap_action:
-                  action: call-service
-                  service: electricity_planner.set_manual_override
-                  data:
-                    target: battery
-                    action: force_charge
-                    duration: |
-                      [[[
-                        const input = prompt('Battery override duration (minutes)', '120');
-                        const minutes = parseInt(input, 10);
-                        if (!Number.isFinite(minutes)) return 120;
-                        return Math.min(Math.max(minutes, 1), 1440);
-                      ]]]
-                    reason: "Dashboard boost"
-              - type: custom:button-card
-                name: Battery wait
-                icon: mdi:battery-remove
-                tap_action:
-                  action: call-service
-                  service: electricity_planner.set_manual_override
-                  data:
-                    target: battery
-                    action: force_wait
-                    duration: |
-                      [[[
-                        const input = prompt('Battery override duration (minutes)', '120');
-                        const minutes = parseInt(input, 10);
-                        if (!Number.isFinite(minutes)) return 120;
-                        return Math.min(Math.max(minutes, 1), 1440);
-                      ]]]
-                    reason: "Dashboard pause"
-              - type: custom:button-card
-                name: Battery auto
-                icon: mdi:restore
-                tap_action:
-                  action: call-service
-                  service: electricity_planner.clear_manual_override
-                  data:
-                    target: battery
-
-          - type: grid
-            square: false
-            columns: 3
-            cards:
-              - type: custom:button-card
-                name: Car charge
-                icon: mdi:car-arrow-right
-                tap_action:
-                  action: call-service
-                  service: electricity_planner.set_manual_override
-                  data:
-                    target: car
-                    action: force_charge
-                    duration: |
-                      [[[
-                        const input = prompt('Car override duration (minutes)', '120');
-                        const minutes = parseInt(input, 10);
-                        if (!Number.isFinite(minutes)) return 120;
-                        return Math.min(Math.max(minutes, 1), 1440);
-                      ]]]
-                    reason: "Dashboard boost"
-              - type: custom:button-card
-                name: Car wait
-                icon: mdi:car-clock
-                tap_action:
-                  action: call-service
-                  service: electricity_planner.set_manual_override
-                  data:
-                    target: car
-                    action: force_wait
-                    duration: |
-                      [[[
-                        const input = prompt('Car override duration (minutes)', '120');
-                        const minutes = parseInt(input, 10);
-                        if (!Number.isFinite(minutes)) return 120;
-                        return Math.min(Math.max(minutes, 1), 1440);
-                      ]]]
-                    reason: "Dashboard pause"
-              - type: custom:button-card
-                name: Clear overrides
-                icon: mdi:flash-off
-                tap_action:
-                  action: call-service
-                  service: electricity_planner.clear_manual_override
-                  data:
-
           - type: grid
             square: false
             columns: 2
@@ -302,6 +192,17 @@ views:
             title: Price Forecast Insights
             content: |
               {% set forecast_available = state_attr('sensor.electricity_planner_price_forecast_insights', 'available') %}
+              {% set is_stale = state_attr('sensor.electricity_planner_price_forecast_insights', 'stale') %}
+              {% set timeline_generated_at = state_attr('sensor.electricity_planner_price_forecast_insights', 'timeline_generated_at') %}
+
+              {% if is_stale %}
+              ⚠️ **Forecast data is stale** - Nord Pool price data temporarily unavailable
+
+              _Last generated at {{ as_datetime(timeline_generated_at).strftime('%a %H:%M') if timeline_generated_at else 'unknown' }}_
+
+              ---
+
+              {% endif %}
               {% if forecast_available %}
               **Cheapest upcoming interval:**
 
@@ -318,7 +219,9 @@ views:
               **Best charging window:** Not enough consecutive low-price hours available
               {% endif %}
 
+              {% if not is_stale %}
               _Evaluated at {{ as_datetime(state_attr('sensor.electricity_planner_price_forecast_insights', 'evaluated_at')).strftime('%H:%M') }}_
+              {% endif %}
               {% else %}
               _Forecast not available - waiting for price data_
               {% endif %}
@@ -526,3 +429,159 @@ views:
                     [startTime, threshold],
                     [endTime, threshold]
                   ];
+
+          # Manual Override Controls
+          - type: markdown
+            title: Manual override status
+            content: >
+              {% set overrides = state_attr('sensor.electricity_planner_decision_diagnostics',
+              'manual_overrides') %}
+              {% if overrides and overrides | length > 0 %}
+              {% for key, value in overrides.items() %}
+              **{{ key | replace('_', ' ') | title }}:** {{ 'charging' if value.value
+              else 'waiting' }}{% if value.expires_at %} (until {{
+              as_datetime(value.expires_at).astimezone().strftime('%H:%M') }}){% endif
+              %}{% if value.reason %} — {{ value.reason }}{% endif %}
+
+              {% endfor %}
+              {% else %}
+              _No manual overrides active_
+              {% endif %}
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:button-card
+                name: Battery charge
+                icon: mdi:battery-arrow-up
+                size: 20%
+                styles:
+                  card:
+                    - height: 60px
+                  name:
+                    - font-size: 11px
+                  icon:
+                    - width: 20px
+                tap_action: |
+                  [[[
+                    const input = prompt('Battery override duration (minutes)', '120');
+                    if (input === null) {
+                      return { action: 'none' };
+                    }
+                    const minutes = parseInt(input, 10);
+                    const duration = Number.isFinite(minutes) ? Math.min(Math.max(minutes, 1), 1440) : 120;
+                    return {
+                      action: 'call-service',
+                      service: 'electricity_planner.set_manual_override',
+                      service_data: {
+                        target: 'battery',
+                        action: 'force_charge',
+                        duration,
+                        reason: 'Dashboard boost'
+                      }
+                    };
+                  ]]]
+              - type: custom:button-card
+                name: Battery wait
+                icon: mdi:battery-remove
+                size: 20%
+                styles:
+                  card:
+                    - height: 60px
+                  name:
+                    - font-size: 11px
+                  icon:
+                    - width: 20px
+                tap_action: |
+                  [[[
+                    const input = prompt('Battery override duration (minutes)', '120');
+                    if (input === null) {
+                      return { action: 'none' };
+                    }
+                    const minutes = parseInt(input, 10);
+                    const duration = Number.isFinite(minutes) ? Math.min(Math.max(minutes, 1), 1440) : 120;
+                    return {
+                      action: 'call-service',
+                      service: 'electricity_planner.set_manual_override',
+                      service_data: {
+                        target: 'battery',
+                        action: 'force_wait',
+                        duration,
+                        reason: 'Dashboard pause'
+                      }
+                    };
+                  ]]]
+              - type: custom:button-card
+                name: Car charge
+                icon: mdi:car-arrow-right
+                size: 20%
+                styles:
+                  card:
+                    - height: 60px
+                  name:
+                    - font-size: 11px
+                  icon:
+                    - width: 20px
+                tap_action: |
+                  [[[
+                    const input = prompt('Car override duration (minutes)', '120');
+                    if (input === null) {
+                      return { action: 'none' };
+                    }
+                    const minutes = parseInt(input, 10);
+                    const duration = Number.isFinite(minutes) ? Math.min(Math.max(minutes, 1), 1440) : 120;
+                    return {
+                      action: 'call-service',
+                      service: 'electricity_planner.set_manual_override',
+                      service_data: {
+                        target: 'car',
+                        action: 'force_charge',
+                        duration,
+                        reason: 'Dashboard boost'
+                      }
+                    };
+                  ]]]
+              - type: custom:button-card
+                name: Car wait
+                icon: mdi:car-clock
+                size: 20%
+                styles:
+                  card:
+                    - height: 60px
+                  name:
+                    - font-size: 11px
+                  icon:
+                    - width: 20px
+                tap_action: |
+                  [[[
+                    const input = prompt('Car override duration (minutes)', '120');
+                    if (input === null) {
+                      return { action: 'none' };
+                    }
+                    const minutes = parseInt(input, 10);
+                    const duration = Number.isFinite(minutes) ? Math.min(Math.max(minutes, 1), 1440) : 120;
+                    return {
+                      action: 'call-service',
+                      service: 'electricity_planner.set_manual_override',
+                      service_data: {
+                        target: 'car',
+                        action: 'force_wait',
+                        duration,
+                        reason: 'Dashboard pause'
+                      }
+                    };
+                  ]]]
+              - type: custom:button-card
+                name: Clear all
+                icon: mdi:restore
+                size: 20%
+                styles:
+                  card:
+                    - height: 60px
+                  name:
+                    - font-size: 11px
+                  icon:
+                    - width: 20px
+                tap_action:
+                  action: call-service
+                  service: electricity_planner.clear_manual_override
+                  data:

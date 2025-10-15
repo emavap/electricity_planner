@@ -87,6 +87,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             "car_grid_charging": None,
         }
         self._last_price_timeline: list[tuple[datetime, datetime, float]] | None = None
+        self._last_price_timeline_generated_at: datetime | None = None
 
         super().__init__(
             hass,
@@ -995,7 +996,6 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         Returns False if any price in the next N hours exceeds threshold.
         """
         if not prices_today and not prices_tomorrow:
-            self._last_price_timeline = None
             return False
 
         now = dt_util.utcnow()
@@ -1019,10 +1019,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         )
 
         if not timeline:
-            self._last_price_timeline = None
             return False
 
         self._last_price_timeline = timeline
+        self._last_price_timeline_generated_at = now
 
         # Identify the interval that covers the current time
         current_idx: int | None = None
@@ -1117,26 +1117,38 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         """Produce forecast insights (cheapest interval and best charging window)."""
         now = dt_util.utcnow()
 
-        if not prices_today and not prices_tomorrow:
-            self._last_price_timeline = None
-            return {"available": False}
+        stale = False
 
-        timeline = self._last_price_timeline or self._build_price_timeline(
-            prices_today,
-            prices_tomorrow,
-            transport_lookup,
-            current_transport_cost,
-            now,
-        )
+        if not prices_today and not prices_tomorrow:
+            if self._last_price_timeline:
+                timeline = self._last_price_timeline
+                stale = True
+            else:
+                self._last_price_timeline = None
+                self._last_price_timeline_generated_at = None
+                return {"available": False}
+        else:
+            timeline = self._last_price_timeline or self._build_price_timeline(
+                prices_today,
+                prices_tomorrow,
+                transport_lookup,
+                current_transport_cost,
+                now,
+            )
+            if timeline and self._last_price_timeline is None:
+                self._last_price_timeline = timeline
+                self._last_price_timeline_generated_at = now
 
         if not timeline:
             self._last_price_timeline = None
+            self._last_price_timeline_generated_at = None
             return {"available": False}
 
         # Consider only intervals that are in the future
         future_segments = [(start, end, price) for start, end, price in timeline if end > now]
         if not future_segments:
             self._last_price_timeline = None
+            self._last_price_timeline_generated_at = None
             return {"available": False}
 
         cheapest_segment = min(future_segments, key=lambda segment: segment[2])
@@ -1197,6 +1209,11 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             "average_threshold": minimum_average_threshold,
             "evaluated_at": now.isoformat(),
         }
+
+        if stale:
+            summary["stale"] = True
+        if self._last_price_timeline_generated_at:
+            summary["timeline_generated_at"] = self._last_price_timeline_generated_at.isoformat()
 
         if best_window:
             summary.update(
