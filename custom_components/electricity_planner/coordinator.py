@@ -380,18 +380,29 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         prices_tomorrow: dict[str, Any] | None,
         transport_lookup: list[dict[str, Any]] | None
     ) -> float | None:
-        """Calculate average of all future prices (from now onwards).
+        """Calculate average threshold from a minimum 24-hour rolling window.
 
-        This provides a dynamic threshold that adapts to the available price data.
+        Uses future prices when available, but backfills with recent past prices
+        to ensure at least 24 hours of data for a stable threshold. This prevents
+        volatile thresholds when only a few hours of future data remain (e.g., late evening).
+
+        Algorithm:
+        1. Collect all available future prices (from now onwards)
+        2. If < 24 hours of future data, backfill with recent past to reach 24h minimum
+        3. Calculate average of combined window
+
         Prices include full adjustments (multiplier + offset + transport cost).
 
-        Returns None if no future prices are available.
+        Returns None if insufficient price data is available.
         """
         if not prices_today and not prices_tomorrow:
             return None
 
         now = dt_util.utcnow()
-        future_prices: list[float] = []
+        MIN_HOURS = 24  # Minimum hours for stable average threshold
+
+        # Storage for price tuples: (start_time, final_price)
+        all_intervals: list[tuple[datetime, float]] = []
 
         # Get multiplier and offset for price adjustments
         multiplier = self.config.get(
@@ -453,10 +464,16 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     break
             return cost if cost is not None else 0.0
 
-        def process_intervals(intervals: list[dict[str, Any]]) -> None:
+        def process_intervals(intervals: list[dict[str, Any]], include_past: bool = False, include_future: bool = True) -> None:
+            """Process intervals and add them to all_intervals list.
+
+            Args:
+                intervals: List of price intervals to process
+                include_past: Include intervals that have ended (start_time < now)
+                include_future: Include intervals that haven't ended (start_time >= now)
+            """
             for interval in intervals:
                 try:
-                    # Check if interval is in the future
                     start_time_str = interval.get("start")
                     if not start_time_str:
                         continue
@@ -465,8 +482,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     if start_time is None:
                         continue
                     start_time_utc = dt_util.as_utc(start_time)
-                    if start_time_utc <= now:
-                        continue  # Skip past intervals
+
+                    # Filter based on time
+                    is_past = start_time_utc < now
+                    if is_past and not include_past:
+                        continue
+                    if not is_past and not include_future:
+                        continue
 
                     # Extract price (try different keys like Nord Pool sensor does)
                     price_value = None
@@ -492,34 +514,204 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     adjusted_price = (price_kwh * multiplier) + offset
 
                     # Add transport cost
-                    transport_cost = 0.0
                     transport_cost = resolve_transport_cost(start_time_utc)
 
                     final_price = adjusted_price + transport_cost
-                    future_prices.append(final_price)
+                    all_intervals.append((start_time_utc, final_price))
 
                 except Exception as err:
                     _LOGGER.debug("Error processing interval for average threshold: %s", err)
                     continue
 
-        # Process today's prices
+        def infer_interval_resolution() -> timedelta:
+            """Infer typical Nord Pool interval duration from provided data.
+
+            Dynamically detects whether Nord Pool is using 15-minute, 1-hour,
+            or other interval lengths. Returns the minimum delta found, which
+            represents the actual granularity of the data.
+            """
+            deltas: list[timedelta] = []
+
+            def collect(intervals: list[dict[str, Any]]) -> None:
+                timestamps: list[datetime] = []
+                for interval in intervals:
+                    start_time_str = interval.get("start")
+                    if not start_time_str:
+                        continue
+                    start_time = dt_util.parse_datetime(start_time_str)
+                    if start_time is None:
+                        continue
+                    timestamps.append(dt_util.as_utc(start_time))
+
+                timestamps.sort()
+                for idx in range(1, len(timestamps)):
+                    delta = timestamps[idx] - timestamps[idx - 1]
+                    if delta > timedelta(0):
+                        deltas.append(delta)
+
+            if isinstance(prices_today, dict):
+                for intervals in prices_today.values():
+                    if isinstance(intervals, list):
+                        collect(intervals)
+
+            if isinstance(prices_tomorrow, dict):
+                for intervals in prices_tomorrow.values():
+                    if isinstance(intervals, list):
+                        collect(intervals)
+
+            if deltas:
+                return min(deltas)
+
+            # Default fallback: assume 15-minute intervals (most common modern resolution)
+            return timedelta(minutes=15)
+
+        def collect_past_intervals(max_count: int) -> list[tuple[datetime, float]]:
+            """Collect recent past price intervals for backfilling.
+
+            Args:
+                max_count: Maximum number of past intervals to collect
+
+            Returns:
+                List of (timestamp, price) tuples in chronological order (oldest first)
+            """
+            past_intervals: list[tuple[datetime, float]] = []
+
+            if not prices_today:
+                return past_intervals
+
+            area_code = next(iter(prices_today.keys()), None)
+            if not area_code or not isinstance(prices_today[area_code], list):
+                return past_intervals
+
+            for interval in prices_today[area_code]:
+                try:
+                    start_time_str = interval.get("start")
+                    if not start_time_str:
+                        continue
+
+                    start_time = dt_util.parse_datetime(start_time_str)
+                    if start_time is None:
+                        continue
+                    start_time_utc = dt_util.as_utc(start_time)
+
+                    # Only include past intervals
+                    if start_time_utc >= now:
+                        continue
+
+                    # Extract and process price
+                    price_value = None
+                    for key in ("value", "value_exc_vat", "price"):
+                        value = interval.get(key)
+                        if isinstance(value, (int, float)):
+                            price_value = float(value)
+                            break
+                        if isinstance(value, str):
+                            try:
+                                price_value = float(value)
+                                break
+                            except (ValueError, TypeError):
+                                continue
+
+                    if price_value is None:
+                        continue
+
+                    # Convert from €/MWh to €/kWh and apply adjustments
+                    price_kwh = price_value / 1000
+                    adjusted_price = (price_kwh * multiplier) + offset
+                    transport_cost = resolve_transport_cost(start_time_utc)
+                    final_price = adjusted_price + transport_cost
+
+                    past_intervals.append((start_time_utc, final_price))
+                except Exception:
+                    continue
+
+            # Sort by time (most recent first) and take what we need
+            past_intervals.sort(key=lambda x: x[0], reverse=True)
+            limited = past_intervals[:max_count]
+            limited.reverse()  # Back to chronological order (oldest first)
+
+            return limited
+
+        # Pass 1: Collect future intervals only
         if prices_today:
             area_code = next(iter(prices_today.keys()), None)
             if area_code and isinstance(prices_today[area_code], list):
-                process_intervals(prices_today[area_code])
+                process_intervals(prices_today[area_code], include_past=False, include_future=True)
 
-        # Process tomorrow's prices
         if prices_tomorrow:
             area_code = next(iter(prices_tomorrow.keys()), None)
             if area_code and isinstance(prices_tomorrow[area_code], list):
-                process_intervals(prices_tomorrow[area_code])
+                process_intervals(prices_tomorrow[area_code], include_past=False, include_future=True)
 
-        # Calculate average
-        if future_prices:
-            average = sum(future_prices) / len(future_prices)
+        # Sort by time (oldest first)
+        all_intervals.sort(key=lambda x: x[0])
+
+        # Separate future intervals
+        future_intervals = [(t, p) for t, p in all_intervals if t >= now]
+
+        if not future_intervals:
+            _LOGGER.warning("No future price intervals available for average threshold")
+            return None
+
+        # Estimate interval resolution (typically 15min or 1h)
+        if len(future_intervals) >= 2:
+            delta = future_intervals[1][0] - future_intervals[0][0]
+            interval_duration = delta if delta > timedelta(0) else infer_interval_resolution()
+        else:
+            interval_duration = infer_interval_resolution()
+
+        if interval_duration <= timedelta(0):
+            interval_duration = timedelta(minutes=15)
+
+        # Calculate how many intervals we need for MIN_HOURS
+        intervals_needed = max(1, int(MIN_HOURS * 3600 / interval_duration.total_seconds()))
+
+        # Pass 2: If we don't have enough future data, backfill with past
+        if len(future_intervals) < intervals_needed:
+            past_intervals_needed = intervals_needed - len(future_intervals)
+            past_intervals = collect_past_intervals(past_intervals_needed)
+
+            if len(past_intervals) >= past_intervals_needed:
+                # Successfully backfilled to meet 24h minimum
+                combined_intervals = past_intervals + future_intervals
+                past_count = len(past_intervals)
+                future_count = len(future_intervals)
+
+                _LOGGER.debug(
+                    "Average threshold: using %d past + %d future intervals (%.1fh total) to meet %dh minimum",
+                    past_count, future_count,
+                    (past_count + future_count) * interval_duration.total_seconds() / 3600,
+                    MIN_HOURS
+                )
+            else:
+                # Not enough past data available - use what we have
+                combined_intervals = future_intervals
+                past_count = 0
+                future_count = len(future_intervals)
+                _LOGGER.debug(
+                    "Average threshold: insufficient past data (have %d intervals, need %d) – using %d future intervals only",
+                    len(past_intervals),
+                    past_intervals_needed,
+                    future_count,
+                )
+        else:
+            # Enough future data
+            combined_intervals = future_intervals
+            past_count = 0
+            future_count = len(future_intervals)
+
             _LOGGER.debug(
-                "Calculated average threshold from %d future prices: %.4f €/kWh",
-                len(future_prices), average
+                "Average threshold: using %d future intervals (%.1fh total)",
+                future_count, future_count * interval_duration.total_seconds() / 3600
+            )
+
+        # Calculate average from combined intervals
+        if combined_intervals:
+            prices = [p for _, p in combined_intervals]
+            average = sum(prices) / len(prices)
+            _LOGGER.debug(
+                "Calculated average threshold: %.4f €/kWh from %d intervals",
+                average, len(combined_intervals)
             )
             return round(average, 4)
 

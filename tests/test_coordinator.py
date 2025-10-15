@@ -462,6 +462,54 @@ def test_calculate_average_threshold_skips_past(fake_hass, monkeypatch):
     assert result == pytest.approx(0.1, rel=1e-6)
 
 
+def test_calculate_average_threshold_backfills_with_past(fake_hass, monkeypatch):
+    """With a single future slot, average should backfill ~24h using past data."""
+    base_time = datetime(2025, 10, 14, 22, 45, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    intervals = []
+    # 95 past intervals (15 min cadence) at 0.1 €/kWh base
+    for steps_back in range(95, 0, -1):
+        start = base_time - timedelta(minutes=15 * steps_back)
+        intervals.append(_make_price_interval(start, 100.0))
+
+    # Single future interval with higher price
+    intervals.append(_make_price_interval(base_time, 200.0))
+
+    prices_today = {"BE": intervals}
+
+    result = coordinator._calculate_average_threshold(prices_today, None, None)
+    # Average of 95 * 0.100 + 1 * 0.200 over 96 slots ≈ 0.10104 -> rounded to 0.101
+    assert result == pytest.approx(0.101, rel=1e-6)
+
+
+def test_calculate_average_threshold_insufficient_past_uses_future_only(fake_hass, monkeypatch):
+    """If there aren't enough historical slots, fall back to future-only average."""
+    base_time = datetime(2025, 10, 14, 2, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    intervals = []
+    # Minimal past data (not enough to backfill 24h)
+    intervals.append(_make_price_interval(base_time - timedelta(minutes=15), 90.0))
+    intervals.append(_make_price_interval(base_time - timedelta(minutes=30), 95.0))
+
+    # Two future intervals that should dominate the average
+    intervals.append(_make_price_interval(base_time, 100.0))
+    intervals.append(_make_price_interval(base_time + timedelta(minutes=15), 130.0))
+
+    prices_today = {"BE": intervals}
+
+    result = coordinator._calculate_average_threshold(prices_today, None, None)
+    # Future-only average: (0.100 + 0.130) / 2 = 0.115 -> rounded to 0.115
+    assert result == pytest.approx(0.115, rel=1e-6)
+
+
 @pytest.mark.parametrize("use_average", [True, False])
 def test_check_minimum_charging_window(fake_hass, monkeypatch, use_average):
     """Charging window detection honors threshold selection and interval continuity."""
