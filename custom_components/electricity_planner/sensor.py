@@ -33,6 +33,7 @@ from .const import (
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
     DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
     DEFAULT_EMERGENCY_SOC,
+    INTEGRATION_VERSION,
 )
 from .coordinator import ElectricityPlannerCoordinator
 
@@ -61,6 +62,7 @@ async def async_setup_entry(
         PowerAnalysisSensor(coordinator, entry, "_diagnostic"),
         DataAvailabilitySensor(coordinator, entry, "_diagnostic"),
         DecisionDiagnosticsSensor(coordinator, entry, "_diagnostic"),
+        ForecastInsightsSensor(coordinator, entry, "_diagnostic"),
         PriceThresholdSensor(coordinator, entry, "_diagnostic"),
         FeedinPriceThresholdSensor(coordinator, entry, "_diagnostic"),
         BuyPriceMarginSensor(coordinator, entry, "_diagnostic"),
@@ -98,9 +100,9 @@ class ElectricityPlannerSensorBase(CoordinatorEntity, SensorEntity):
         self._attr_device_info = {
             "identifiers": {(DOMAIN, device_id)},
             "name": device_name,
-            "manufacturer": "Custom",
+            "manufacturer": "Electricity Planner",
             "model": "Electricity Planner",
-            "sw_version": "1.0.0",
+            "sw_version": INTEGRATION_VERSION,
         }
 
 
@@ -460,7 +462,12 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "battery_reason": self.coordinator.data.get("battery_grid_charging_reason", ""),
                 "car_reason": self.coordinator.data.get("car_grid_charging_reason", ""),
                 "feedin_reason": self.coordinator.data.get("feedin_solar_reason", ""),
+                "manual_overrides": self.coordinator.data.get("manual_overrides", {}),
             },
+
+            # Strategy evaluation order
+            "strategy_trace": self.coordinator.data.get("strategy_trace", []),
+            "forecast_summary": self.coordinator.data.get("forecast_summary", {}),
 
             # Power outputs
             "power_outputs": {
@@ -587,6 +594,38 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
             return False
 
         return is_low_price and significant_price_drop and average_soc > predictive_min_soc
+
+
+class ForecastInsightsSensor(ElectricityPlannerSensorBase):
+    """Sensor exposing upcoming price forecast insights."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        """Initialize the forecast sensor."""
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Price Forecast Insights"
+        self._attr_unique_id = f"{entry.entry_id}_forecast_insights"
+        self._attr_icon = "mdi:chart-line"
+        self._attr_native_unit_of_measurement = "€/kWh"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the cheapest upcoming interval price."""
+        if not self.coordinator.data:
+            return None
+        summary = self.coordinator.data.get("forecast_summary")
+        if not summary or not summary.get("available"):
+            return None
+        return summary.get("cheapest_interval_price")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return detailed forecast data."""
+        if not self.coordinator.data:
+            return {}
+        summary = self.coordinator.data.get("forecast_summary")
+        if not summary:
+            return {}
+        return summary.copy()
 
 
 class PriceThresholdSensor(ElectricityPlannerSensorBase):

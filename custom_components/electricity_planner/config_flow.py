@@ -446,24 +446,20 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Manage the options."""
         if user_input is not None:
-            updated_data = dict(self.config_entry.data)
+            # Extract dynamic battery capacity fields and move them under a dedicated key.
+            updated_options = dict(user_input)
 
             battery_entities = user_input.get(CONF_BATTERY_SOC_ENTITIES, [])
             battery_capacities = {}
 
             for entity_id in battery_entities:
                 entity_key = f"capacity_{entity_id.replace('.', '_')}"
-                if entity_key in user_input:
-                    battery_capacities[entity_id] = user_input[entity_key]
-                    user_input.pop(entity_key, None)
+                if entity_key in updated_options:
+                    battery_capacities[entity_id] = updated_options.pop(entity_key)
 
-            user_input[CONF_BATTERY_CAPACITIES] = battery_capacities
-            updated_data.update(user_input)
+            updated_options[CONF_BATTERY_CAPACITIES] = battery_capacities
 
-            self.hass.config_entries.async_update_entry(
-                self.config_entry, data=updated_data
-            )
-            return self.async_create_entry(title="", data={})
+            return self.async_create_entry(title="", data=updated_options)
 
         current_config = self.config_entry.data
 

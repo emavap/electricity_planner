@@ -63,6 +63,48 @@
       "already_configured": "Device is already configured"
     }
   },
+  "services": {
+    "set_manual_override": {
+      "name": "Set Manual Override",
+      "description": "Force battery or car charging decisions (charge or wait) for a specified duration.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "Optional config entry ID of the Electricity Planner instance (required when multiple instances are configured)."
+        },
+        "target": {
+          "name": "Target",
+          "description": "Which system to override: battery, car, or both."
+        },
+        "action": {
+          "name": "Action",
+          "description": "Force charge (enable charging) or force wait (disable charging)."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "Override duration in minutes (1-1440). Optional - omit for indefinite override."
+        },
+        "reason": {
+          "name": "Reason",
+          "description": "Optional reason for the override (for logging and diagnostics)."
+        }
+      }
+    },
+    "clear_manual_override": {
+      "name": "Clear Manual Override",
+      "description": "Remove active manual overrides and return to automatic decision making.",
+      "fields": {
+        "entry_id": {
+          "name": "Config Entry ID",
+          "description": "Optional config entry ID of the Electricity Planner instance (required when multiple instances are configured)."
+        },
+        "target": {
+          "name": "Target",
+          "description": "Which system to clear: battery, car, or both (default: both)."
+        }
+      }
+    }
+  },
   "options": {
     "step": {
       "init": {

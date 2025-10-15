@@ -714,6 +714,7 @@ class ChargingDecisionEngine:
             return {
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": "No battery entities configured",
+                "strategy_trace": [],
             }
 
         if not battery_analysis.get("batteries_available", True):
@@ -723,6 +724,7 @@ class ChargingDecisionEngine:
                     "validation_status",
                     "Battery data unavailable"
                 ),
+                "strategy_trace": [],
             }
 
         if battery_analysis.get("batteries_full"):
@@ -730,12 +732,14 @@ class ChargingDecisionEngine:
             return {
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": f"Batteries above {max_threshold}% SOC",
+                "strategy_trace": [],
             }
 
         if not price_analysis.get("data_available", True):
             return {
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": "No price data available",
+                "strategy_trace": [],
             }
 
         # Early return: If significant solar available + medium/high SOC
@@ -757,6 +761,7 @@ class ChargingDecisionEngine:
                     f"SOC {average_soc:.0f}% ≥ {surplus_block_soc}% so waiting for free solar "
                     f"(even at very low prices)"
                 ),
+                "strategy_trace": [],
             }
 
         # Create context for strategies
@@ -771,10 +776,12 @@ class ChargingDecisionEngine:
 
         # Use strategy manager
         should_charge, reason = self.strategy_manager.evaluate(context)
+        trace = self.strategy_manager.get_last_trace()
 
         return {
             "battery_grid_charging": should_charge,
             "battery_grid_charging_reason": reason,
+            "strategy_trace": trace,
         }
 
     def _decide_car_grid_charging(

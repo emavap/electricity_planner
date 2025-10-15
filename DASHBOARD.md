@@ -111,11 +111,11 @@ Some advanced visualizations require custom cards:
    ```
    - Required for: Nord Pool price chart, price trends, battery analysis, power flow, price position charts
 
-2. **Button Card** (Optional)
+2. **Button Card** (Required for manual overrides)
    ```
    Install via HACS: https://github.com/custom-cards/button-card
    ```
-   - Required for: Manual override buttons
+   - Used for: Manual override buttons with dynamic duration prompt
 
 ### Step 3: Configure Nord Pool Integration (Required for price chart)
 To enable the Nord Pool price visualization:
@@ -162,6 +162,10 @@ Update the YAML configurations to match your actual entity names:
 10. Click **SAVE**
 
 **Note**: The Nord Pool price chart requires ApexCharts Card to be installed and the Nord Pool config entry to be configured in Electricity Planner settings.
+
+> 💡 If you run multiple Electricity Planner instances, add `entry_id: YOUR_ENTRY_ID` to each manual override button’s `service` data block so the service targets the correct coordinator.
+
+> ℹ️ Manual override buttons prompt you for the duration (in minutes) when tapped. Enter a value between 1 and 1440; the default is 120 if you cancel or provide invalid input.
 
 ## 📱 Mobile Optimization
 
