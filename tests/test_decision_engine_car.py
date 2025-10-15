@@ -1,4 +1,6 @@
 """Unit tests for car charging decisions in the decision engine."""
+import pytest
+
 from custom_components.electricity_planner.decision_engine import ChargingDecisionEngine
 
 
@@ -18,6 +20,10 @@ def test_car_uses_grid_when_price_low_even_with_solar_allocation():
         "is_low_price": True,
         "very_low_price": False,
     }
+    data = {
+        "previous_car_charging": False,
+        "has_min_charging_window": True,
+    }
     decision = engine._decide_car_grid_charging(
         price_analysis,
         battery_analysis={
@@ -27,7 +33,7 @@ def test_car_uses_grid_when_price_low_even_with_solar_allocation():
             "batteries_full": True,
         },
         power_allocation={"solar_for_car": 1800},
-        data={"previous_car_charging": False, "has_min_charging_window": True},
+        data=data,
     )
 
     assert decision["car_grid_charging"] is True
@@ -36,6 +42,7 @@ def test_car_uses_grid_when_price_low_even_with_solar_allocation():
     assert "solar" in reason
     assert "starting" in reason
     assert "car_solar_only" not in decision
+    assert data["car_charging_locked_threshold"] == pytest.approx(0.15, rel=1e-6)
 
 
 def test_car_limits_to_solar_only_when_price_high():
@@ -94,6 +101,64 @@ def test_car_does_not_wait_for_future_price_drop():
 
     assert decision["car_grid_charging"] is True
     assert "Low price" in decision["car_grid_charging_reason"]
+
+
+def test_car_continues_when_threshold_drops_but_price_below_lock():
+    """Car should continue charging if threshold drops but price still below locked value."""
+    engine = _create_engine()
+
+    price_analysis = {
+        "data_available": True,
+        "current_price": 0.18,
+        "price_threshold": 0.15,  # new lower threshold
+        "is_low_price": False,
+        "very_low_price": False,
+    }
+    data = {
+        "previous_car_charging": True,
+        "has_min_charging_window": True,
+        "car_charging_locked_threshold": 0.20,
+    }
+
+    decision = engine._decide_car_grid_charging(
+        price_analysis,
+        battery_analysis={},
+        power_allocation={"solar_for_car": 0},
+        data=data,
+    )
+
+    assert decision["car_grid_charging"] is True
+    assert "continuing" in decision["car_grid_charging_reason"]
+    assert data["car_charging_locked_threshold"] == pytest.approx(0.20, rel=1e-6)
+
+
+def test_car_stops_when_price_exceeds_locked_threshold():
+    """Car should stop when price rises above the locked threshold floor."""
+    engine = _create_engine()
+
+    price_analysis = {
+        "data_available": True,
+        "current_price": 0.23,
+        "price_threshold": 0.15,
+        "is_low_price": False,
+        "very_low_price": False,
+    }
+    data = {
+        "previous_car_charging": True,
+        "has_min_charging_window": True,
+        "car_charging_locked_threshold": 0.20,
+    }
+
+    decision = engine._decide_car_grid_charging(
+        price_analysis,
+        battery_analysis={},
+        power_allocation={"solar_for_car": 0},
+        data=data,
+    )
+
+    assert decision["car_grid_charging"] is False
+    assert data["car_charging_locked_threshold"] is None
+    assert "Price exceeded threshold" in decision["car_grid_charging_reason"]
 
 
 def test_solar_not_allocated_to_car_until_batteries_high_soc():

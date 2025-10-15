@@ -246,6 +246,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             self.config.get(CONF_MONTHLY_GRID_PEAK_ENTITY)
         )
 
+        # Preserve car charging locked threshold across updates (for threshold continuity)
+        data["car_charging_locked_threshold"] = self.data.get("car_charging_locked_threshold") if self.data else None
+
 
 
         data["transport_cost"] = await self._get_state_value(

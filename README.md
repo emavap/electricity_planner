@@ -60,9 +60,10 @@ Electricity Planner is a Home Assistant custom integration that turns Nord Pool 
 4. **Power analysis** – real-time solar production, house consumption, solar surplus and EV draw; flag “significant” surplus once it exceeds the configured watt threshold.
 5. **Solar allocation** – reserve surplus for the EV’s current draw, then batteries, then bonus EV power once every battery is near its target SOC. Allocation never exceeds the measured surplus.
 6. **Strategy evaluation** – ordered strategy set (Emergency, Solar priority, Very low price, Dynamic pricing, Predictive wait, Solar-aware, SOC safety nets) returns “charge” or “wait” with a human-readable reason.
-7. **Car decision logic** – applies hysteresis for OFF→ON transitions only:
+7. **Car decision logic** – applies hysteresis for OFF→ON transitions with threshold floor protection:
    - **OFF → ON**: Requires current price below threshold AND next N hours (configurable, default 2h) all below threshold
    - **ON → OFF**: Immediately when current price exceeds threshold
+   - **Threshold floor**: Locks threshold when starting, uses `max(locked, current)` during session to prevent mid-session interruptions from threshold drift
    - Uses exact interval resolution detection (15-min or hourly) with gap detection
    - Very-low prices still require the minimum window before starting
 8. **Feed-in & safety outputs** – compute charger limit, grid setpoint, and whether to export surplus via the configured feed-in pricing model.
@@ -170,6 +171,7 @@ For a ready-made Lovelace layout, mount the Nord Pool prices and diagnostic sens
 - **Price unavailable** – ensure Nord Pool entities update at least hourly; during brief refresh periods, dynamic pricing tolerates `None` values.
 - **Transport cost jumps** – the coordinator builds a 7-day history. Until enough minutes are captured, the fallback is the live transport cost sensor.
 - **Car ignores very-low prices** – check `has_min_charging_window` in diagnostics. The car will only start (OFF→ON) if the next N hours (default 2h, configurable via `min_car_charging_duration`) are all below threshold. Once charging (ON state), it continues until price exceeds threshold. Adjust `min_car_charging_duration` to require shorter/longer guaranteed windows.
+- **Car stops mid-session unexpectedly** – check debug logs for threshold floor messages. The threshold floor pattern locks the price threshold when charging starts and uses `max(locked, current)` during the session. This prevents threshold drift (e.g., from 24h rolling average updates) from interrupting active charging. Threshold increases are still honored immediately.
 - **Feed-in never triggers** – verify `remaining_solar` in `power_allocation`, and ensure your feed-in multiplier/offset produce a net value above the threshold.
 - **Batteries never reach 100 %** – adjust `max_soc_threshold` upward, or reduce `significant_solar_threshold` if surplus is frequently just below the default 1 kW.
 
