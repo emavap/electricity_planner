@@ -5,6 +5,22 @@ All notable changes to the Electricity Planner integration will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2025-10-15
+
+### Fixed
+- **Car Charging Window Validation** - Fixed `_check_minimum_charging_window()` to ensure continuous low-price windows start NOW
+  - Previously: Method could find any 2-hour window in the future and approve charging immediately
+  - Now: Only approves if current time is within a continuous N-hour low-price window
+  - Improved interval handling to include currently active intervals
+  - Added automatic interval resolution detection (15-min vs hourly)
+  - Added gap detection with 5-second tolerance for consecutive intervals
+  - Counts only time remaining from NOW forward, not past portions of intervals
+
+### Improved
+- **Clearer Hysteresis Documentation** - Added detailed explanation of OFF→ON vs ON→OFF behavior
+- **Better Logging** - Enhanced debug messages show why windows are rejected
+- **Robust Timeline Building** - Explicit start/end times for all intervals handle missing data gracefully
+
 ## [2.2.0] - 2024-01-10
 
 ### Changed

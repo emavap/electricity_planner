@@ -532,10 +532,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         transport_lookup: list[dict[str, Any]] | None,
         current_transport_cost: float | None
     ) -> bool:
-        """Check if there are at least 2 consecutive hours of low prices starting now.
+        """Check if there are at least N consecutive hours of low prices starting from NOW.
 
-        Returns True if the current price and the next 2 hours are all below threshold.
-        This prevents car charging from starting for very short low-price periods.
+        This is used for the OFF → ON transition: only allow car charging to start
+        if the price will stay low for the configured duration (default 2 hours).
+
+        Returns True if all prices from NOW for the next N hours are below threshold.
+        Returns False if any price in the next N hours exceeds threshold.
         """
         if not prices_today and not prices_tomorrow:
             return False
@@ -625,8 +628,6 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     if start_time is None:
                         continue
                     start_time_utc = dt_util.as_utc(start_time)
-                    if start_time_utc < now:
-                        continue  # Skip past intervals
 
                     end_time = None
                     end_time_str = interval.get("end")
@@ -637,6 +638,16 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                                 end_time = None
                         except Exception:
                             end_time = None
+
+                    # Skip intervals that have completely ended
+                    # Include current interval (even if it started in the past but is still active)
+                    if end_time is not None:
+                        if end_time <= now:
+                            continue  # Interval has ended
+                    else:
+                        # No end time specified, assume hourly interval
+                        if start_time_utc < now - timedelta(hours=1):
+                            continue  # Interval started >1h ago, likely ended
 
                     # Extract and convert price
                     price_value = None
@@ -686,53 +697,122 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         if not future_intervals:
             return False
 
-        # Check if we have at least N hours of consecutive low prices (configurable)
-        # We need the current interval + at least N more hours (depends on Nord Pool interval duration)
+        # Determine the most likely interval resolution so we can safely handle
+        # entries that do not provide an explicit end timestamp (Nord Pool often omits it).
+        estimated_resolution: timedelta | None = None
+        for idx in range(len(future_intervals) - 1):
+            current_start = future_intervals[idx][0]
+            next_start = future_intervals[idx + 1][0]
+            delta = next_start - current_start
+            if delta <= timedelta(0):
+                continue
+            if estimated_resolution is None or delta < estimated_resolution:
+                estimated_resolution = delta
+
+        if estimated_resolution is None or estimated_resolution <= timedelta(0):
+            estimated_resolution = timedelta(minutes=15)
+
+        # Build a timeline with concrete end times for each interval
+        timeline: list[tuple[datetime, datetime, float]] = []
+        for idx, (start_time, end_time, price) in enumerate(future_intervals):
+            if end_time and end_time > start_time:
+                interval_end = end_time
+            elif idx + 1 < len(future_intervals):
+                next_start = future_intervals[idx + 1][0]
+                if next_start > start_time:
+                    interval_end = next_start
+                else:
+                    interval_end = start_time + estimated_resolution
+            else:
+                interval_end = start_time + estimated_resolution
+
+            if interval_end <= start_time:
+                continue
+
+            timeline.append((start_time, interval_end, price))
+
+        if not timeline:
+            return False
+
+        # Identify the interval that covers the current time
+        current_idx: int | None = None
+        for idx, (start_time, interval_end, _) in enumerate(timeline):
+            if interval_end <= now:
+                continue
+            if start_time <= now < interval_end:
+                current_idx = idx
+                break
+
+        if current_idx is None:
+            _LOGGER.debug("No active Nord Pool interval covering current time %s", now.isoformat())
+            return False
+
         min_duration_hours = self.config.get(
             CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION
         )
-        current_time = now
-        low_price_duration = timedelta(hours=0)
+        required_duration = timedelta(hours=min_duration_hours)
 
-        for idx, (start_time, end_time, price) in enumerate(future_intervals):
-            if price > threshold:
-                # Hit a high price, reset counter
-                low_price_duration = timedelta(hours=0)
-                current_time = start_time
-                continue
+        current_start, current_end, current_price = timeline[current_idx]
+        if current_price > threshold:
+            _LOGGER.debug(
+                "Current price %.4f €/kWh exceeds threshold %.4f €/kWh - no charging window starting now",
+                current_price,
+                threshold,
+            )
+            return False
 
-            # Check if this interval is continuous with our window
-            if low_price_duration == timedelta(hours=0):
-                # Starting a new window
-                current_time = start_time
+        low_price_duration = current_end - max(now, current_start)
+        if low_price_duration >= required_duration:
+            _LOGGER.debug(
+                "Found %d-hour charging window entirely within current interval (price %.4f €/kWh ≤ %.4f €/kWh)",
+                min_duration_hours,
+                current_price,
+                threshold,
+            )
+            return True
 
-            # Calculate interval duration (look at next interval or assume standard duration)
-            interval_duration: timedelta | None = None
+        # Extend the window with consecutive low-price intervals with no gaps
+        previous_end = current_end
+        for next_idx in range(current_idx + 1, len(timeline)):
+            next_start, next_end, next_price = timeline[next_idx]
 
-            if end_time:
-                interval_duration = end_time - start_time
-
-            if (interval_duration is None or interval_duration <= timedelta(0)) and idx + 1 < len(future_intervals):
-                next_start = future_intervals[idx + 1][0]
-                interval_duration = next_start - start_time
-
-            if interval_duration is None or interval_duration <= timedelta(0):
-                # Could not determine duration safely, skip this interval
-                continue
-
-            low_price_duration += interval_duration
-
-            # Check if we've accumulated enough low-price time
-            if low_price_duration >= timedelta(hours=min_duration_hours):
+            # Any gap in coverage breaks the consecutive window requirement
+            if next_start > previous_end + timedelta(seconds=5):
                 _LOGGER.debug(
-                    "Found minimum charging window: %.1f hours of prices below %.4f €/kWh",
-                    low_price_duration.total_seconds() / 3600, threshold
+                    "Charging window broken by gap between %s and %s",
+                    previous_end.isoformat(),
+                    next_start.isoformat(),
+                )
+                break
+
+            if next_price > threshold:
+                _LOGGER.debug(
+                    "Charging window broken by high price %.4f €/kWh (>%.4f €/kWh)",
+                    next_price,
+                    threshold,
+                )
+                break
+
+            effective_start = max(previous_end, next_start)
+            if next_end <= effective_start:
+                continue
+
+            low_price_duration += next_end - effective_start
+            previous_end = max(previous_end, next_end)
+
+            if low_price_duration >= required_duration:
+                _LOGGER.debug(
+                    "Found %d-hour charging window: %.1f hours of low prices (≤%.4f €/kWh) ahead",
+                    min_duration_hours,
+                    low_price_duration.total_seconds() / 3600,
+                    threshold,
                 )
                 return True
 
         _LOGGER.debug(
-            "No minimum charging window found: only %.1f hours of low prices (need %d)",
-            low_price_duration.total_seconds() / 3600, min_duration_hours
+            "Charging window too short: only %.1f hours of low prices from now (need %d)",
+            low_price_duration.total_seconds() / 3600,
+            min_duration_hours,
         )
         return False
 
