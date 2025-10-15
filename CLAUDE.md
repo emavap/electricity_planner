@@ -41,6 +41,18 @@ The integration uses **price positioning** within daily range (0-100%) rather th
 - Battery SOC: Different logic for batteries above/below 30% SOC
 - Price trends: Considers next hour price improvements for timing
 
+### Average Threshold Calculation
+
+When dynamic threshold mode is enabled, the integration calculates a 24-hour rolling average:
+- **Minimum window**: Forces at least 24 hours of data for stable threshold
+- **Future preference**: Uses future Nord Pool prices when available
+- **Past backfill**: When future < 24h, backfills with recent past prices
+- **Interval detection**: Automatically detects 15-min or 1-hour intervals from data
+- **Graceful degradation**: Falls back to future-only when insufficient past data
+- **Implementation**: `coordinator.py:377-643` (`_calculate_average_threshold`)
+
+This prevents late-evening threshold spikes from sparse data and provides more stable charging decisions, especially beneficial for batteries.
+
 ### Car Charging Hysteresis
 
 The car charging logic implements strict hysteresis to prevent short charging cycles:
@@ -60,7 +72,17 @@ The car charging logic implements strict hysteresis to prevent short charging cy
 - Immediately when current price exceeds threshold
 - No window check needed
 
-**Implementation:** `coordinator.py:528-817` (`_check_minimum_charging_window`)
+**Threshold Floor Pattern:**
+- Locks price threshold when charging starts (OFF→ON)
+- During active charging: uses `max(locked_threshold, current_threshold)` as effective threshold
+- Prevents threshold decreases from stopping mid-session (e.g., when 24h rolling average drops)
+- Allows threshold increases to take effect immediately
+- Clears lock when charging stops (ON→OFF)
+- Critical for charging continuity when using dynamic thresholds
+
+**Implementation:**
+- Window validation: `coordinator.py:528-817` (`_check_minimum_charging_window`)
+- Threshold floor: `decision_engine.py:808-819` (threshold floor logic), `coordinator.py:250` (state storage)
 
 ### Entity Dependencies
 

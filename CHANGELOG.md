@@ -5,6 +5,36 @@ All notable changes to the Electricity Planner integration will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2025-10-15
+
+### Added
+- **Car Charging Threshold Floor** - Prevents mid-session interruptions from threshold drift
+  - Locks price threshold when car starts charging (OFF→ON transition)
+  - Uses `max(locked_threshold, current_threshold)` during active charging
+  - Prevents threshold decreases from stopping charging
+  - Allows threshold increases to take effect immediately
+  - Clears lock when charging stops (ON→OFF transition)
+  - Particularly important with 24h rolling average threshold that can drop when day-ahead data arrives
+
+### Improved
+- **Charging Continuity** - Car charging sessions now complete reliably even when threshold drifts downward
+- **Debug Logging** - Added threshold floor logging showing locked vs current vs effective threshold
+
+## [2.7.0] - 2025-10-15
+
+### Added
+- **24-Hour Minimum Window for Average Threshold** - More stable threshold calculation
+  - Forces minimum 24-hour rolling window for average threshold
+  - Backfills with recent past prices when future data < 24h
+  - Prevents late-evening threshold spikes from sparse data
+  - Gracefully degrades to future-only when insufficient past data available
+  - Dynamic interval resolution detection (15-min or hourly)
+
+### Improved
+- **Threshold Stability** - Eliminates volatility from short future windows
+- **Better for Batteries** - More consistent charging decisions with full 24h context
+- **Robust Past Collection** - Handles missing historical data gracefully
+
 ## [2.6.0] - 2025-10-15
 
 ### Fixed
