@@ -77,6 +77,53 @@ This folder contains example Home Assistant automations that integrate with the 
 
 ---
 
+### 4. Control Luna Battery Forcible Charge (`Control Luna Battery Forcible Charge.yaml`)
+
+**Purpose**: Force-charges Huawei Luna batteries during specific Electricity Planner states (e.g., upcoming price spikes).
+
+**Features**:
+- Uses planner battery charging binary sensor to trigger temporary force-charge
+- Writes desired charge current to Huawei integration service
+- Prevents conflicts with manual overrides via helper toggles
+- Includes safety timeout so batteries revert to planner control automatically
+
+**Required Entities / Helpers**:
+- `binary_sensor.electricity_planner_battery_charge_from_grid` – Planner green light
+- `sensor.electricity_planner_current_electricity_price` – Current tariff (for logging)
+- `switch.huawei_force_charge_enable` – Helper to allow/deny force charging
+- `number.huawei_battery_force_charge_current` – Charge current target
+
+**Triggers**:
+- Planner binary sensor changes
+- Force-charge enable switch toggled
+- Periodic safety check (every 15 minutes)
+
+---
+
+### 5. Recover Nord Pool When Price Sensor Is Unavailable (`Recover Nord Pool when price sensor is unavailable.yaml`)
+
+**Purpose**: Automatically resets the Nord Pool integration when the price sensor goes `unavailable` for an extended period.
+
+**Features**:
+- Watches `sensor.nordpool_kwh_*` entities for `unavailable`/`unknown` states
+- Issues `homeassistant.reload_config_entry` for the Nord Pool config entry
+- Sends persistent notification so you know the reset happened
+- Avoids rapid-fire restarts through a cooldown helper
+
+**Required Entities / Helpers**:
+- `sensor.nordpool_kwh_*` – Your Nord Pool price sensor(s)
+- `input_boolean.nordpool_auto_recover_enabled` – Toggle to enable automation
+- `input_datetime.nordpool_last_recover` – Timestamp helper tracking latest recovery
+- `notify.notify` (or similar) – Notification target
+- Nord Pool config entry ID (configured in the automation)
+
+**Triggers**:
+- Price sensor transitions to `unavailable` for >10 minutes
+- Manual enable switch toggled on
+- Time pattern (every hour) to clear cooldown
+
+---
+
 ## Installation
 
 1. Copy the desired automation YAML file(s) to your Home Assistant configuration
@@ -151,6 +198,6 @@ For issues with:
 
 ## Version
 
-These examples are for **Electricity Planner v2.5.0+**.
+These examples are for **Electricity Planner v2.8.0+**.
 
 **Note on Entity Naming**: Most entities use simple names like `sensor.electricity_planner_current_electricity_price`. Some newer threshold/margin sensors use longer names with `diagnostics_monitoring_` prefix (e.g., `sensor.electricity_planner_diagnostics_monitoring_price_threshold`). Check Developer Tools → States to see the exact entity IDs in your installation.

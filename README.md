@@ -141,6 +141,19 @@ Key attribute groups:
 
 ## 6. Automation & Dashboard Ideas
 
+### Example Library
+
+Looking for ready-made blueprints? The `examples/` folder ships with:
+- **PDF walkthrough** – `examples/Electricity Planner – Home Assistant.pdf` shows a complete dashboard and automation wiring.
+- **Automation collection** – `examples/automations/` contains drop-in YAML snippets:
+  - `car_charger_dynamic_control.yaml` – EV charging orchestration with power limits and price guardrails
+  - `solar_feedin_control.yaml` – inverter throttling to respect feed-in profitability
+  - `victron_grid_setpoint.yaml` – sync grid targets into Victron ESS
+  - `Control Luna Battery Forcible Charge.yaml` – force-charge Huawei Luna batteries on planner triggers
+  - `Recover Nord Pool when price sensor is unavailable.yaml` – automatic fallback when Nord Pool sensors glitch
+
+Copy any of the files into your Home Assistant config and adjust entity IDs as described in `examples/automations/README.md`.
+
 ### Automation Hooks
 
 - Use the `battery_grid_charging` and `car_grid_charging` binary sensors to trigger inverter or EVSE service calls.

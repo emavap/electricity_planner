@@ -1,11 +1,9 @@
 alias: Car Charger Dynamic Control
-description: Control car charging only when car is plugged in with price-based cutoff
+description: Control car charging only when car is plugged in; enforce planner allow/deny
 triggers:
   - entity_id:
       - binary_sensor.electricity_planner_car_charge_from_grid
       - sensor.electricity_planner_car_charger_limit
-      - sensor.electricity_planner_current_electricity_price
-      - input_number.car_charger_price_threshold
     for: "00:02:00"
     trigger: state
   - entity_id: sensor.huawei_charger_plugged_in
@@ -22,57 +20,53 @@ actions:
   - variables:
       charger_is_off: "{{ is_state('switch.evcharger', 'off') }}"
       charge_from_grid: >-
-        {{ is_state('binary_sensor.electricity_planner_car_charge_from_grid',
-        'on') }}
-      price_threshold: "{{ states('input_number.car_charger_price_threshold') | float(0.15) }}"
-      current_price: >-
-        {{ states('sensor.electricity_planner_current_electricity_price') |
-        float(0) }}
-      price_too_high: "{{ current_price > price_threshold }}"
+        {{
+        is_state('binary_sensor.electricity_planner_car_charge_from_grid','on')
+        }}
       charger_recently_turned_on: |
-        {{ (now() - states.switch.evcharger.last_changed).total_seconds() < 300 
+        {{ (now() - states.switch.evcharger.last_changed).total_seconds() < 300
            if states.switch.evcharger.last_changed is defined else false }}
   - choose:
       - conditions:
           - condition: template
             value_template: "{{ charger_is_off and charge_from_grid }}"
         sequence:
-          - target:
+          - action: switch.turn_on
+            target:
               entity_id: switch.evcharger
-            action: switch.turn_on
-          - data:
+          - action: logbook.log
+            data:
               name: Car Charger
-              message: >-
+              message: >
                 Turned ON - Grid charging enabled by planner (waiting for
                 initialization)
-            action: logbook.log
       - conditions:
           - condition: template
             value_template: "{{ not charger_is_off and charger_recently_turned_on }}"
         sequence:
           - variables:
-              sensor_available: >-
-                {{ states('sensor.huawei_charger_plugged_in') not in ['unknown',
-                'unavailable'] }}
-              time_since_on: >-
+              sensor_available: >
+                {{ states('sensor.huawei_charger_plugged_in') not in
+                ['unknown','unavailable'] }}
+              time_since_on: >
                 {{ ((now() -
                 states.switch.evcharger.last_changed).total_seconds() / 60) |
                 round(1) }}
-          - data:
+          - action: logbook.log
+            data:
               name: Car Charger
               message: >
                 Charger initializing ({{ time_since_on }} min) - Sensors: {{
                 'available' if sensor_available else 'not ready' }}
-            action: logbook.log
       - conditions:
           - condition: template
             value_template: "{{ not charger_is_off and not charger_recently_turned_on }}"
         sequence:
           - variables:
-              sensor_available: >-
-                {{ states('sensor.huawei_charger_plugged_in') not in ['unknown',
-                'unavailable'] }}
-              car_plugged_in: >-
+              sensor_available: >
+                {{ states('sensor.huawei_charger_plugged_in') not in
+                ['unknown','unavailable'] }}
+              car_plugged_in: >
                 {{ states('sensor.huawei_charger_plugged_in') | int(0) if
                 sensor_available else 0 }}
               car_is_charging: "{{ car_plugged_in == 3 }}"
@@ -82,95 +76,99 @@ actions:
                   - condition: template
                     value_template: "{{ not sensor_available }}"
                 sequence:
-                  - data:
+                  - action: logbook.log
+                    data:
                       name: Car Charger
-                      message: >-
+                      message: >
                         Warning: Charger sensors still unavailable after
                         initialization period
-                    action: logbook.log
               - conditions:
                   - condition: template
-                    value_template: "{{ sensor_available and car_is_connected }}"
+                    value_template: >-
+                      {{ sensor_available and not charge_from_grid and
+                      car_is_connected }}
+                sequence:
+                  - action: switch.turn_off
+                    target:
+                      entity_id: switch.evcharger
+                  - action: logbook.log
+                    data:
+                      name: Car Charger
+                      message: >
+                        Turned OFF - Charging not allowed by planner (car
+                        connected)
+              - conditions:
+                  - condition: template
+                    value_template: >-
+                      {{ sensor_available and charge_from_grid and
+                      car_is_connected }}
                 sequence:
                   - variables:
-                      min_power_kw: >-
+                      min_power_kw: >
                         {{
-                        state_attr('number.huawei_charger_dynamic_power_limit',
-                        'min') | float(1.4) }}
-                      min_power_w: "{{ min_power_kw * 1000 }}"
-                      current_limit_kw: >-
+                        state_attr('number.huawei_charger_dynamic_power_limit','min')
+                        | float(1.4) }}
+                      max_power_kw: >
+                        {{
+                        state_attr('number.huawei_charger_dynamic_power_limit','max')
+                        | float(7.4) }}
+                      min_power_w: "{{ (min_power_kw * 1000) | float }}"
+                      max_power_w: "{{ (max_power_kw * 1000) | float }}"
+                      current_limit_kw: >
                         {{ states('number.huawei_charger_dynamic_power_limit') |
-                        float(0) }}
-                      current_limit_w: "{{ current_limit_kw * 1000 }}"
-                      planner_limit_w: >-
+                        float(min_power_kw) }}
+                      current_limit_w: "{{ (current_limit_kw * 1000) | float }}"
+                      planner_limit_w_raw: >
                         {{
                         states('sensor.electricity_planner_car_charger_limit') |
                         float(0) }}
-                      target_limit_w: "{{ planner_limit_w }}"
-                      target_limit_kw: "{{ (target_limit_w / 1000) | round(2) }}"
-                      difference_w: "{{ (current_limit_w - target_limit_w) | abs }}"
+                      planner_limit_valid: "{{ planner_limit_w_raw > 0 }}"
+                      target_limit_w: |
+                        {{ planner_limit_w_raw
+                           | iif(planner_limit_valid, planner_limit_w_raw, current_limit_w) }}
+                      target_limit_w_clamped: >
+                        {{ [max_power_w, [min_power_w, target_limit_w] | max] |
+                        min }}
+                      target_limit_kw: "{{ (target_limit_w_clamped / 1000) | round(2) }}"
+                      difference_w: "{{ (current_limit_w - target_limit_w_clamped) | abs }}"
                   - choose:
                       - conditions:
                           - condition: template
-                            value_template: >-
-                              {{ car_is_charging and not charge_from_grid and
-                              price_too_high }}
+                            value_template: "{{ planner_limit_valid and difference_w > 500 }}"
                         sequence:
-                          - target:
-                              entity_id: switch.evcharger
-                            action: switch.turn_off
-                          - data:
+                          - action: number.set_value
+                            target:
+                              entity_id: number.huawei_charger_dynamic_power_limit
+                            data:
+                              value: "{{ target_limit_kw }}"
+                          - action: logbook.log
+                            data:
                               name: Car Charger
                               message: >
-                                Turned OFF - Price too high for battery use ({{
-                                current_price }}€/kWh > {{ price_threshold
-                                }}€/kWh)
-                            action: logbook.log
-                    default:
-                      - choose:
-                          - conditions:
-                              - condition: or
-                                conditions:
-                                  - condition: template
-                                    value_template: "{{ not charge_from_grid }}"
-                                  - condition: and
-                                    conditions:
-                                      - condition: template
-                                        value_template: "{{ charge_from_grid }}"
-                                      - condition: or
-                                        conditions:
-                                          - condition: template
-                                            value_template: >-
-                                              {{ (current_limit_w <= min_power_w and
-                                              target_limit_w > min_power_w) or 
-                                                 (current_limit_w > min_power_w and target_limit_w <= min_power_w) }}
-                                          - condition: template
-                                            value_template: "{{ difference_w > 500 }}"
-                            sequence:
-                              - target:
-                                  entity_id: number.huawei_charger_dynamic_power_limit
-                                data:
-                                  value: "{{ target_limit_kw }}"
-                                action: number.set_value
-                              - data:
-                                  name: Car Charger
-                                  message: >
-                                    Power adjusted from {{ current_limit_w |
-                                    round(0) }}W to {{ target_limit_w | round(0)
-                                    }}W (Status: {{ 'Charging' if
-                                    car_is_charging else 'Connected' }}) {% if
-                                    not charge_from_grid %}(No grid charging
-                                    mode - Price: {{ current_price }}€/kWh){%
-                                    endif %}
-                                action: logbook.log
+                                Power adjusted from {{ current_limit_w |
+                                round(0) }}W to {{ target_limit_w_clamped |
+                                round(0) }}W (Status: {{ 'Charging' if
+                                car_is_charging else 'Connected' }})
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ not planner_limit_valid }}"
+                        sequence:
+                          - action: logbook.log
+                            data:
+                              name: Car Charger
+                              message: >
+                                Planner limit unavailable/zero; leaving charger
+                                at {{ current_limit_w | round(0) }}W (Status: {{
+                                'Charging' if car_is_charging else 'Connected'
+                                }})
               - conditions:
                   - condition: template
                     value_template: "{{ sensor_available and not car_is_connected }}"
                 sequence:
-                  - data:
+                  - action: logbook.log
+                    data:
                       name: Car Charger
-                      message: >-
+                      message: >
                         Charger ready, no car connected (status: {{
                         car_plugged_in }})
-                    action: logbook.log
 mode: single

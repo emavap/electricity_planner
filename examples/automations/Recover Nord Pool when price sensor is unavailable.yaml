@@ -1,0 +1,16 @@
+alias: Recover Nord Pool when price sensor is unavailable
+description: ""
+triggers:
+  - entity_id: sensor.nord_pool_be_current_price
+    to: unavailable
+    for: "00:01:00"
+    trigger: state
+conditions: []
+actions:
+  - action: homeassistant.reload_config_entry
+    data: {}
+    target:
+      device_id: e786c542f81463217b11074f0ae5d71f
+  - delay: "00:00:15"
+mode: single
+max_exceeded: silent
