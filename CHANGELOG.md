@@ -5,6 +5,22 @@ All notable changes to the Electricity Planner integration will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2025-10-18
+
+### Added
+- **Manual Override Services** – new `set_manual_override` / `clear_manual_override` domain services with duration and reason support, exposed in Lovelace for one-touch boosts or pauses.
+- **Forecast Insights Sensor** – `sensor.electricity_planner_price_forecast_insights` surfaces the cheapest upcoming interval and best charging window in diagnostics dashboards.
+- **Strategy Trace & Diagnostics** – decision diagnostics now include strategy evaluation traces plus live override metadata to aid troubleshooting.
+
+### Changed
+- **Options Flow** – writes changes to config entry options (instead of data) and persists per-battery capacity inputs without mutating the original entry.
+- **Service UX** – services auto-select the sole coordinator when only one instance is running; `entry_id` is now optional in both UI strings and Lovelace calls.
+- **Dashboard** – bundled dashboard YAML shows manual override status and includes ready-made buttons leveraging the new services.
+
+### Fixed
+- **Negative Price Windows** – forecast window logic accounts for zero or negative €/kWh pricing while still exposing the best average price.
+- **Manual Override Expiry** – overrides clear cleanly after expiry and strategy traces note overrides explicitly, preventing stale decisions.
+
 ## [2.8.0] - 2025-10-15
 
 ### Added

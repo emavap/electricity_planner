@@ -84,3 +84,20 @@ ATTR_CHARGER_LIMIT = "charger_limit"
 ATTR_GRID_SETPOINT = "grid_setpoint"
 ATTR_FEEDIN_SOLAR = "feedin_solar"
 ATTR_FEEDIN_REASON = "feedin_reason"
+
+SERVICE_SET_MANUAL_OVERRIDE = "set_manual_override"
+SERVICE_CLEAR_MANUAL_OVERRIDE = "clear_manual_override"
+
+ATTR_ENTRY_ID = "entry_id"
+ATTR_TARGET = "target"
+ATTR_ACTION = "action"
+ATTR_DURATION = "duration"
+ATTR_REASON = "reason"
+
+MANUAL_OVERRIDE_ACTION_FORCE_CHARGE = "force_charge"
+MANUAL_OVERRIDE_ACTION_FORCE_WAIT = "force_wait"
+MANUAL_OVERRIDE_TARGET_BATTERY = "battery"
+MANUAL_OVERRIDE_TARGET_CAR = "car"
+MANUAL_OVERRIDE_TARGET_BOTH = "both"
+
+INTEGRATION_VERSION = "3.0.0"

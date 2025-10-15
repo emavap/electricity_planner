@@ -198,6 +198,6 @@ For issues with:
 
 ## Version
 
-These examples are for **Electricity Planner v2.8.0+**.
+These examples are for **Electricity Planner v3.0.0+**.
 
 **Note on Entity Naming**: Most entities use simple names like `sensor.electricity_planner_current_electricity_price`. Some newer threshold/margin sensors use longer names with `diagnostics_monitoring_` prefix (e.g., `sensor.electricity_planner_diagnostics_monitoring_price_threshold`). Check Developer Tools → States to see the exact entity IDs in your installation.

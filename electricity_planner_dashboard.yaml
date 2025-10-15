@@ -3,7 +3,7 @@
 # This dashboard uses dynamic thresholds that update in real-time:
 # - Buy price gauge: green → yellow (dynamic threshold) → red (max threshold)
 # - Feed-in price gauge: red (negative) → yellow (zero) → green (feed-in threshold)
-
+# - Manual override buttons rely on `custom:button-card` (install via HACS) and prompt for duration dynamically
 views:
   - title: Electricity Planner
     path: electricity-planner
@@ -150,6 +150,116 @@ views:
                 attribute: reason
                 name: Car reason
 
+          - type: markdown
+            title: Manual override status
+            content: >
+              {% set overrides = state_attr('sensor.electricity_planner_decision_diagnostics',
+              'manual_overrides') %}
+              {% if overrides and overrides | length > 0 %}
+              {% for key, value in overrides.items() %}
+              **{{ key | replace('_', ' ') | title }}:** {{ 'charging' if value.value
+              else 'waiting' }}{% if value.expires_at %} (until {{
+              as_datetime(value.expires_at).astimezone().strftime('%H:%M') }}){% endif
+              %}{% if value.reason %} — {{ value.reason }}{% endif %}
+
+              {% endfor %}
+              {% else %}
+              _No manual overrides active_
+              {% endif %}
+
+          - type: grid
+            square: false
+            columns: 3
+            cards:
+              - type: custom:button-card
+                name: Battery charge
+                icon: mdi:battery-arrow-up
+                tap_action:
+                  action: call-service
+                  service: electricity_planner.set_manual_override
+                  data:
+                    target: battery
+                    action: force_charge
+                    duration: |
+                      [[[
+                        const input = prompt('Battery override duration (minutes)', '120');
+                        const minutes = parseInt(input, 10);
+                        if (!Number.isFinite(minutes)) return 120;
+                        return Math.min(Math.max(minutes, 1), 1440);
+                      ]]]
+                    reason: "Dashboard boost"
+              - type: custom:button-card
+                name: Battery wait
+                icon: mdi:battery-remove
+                tap_action:
+                  action: call-service
+                  service: electricity_planner.set_manual_override
+                  data:
+                    target: battery
+                    action: force_wait
+                    duration: |
+                      [[[
+                        const input = prompt('Battery override duration (minutes)', '120');
+                        const minutes = parseInt(input, 10);
+                        if (!Number.isFinite(minutes)) return 120;
+                        return Math.min(Math.max(minutes, 1), 1440);
+                      ]]]
+                    reason: "Dashboard pause"
+              - type: custom:button-card
+                name: Battery auto
+                icon: mdi:restore
+                tap_action:
+                  action: call-service
+                  service: electricity_planner.clear_manual_override
+                  data:
+                    target: battery
+
+          - type: grid
+            square: false
+            columns: 3
+            cards:
+              - type: custom:button-card
+                name: Car charge
+                icon: mdi:car-arrow-right
+                tap_action:
+                  action: call-service
+                  service: electricity_planner.set_manual_override
+                  data:
+                    target: car
+                    action: force_charge
+                    duration: |
+                      [[[
+                        const input = prompt('Car override duration (minutes)', '120');
+                        const minutes = parseInt(input, 10);
+                        if (!Number.isFinite(minutes)) return 120;
+                        return Math.min(Math.max(minutes, 1), 1440);
+                      ]]]
+                    reason: "Dashboard boost"
+              - type: custom:button-card
+                name: Car wait
+                icon: mdi:car-clock
+                tap_action:
+                  action: call-service
+                  service: electricity_planner.set_manual_override
+                  data:
+                    target: car
+                    action: force_wait
+                    duration: |
+                      [[[
+                        const input = prompt('Car override duration (minutes)', '120');
+                        const minutes = parseInt(input, 10);
+                        if (!Number.isFinite(minutes)) return 120;
+                        return Math.min(Math.max(minutes, 1), 1440);
+                      ]]]
+                    reason: "Dashboard pause"
+              - type: custom:button-card
+                name: Clear overrides
+                icon: mdi:flash-off
+                tap_action:
+                  action: call-service
+                  service: electricity_planner.clear_manual_override
+                  data:
+
           - type: grid
             square: false
             columns: 2
@@ -187,6 +297,31 @@ views:
                   **Feed-in threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float | round(4) }} €/kWh
 
                   _Note: To toggle average threshold mode, go to Settings → Devices & Services → Electricity Planner → Configure_
+
+          - type: markdown
+            title: Price Forecast Insights
+            content: |
+              {% set forecast_available = state_attr('sensor.electricity_planner_price_forecast_insights', 'available') %}
+              {% if forecast_available %}
+              **Cheapest upcoming interval:**
+
+              - **Time:** {{ as_datetime(state_attr('sensor.electricity_planner_price_forecast_insights', 'cheapest_interval_start')).strftime('%a %H:%M') }} - {{ as_datetime(state_attr('sensor.electricity_planner_price_forecast_insights', 'cheapest_interval_end')).strftime('%H:%M') }}
+              - **Price:** {{ states('sensor.electricity_planner_price_forecast_insights') | float | round(4) }} €/kWh
+
+              {% set best_window_start = state_attr('sensor.electricity_planner_price_forecast_insights', 'best_window_start') %}
+              {% if best_window_start %}
+              **Best charging window ({{ state_attr('sensor.electricity_planner_price_forecast_insights', 'best_window_hours') }}h):**
+
+              - **Time:** {{ as_datetime(best_window_start).strftime('%a %H:%M') }} - {{ as_datetime(state_attr('sensor.electricity_planner_price_forecast_insights', 'best_window_end')).strftime('%H:%M') }}
+              - **Average price:** {{ state_attr('sensor.electricity_planner_price_forecast_insights', 'best_window_average_price') | float | round(4) }} €/kWh
+              {% else %}
+              **Best charging window:** Not enough consecutive low-price hours available
+              {% endif %}
+
+              _Evaluated at {{ as_datetime(state_attr('sensor.electricity_planner_price_forecast_insights', 'evaluated_at')).strftime('%H:%M') }}_
+              {% else %}
+              _Forecast not available - waiting for price data_
+              {% endif %}
 
           - type: entities
             title: Power controls

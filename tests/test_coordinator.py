@@ -16,9 +16,13 @@ from homeassistant.util import dt as dt_util
 from custom_components.electricity_planner import coordinator as coordinator_module
 from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
 from custom_components.electricity_planner.const import (
+    ATTR_ACTION,
+    ATTR_ENTRY_ID,
+    ATTR_TARGET,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_CURRENT_PRICE_ENTITY,
+    CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     CONF_HIGHEST_PRICE_ENTITY,
     CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_LOWEST_PRICE_ENTITY,
@@ -29,7 +33,14 @@ from custom_components.electricity_planner.const import (
     CONF_USE_AVERAGE_THRESHOLD,
     DEFAULT_MIN_CAR_CHARGING_DURATION,
     DOMAIN,
+    MANUAL_OVERRIDE_ACTION_FORCE_CHARGE,
+    MANUAL_OVERRIDE_ACTION_FORCE_WAIT,
+    MANUAL_OVERRIDE_TARGET_BATTERY,
+    MANUAL_OVERRIDE_TARGET_CAR,
+    SERVICE_CLEAR_MANUAL_OVERRIDE,
+    SERVICE_SET_MANUAL_OVERRIDE,
 )
+from homeassistant.exceptions import HomeAssistantError
 
 
 class FakeState:
@@ -51,9 +62,16 @@ class FakeStates:
 class FakeServices:
     def __init__(self):
         self.calls: list[tuple[str, str, dict]] = []
+        self.registered: dict[tuple[str, str], dict] = {}
 
     async def async_call(self, domain, service, data, blocking=False, context=None):
         self.calls.append((domain, service, data))
+
+    def async_register(self, domain, service, handler, schema=None):
+        self.registered[(domain, service)] = {
+            "handler": handler,
+            "schema": schema,
+        }
 
 
 class FakeHass:
@@ -89,8 +107,8 @@ def _base_config():
     }
 
 
-def _create_coordinator(fake_hass, config, monkeypatch):
-    entry = MockConfigEntry(domain=DOMAIN, data=config)
+def _create_coordinator(fake_hass, config, monkeypatch, options=None):
+    entry = MockConfigEntry(domain=DOMAIN, data=config, options=options or {})
     monkeypatch.setattr(
         coordinator_module.ElectricityPlannerCoordinator,
         "_setup_entity_listeners",
@@ -98,6 +116,19 @@ def _create_coordinator(fake_hass, config, monkeypatch):
     )
     coordinator = ElectricityPlannerCoordinator(fake_hass, entry)
     return coordinator
+
+
+def test_coordinator_merges_entry_options(fake_hass, monkeypatch):
+    config = _base_config()
+    config[CONF_PRICE_THRESHOLD] = 0.12
+    options = {
+        CONF_PRICE_THRESHOLD: 0.05,
+        CONF_DYNAMIC_THRESHOLD_CONFIDENCE: 80,
+    }
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch, options)
+
+    assert coordinator.config[CONF_PRICE_THRESHOLD] == 0.05
+    assert coordinator.config[CONF_DYNAMIC_THRESHOLD_CONFIDENCE] == 80
 
 
 @pytest.mark.asyncio
@@ -542,8 +573,16 @@ def test_check_minimum_charging_window(fake_hass, monkeypatch, use_average):
     ]
     prices_today = {"BE": intervals}
 
+    average = coordinator._calculate_average_threshold(prices_today, None, transport_lookup)
+
     # Average threshold ≈ 0.075 -> qualifies when using average, fails fixed (0.07)
-    result = coordinator._check_minimum_charging_window(prices_today, None, transport_lookup, None)
+    result = coordinator._check_minimum_charging_window(
+        prices_today,
+        None,
+        transport_lookup,
+        None,
+        average,
+    )
 
     if use_average:
         assert result is True
@@ -573,7 +612,9 @@ def test_check_minimum_charging_window_respects_duration(fake_hass, monkeypatch)
     ]
     prices_today = {"BE": intervals}
 
-    result = coordinator._check_minimum_charging_window(prices_today, None, None, None)
+    result = coordinator._check_minimum_charging_window(
+        prices_today, None, None, None, None
+    )
     assert result is False
 
 
@@ -598,8 +639,274 @@ def test_check_minimum_charging_window_single_interval_too_short(fake_hass, monk
     ]
     prices_today = {"BE": intervals}
 
-    result = coordinator._check_minimum_charging_window(prices_today, None, None, None)
+    result = coordinator._check_minimum_charging_window(
+        prices_today, None, None, None, None
+    )
     assert result is False
+
+
+@pytest.mark.asyncio
+async def test_manual_override_application_and_expiry(fake_hass, monkeypatch):
+    """Manual overrides should modify decisions until expiration."""
+    base_time = datetime(2025, 6, 1, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    await coordinator.async_set_manual_override(
+        target="battery",
+        value=True,
+        duration=timedelta(minutes=30),
+        reason="boost",
+    )
+
+    decision = {
+        "battery_grid_charging": False,
+        "battery_grid_charging_reason": "price too high",
+        "strategy_trace": [],
+    }
+
+    overridden = coordinator._apply_manual_overrides(decision)
+    assert overridden["battery_grid_charging"] is True
+    assert "override" in overridden["battery_grid_charging_reason"]
+    assert overridden["manual_overrides"]["battery_grid_charging"]["reason"] == "boost"
+    assert overridden["strategy_trace"][-1]["strategy"] == "ManualOverride"
+
+    _freeze_time(monkeypatch, base_time + timedelta(minutes=31))
+    follow_up = coordinator._apply_manual_overrides(
+        {
+            "battery_grid_charging": False,
+            "battery_grid_charging_reason": "reset",
+            "strategy_trace": [],
+        }
+    )
+    assert follow_up["battery_grid_charging"] is False
+    assert coordinator._manual_overrides["battery_grid_charging"] is None
+
+
+def test_forecast_summary_uses_price_timeline(fake_hass, monkeypatch):
+    """Forecast summary exposes cheapest interval and best window."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update({
+        "price_adjustment_multiplier": 1.0,
+        "price_adjustment_offset": 0.0,
+    })
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    intervals = []
+    for slot in range(16):
+        start = base_time + timedelta(minutes=15 * slot)
+        value = 60.0 if slot < 8 else 40.0
+        intervals.append(_make_price_interval(start, value))
+
+    prices_today = {"BE": intervals}
+
+    average = coordinator._calculate_average_threshold(prices_today, None, None)
+    coordinator._check_minimum_charging_window(
+        prices_today, None, None, None, average
+    )
+
+    summary = coordinator._calculate_forecast_summary(
+        prices_today,
+        None,
+        None,
+        None,
+        average,
+    )
+
+    assert summary["available"] is True
+    assert summary["cheapest_interval_price"] == pytest.approx(0.04, rel=1e-6)
+    assert summary["cheapest_interval_start"] == (base_time + timedelta(hours=2)).isoformat()
+    assert summary["best_window_average_price"] == pytest.approx(0.04, rel=1e-6)
+    assert summary["best_window_start"] == (base_time + timedelta(hours=2)).isoformat()
+
+
+def test_forecast_summary_handles_negative_prices(fake_hass, monkeypatch):
+    """Negative or free prices should still surface a best window."""
+    base_time = datetime(2025, 11, 5, 10, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            "price_adjustment_multiplier": 1.0,
+            "price_adjustment_offset": 0.0,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    intervals = []
+    for slot in range(12):
+        start = base_time + timedelta(minutes=15 * slot)
+        value = 0.0 if slot < 4 else -5.0  # €/MWh, converts to 0.0 or -0.005 €/kWh
+        intervals.append(_make_price_interval(start, value))
+
+    prices_today = {"BE": intervals}
+
+    average = coordinator._calculate_average_threshold(prices_today, None, None)
+    coordinator._check_minimum_charging_window(
+        prices_today,
+        None,
+        None,
+        None,
+        average,
+    )
+
+    summary = coordinator._calculate_forecast_summary(
+        prices_today,
+        None,
+        None,
+        None,
+        average,
+    )
+
+    expected_start = (base_time + timedelta(minutes=60)).isoformat()
+
+    assert summary["available"] is True
+    assert summary["cheapest_interval_price"] == pytest.approx(-0.005, rel=1e-6)
+    assert summary["best_window_average_price"] == pytest.approx(-0.005, rel=1e-6)
+    assert summary["best_window_average_price"] <= 0
+    assert summary["best_window_start"] == expected_start
+
+
+def test_missing_price_data_clears_forecast(fake_hass, monkeypatch):
+    """Stale price timelines must be cleared when price data becomes unavailable."""
+    base_time = datetime(2025, 11, 6, 7, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Populate the price timeline with current data
+    intervals = [
+        _make_price_interval(base_time + timedelta(minutes=15 * slot), 50.0 + slot)
+        for slot in range(8)
+    ]
+    prices_today = {"BE": intervals}
+
+    average = coordinator._calculate_average_threshold(prices_today, None, None)
+    coordinator._check_minimum_charging_window(
+        prices_today,
+        None,
+        None,
+        None,
+        average,
+    )
+    assert coordinator._last_price_timeline is not None
+
+    # Price data disappears — cached forecast must not be reused
+    window_result = coordinator._check_minimum_charging_window(
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    assert window_result is False
+    assert coordinator._last_price_timeline is None
+
+    summary = coordinator._calculate_forecast_summary(
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    assert summary == {"available": False}
+    assert coordinator._last_price_timeline is None
+
+
+class FakeServiceCall:
+    def __init__(self, data):
+        self.data = data
+
+
+@pytest.mark.asyncio
+async def test_service_defaults_to_single_entry(fake_hass, monkeypatch):
+    """Service should infer entry_id when only one coordinator is registered."""
+    config = _base_config()
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator.async_set_manual_override = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    from custom_components.electricity_planner.__init__ import _register_services_once
+
+    fake_hass.data.setdefault(DOMAIN, {})[coordinator.entry.entry_id] = coordinator
+
+    _register_services_once(fake_hass)
+
+    handler = fake_hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
+
+    call = FakeServiceCall(
+        {
+            ATTR_TARGET: MANUAL_OVERRIDE_TARGET_BATTERY,
+            ATTR_ACTION: MANUAL_OVERRIDE_ACTION_FORCE_CHARGE,
+        }
+    )
+
+    await handler(call)
+
+    coordinator.async_set_manual_override.assert_awaited_once()
+    coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_service_requires_entry_when_multiple(fake_hass, monkeypatch):
+    """Service without entry_id should fail when multiple coordinators exist."""
+    config = _base_config()
+    coord_a = _create_coordinator(fake_hass, config, monkeypatch)
+    coord_b = _create_coordinator(fake_hass, config, monkeypatch)
+
+    from custom_components.electricity_planner.__init__ import _register_services_once
+
+    fake_hass.data.setdefault(DOMAIN, {})[coord_a.entry.entry_id] = coord_a
+    fake_hass.data[DOMAIN][coord_b.entry.entry_id] = coord_b
+
+    _register_services_once(fake_hass)
+
+    handler = fake_hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
+
+    with pytest.raises(HomeAssistantError):
+        await handler(
+            FakeServiceCall(
+                {
+                    ATTR_TARGET: MANUAL_OVERRIDE_TARGET_BATTERY,
+                    ATTR_ACTION: MANUAL_OVERRIDE_ACTION_FORCE_CHARGE,
+                }
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_service_accepts_explicit_entry(fake_hass, monkeypatch):
+    """Explicit entry_id should select the matching coordinator."""
+    config = _base_config()
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator.async_clear_manual_override = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    from custom_components.electricity_planner.__init__ import _register_services_once
+
+    fake_hass.data.setdefault(DOMAIN, {})[coordinator.entry.entry_id] = coordinator
+
+    _register_services_once(fake_hass)
+
+    handler = fake_hass.services.registered[(DOMAIN, SERVICE_CLEAR_MANUAL_OVERRIDE)]["handler"]
+
+    await handler(
+        FakeServiceCall(
+            {
+                ATTR_ENTRY_ID: coordinator.entry.entry_id,
+                ATTR_TARGET: MANUAL_OVERRIDE_TARGET_CAR,
+            }
+        )
+    )
+
+    coordinator.async_clear_manual_override.assert_awaited_once_with(MANUAL_OVERRIDE_TARGET_CAR)
+    coordinator.async_request_refresh.assert_awaited_once()
 
 
 @pytest.mark.asyncio

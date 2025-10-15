@@ -13,7 +13,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
+from .const import (
+    DOMAIN,
+    CONF_FEEDIN_PRICE_THRESHOLD,
+    DEFAULT_FEEDIN_PRICE_THRESHOLD,
+    INTEGRATION_VERSION,
+)
 from .coordinator import ElectricityPlannerCoordinator
 
 
@@ -65,9 +70,9 @@ class ElectricityPlannerBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
         self._attr_device_info = {
             "identifiers": {(DOMAIN, device_id)},
             "name": device_name,
-            "manufacturer": "Custom",
+            "manufacturer": "Electricity Planner",
             "model": "Electricity Planner",
-            "sw_version": "1.0.0",
+            "sw_version": INTEGRATION_VERSION,
         }
 
 

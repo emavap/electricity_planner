@@ -128,6 +128,28 @@ Key attribute groups:
 - `car_grid_charging_reason`: “Very low price (0.062€/kWh) – bottom 30% of daily range (2h+ window available)”
 - `feedin_solar_reason`: “Net feed-in price 0.125€/kWh ≥ 0.050€/kWh – enable solar export (surplus: 1800W)”
 
+### Forecast Insights (`sensor.electricity_planner_price_forecast_insights`)
+
+- Publishes the **cheapest upcoming interval** and the **best continuous charging window** that satisfies your minimum duration.
+- Attributes include `cheapest_interval_*`, `best_window_*`, the evaluated timestamp, and the average price threshold used in the analysis.
+- Exposes the cheapest price as the sensor value, so you can build threshold-based automations or alerting directly in Lovelace.
+
+### Manual Override Services
+
+Two services let you temporarily force the planner to charge or wait:
+
+- `electricity_planner.set_manual_override`
+- `electricity_planner.clear_manual_override`
+
+Usage highlights:
+
+- `target` accepts `battery`, `car`, or `both`.
+- `action` is `force_charge` or `force_wait`.
+- `duration` (minutes) is optional; omit it for an indefinite override and clear it later.
+- `entry_id` is optional when you have **one** Electricity Planner instance. If you run multiple instances, pass the desired config entry ID explicitly.
+- Overrides are reflected in `sensor.electricity_planner_decision_diagnostics` under `manual_overrides`, including the reason, start time, and expiry.
+- The bundled dashboard prompts you for the duration each time you trigger a manual override; enter the number of minutes (1–1440) when the dialog appears.
+
 ### Quick Troubleshooting Checklist
 
 | Symptom | What to inspect |

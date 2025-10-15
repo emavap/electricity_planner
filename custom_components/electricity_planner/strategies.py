@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 
 from .defaults import DEFAULT_ALGORITHM_THRESHOLDS
@@ -292,6 +292,7 @@ class StrategyManager:
     
     def __init__(self, use_dynamic_threshold: bool = True):
         """Initialize strategy manager."""
+        self._last_trace: List[Dict[str, Any]] = []
         # Always include core strategies
         self.strategies = [
             EmergencyChargingStrategy(),
@@ -326,6 +327,7 @@ class StrategyManager:
         Exception: EmergencyChargingStrategy can override price threshold check.
         """
         # Hard stop: Price too high (unless emergency overrides it)
+        trace: List[Dict[str, Any]] = []
         price = context.get("price_analysis", {})
         current_price = price.get("current_price")
         threshold = price.get("price_threshold", 0.15)
@@ -336,21 +338,49 @@ class StrategyManager:
             config = context.get("config", {})
             average_soc = battery.get("average_soc", 100)
             emergency_threshold = config.get("emergency_soc_threshold", 15)
+            guard_entry = {
+                "strategy": "PriceThresholdGuard",
+                "priority": 0,
+                "should_charge": False,
+                "reason": (
+                    f"Price {current_price:.3f}€/kWh exceeds maximum threshold {threshold:.3f}€/kWh"
+                ),
+            }
 
             if average_soc < emergency_threshold:
-                return True, (f"Emergency charge - SOC {average_soc:.0f}% < {emergency_threshold}% threshold, "
-                            f"charging regardless of price ({current_price:.3f}€/kWh)")
-            else:
-                return False, f"Price {current_price:.3f}€/kWh exceeds maximum threshold {threshold:.3f}€/kWh"
+                guard_entry.update(
+                    {
+                        "should_charge": True,
+                        "reason": (
+                            f"Emergency charge - SOC {average_soc:.0f}% < {emergency_threshold}% threshold, "
+                            f"charging regardless of price ({current_price:.3f}€/kWh)"
+                        ),
+                    }
+                )
+                trace.append(guard_entry)
+                self._last_trace = trace
+                return True, guard_entry["reason"]
+
+            trace.append(guard_entry)
+            self._last_trace = trace
+            return False, guard_entry["reason"]
 
         last_reason = ""
 
         for strategy in self.strategies:
             should_charge, reason = strategy.should_charge(context)
+            entry = {
+                "strategy": strategy.__class__.__name__,
+                "priority": strategy.get_priority(),
+                "should_charge": bool(should_charge),
+                "reason": reason or "",
+            }
+            trace.append(entry)
 
             if should_charge:
                 _LOGGER.debug("Strategy %s decided to charge: %s",
                             strategy.__class__.__name__, reason)
+                self._last_trace = trace
                 return True, reason
             elif reason:  # Strategy made a decision not to charge, but continue checking
                 _LOGGER.debug("Strategy %s suggests not charging: %s (continuing evaluation)",
@@ -360,6 +390,15 @@ class StrategyManager:
         # If we got here, no strategy said to charge
         # Use the last reason provided, or generate default
         if last_reason:
+            trace.append(
+                {
+                    "strategy": "AdvisoryReason",
+                    "priority": 998,
+                    "should_charge": False,
+                    "reason": last_reason,
+                }
+            )
+            self._last_trace = trace
             return False, last_reason
 
         # Default decision if no strategy provided a reason
@@ -378,8 +417,19 @@ class StrategyManager:
             f"{position:.0%} of daily range" if position is not None else "unknown price position"
         )
 
-        return False, (f"Price not favorable ({price_fragment}, "
-                      f"{position_fragment}) for SOC {average_soc:.0f}%")
+        default_reason = (
+            f"Price not favorable ({price_fragment}, {position_fragment}) for SOC {average_soc:.0f}%"
+        )
+        trace.append(
+            {
+                "strategy": "DefaultDecision",
+                "priority": 999,
+                "should_charge": False,
+                "reason": default_reason,
+            }
+        )
+        self._last_trace = trace
+        return False, default_reason
 
     def get_dynamic_threshold(self, context: Dict[str, Any]) -> Optional[float]:
         """Get the current dynamic threshold if dynamic pricing is enabled.
@@ -412,3 +462,7 @@ class StrategyManager:
         )
 
         return analysis.get("dynamic_threshold")
+
+    def get_last_trace(self) -> List[Dict[str, Any]]:
+        """Return a copy of the most recent strategy evaluation trace."""
+        return list(self._last_trace)
