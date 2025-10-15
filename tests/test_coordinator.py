@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+import pytz
+
+from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner import coordinator as coordinator_module
 from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
@@ -19,7 +23,11 @@ from custom_components.electricity_planner.const import (
     CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_LOWEST_PRICE_ENTITY,
     CONF_NEXT_PRICE_ENTITY,
+    CONF_PRICE_THRESHOLD,
     CONF_SOLAR_PRODUCTION_ENTITY,
+    CONF_TRANSPORT_COST_ENTITY,
+    CONF_USE_AVERAGE_THRESHOLD,
+    DEFAULT_MIN_CAR_CHARGING_DURATION,
     DOMAIN,
 )
 
@@ -58,6 +66,9 @@ class FakeHass:
 
     def async_create_task(self, coro):
         return self.loop.create_task(coro)
+
+    async def async_add_executor_job(self, func, *args, **kwargs):
+        return func(*args, **kwargs)
 
 
 @pytest.fixture
@@ -364,3 +375,273 @@ async def test_fetch_all_data_includes_nordpool_prices(fake_hass, monkeypatch):
     assert "BE" in data["nordpool_prices_tomorrow"]
     assert data["nordpool_prices_today"]["BE"][0]["price"] == 100.0
     assert data["nordpool_prices_tomorrow"]["BE"][0]["price"] == 110.0
+
+
+def _make_price_interval(start, value):
+    return {
+        "start": start.isoformat(),
+        "end": (start + timedelta(minutes=15)).isoformat(),
+        "value": value,
+    }
+
+
+def _freeze_time(monkeypatch, base_time):
+    monkeypatch.setattr(coordinator_module.dt_util, "now", lambda: base_time, raising=False)
+    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+
+
+@pytest.mark.parametrize(
+    "multiplier,offset,transport_lookup,expected",
+    [
+        (
+            1.0,
+            0.0,
+            [
+                # Week-old data: what transport cost was 7 days ago at 08:00 and 09:00
+                {"start": "2025-10-07T08:00:00+00:00", "cost": 0.02},
+                {"start": "2025-10-07T09:00:00+00:00", "cost": 0.03},
+            ],
+            0.135,
+        ),
+        (
+            1.1,
+            0.05,
+            [
+                # Week-old data: what transport cost was 7 days ago at 08:00 and 09:00
+                {"start": "2025-10-07T08:00:00+00:00", "cost": 0.02},
+                {"start": "2025-10-07T09:00:00+00:00", "cost": 0.03},
+            ],
+            0.196,
+        ),
+    ],
+)
+def test_calculate_average_threshold(fake_hass, monkeypatch, multiplier, offset, transport_lookup, expected):
+    """Average threshold should use week-old transport costs for future prices (€/kWh)."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_TRANSPORT_COST_ENTITY: "sensor.transport_cost",
+            "price_adjustment_multiplier": multiplier,
+            "price_adjustment_offset": offset,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Two future intervals (15 and 60 minutes ahead)
+    prices_today = {
+        "BE": [
+            _make_price_interval(base_time + timedelta(minutes=15), 100.0),  # 0.1 €/kWh base
+            _make_price_interval(base_time + timedelta(hours=1), 120.0),      # 0.12 €/kWh base
+        ]
+    }
+
+    result = coordinator._calculate_average_threshold(prices_today, None, transport_lookup)
+    assert result == pytest.approx(expected, rel=1e-6)
+
+
+def test_calculate_average_threshold_skips_past(fake_hass, monkeypatch):
+    """Intervals in the past should be ignored."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    prices_today = {
+        "BE": [
+            _make_price_interval(base_time - timedelta(hours=1), 80.0),       # past interval
+            _make_price_interval(base_time + timedelta(minutes=30), 100.0),   # future interval
+        ]
+    }
+
+    result = coordinator._calculate_average_threshold(prices_today, None, None)
+    # Only the future interval remains: (100/1000) = 0.1
+    assert result == pytest.approx(0.1, rel=1e-6)
+
+
+def test_calculate_average_threshold_backfills_with_past(fake_hass, monkeypatch):
+    """With a single future slot, average should backfill ~24h using past data."""
+    base_time = datetime(2025, 10, 14, 22, 45, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    intervals = []
+    # 95 past intervals (15 min cadence) at 0.1 €/kWh base
+    for steps_back in range(95, 0, -1):
+        start = base_time - timedelta(minutes=15 * steps_back)
+        intervals.append(_make_price_interval(start, 100.0))
+
+    # Single future interval with higher price
+    intervals.append(_make_price_interval(base_time, 200.0))
+
+    prices_today = {"BE": intervals}
+
+    result = coordinator._calculate_average_threshold(prices_today, None, None)
+    # Average of 95 * 0.100 + 1 * 0.200 over 96 slots ≈ 0.10104 -> rounded to 0.101
+    assert result == pytest.approx(0.101, rel=1e-6)
+
+
+def test_calculate_average_threshold_insufficient_past_uses_future_only(fake_hass, monkeypatch):
+    """If there aren't enough historical slots, fall back to future-only average."""
+    base_time = datetime(2025, 10, 14, 2, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    intervals = []
+    # Minimal past data (not enough to backfill 24h)
+    intervals.append(_make_price_interval(base_time - timedelta(minutes=15), 90.0))
+    intervals.append(_make_price_interval(base_time - timedelta(minutes=30), 95.0))
+
+    # Two future intervals that should dominate the average
+    intervals.append(_make_price_interval(base_time, 100.0))
+    intervals.append(_make_price_interval(base_time + timedelta(minutes=15), 130.0))
+
+    prices_today = {"BE": intervals}
+
+    result = coordinator._calculate_average_threshold(prices_today, None, None)
+    # Future-only average: (0.100 + 0.130) / 2 = 0.115 -> rounded to 0.115
+    assert result == pytest.approx(0.115, rel=1e-6)
+
+
+@pytest.mark.parametrize("use_average", [True, False])
+def test_check_minimum_charging_window(fake_hass, monkeypatch, use_average):
+    """Charging window detection honors threshold selection and interval continuity."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_USE_AVERAGE_THRESHOLD: use_average,
+            "price_adjustment_multiplier": 1.0,
+            "price_adjustment_offset": 0.0,
+            CONF_TRANSPORT_COST_ENTITY: "sensor.transport_cost",
+            CONF_PRICE_THRESHOLD: 0.07,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Transport lookup: 0.01 €/kWh for 8-10h (from week ago for pattern matching)
+    transport_lookup = [
+        {"start": "2025-10-07T08:00:00+00:00", "cost": 0.01},
+        {"start": "2025-10-07T09:00:00+00:00", "cost": 0.01},
+        {"start": "2025-10-07T10:00:00+00:00", "cost": 0.01},
+    ]
+
+    # Eight consecutive prices = 0.065 €/kWh base + 0.01 transport = 0.075 final (2 hours total)
+    intervals = [
+        _make_price_interval(base_time + timedelta(minutes=15 * i), 65.0)
+        for i in range(8)
+    ]
+    prices_today = {"BE": intervals}
+
+    # Average threshold ≈ 0.075 -> qualifies when using average, fails fixed (0.07)
+    result = coordinator._check_minimum_charging_window(prices_today, None, transport_lookup, None)
+
+    if use_average:
+        assert result is True
+    else:
+        assert result is False
+
+
+def test_check_minimum_charging_window_respects_duration(fake_hass, monkeypatch):
+    """Charging window requires duration >= DEFAULT_MIN_CAR_CHARGING_DURATION."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_PRICE_THRESHOLD: 0.08,
+            "price_adjustment_multiplier": 1.0,
+            "price_adjustment_offset": 0.0,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Only one low-price interval (30 minutes) < required duration
+    intervals = [
+        _make_price_interval(base_time + timedelta(minutes=0), 60.0),
+        _make_price_interval(base_time + timedelta(minutes=30), 120.0),  # high price breaks window
+    ]
+    prices_today = {"BE": intervals}
+
+    result = coordinator._check_minimum_charging_window(prices_today, None, None, None)
+    assert result is False
+
+
+def test_check_minimum_charging_window_single_interval_too_short(fake_hass, monkeypatch):
+    """Single 15-minute low-price interval should not satisfy 2-hour requirement."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_PRICE_THRESHOLD: 0.09,
+            "price_adjustment_multiplier": 1.0,
+            "price_adjustment_offset": 0.0,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Only one 15-minute low price interval
+    intervals = [
+        _make_price_interval(base_time + timedelta(minutes=0), 80.0),
+    ]
+    prices_today = {"BE": intervals}
+
+    result = coordinator._check_minimum_charging_window(prices_today, None, None, None)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_transport_cost_lookup_uses_local_hour(fake_hass, monkeypatch):
+    """Recorded transport costs should map to local hours, not UTC."""
+    base_time = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config[CONF_TRANSPORT_COST_ENTITY] = "sensor.transport_cost"
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(pytz.timezone("Europe/Rome"))
+
+    try:
+        midnight_utc = datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc)
+        sample_state = SimpleNamespace(state="0.05", last_changed=midnight_utc)
+
+        def fake_history(hass, start_time, end_time, entities):
+            assert entities == ["sensor.transport_cost"]
+            return {"sensor.transport_cost": [sample_state]}
+
+        fake_recorder = ModuleType("homeassistant.components.recorder")
+        fake_history_module = ModuleType("homeassistant.components.recorder.history")
+        fake_history_module.get_significant_states = fake_history
+        fake_recorder.history = fake_history_module
+
+        monkeypatch.setitem(sys.modules, "homeassistant.components.recorder", fake_recorder)
+        monkeypatch.setitem(
+            sys.modules,
+            "homeassistant.components.recorder.history",
+            fake_history_module,
+        )
+
+        lookup, status = await coordinator._get_transport_cost_lookup(0.05)
+
+        assert status == "applied"
+        assert len(lookup) == 1
+        change = lookup[0]
+        assert change["cost"] == pytest.approx(0.05, rel=1e-6)
+        change_start = dt_util.as_local(dt_util.parse_datetime(change["start"]))
+        assert change_start.hour == 1
+    finally:
+        dt_util.set_default_time_zone(original_tz)

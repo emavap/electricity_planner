@@ -29,7 +29,18 @@ views:
                 scale: "50px"
                 segments: |-
                   {% set dynamic_threshold = state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') %}
-                  {% set max_threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float %}
+                  {% set price_analysis = state_attr('sensor.electricity_planner_decision_diagnostics', 'price_analysis') %}
+                  {% set average_threshold = price_analysis.average_threshold if price_analysis else None %}
+                  {% set fixed_threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float %}
+
+                  {# Determine the max threshold (average or fixed) #}
+                  {% if average_threshold != None %}
+                    {% set max_threshold = average_threshold | float %}
+                  {% else %}
+                    {% set max_threshold = fixed_threshold %}
+                  {% endif %}
+
+                  {# Determine the active threshold (dynamic if present, otherwise max) #}
                   {% if dynamic_threshold != None %}
                     {% set threshold = dynamic_threshold | float %}
                   {% else %}
@@ -104,6 +115,23 @@ views:
               green: 70
 
           - type: entities
+            title: Price components
+            show_header_toggle: false
+            entities:
+              - entity: sensor.electricity_planner_current_electricity_price
+                name: Total price
+              - type: attribute
+                entity: sensor.electricity_planner_current_electricity_price
+                attribute: raw_current_price
+                name: Energy market price
+                unit: "€/kWh"
+              - type: attribute
+                entity: sensor.electricity_planner_current_electricity_price
+                attribute: transport_cost
+                name: Transport cost
+                unit: "€/kWh"
+
+          - type: entities
             title: Charging decisions
             show_header_toggle: false
             entities:
@@ -126,57 +154,39 @@ views:
             square: false
             columns: 2
             cards:
-              - type: entities
+              - type: markdown
                 title: Price adjustments
-                show_header_toggle: false
-                entities:
-                  - entity: sensor.electricity_planner_current_electricity_price
-                    type: attribute
-                    name: Highest price today
-                    attribute: highest_price
-                  - entity: sensor.electricity_planner_current_electricity_price
-                    type: attribute
-                    name: Lowest price today
-                    attribute: lowest_price
-                  - entity: sensor.electricity_planner_current_electricity_price
-                    type: attribute
-                    name: Raw Nord Pool price
-                    attribute: raw_current_price
-                  - entity: sensor.electricity_planner_current_electricity_price
-                    type: attribute
-                    name: Transport cost
-                    attribute: transport_cost
-                  - entity: sensor.electricity_planner_current_electricity_price
-                    type: attribute
-                    name: Consumption multiplier
-                    attribute: price_adjustment_multiplier
-                  - entity: sensor.electricity_planner_current_electricity_price
-                    type: attribute
-                    name: Consumption offset
-                    attribute: price_adjustment_offset
-                  - entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
-                    type: attribute
-                    name: Feed-in multiplier
-                    attribute: feedin_multiplier
-                  - entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
-                    type: attribute
-                    name: Feed-in offset
-                    attribute: feedin_offset
-                  - entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
-                    name: Feed-in threshold
+                content: |
+                  **Highest price today:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'highest_price') | float | round(4) }} €/kWh
 
-              - type: entities
+                  **Lowest price today:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'lowest_price') | float | round(4) }} €/kWh
+
+                  **Raw Nord Pool price:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'raw_current_price') | float | round(4) }} €/kWh
+
+                  **Transport cost:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'transport_cost') | float | round(4) }} €/kWh
+
+                  **Consumption multiplier:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'price_adjustment_multiplier') | float | round(4) }}
+
+                  **Consumption offset:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'price_adjustment_offset') | float | round(4) }} €/kWh
+
+                  **Feed-in multiplier:** {{ state_attr('sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price', 'feedin_multiplier') | float | round(4) }}
+
+                  **Feed-in offset:** {{ state_attr('sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price', 'feedin_offset') | float | round(4) }} €/kWh
+
+                  **Feed-in threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float | round(4) }} €/kWh
+
+              - type: markdown
                 title: Thresholds
-                show_header_toggle: false
-                entities:
-                  - entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
-                    name: Max price threshold
-                  - entity: sensor.electricity_planner_current_electricity_price
-                    type: attribute
-                    name: Dynamic threshold
-                    attribute: dynamic_threshold
-                  - entity: sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold
-                    name: Feed-in threshold
+                content: |
+                  **Max price threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float | round(4) }} €/kWh
+
+                  **Dynamic threshold:** {% set dyn_threshold = state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') %}{{ (dyn_threshold | float | round(4) ~ ' €/kWh') if dyn_threshold != None else 'Not active' }}
+
+                  **Average threshold:** {% set price_analysis = state_attr('sensor.electricity_planner_decision_diagnostics', 'price_analysis') %}{{ (price_analysis['average_threshold'] | float | round(4) ~ ' €/kWh') if price_analysis and price_analysis.get('average_threshold') != None else 'Not available' }}
+
+                  **Feed-in threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float | round(4) }} €/kWh
+
+                  _Note: To toggle average threshold mode, go to Settings → Devices & Services → Electricity Planner → Configure_
 
           - type: entities
             title: Power controls
@@ -220,18 +230,18 @@ views:
                   - entity: sensor.electricity_planner_data_unavailable_duration
                     name: Data unavailable time
 
-          - type: entities
+          - type: markdown
             title: Algorithm thresholds
-            show_header_toggle: false
-            entities:
-              - entity: sensor.electricity_planner_diagnostics_monitoring_very_low_price_threshold
-                name: Very low price %
+            content: |
+              **Very low price threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_very_low_price_threshold') }}%
 
-              - entity: sensor.electricity_planner_diagnostics_monitoring_emergency_soc_threshold
-                name: Emergency SOC
+              **Emergency SOC:** {{ states('sensor.electricity_planner_diagnostics_monitoring_emergency_soc_threshold') }}%
 
-              - entity: sensor.electricity_planner_diagnostics_monitoring_significant_solar_threshold
-                name: Significant solar
+              **Significant solar:** {{ states('sensor.electricity_planner_diagnostics_monitoring_significant_solar_threshold') }}W
+
+              **Min car charging duration:** {% set config_limits = state_attr('sensor.electricity_planner_decision_diagnostics', 'configured_limits') %}{{ config_limits.get('min_car_charging_duration', 'unknown') if config_limits else 'unknown' }} hours
+
+              _Note: To change car charging duration, go to Settings → Devices & Services → Electricity Planner → Configure_
 
           - type: history-graph
             title: Price vs decisions (48h)
@@ -249,17 +259,19 @@ views:
 
           - type: custom:apexcharts-card
             header:
-              title: Nord Pool Electricity Prices (Now → Future)
+              title: Nord Pool Electricity Prices (History + Future)
               show: true
-            graph_span: 36h
+            graph_span: 38h
             span:
-              start: minute
+              start: hour
+              offset: -2h
             now:
               show: true
               label: Now
             apex_config:
               chart:
                 height: 350
+                stacked: true
               tooltip:
                 enabled: false
               xaxis:
@@ -276,16 +288,41 @@ views:
                     }
             series:
               - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
-                name: Electricity Price
+                name: Transport cost
+                type: column
+                color: "#95a5a6"
+                data_generator: |
+                  return entity.attributes.data.map((interval) => {
+                    const transport = interval.transport_cost ?? 0;
+                    return [new Date(interval.start).getTime(), Math.max(transport, 0)];
+                  });
+                show:
+                  legend_value: false
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Energy price
                 type: column
                 color: "#3498db"
                 data_generator: |
                   return entity.attributes.data.map((interval) => {
-                    return [new Date(interval.start).getTime(), interval.price];
+                    const transport = interval.transport_cost ?? 0;
+                    const energy = (interval.price ?? 0) - transport;
+                    return [new Date(interval.start).getTime(), Math.max(energy, 0)];
                   });
                 show:
                   legend_value: false
-              - entity: sensor.electricity_planner_diagnostics_monitoring_price_threshold
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Total price
+                type: line
+                stroke_width: 2
+                color: "#2ecc71"
+                curve: straight
+                show:
+                  legend_value: false
+                data_generator: |
+                  return entity.attributes.data.map((interval) => {
+                    return [new Date(interval.start).getTime(), interval.price ?? 0];
+                  });
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
                 name: Max Threshold
                 type: line
                 stroke_width: 2
@@ -293,3 +330,64 @@ views:
                 curve: straight
                 show:
                   legend_value: false
+                data_generator: |
+                  // Show the base max threshold (average or fixed)
+                  const diagnosticsEntity = hass.states['sensor.electricity_planner_decision_diagnostics'];
+                  const priceAnalysis = diagnosticsEntity?.attributes?.price_analysis;
+                  const averageThreshold = priceAnalysis?.average_threshold;
+
+                  const maxThresholdEntity = hass.states['sensor.electricity_planner_diagnostics_monitoring_price_threshold'];
+                  const fixedThreshold = maxThresholdEntity ? parseFloat(maxThresholdEntity.state) : 0.15;
+
+                  // Use average if enabled, otherwise fixed
+                  let maxThreshold = fixedThreshold;
+                  if (averageThreshold != null && averageThreshold !== undefined) {
+                    maxThreshold = parseFloat(averageThreshold);
+                  }
+
+                  // Get time range from price data
+                  if (!entity.attributes.data || entity.attributes.data.length === 0) {
+                    return [];
+                  }
+
+                  const intervals = entity.attributes.data;
+                  const startTime = new Date(intervals[0].start).getTime();
+                  const endTime = new Date(intervals[intervals.length - 1].start).getTime();
+
+                  return [
+                    [startTime, maxThreshold],
+                    [endTime, maxThreshold]
+                  ];
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Dynamic Threshold
+                type: line
+                stroke_width: 3
+                color: "#f39c12"
+                curve: straight
+                show:
+                  legend_value: false
+                data_generator: |
+                  // Only show dynamic threshold when it's active (more strict than max)
+                  const currentPriceEntity = hass.states['sensor.electricity_planner_current_electricity_price'];
+                  const dynamicThreshold = currentPriceEntity?.attributes?.dynamic_threshold;
+
+                  // If no dynamic threshold, don't show this line
+                  if (dynamicThreshold == null || dynamicThreshold === undefined) {
+                    return [];
+                  }
+
+                  const threshold = parseFloat(dynamicThreshold);
+
+                  // Get time range from price data
+                  if (!entity.attributes.data || entity.attributes.data.length === 0) {
+                    return [];
+                  }
+
+                  const intervals = entity.attributes.data;
+                  const startTime = new Date(intervals[0].start).getTime();
+                  const endTime = new Date(intervals[intervals.length - 1].start).getTime();
+
+                  return [
+                    [startTime, threshold],
+                    [endTime, threshold]
+                  ];

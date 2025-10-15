@@ -10,7 +10,7 @@ This is a Home Assistant custom integration called "Electricity Planner" - a sma
 
 ### Core Components
 
-- **Decision Engine** (`decision_engine.py`): Multi-factor algorithm that evaluates price positioning, battery status, and solar forecasts
+- **Decision Engine** (`decision_engine.py`): Multi-factor algorithm that evaluates price positioning, battery status, and live solar production
   - 29 methods for comprehensive decision logic
   - 17 validation checks for data integrity
   - Uses strategy pattern for extensible decision making
@@ -40,6 +40,27 @@ The integration uses **price positioning** within daily range (0-100%) rather th
 - Solar surplus: Always preferred over grid charging for batteries
 - Battery SOC: Different logic for batteries above/below 30% SOC
 - Price trends: Considers next hour price improvements for timing
+
+### Car Charging Hysteresis
+
+The car charging logic implements strict hysteresis to prevent short charging cycles:
+
+**OFF → ON Transition:**
+- Current price must be below threshold
+- `_check_minimum_charging_window()` validates next N hours (configurable via `CONF_MIN_CAR_CHARGING_DURATION`, default 2h)
+- Method performs:
+  1. Automatic interval resolution detection (finds smallest interval spacing, typically 15min or 1h)
+  2. Timeline building with explicit start/end times for all intervals
+  3. Current interval identification (interval containing NOW)
+  4. Continuous low-price accumulation from NOW forward
+  5. Gap detection (5-second tolerance) - any gap breaks the window
+  6. Returns True only if accumulated duration ≥ configured minimum
+
+**ON → OFF Transition:**
+- Immediately when current price exceeds threshold
+- No window check needed
+
+**Implementation:** `coordinator.py:528-817` (`_check_minimum_charging_window`)
 
 ### Entity Dependencies
 
@@ -123,7 +144,7 @@ The integration is designed for dynamic electricity markets:
 2. **SOC Thresholds**: Min/max SOC, emergency overrides, predictive logic thresholds
 3. **Price Thresholds**: Price threshold, very low price %, feed-in threshold
 4. **Power Limits**: Max battery/car/grid power, charging thresholds
-5. **Solar Parameters**: Forecast thresholds, significant solar threshold
+5. **Solar Parameters**: Significant solar surplus threshold configuration
 
 ### Recent Changes (v2.3.0)
 - **Removed**: `grid_battery_charging_limit_soc` (unused config option)

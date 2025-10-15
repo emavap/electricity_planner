@@ -198,6 +198,8 @@ def test_feed_in_adjustment_respects_threshold():
     assert "0.020" in result["feedin_solar_reason"]
 
 
+
+
 def test_price_analysis_unavailable_when_adjustment_missing_data():
     engine = _engine({
         CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.12,

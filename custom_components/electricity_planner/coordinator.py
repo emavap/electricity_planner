@@ -24,18 +24,21 @@ from .const import (
     CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MONTHLY_GRID_PEAK_ENTITY,
-    CONF_SOLAR_FORECAST_CURRENT_ENTITY,
-    CONF_SOLAR_FORECAST_NEXT_ENTITY,
-    CONF_SOLAR_FORECAST_TODAY_ENTITY,
-    CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY,
-    CONF_SOLAR_FORECAST_TOMORROW_ENTITY,
     CONF_TRANSPORT_COST_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
+    CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+    CONF_PRICE_ADJUSTMENT_OFFSET,
+    CONF_USE_AVERAGE_THRESHOLD,
+    CONF_MIN_CAR_CHARGING_DURATION,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
+    DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_PRICE_ADJUSTMENT_OFFSET,
+    DEFAULT_USE_AVERAGE_THRESHOLD,
+    DEFAULT_MIN_CAR_CHARGING_DURATION,
 )
 from .decision_engine import ChargingDecisionEngine
 
@@ -67,10 +70,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._nordpool_cache_time = {}
 
         # Transport cost lookup caching (expensive recorder query)
-        self._transport_cost_lookup: dict[int, float] = {}
+        self._transport_cost_lookup: list[dict[str, Any]] = []
         self._transport_cost_lookup_time: datetime | None = None
         self._transport_cost_status: str = "not_configured"
         self._transport_cost_last_log: str | None = None
+
+        # Car charging state tracking for hysteresis
+        self._previous_car_charging: bool = False
 
         super().__init__(
             hass,
@@ -111,12 +117,6 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             if self.config.get(entity_key):
                 entities_to_track.append(self.config[entity_key])
 
-        # Solar forecast entities
-        for entity_key in [CONF_SOLAR_FORECAST_CURRENT_ENTITY, CONF_SOLAR_FORECAST_NEXT_ENTITY,
-                          CONF_SOLAR_FORECAST_TODAY_ENTITY, CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY,
-                          CONF_SOLAR_FORECAST_TOMORROW_ENTITY]:
-            if self.config.get(entity_key):
-                entities_to_track.append(self.config[entity_key])
 
         if entities_to_track:
             async_track_state_change_event(
@@ -160,9 +160,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         try:
             data = await self._fetch_all_data()
 
+            # Add previous car charging state for hysteresis logic
+            data["previous_car_charging"] = self._previous_car_charging
+
             charging_decision = await self.decision_engine.evaluate_charging_decision(data)
 
             data.update(charging_decision)
+
+            # Update previous car charging state
+            self._previous_car_charging = charging_decision.get("car_grid_charging", False)
 
             # Check data availability and handle notifications
             await self._check_data_availability(data)
@@ -241,22 +247,6 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         )
 
 
-        # Solar forecast data
-        data["solar_forecast_current"] = await self._get_state_value(
-            self.config.get(CONF_SOLAR_FORECAST_CURRENT_ENTITY)
-        )
-        data["solar_forecast_next"] = await self._get_state_value(
-            self.config.get(CONF_SOLAR_FORECAST_NEXT_ENTITY)  
-        )
-        data["solar_forecast_today"] = await self._get_state_value(
-            self.config.get(CONF_SOLAR_FORECAST_TODAY_ENTITY)
-        )
-        data["solar_forecast_remaining_today"] = await self._get_state_value(
-            self.config.get(CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY)
-        )
-        data["solar_forecast_tomorrow"] = await self._get_state_value(
-            self.config.get(CONF_SOLAR_FORECAST_TOMORROW_ENTITY)
-        )
 
         data["transport_cost"] = await self._get_state_value(
             self.config.get(CONF_TRANSPORT_COST_ENTITY)
@@ -273,9 +263,26 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             data["nordpool_prices_today"] = None
             data["nordpool_prices_tomorrow"] = None
 
-        transport_lookup, transport_status = await self._get_transport_cost_lookup()
+        transport_lookup, transport_status = await self._get_transport_cost_lookup(
+            data.get("transport_cost")
+        )
         data["transport_cost_lookup"] = transport_lookup
         data["transport_cost_status"] = transport_status
+
+        # Calculate average threshold if enabled
+        data["average_threshold"] = self._calculate_average_threshold(
+            data.get("nordpool_prices_today"),
+            data.get("nordpool_prices_tomorrow"),
+            transport_lookup
+        )
+
+        # Calculate if we have at least 2 hours of low prices ahead for car charging
+        data["has_min_charging_window"] = self._check_minimum_charging_window(
+            data.get("nordpool_prices_today"),
+            data.get("nordpool_prices_tomorrow"),
+            transport_lookup,
+            data.get("transport_cost")
+        )
 
         return data
 
@@ -367,13 +374,649 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("Failed to fetch Nord Pool prices for %s: %s", day, err)
             return None
 
-    async def _get_transport_cost_lookup(self) -> tuple[dict[int, float], str]:
+    def _calculate_average_threshold(
+        self,
+        prices_today: dict[str, Any] | None,
+        prices_tomorrow: dict[str, Any] | None,
+        transport_lookup: list[dict[str, Any]] | None
+    ) -> float | None:
+        """Calculate average threshold from a minimum 24-hour rolling window.
+
+        Uses future prices when available, but backfills with recent past prices
+        to ensure at least 24 hours of data for a stable threshold. This prevents
+        volatile thresholds when only a few hours of future data remain (e.g., late evening).
+
+        Algorithm:
+        1. Collect all available future prices (from now onwards)
+        2. If < 24 hours of future data, backfill with recent past to reach 24h minimum
+        3. Calculate average of combined window
+
+        Prices include full adjustments (multiplier + offset + transport cost).
+
+        Returns None if insufficient price data is available.
+        """
+        if not prices_today and not prices_tomorrow:
+            return None
+
+        now = dt_util.utcnow()
+        MIN_HOURS = 24  # Minimum hours for stable average threshold
+
+        # Storage for price tuples: (start_time, final_price)
+        all_intervals: list[tuple[datetime, float]] = []
+
+        # Get multiplier and offset for price adjustments
+        multiplier = self.config.get(
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+        )
+        offset = self.config.get(
+            CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
+        )
+
+        # Helper to process intervals
+        def resolve_transport_cost(start_time_utc: datetime) -> float:
+            """Get transport cost for future time using week-old pattern if available."""
+            if not transport_lookup:
+                return 0.0
+
+            # For future times, look for the same hour from 1 week ago
+            now = dt_util.utcnow()
+            if start_time_utc > now:
+                week_ago = start_time_utc - timedelta(days=7)
+                # Find the cost that was active at this same time last week
+                cost_from_pattern: float | None = None
+                for entry in transport_lookup:
+                    entry_cost = entry.get("cost")
+                    if entry_cost is None:
+                        continue
+                    entry_start_str = entry.get("start")
+                    if entry_start_str is None:
+                        cost_from_pattern = float(entry_cost)
+                        continue
+                    entry_start = dt_util.parse_datetime(entry_start_str)
+                    if entry_start is None:
+                        continue
+                    entry_start_utc = dt_util.as_utc(entry_start)
+                    if entry_start_utc <= week_ago:
+                        cost_from_pattern = float(entry_cost)
+                    else:
+                        break
+
+                if cost_from_pattern is not None:
+                    return cost_from_pattern
+
+            # For past/current times or if no week-old data, use most recent cost
+            cost: float | None = None
+            for entry in transport_lookup:
+                entry_cost = entry.get("cost")
+                if entry_cost is None:
+                    continue
+                entry_start_str = entry.get("start")
+                if entry_start_str is None:
+                    cost = float(entry_cost)
+                    continue
+                entry_start = dt_util.parse_datetime(entry_start_str)
+                if entry_start is None:
+                    continue
+                entry_start_utc = dt_util.as_utc(entry_start)
+                if entry_start_utc <= start_time_utc:
+                    cost = float(entry_cost)
+                else:
+                    break
+            return cost if cost is not None else 0.0
+
+        def process_intervals(intervals: list[dict[str, Any]], include_past: bool = False, include_future: bool = True) -> None:
+            """Process intervals and add them to all_intervals list.
+
+            Args:
+                intervals: List of price intervals to process
+                include_past: Include intervals that have ended (start_time < now)
+                include_future: Include intervals that haven't ended (start_time >= now)
+            """
+            for interval in intervals:
+                try:
+                    start_time_str = interval.get("start")
+                    if not start_time_str:
+                        continue
+
+                    start_time = dt_util.parse_datetime(start_time_str)
+                    if start_time is None:
+                        continue
+                    start_time_utc = dt_util.as_utc(start_time)
+
+                    # Filter based on time
+                    is_past = start_time_utc < now
+                    if is_past and not include_past:
+                        continue
+                    if not is_past and not include_future:
+                        continue
+
+                    # Extract price (try different keys like Nord Pool sensor does)
+                    price_value = None
+                    for key in ("value", "value_exc_vat", "price"):
+                        value = interval.get(key)
+                        if isinstance(value, (int, float)):
+                            price_value = float(value)
+                            break
+                        if isinstance(value, str):
+                            try:
+                                price_value = float(value)
+                                break
+                            except (ValueError, TypeError):
+                                continue
+
+                    if price_value is None:
+                        continue
+
+                    # Convert from €/MWh to €/kWh
+                    price_kwh = price_value / 1000
+
+                    # Apply adjustments
+                    adjusted_price = (price_kwh * multiplier) + offset
+
+                    # Add transport cost
+                    transport_cost = resolve_transport_cost(start_time_utc)
+
+                    final_price = adjusted_price + transport_cost
+                    all_intervals.append((start_time_utc, final_price))
+
+                except Exception as err:
+                    _LOGGER.debug("Error processing interval for average threshold: %s", err)
+                    continue
+
+        def infer_interval_resolution() -> timedelta:
+            """Infer typical Nord Pool interval duration from provided data.
+
+            Dynamically detects whether Nord Pool is using 15-minute, 1-hour,
+            or other interval lengths. Returns the minimum delta found, which
+            represents the actual granularity of the data.
+            """
+            deltas: list[timedelta] = []
+
+            def collect(intervals: list[dict[str, Any]]) -> None:
+                timestamps: list[datetime] = []
+                for interval in intervals:
+                    start_time_str = interval.get("start")
+                    if not start_time_str:
+                        continue
+                    start_time = dt_util.parse_datetime(start_time_str)
+                    if start_time is None:
+                        continue
+                    timestamps.append(dt_util.as_utc(start_time))
+
+                timestamps.sort()
+                for idx in range(1, len(timestamps)):
+                    delta = timestamps[idx] - timestamps[idx - 1]
+                    if delta > timedelta(0):
+                        deltas.append(delta)
+
+            if isinstance(prices_today, dict):
+                for intervals in prices_today.values():
+                    if isinstance(intervals, list):
+                        collect(intervals)
+
+            if isinstance(prices_tomorrow, dict):
+                for intervals in prices_tomorrow.values():
+                    if isinstance(intervals, list):
+                        collect(intervals)
+
+            if deltas:
+                return min(deltas)
+
+            # Default fallback: assume 15-minute intervals (most common modern resolution)
+            return timedelta(minutes=15)
+
+        def collect_past_intervals(max_count: int) -> list[tuple[datetime, float]]:
+            """Collect recent past price intervals for backfilling.
+
+            Args:
+                max_count: Maximum number of past intervals to collect
+
+            Returns:
+                List of (timestamp, price) tuples in chronological order (oldest first)
+            """
+            past_intervals: list[tuple[datetime, float]] = []
+
+            if not prices_today:
+                return past_intervals
+
+            area_code = next(iter(prices_today.keys()), None)
+            if not area_code or not isinstance(prices_today[area_code], list):
+                return past_intervals
+
+            for interval in prices_today[area_code]:
+                try:
+                    start_time_str = interval.get("start")
+                    if not start_time_str:
+                        continue
+
+                    start_time = dt_util.parse_datetime(start_time_str)
+                    if start_time is None:
+                        continue
+                    start_time_utc = dt_util.as_utc(start_time)
+
+                    # Only include past intervals
+                    if start_time_utc >= now:
+                        continue
+
+                    # Extract and process price
+                    price_value = None
+                    for key in ("value", "value_exc_vat", "price"):
+                        value = interval.get(key)
+                        if isinstance(value, (int, float)):
+                            price_value = float(value)
+                            break
+                        if isinstance(value, str):
+                            try:
+                                price_value = float(value)
+                                break
+                            except (ValueError, TypeError):
+                                continue
+
+                    if price_value is None:
+                        continue
+
+                    # Convert from €/MWh to €/kWh and apply adjustments
+                    price_kwh = price_value / 1000
+                    adjusted_price = (price_kwh * multiplier) + offset
+                    transport_cost = resolve_transport_cost(start_time_utc)
+                    final_price = adjusted_price + transport_cost
+
+                    past_intervals.append((start_time_utc, final_price))
+                except Exception:
+                    continue
+
+            # Sort by time (most recent first) and take what we need
+            past_intervals.sort(key=lambda x: x[0], reverse=True)
+            limited = past_intervals[:max_count]
+            limited.reverse()  # Back to chronological order (oldest first)
+
+            return limited
+
+        # Pass 1: Collect future intervals only
+        if prices_today:
+            area_code = next(iter(prices_today.keys()), None)
+            if area_code and isinstance(prices_today[area_code], list):
+                process_intervals(prices_today[area_code], include_past=False, include_future=True)
+
+        if prices_tomorrow:
+            area_code = next(iter(prices_tomorrow.keys()), None)
+            if area_code and isinstance(prices_tomorrow[area_code], list):
+                process_intervals(prices_tomorrow[area_code], include_past=False, include_future=True)
+
+        # Sort by time (oldest first)
+        all_intervals.sort(key=lambda x: x[0])
+
+        # Separate future intervals
+        future_intervals = [(t, p) for t, p in all_intervals if t >= now]
+
+        if not future_intervals:
+            _LOGGER.warning("No future price intervals available for average threshold")
+            return None
+
+        # Estimate interval resolution (typically 15min or 1h)
+        if len(future_intervals) >= 2:
+            delta = future_intervals[1][0] - future_intervals[0][0]
+            interval_duration = delta if delta > timedelta(0) else infer_interval_resolution()
+        else:
+            interval_duration = infer_interval_resolution()
+
+        if interval_duration <= timedelta(0):
+            interval_duration = timedelta(minutes=15)
+
+        # Calculate how many intervals we need for MIN_HOURS
+        intervals_needed = max(1, int(MIN_HOURS * 3600 / interval_duration.total_seconds()))
+
+        # Pass 2: If we don't have enough future data, backfill with past
+        if len(future_intervals) < intervals_needed:
+            past_intervals_needed = intervals_needed - len(future_intervals)
+            past_intervals = collect_past_intervals(past_intervals_needed)
+
+            if len(past_intervals) >= past_intervals_needed:
+                # Successfully backfilled to meet 24h minimum
+                combined_intervals = past_intervals + future_intervals
+                past_count = len(past_intervals)
+                future_count = len(future_intervals)
+
+                _LOGGER.debug(
+                    "Average threshold: using %d past + %d future intervals (%.1fh total) to meet %dh minimum",
+                    past_count, future_count,
+                    (past_count + future_count) * interval_duration.total_seconds() / 3600,
+                    MIN_HOURS
+                )
+            else:
+                # Not enough past data available - use what we have
+                combined_intervals = future_intervals
+                past_count = 0
+                future_count = len(future_intervals)
+                _LOGGER.debug(
+                    "Average threshold: insufficient past data (have %d intervals, need %d) – using %d future intervals only",
+                    len(past_intervals),
+                    past_intervals_needed,
+                    future_count,
+                )
+        else:
+            # Enough future data
+            combined_intervals = future_intervals
+            past_count = 0
+            future_count = len(future_intervals)
+
+            _LOGGER.debug(
+                "Average threshold: using %d future intervals (%.1fh total)",
+                future_count, future_count * interval_duration.total_seconds() / 3600
+            )
+
+        # Calculate average from combined intervals
+        if combined_intervals:
+            prices = [p for _, p in combined_intervals]
+            average = sum(prices) / len(prices)
+            _LOGGER.debug(
+                "Calculated average threshold: %.4f €/kWh from %d intervals",
+                average, len(combined_intervals)
+            )
+            return round(average, 4)
+
+        return None
+
+    def _check_minimum_charging_window(
+        self,
+        prices_today: dict[str, Any] | None,
+        prices_tomorrow: dict[str, Any] | None,
+        transport_lookup: list[dict[str, Any]] | None,
+        current_transport_cost: float | None
+    ) -> bool:
+        """Check if there are at least N consecutive hours of low prices starting from NOW.
+
+        This is used for the OFF → ON transition: only allow car charging to start
+        if the price will stay low for the configured duration (default 2 hours).
+
+        Returns True if all prices from NOW for the next N hours are below threshold.
+        Returns False if any price in the next N hours exceeds threshold.
+        """
+        if not prices_today and not prices_tomorrow:
+            return False
+
+        now = dt_util.utcnow()
+
+        # Get the threshold (either average or fixed)
+        use_average = self.config.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)
+        average_threshold = self._calculate_average_threshold(prices_today, prices_tomorrow, transport_lookup)
+
+        if use_average and average_threshold is not None:
+            threshold = average_threshold
+        else:
+            threshold = self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
+
+        # Get multiplier and offset for price adjustments
+        multiplier = self.config.get(
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+        )
+        offset = self.config.get(
+            CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
+        )
+
+        # Collect all future intervals with their prices
+        future_intervals: list[tuple[datetime, datetime | None, float]] = []
+
+        def resolve_transport_cost(start_time_utc: datetime) -> float:
+            """Get transport cost for future time using week-old pattern if available."""
+            if transport_lookup:
+                # For future times, look for the same hour from 1 week ago
+                if start_time_utc > now:
+                    week_ago = start_time_utc - timedelta(days=7)
+                    # Find the cost that was active at this same time last week
+                    cost_from_pattern: float | None = None
+                    for entry in transport_lookup:
+                        entry_cost = entry.get("cost")
+                        if entry_cost is None:
+                            continue
+                        entry_start_str = entry.get("start")
+                        if entry_start_str is None:
+                            cost_from_pattern = float(entry_cost)
+                            continue
+                        entry_start = dt_util.parse_datetime(entry_start_str)
+                        if entry_start is None:
+                            continue
+                        entry_start_utc = dt_util.as_utc(entry_start)
+                        if entry_start_utc <= week_ago:
+                            cost_from_pattern = float(entry_cost)
+                        else:
+                            break
+
+                    if cost_from_pattern is not None:
+                        return cost_from_pattern
+
+                # For past/current times or if no week-old data, use most recent cost
+                cost: float | None = None
+                for entry in transport_lookup:
+                    entry_cost = entry.get("cost")
+                    if entry_cost is None:
+                        continue
+                    entry_start_str = entry.get("start")
+                    if entry_start_str is None:
+                        cost = float(entry_cost)
+                        continue
+                    entry_start = dt_util.parse_datetime(entry_start_str)
+                    if entry_start is None:
+                        continue
+                    entry_start_utc = dt_util.as_utc(entry_start)
+                    if entry_start_utc <= start_time_utc:
+                        cost = float(entry_cost)
+                    else:
+                        break
+                if cost is not None:
+                    return cost
+            if current_transport_cost is not None:
+                return current_transport_cost
+            return 0.0
+
+        def process_intervals(intervals: list[dict[str, Any]]) -> None:
+            for interval in intervals:
+                try:
+                    start_time_str = interval.get("start")
+                    if not start_time_str:
+                        continue
+
+                    start_time = dt_util.parse_datetime(start_time_str)
+                    if start_time is None:
+                        continue
+                    start_time_utc = dt_util.as_utc(start_time)
+
+                    end_time = None
+                    end_time_str = interval.get("end")
+                    if end_time_str:
+                        try:
+                            end_time = dt_util.parse_datetime(end_time_str)
+                            if end_time <= start_time:
+                                end_time = None
+                        except Exception:
+                            end_time = None
+
+                    # Skip intervals that have completely ended
+                    # Include current interval (even if it started in the past but is still active)
+                    if end_time is not None:
+                        if end_time <= now:
+                            continue  # Interval has ended
+                    else:
+                        # No end time specified, assume hourly interval
+                        if start_time_utc < now - timedelta(hours=1):
+                            continue  # Interval started >1h ago, likely ended
+
+                    # Extract and convert price
+                    price_value = None
+                    for key in ("value", "value_exc_vat", "price"):
+                        value = interval.get(key)
+                        if isinstance(value, (int, float)):
+                            price_value = float(value)
+                            break
+                        if isinstance(value, str):
+                            try:
+                                price_value = float(value)
+                                break
+                            except (ValueError, TypeError):
+                                continue
+
+                    if price_value is None:
+                        continue
+
+                    # Convert from €/MWh to €/kWh and apply adjustments
+                    price_kwh = price_value / 1000
+                    adjusted_price = (price_kwh * multiplier) + offset
+
+                    # Add transport cost based on resolved change times
+                    transport_cost = resolve_transport_cost(start_time_utc)
+
+                    final_price = adjusted_price + transport_cost
+                    future_intervals.append((start_time_utc, end_time, final_price))
+
+                except Exception as err:
+                    _LOGGER.debug("Error processing interval for charging window check: %s", err)
+                    continue
+
+        # Process today's and tomorrow's prices
+        if prices_today:
+            area_code = next(iter(prices_today.keys()), None)
+            if area_code and isinstance(prices_today[area_code], list):
+                process_intervals(prices_today[area_code])
+
+        if prices_tomorrow:
+            area_code = next(iter(prices_tomorrow.keys()), None)
+            if area_code and isinstance(prices_tomorrow[area_code], list):
+                process_intervals(prices_tomorrow[area_code])
+
+        # Sort by time
+        future_intervals.sort(key=lambda item: item[0])
+
+        if not future_intervals:
+            return False
+
+        # Determine the most likely interval resolution so we can safely handle
+        # entries that do not provide an explicit end timestamp (Nord Pool often omits it).
+        estimated_resolution: timedelta | None = None
+        for idx in range(len(future_intervals) - 1):
+            current_start = future_intervals[idx][0]
+            next_start = future_intervals[idx + 1][0]
+            delta = next_start - current_start
+            if delta <= timedelta(0):
+                continue
+            if estimated_resolution is None or delta < estimated_resolution:
+                estimated_resolution = delta
+
+        if estimated_resolution is None or estimated_resolution <= timedelta(0):
+            estimated_resolution = timedelta(minutes=15)
+
+        # Build a timeline with concrete end times for each interval
+        timeline: list[tuple[datetime, datetime, float]] = []
+        for idx, (start_time, end_time, price) in enumerate(future_intervals):
+            if end_time and end_time > start_time:
+                interval_end = end_time
+            elif idx + 1 < len(future_intervals):
+                next_start = future_intervals[idx + 1][0]
+                if next_start > start_time:
+                    interval_end = next_start
+                else:
+                    interval_end = start_time + estimated_resolution
+            else:
+                interval_end = start_time + estimated_resolution
+
+            if interval_end <= start_time:
+                continue
+
+            timeline.append((start_time, interval_end, price))
+
+        if not timeline:
+            return False
+
+        # Identify the interval that covers the current time
+        current_idx: int | None = None
+        for idx, (start_time, interval_end, _) in enumerate(timeline):
+            if interval_end <= now:
+                continue
+            if start_time <= now < interval_end:
+                current_idx = idx
+                break
+
+        if current_idx is None:
+            _LOGGER.debug("No active Nord Pool interval covering current time %s", now.isoformat())
+            return False
+
+        min_duration_hours = self.config.get(
+            CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION
+        )
+        required_duration = timedelta(hours=min_duration_hours)
+
+        current_start, current_end, current_price = timeline[current_idx]
+        if current_price > threshold:
+            _LOGGER.debug(
+                "Current price %.4f €/kWh exceeds threshold %.4f €/kWh - no charging window starting now",
+                current_price,
+                threshold,
+            )
+            return False
+
+        low_price_duration = current_end - max(now, current_start)
+        if low_price_duration >= required_duration:
+            _LOGGER.debug(
+                "Found %d-hour charging window entirely within current interval (price %.4f €/kWh ≤ %.4f €/kWh)",
+                min_duration_hours,
+                current_price,
+                threshold,
+            )
+            return True
+
+        # Extend the window with consecutive low-price intervals with no gaps
+        previous_end = current_end
+        for next_idx in range(current_idx + 1, len(timeline)):
+            next_start, next_end, next_price = timeline[next_idx]
+
+            # Any gap in coverage breaks the consecutive window requirement
+            if next_start > previous_end + timedelta(seconds=5):
+                _LOGGER.debug(
+                    "Charging window broken by gap between %s and %s",
+                    previous_end.isoformat(),
+                    next_start.isoformat(),
+                )
+                break
+
+            if next_price > threshold:
+                _LOGGER.debug(
+                    "Charging window broken by high price %.4f €/kWh (>%.4f €/kWh)",
+                    next_price,
+                    threshold,
+                )
+                break
+
+            effective_start = max(previous_end, next_start)
+            if next_end <= effective_start:
+                continue
+
+            low_price_duration += next_end - effective_start
+            previous_end = max(previous_end, next_end)
+
+            if low_price_duration >= required_duration:
+                _LOGGER.debug(
+                    "Found %d-hour charging window: %.1f hours of low prices (≤%.4f €/kWh) ahead",
+                    min_duration_hours,
+                    low_price_duration.total_seconds() / 3600,
+                    threshold,
+                )
+                return True
+
+        _LOGGER.debug(
+            "Charging window too short: only %.1f hours of low prices from now (need %d)",
+            low_price_duration.total_seconds() / 3600,
+            min_duration_hours,
+        )
+        return False
+
+    async def _get_transport_cost_lookup(
+        self, current_transport_cost: float | None = None
+    ) -> tuple[list[dict[str, Any]], str]:
         """Return cached transport cost lookup built from recorder history."""
         transport_entity = self.config.get(CONF_TRANSPORT_COST_ENTITY)
         if not transport_entity:
-            self._transport_cost_lookup = {}
+            self._transport_cost_lookup = []
             self._transport_cost_status = "not_configured"
-            return {}, "not_configured"
+            return [], "not_configured"
 
         now = dt_util.utcnow()
         # Refresh every 30 minutes at most
@@ -398,46 +1041,60 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             )
 
             if not states or transport_entity not in states:
-                self._transport_cost_lookup = {}
-                self._transport_cost_status = "pending_history"
-                self._maybe_log_transport_status(
-                    "pending_history",
-                    "No transport cost history available for %s. "
-                    "Nord Pool prices will exclude transport cost until 7 days of history accumulate.",
-                    transport_entity,
+                fallback_lookup = self._build_fallback_transport_lookup(
+                    current_transport_cost
                 )
+                self._transport_cost_lookup = fallback_lookup
+                if fallback_lookup:
+                    self._transport_cost_status = "fallback_current"
+                    self._maybe_log_transport_status(
+                        "fallback_current",
+                        "Using current transport cost value for all hours due to missing history on %s.",
+                        transport_entity,
+                    )
+                else:
+                    self._transport_cost_status = "pending_history"
+                    self._maybe_log_transport_status(
+                        "pending_history",
+                        "No transport cost history available for %s. "
+                        "Nord Pool prices will exclude transport cost until 7 days of history accumulate.",
+                        transport_entity,
+                    )
                 self._transport_cost_lookup_time = now
                 return self._transport_cost_lookup, self._transport_cost_status
 
-            hour_costs: dict[int, list[float]] = {hour: [] for hour in range(24)}
+            # First collect all valid cost changes with timestamps
+            raw_changes: list[dict[str, Any]] = []
             for state in states[transport_entity]:
                 value = state.state
                 if value in (STATE_UNAVAILABLE, STATE_UNKNOWN):
                     continue
                 try:
                     cost = float(value)
-                    hour = state.last_changed.hour
-                    hour_costs[hour].append(cost)
+                    timestamp = dt_util.as_utc(state.last_changed)
+                    raw_changes.append(
+                        {
+                            "start": timestamp.isoformat(),
+                            "cost": cost,
+                        }
+                    )
                 except (ValueError, TypeError, AttributeError):
                     continue
 
-            lookup: dict[int, float] = {}
-            for hour, values in hour_costs.items():
-                if values:
-                    lookup[hour] = values[-1]
+            # Sort by timestamp first
+            raw_changes.sort(key=lambda entry: entry["start"])
 
-            # Fill gaps with neighboring hours
-            for hour in range(24):
-                if hour not in lookup:
-                    next_hour = (hour + 1) % 24
-                    prev_hour = (hour - 1) % 24
-                    if next_hour in lookup:
-                        lookup[hour] = lookup[next_hour]
-                    elif prev_hour in lookup:
-                        lookup[hour] = lookup[prev_hour]
+            # Then remove duplicate consecutive values
+            changes: list[dict[str, Any]] = []
+            last_cost: float | None = None
+            for change in raw_changes:
+                cost = change["cost"]
+                if last_cost is None or abs(cost - last_cost) > 1e-9:
+                    changes.append(change)
+                    last_cost = cost
 
-            self._transport_cost_lookup = lookup
-            self._transport_cost_status = "applied" if lookup else "pending_history"
+            self._transport_cost_lookup = changes
+            self._transport_cost_status = "applied" if changes else "pending_history"
             self._transport_cost_lookup_time = now
 
             if self._transport_cost_status == "pending_history":
@@ -453,16 +1110,27 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             return self._transport_cost_lookup, self._transport_cost_status
 
         except Exception as err:
-            self._transport_cost_lookup = {}
-            self._transport_cost_status = "error"
-            self._transport_cost_lookup_time = now
-            self._maybe_log_transport_status(
-                "error",
-                "Failed to build transport cost lookup from history for %s: %s. "
-                "Nord Pool prices will exclude transport cost.",
-                transport_entity,
-                err,
+            fallback_lookup = self._build_fallback_transport_lookup(
+                current_transport_cost
             )
+            self._transport_cost_lookup = fallback_lookup
+            if fallback_lookup:
+                self._transport_cost_status = "fallback_current"
+                self._maybe_log_transport_status(
+                    "fallback_current",
+                    "Using current transport cost value for all hours after history lookup failure on %s.",
+                    transport_entity,
+                )
+            else:
+                self._transport_cost_status = "error"
+                self._maybe_log_transport_status(
+                    "error",
+                    "Failed to build transport cost lookup from history for %s: %s. "
+                    "Nord Pool prices will exclude transport cost.",
+                    transport_entity,
+                    err,
+                )
+            self._transport_cost_lookup_time = now
             return self._transport_cost_lookup, self._transport_cost_status
 
     def _maybe_log_transport_status(self, status: str, message: str | None, *args) -> None:
@@ -473,6 +1141,19 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         _LOGGER.warning(message, *args)
         self._transport_cost_last_log = status
+
+    def _build_fallback_transport_lookup(
+        self, current_transport_cost: float | None
+    ) -> list[dict[str, Any]]:
+        """Build a lookup that uses the current transport cost for all hours."""
+        if current_transport_cost is None:
+            return []
+        return [
+            {
+                "start": None,
+                "cost": current_transport_cost,
+            }
+        ]
 
     async def _check_data_availability(self, data: dict[str, Any]) -> None:
         """Check data availability and send notifications if needed."""

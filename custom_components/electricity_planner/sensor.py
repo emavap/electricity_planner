@@ -1,6 +1,7 @@
 """Sensor platform for Electricity Planner."""
 from __future__ import annotations
 
+from datetime import timedelta
 import logging
 from typing import Any
 
@@ -445,7 +446,6 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
         power_analysis = self.coordinator.data.get("power_analysis", {})
         power_allocation = self.coordinator.data.get("power_allocation", {})
         solar_analysis = self.coordinator.data.get("solar_analysis", {})
-        solar_forecast = self.coordinator.data.get("solar_forecast", {})
         time_context = self.coordinator.data.get("time_context", {})
 
         # Configuration values (for validation)
@@ -483,6 +483,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "price_adjustment_multiplier": price_analysis.get("price_adjustment_multiplier"),
                 "price_adjustment_offset": price_analysis.get("price_adjustment_offset"),
                 "price_threshold": price_analysis.get("price_threshold"),
+                "average_threshold": self.coordinator.data.get("average_threshold"),
                 "is_low_price": price_analysis.get("is_low_price", False),
                 "very_low_price": price_analysis.get("very_low_price", False),
                 "price_position": price_analysis.get("price_position"),
@@ -521,15 +522,6 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "allocation_reason": power_allocation.get("allocation_reason", ""),
             },
 
-            # Solar forecast (for validation)
-            "solar_forecast": {
-                "forecast_available": solar_forecast.get("forecast_available", False),
-                "solar_production_factor": solar_forecast.get("solar_production_factor"),
-                "expected_solar_production": solar_forecast.get("expected_solar_production", "unknown"),
-                "sunny_hours": solar_forecast.get("sunny_hours", 0),
-                "cloudy_hours": solar_forecast.get("cloudy_hours", 0),
-            },
-
             # Time context (for validation)
             "time_context": {
                 "current_hour": time_context.get("current_hour"),
@@ -547,6 +539,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "max_car_power": config.get("max_car_power", 11000),
                 "max_grid_power": config.get("max_grid_power", 15000),
                 "min_car_charging_threshold": config.get("min_car_charging_threshold", 100),
+                "min_car_charging_duration": config.get("min_car_charging_duration", 2),
                 "solar_peak_emergency_soc": config.get("solar_peak_emergency_soc", 25),
                 "predictive_charging_min_soc": config.get("predictive_charging_min_soc", 30),
                 "significant_solar_threshold": config.get("significant_solar_threshold", 1000),
@@ -562,7 +555,6 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "power_allocation_valid": power_allocation.get("total_allocated", 0) <= power_analysis.get("solar_surplus", 0),
                 "emergency_override_active": self._check_emergency_override(battery_analysis, time_context, config),
                 "predictive_logic_active": self._check_predictive_logic(price_analysis, battery_analysis, config),
-                "solar_forecast_influencing": solar_forecast.get("forecast_available", False) and solar_forecast.get("solar_production_factor", 0.5) != 0.5,
             },
 
             # Last update
@@ -941,7 +933,7 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         prices_tomorrow = self.coordinator.data.get("nordpool_prices_tomorrow")
 
         # Transport cost lookup/status provided by coordinator
-        transport_lookup = self.coordinator.data.get("transport_cost_lookup") or {}
+        transport_lookup = self.coordinator.data.get("transport_cost_lookup") or []
         transport_status = self.coordinator.data.get("transport_cost_status", "not_configured")
 
         # Combine today and tomorrow prices into a single list for easier dashboard usage
@@ -984,7 +976,11 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             "avg_price": round(avg_price, 4) if avg_price is not None else None,
             "price_range": round(max_price - min_price, 4) if (max_price is not None and min_price is not None) else None,
             "transport_cost_applied": (
-                True if transport_status == "applied" else False if transport_status in ("pending_history", "error") else None
+                True
+                if transport_status in ("applied", "fallback_current")
+                else False
+                if transport_status in ("pending_history", "error")
+                else None
             ),
             "transport_cost_status": transport_status,
             "last_update": dt_util.now().isoformat(),
@@ -1006,7 +1002,7 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
 
         return None
 
-    def _normalize_price_interval(self, interval: Any, transport_cost_lookup: dict[int, float] | None = None) -> dict[str, Any] | None:
+    def _normalize_price_interval(self, interval: Any, transport_cost_lookup: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
         """Return a normalized interval dict with a guaranteed price key.
 
         Converts price from €/MWh to €/kWh and applies contract adjustments
@@ -1035,18 +1031,71 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         # Add transport cost based on the interval's hour
         # Use lookup table built from historical data
         transport_cost = 0.0
+        fallback_transport = self.coordinator.data.get("transport_cost")
+        applied_lookup_cost = False
 
         if transport_cost_lookup:
             start_time_str = interval.get("start")
-            if start_time_str:
-                try:
-                    # Parse ISO format timestamp
-                    from datetime import datetime
-                    start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
-                    hour = start_time.hour
-                    transport_cost = transport_cost_lookup.get(hour, 0.0)
-                except Exception:
-                    pass
+            interval_start = dt_util.parse_datetime(start_time_str) if start_time_str else None
+            if interval_start is not None:
+                interval_start_utc = dt_util.as_utc(interval_start)
+            else:
+                interval_start_utc = None
+
+            if interval_start_utc is not None:
+                now = dt_util.utcnow()
+                effective_cost: float | None = None
+
+                # For future times, look for the same hour from 1 week ago
+                if interval_start_utc > now:
+                    week_ago = interval_start_utc - timedelta(days=7)
+                    # Find the cost that was active at this same time last week
+                    cost_from_pattern: float | None = None
+                    for change in transport_cost_lookup:
+                        change_start_str = change.get("start")
+                        change_cost = change.get("cost")
+                        if change_cost is None:
+                            continue
+                        if change_start_str is None:
+                            cost_from_pattern = float(change_cost)
+                            continue
+                        change_start = dt_util.parse_datetime(change_start_str)
+                        if change_start is None:
+                            continue
+                        change_start_utc = dt_util.as_utc(change_start)
+                        if change_start_utc <= week_ago:
+                            cost_from_pattern = float(change_cost)
+                        else:
+                            break
+
+                    if cost_from_pattern is not None:
+                        effective_cost = cost_from_pattern
+
+                # For past/current times or if no week-old data, use most recent cost
+                if effective_cost is None:
+                    for change in transport_cost_lookup:
+                        change_start_str = change.get("start")
+                        change_cost = change.get("cost")
+                        if change_cost is None:
+                            continue
+                        if change_start_str is None:
+                            effective_cost = float(change_cost)
+                            continue
+                        change_start = dt_util.parse_datetime(change_start_str)
+                        if change_start is None:
+                            continue
+                        change_start_utc = dt_util.as_utc(change_start)
+                        if change_start_utc <= interval_start_utc:
+                            effective_cost = float(change_cost)
+                        else:
+                            break
+
+                if effective_cost is not None:
+                    transport_cost = effective_cost
+                    applied_lookup_cost = True
+
+        if not applied_lookup_cost and fallback_transport is not None:
+            transport_cost = fallback_transport
 
         final_price = adjusted_price + transport_cost
 

@@ -38,13 +38,9 @@ class AlgorithmThresholds:
     medium_soc_threshold: int = 50  # % - Medium SOC charging threshold
     high_soc_threshold: int = 60  # % - High SOC threshold for time-based
     max_target_soc: int = 90  # % - Maximum target SOC for calculations
-    
+
     significant_price_drop: float = 0.15  # 15% - Price drop considered significant
     neutral_price_position: float = 0.5  # 50% - Neutral position in daily range
-    
-    poor_solar_threshold: float = 0.3  # 30% - Below this is poor
-    moderate_solar_threshold: float = 0.6  # 60% - Above this is good
-    excellent_solar_threshold: float = 0.8  # 80% - Above this is excellent
 
 # System limits
 @dataclass

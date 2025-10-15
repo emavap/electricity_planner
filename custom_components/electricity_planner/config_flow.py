@@ -22,11 +22,6 @@ from .const import (
     CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MONTHLY_GRID_PEAK_ENTITY,
-    CONF_SOLAR_FORECAST_CURRENT_ENTITY,
-    CONF_SOLAR_FORECAST_NEXT_ENTITY,
-    CONF_SOLAR_FORECAST_TODAY_ENTITY,
-    CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY,
-    CONF_SOLAR_FORECAST_TOMORROW_ENTITY,
     CONF_TRANSPORT_COST_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
@@ -34,8 +29,6 @@ from .const import (
     CONF_EMERGENCY_SOC_THRESHOLD,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
-    CONF_POOR_SOLAR_FORECAST_THRESHOLD,
-    CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD,
     CONF_FEEDIN_PRICE_THRESHOLD,
     CONF_MAX_BATTERY_POWER,
     CONF_MAX_CAR_POWER,
@@ -46,6 +39,8 @@ from .const import (
     CONF_BASE_GRID_SETPOINT,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+    CONF_USE_AVERAGE_THRESHOLD,
+    CONF_MIN_CAR_CHARGING_DURATION,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -56,8 +51,6 @@ from .const import (
     DEFAULT_EMERGENCY_SOC,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
     DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
-    DEFAULT_POOR_SOLAR_FORECAST,
-    DEFAULT_EXCELLENT_SOLAR_FORECAST,
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
     DEFAULT_MAX_BATTERY_POWER,
     DEFAULT_MAX_CAR_POWER,
@@ -68,6 +61,8 @@ from .const import (
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
+    DEFAULT_USE_AVERAGE_THRESHOLD,
+    DEFAULT_MIN_CAR_CHARGING_DURATION,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -127,21 +122,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_MONTHLY_GRID_PEAK_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
-            vol.Optional(CONF_SOLAR_FORECAST_CURRENT_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(CONF_SOLAR_FORECAST_NEXT_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(CONF_SOLAR_FORECAST_TODAY_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(CONF_SOLAR_FORECAST_TOMORROW_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
             vol.Optional(CONF_TRANSPORT_COST_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
@@ -158,14 +138,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "next_price": "Next hour price from Nord Pool",
                 "battery_soc": "Battery State of Charge entities",
                 "solar_production": "Current solar production in W",
-                "house_consumption": "Current house power consumption in W", 
+                "house_consumption": "Current house power consumption in W",
                 "car_charging": "Car charging power in W (optional)",
                 "monthly_grid_peak": "Current month grid peak in W (optional)",
-                "solar_forecast_current": "Solar forecast for current hour (kWh) (optional)",
-                "solar_forecast_next": "Solar forecast for next hour (kWh) (optional)", 
-                "solar_forecast_today": "Total solar forecast for today (kWh) (optional)",
-                "solar_forecast_remaining": "Remaining solar forecast for today (kWh) (optional)",
-                "solar_forecast_tomorrow": "Solar forecast for tomorrow (kWh) (optional)",
                 "transport_cost": "Optional transport cost sensor (€/kWh) added to buy price",
             },
         )
@@ -300,22 +275,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             ),
             vol.Optional(
-                CONF_POOR_SOLAR_FORECAST_THRESHOLD,
-                default=DEFAULT_POOR_SOLAR_FORECAST
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=10, max=60, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD,
-                default=DEFAULT_EXCELLENT_SOLAR_FORECAST
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=60, max=95, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
                 CONF_FEEDIN_PRICE_THRESHOLD,
                 default=DEFAULT_FEEDIN_PRICE_THRESHOLD
             ): selector.NumberSelector(
@@ -351,6 +310,18 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     min=30, max=90, step=5, unit_of_measurement="%"
                 )
             ),
+            vol.Optional(
+                CONF_USE_AVERAGE_THRESHOLD,
+                default=DEFAULT_USE_AVERAGE_THRESHOLD
+            ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_MIN_CAR_CHARGING_DURATION,
+                default=DEFAULT_MIN_CAR_CHARGING_DURATION
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1, max=6, step=1, unit_of_measurement="hours"
+                )
+            ),
         })
 
         return self.async_show_form(
@@ -365,8 +336,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "emergency_soc": "Emergency SOC level that triggers charging regardless of price",
                 "very_low_price": "Percentage threshold for 'very low' price in daily range",
                 "significant_solar": "Solar surplus threshold considered significant",
-                "poor_forecast": "Solar forecast below this percentage is considered poor",
-                "excellent_forecast": "Solar forecast above this percentage is considered excellent",
                 "use_dynamic_threshold": "Enable intelligent price analysis (more selective, better prices)",
                 "dynamic_threshold_confidence": "Confidence required for dynamic charging (higher = more selective)",
                 "feedin_price_threshold": "Minimum export price required when no adjustment is set",
@@ -582,36 +551,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Optional(
-                CONF_SOLAR_FORECAST_CURRENT_ENTITY,
-                default=current_config.get(CONF_SOLAR_FORECAST_CURRENT_ENTITY)
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(
-                CONF_SOLAR_FORECAST_NEXT_ENTITY,
-                default=current_config.get(CONF_SOLAR_FORECAST_NEXT_ENTITY)
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(
-                CONF_SOLAR_FORECAST_TODAY_ENTITY,
-                default=current_config.get(CONF_SOLAR_FORECAST_TODAY_ENTITY)
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(
-                CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY,
-                default=current_config.get(CONF_SOLAR_FORECAST_REMAINING_TODAY_ENTITY)
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(
-                CONF_SOLAR_FORECAST_TOMORROW_ENTITY,
-                default=current_config.get(CONF_SOLAR_FORECAST_TOMORROW_ENTITY)
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(
                 CONF_TRANSPORT_COST_ENTITY,
                 default=current_config.get(CONF_TRANSPORT_COST_ENTITY)
             ): selector.EntitySelector(
@@ -714,22 +653,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 )
             ),
             vol.Optional(
-                CONF_POOR_SOLAR_FORECAST_THRESHOLD,
-                default=current_config.get(CONF_POOR_SOLAR_FORECAST_THRESHOLD, DEFAULT_POOR_SOLAR_FORECAST)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=10, max=60, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD,
-                default=current_config.get(CONF_EXCELLENT_SOLAR_FORECAST_THRESHOLD, DEFAULT_EXCELLENT_SOLAR_FORECAST)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=60, max=95, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
                 CONF_FEEDIN_PRICE_THRESHOLD,
                 default=current_config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
             ): selector.NumberSelector(
@@ -747,6 +670,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=30, max=90, step=5, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_USE_AVERAGE_THRESHOLD,
+                default=current_config.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)
+            ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_MIN_CAR_CHARGING_DURATION,
+                default=current_config.get(CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1, max=6, step=1, unit_of_measurement="hours"
                 )
             ),
             vol.Optional(
