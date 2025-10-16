@@ -24,8 +24,15 @@ actions:
           - action: huawei_solar.forcible_charge
             data:
               power: >-
-                {{ (states('sensor.electricity_planner_grid_setpoint') | float /
-                2) | int }}
+                {{ (
+                  (
+                    [
+                      (states('sensor.electricity_planner_grid_setpoint') | float(0)) -
+                      (states('sensor.evcharger_power_2') | float(0)),
+                      0
+                    ] | max
+                  ) / 2
+                ) | int }}
               device_id: 5f18f808c2a17aeb3c78b435012f6713
               duration: 15
       - conditions:

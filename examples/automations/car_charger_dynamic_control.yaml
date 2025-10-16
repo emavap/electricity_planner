@@ -124,8 +124,7 @@ actions:
                         float(0) }}
                       planner_limit_valid: "{{ planner_limit_w_raw > 0 }}"
                       target_limit_w: |
-                        {{ planner_limit_w_raw
-                           | iif(planner_limit_valid, planner_limit_w_raw, current_limit_w) }}
+                        {{ planner_limit_w_raw if planner_limit_valid else current_limit_w }}
                       target_limit_w_clamped: >
                         {{ [max_power_w, [min_power_w, target_limit_w] | max] |
                         min }}
