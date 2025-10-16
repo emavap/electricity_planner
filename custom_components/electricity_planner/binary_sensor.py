@@ -276,10 +276,14 @@ class FeedinSolarBinarySensor(ElectricityPlannerBinarySensorBase):
             return {}
 
         power_allocation = self.coordinator.data.get("power_allocation", {})
+        coordinator_config = getattr(self.coordinator, "config", {}) or {}
+        feedin_threshold = coordinator_config.get(
+            CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
+        )
         return {
             "reason": self.coordinator.data.get("feedin_solar_reason", "No reason available"),
             "current_price": self.coordinator.data.get("current_price"),
-            "feedin_threshold": self.entry.data.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD),
+            "feedin_threshold": feedin_threshold,
             "remaining_solar": power_allocation.get("remaining_solar", 0),
             "total_solar_allocated": power_allocation.get("total_allocated", 0),
         }

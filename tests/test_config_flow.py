@@ -15,6 +15,12 @@ from custom_components.electricity_planner.const import (
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_PRICE_THRESHOLD,
+    CONF_CURRENT_PRICE_ENTITY,
+    CONF_HIGHEST_PRICE_ENTITY,
+    CONF_LOWEST_PRICE_ENTITY,
+    CONF_NEXT_PRICE_ENTITY,
+    CONF_SOLAR_PRODUCTION_ENTITY,
+    CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_MAX_BATTERY_POWER,
     CONF_MAX_CAR_POWER,
     CONF_MAX_GRID_POWER,
@@ -100,3 +106,43 @@ async def test_options_flow_returns_updated_options():
     assert "capacity_sensor_main_battery" not in result["data"]
     # Options flow should not have mutated the original entry data
     assert entry.data == {}
+
+
+@pytest.mark.asyncio
+async def test_options_flow_defaults_reflect_existing_options():
+    battery_entity = "sensor.main_battery"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_CURRENT_PRICE_ENTITY: "sensor.current_price",
+            CONF_HIGHEST_PRICE_ENTITY: "sensor.highest_price",
+            CONF_LOWEST_PRICE_ENTITY: "sensor.lowest_price",
+            CONF_NEXT_PRICE_ENTITY: "sensor.next_price",
+            CONF_BATTERY_SOC_ENTITIES: [battery_entity],
+            CONF_SOLAR_PRODUCTION_ENTITY: "sensor.solar_production",
+            CONF_HOUSE_CONSUMPTION_ENTITY: "sensor.house_consumption",
+        },
+        options={
+            CONF_PRICE_THRESHOLD: 0.321,
+            CONF_BATTERY_SOC_ENTITIES: [battery_entity],
+            CONF_BATTERY_CAPACITIES: {battery_entity: 11.5},
+        },
+    )
+
+    handler = OptionsFlowHandler(entry)
+    result = await handler.async_step_init()
+
+    assert result["type"] == FlowResultType.FORM
+    schema = result["data_schema"]
+
+    def default_for(field_name: str):
+        key = next(
+            key for key in schema.schema if getattr(key, "schema", None) == field_name
+        )
+        default = getattr(key, "default", None)
+        return default() if callable(default) else default
+
+    assert default_for(CONF_PRICE_THRESHOLD) == pytest.approx(0.321)
+
+    capacity_field = f"capacity_{battery_entity.replace('.', '_')}"
+    assert default_for(capacity_field) == pytest.approx(11.5)

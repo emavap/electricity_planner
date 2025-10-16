@@ -461,7 +461,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
             return self.async_create_entry(title="", data=updated_options)
 
-        current_config = self.config_entry.data
+        # Merge stored data with runtime options so that defaults reflect the latest settings.
+        current_config = {**self.config_entry.data, **self.config_entry.options}
 
         battery_entities = current_config.get(CONF_BATTERY_SOC_ENTITIES, [])
         current_capacities = current_config.get(CONF_BATTERY_CAPACITIES, {})
