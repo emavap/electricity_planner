@@ -422,7 +422,9 @@ views:
             series:
               - entity: sensor.electricity_planner_current_electricity_price
                 name: Total price
-                type: column
+                type: line
+                curve: smooth
+                stroke_width: 2
                 color: "#2ecc71"
                 float_precision: 4
                 yaxis_id: price
