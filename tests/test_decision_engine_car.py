@@ -40,7 +40,7 @@ def test_car_uses_grid_when_price_low_even_with_solar_allocation():
     reason = decision["car_grid_charging_reason"]
     assert "Low price" in reason
     assert "solar" in reason
-    assert "starting" in reason
+    assert "window available" in reason
     assert "car_solar_only" not in decision
     assert data["car_charging_locked_threshold"] == pytest.approx(0.15, rel=1e-6)
 
