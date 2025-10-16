@@ -12,9 +12,32 @@ This is a Home Assistant custom integration that analyses live Nord Pool prices,
 
 ## Documentation Map
 
-- [README](README.md) – full installation, configuration and decision logic.
-- [DYNAMIC_THRESHOLD](DYNAMIC_THRESHOLD.md) – deep dive into the adaptive price model.
-- [DASHBOARD](DASHBOARD.md) – Lovelace visualisation ideas.
-- [TROUBLESHOOTING](TROUBLESHOOTING.md) – checklist for common issues.
+- [README](README.md) – installation, configuration wizard, decision flow, detailed outputs, and automation ideas.
+- [DASHBOARD](DASHBOARD.md) – Lovelace visualisation examples (ApexCharts, manual override buttons, etc.).
+- [CHANGELOG](CHANGELOG.md) – release notes and migration history.
+- [CLAUDE](CLAUDE.md) – contributor/developer guide for AI coding assistants.
 
-To install, use HACS or copy the `custom_components/electricity_planner` directory into Home Assistant, then configure the integration via the UI. Once configured, observe the binary sensors and diagnostics attributes to drive your automations. For contribution guidelines and test instructions, see the README.
+### Installation Recap
+
+1. Add the repository via HACS (Integration) **or** copy `custom_components/electricity_planner` into `<config>/custom_components/`.
+2. Restart Home Assistant and add the integration from **Settings → Devices & Services → Add Integration**.
+3. Use the configuration wizard to select sensors, thresholds, and limits. Reopen **Configure** later to tweak options; defaults now reflect saved choices.
+
+### Testing & Contributions
+
+- The project ships with a Docker-based pytest harness:
+
+  ```bash
+  docker build -f Dockerfile.tests -t electricity-planner-tests .
+  docker run --rm -v "$PWD":/app -w /app -e PYTHONPATH=/app electricity-planner-tests pytest
+  ```
+
+- Enable debug logging in Home Assistant:
+
+  ```yaml
+  logger:
+    logs:
+      custom_components.electricity_planner: debug
+  ```
+
+- Pull requests should include updated documentation when behaviour or configuration changes. The README is the authoritative user-facing reference.

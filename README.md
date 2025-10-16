@@ -38,6 +38,12 @@ Electricity Planner is a Home Assistant custom integration that turns Nord Pool 
    - **Solar Parameters** – significant surplus threshold, solar-peak SOC override.
 3. Save and allow the coordinator to populate sensors (10–30 seconds).
 
+### Updating Configuration Later
+
+- Settings → Devices & Services → Electricity Planner → **Configure** to reopen the options flow.
+- All forms now merge your saved `options` with the original data, so defaults reflect the latest thresholds, multipliers, and per-battery capacities.
+- Submit only the pages you need to modify; unchanged values remain intact in Home Assistant’s options store.
+
 ### Entities Exposed
 
 | Entity | Purpose |
@@ -46,8 +52,8 @@ Electricity Planner is a Home Assistant custom integration that turns Nord Pool 
 | `binary_sensor.electricity_planner_car_grid_charging`     | “Can the EV draw grid energy now?” (reason attribute) |
 | `sensor.electricity_planner_decision_diagnostics`         | Full analysis context in attributes |
 | `sensor.electricity_planner_battery_soc_average`          | Optional automation helper |
-| `sensor.electricity_planner_grid_setpoint` / `number.electricity_planner_grid_setpoint` | Suggested grid power limit (if enabled) |
-| `sensor.electricity_planner_car_charger_limit` / `number.electricity_planner_car_charger_limit` | Recommended EVSE limit |
+| `sensor.electricity_planner_grid_setpoint` | Suggested grid power limit (if enabled) |
+| `sensor.electricity_planner_car_charger_limit` | Recommended EVSE limit |
 | Diagnostic sensors (current price, feed-in price, thresholds, solar surplus, etc.) | Visualisation and troubleshooting |
 
 ---
@@ -121,6 +127,7 @@ Key attribute groups:
 - `power_allocation` – where surplus is assigned (battery, EV, export).
 - `time_context` – night/peak/evening flags, winter detection.
 - `configured_limits` – the effective power and SOC limits currently applied.
+- Feed-in attributes (`feedin_solar`, `feedin_effective_price`, `feedin_threshold`) always reflect the merged configuration (entry data + options), so dashboard values stay aligned with any tweaks made in the options flow.
 
 ### Example Reason Strings
 
@@ -221,7 +228,7 @@ docker build -f Dockerfile.tests -t electricity-planner-tests .
 docker run --rm -v "$PWD":/app -w /app -e PYTHONPATH=/app electricity-planner-tests pytest
 ```
 
-### Running Locally
+### Running Locally (optional)
 
 ```bash
 pip install -r requirements-dev.txt
@@ -229,7 +236,7 @@ export PYTHONPATH=.
 pytest
 ```
 
-All tests are written to run without spinning up Home Assistant itself—the project stubs the coordinator and entity layers where necessary.
+Use a virtual environment (e.g., `python3 -m venv .venv && source .venv/bin/activate`) to keep dependencies isolated. All tests are written to run without spinning up Home Assistant itself—the project stubs the coordinator and entity layers where necessary.
 
 ### Logging
 

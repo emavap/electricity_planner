@@ -11,8 +11,8 @@ This is a Home Assistant custom integration called "Electricity Planner" - a sma
 ### Core Components
 
 - **Decision Engine** (`decision_engine.py`): Multi-factor algorithm that evaluates price positioning, battery status, and live solar production
-  - 29 methods for comprehensive decision logic
-  - 17 validation checks for data integrity
+  - 29+ methods for comprehensive decision logic
+  - Extensive validation checks for data integrity and safety
   - Uses strategy pattern for extensible decision making
 - **Strategies** (`strategies.py`): 8 strategy classes implementing different charging scenarios
   - EmergencyChargingStrategy, SolarPriorityStrategy, VeryLowPriceStrategy, etc.
@@ -20,10 +20,15 @@ This is a Home Assistant custom integration called "Electricity Planner" - a sma
 - **Coordinator** (`coordinator.py`): Real-time data coordination with 30-second updates and state change triggers
   - Provides normalized access to all configuration and sensor data
   - Manages update cycles and entity state tracking
+- **Options-aware Config Flow** (`config_flow.py`): UI-based configuration for entity selection and thresholds
+  - Multi-step setup wizard (entities → capacities → thresholds → safety limits)
+  - Options flow defaults now merge `entry.data` + `entry.options` so users always see their latest selections
+  - Version 7 config schema with migration support
 - **Config Flow** (`config_flow.py`): UI-based configuration for entity selection and thresholds
-  - 5-step setup wizard (entities, thresholds, limits, solar, finalize)
-  - Version 5 config schema with migration support
-- **Migrations** (`migrations.py`): Handles configuration upgrades from v1→v5
+  - Multi-step wizard (entities → capacities → thresholds → safety limits)
+  - Options flow mirrors the same defaults and now merges with stored options
+  - Version 7 config schema with migration support
+- **Migrations** (`migrations.py`): Handles configuration upgrades from v1→v7
   - Automatic migration on integration load
   - Safe removal of deprecated options
 - **Sensors** (`sensor.py`): Comprehensive analysis sensors
@@ -31,7 +36,8 @@ This is a Home Assistant custom integration called "Electricity Planner" - a sma
   - Decision diagnostics with full validation data
   - Threshold visibility sensors for monitoring
 - **Binary Sensors** (`binary_sensor.py`): Main boolean outputs for charging decisions
-  - battery_grid_charging and car_grid_charging with detailed reasons
+  - `battery_grid_charging` and `car_grid_charging` with detailed reasons
+  - Feed-in sensor attributes sourced from the coordinator’s merged configuration, keeping thresholds aligned with live options
 
 ### Key Decision Logic
 
@@ -99,12 +105,17 @@ The car charging logic implements strict hysteresis to prevent short charging cy
 
 ## Development Commands
 
-This is a Home Assistant custom integration - no build system or tests are present. Development workflow:
+This is a Home Assistant custom integration. Recommended development workflow:
 
-1. **Install in Home Assistant**: Copy `custom_components/electricity_planner/` to HA config
-2. **Restart Home Assistant**: Required after code changes
-3. **Reload integration**: Through HA UI for configuration changes
-4. **Debug logging**: Add to `configuration.yaml`:
+1. **Run automated tests (preferred)** – via Docker (no local Python deps required):
+   ```bash
+   docker build -f Dockerfile.tests -t electricity-planner-tests .
+   docker run --rm -v "$PWD":/app -w /app -e PYTHONPATH=/app electricity-planner-tests pytest
+   ```
+2. **Install in Home Assistant**: Copy `custom_components/electricity_planner/` to HA config
+3. **Restart Home Assistant**: Required after code changes
+4. **Reload integration**: Through HA UI for configuration changes
+5. **Debug logging**: Add to `configuration.yaml`:
    ```yaml
    logger:
      logs:
@@ -120,11 +131,11 @@ custom_components/electricity_planner/
 ├── coordinator.py       # Data coordination and state management
 ├── decision_engine.py   # Core charging decision algorithms (4538 lines)
 ├── strategies.py        # Decision strategies (8 strategy classes)
-├── config_flow.py       # UI configuration flow (5-step wizard, version 5)
+├── config_flow.py       # UI configuration + options flow (multi-step wizard, schema v7)
 ├── sensor.py           # Analysis sensors (price, battery, power, diagnostics)
 ├── binary_sensor.py    # Main boolean outputs for charging decisions
-├── migrations.py       # Configuration migration system (v1→v5)
-├── manifest.json       # Integration metadata and dependencies (v2.3.0)
+├── migrations.py       # Configuration migration system (v1→v7)
+├── manifest.json       # Integration metadata and dependencies (v3.0.0)
 └── strings.json        # UI text and translations
 ```
 
@@ -157,9 +168,9 @@ The integration is designed for dynamic electricity markets:
 ## Configuration System
 
 ### Current Version
-- **Integration Version**: 2.3.0
-- **Config Schema Version**: 5
-- **Migration Path**: Automatic v1→v2→v3→v4→v5 migration
+- **Integration Version**: 3.0.0
+- **Config Schema Version**: 7
+- **Migration Path**: Automatic v1→v2→v3→v4→v5→v6→v7 migration
 
 ### Configuration Categories
 1. **Entity Selection**: Nord Pool, battery, solar, car, power flow entities
@@ -168,9 +179,9 @@ The integration is designed for dynamic electricity markets:
 4. **Power Limits**: Max battery/car/grid power, charging thresholds
 5. **Solar Parameters**: Significant solar surplus threshold configuration
 
-### Recent Changes (v2.3.0)
-- **Removed**: `grid_battery_charging_limit_soc` (unused config option)
-- **Added**: Threshold visibility sensors for monitoring
-- **Fixed**: Grid setpoint calculation to account for battery power
-- **Fixed**: Solar surplus calculation to prevent negative values
-- **Added**: Car charging restriction logic (1.4kW limit when not allowed)
+### Recent Changes (v3.0.0)
+- **Improved**: Options flow defaults now reflect saved options without reverting to base config data
+- **Improved**: Feed-in binary sensor attributes sourced from merged configuration for accurate thresholds
+- **Added**: Comprehensive pytest suite runnable via Docker for quick regression coverage
+- **Fixed**: Historical migrations extended to schema version 7 (handles dynamic threshold + Nord Pool entry)
+- **Retained**: Safety guards against negative solar surplus and grid over-allocation
