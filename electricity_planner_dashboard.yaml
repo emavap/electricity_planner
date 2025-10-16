@@ -377,19 +377,77 @@ views:
 
               _Note: To change car charging duration, go to Settings → Devices & Services → Electricity Planner → Configure_
 
-          - type: history-graph
-            title: Price vs decisions (48h)
-            hours_to_show: 48
-            refresh_interval: 300
-            entities:
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Price & Decisions (24h)
+            graph_span: 24h
+            span:
+              end: hour
+            apex_config:
+              chart:
+                height: 320
+              tooltip:
+                shared: true
+              dataLabels:
+                enabled: false
+              markers:
+                size: 0
+              xaxis:
+                type: datetime
+                labels:
+                  datetimeFormatter:
+                    hour: "HH:mm"
+              yaxis:
+                - id: price
+                  decimalsInFloat: 4
+                  labels:
+                    formatter: |
+                      EVAL:function(value) {
+                        return value.toFixed(4) + ' €/kWh';
+                      }
+                - id: decisions
+                  opposite: true
+                  min: -0.05
+                  max: 1.05
+                  title:
+                    text: "Decision active"
+                  labels:
+                    formatter: |
+                      EVAL:function(value) {
+                        if (value >= 0.75) { return 'On'; }
+                        if (value <= 0.25) { return 'Off'; }
+                        return '';
+                      }
+            series:
               - entity: sensor.electricity_planner_current_electricity_price
-                name: Buy price
-              - entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
-                name: Feed-in price
+                name: Total price
+                type: column
+                color: "#2ecc71"
+                float_precision: 4
+                yaxis_id: price
+                show:
+                  legend_value: false
               - entity: binary_sensor.electricity_planner_battery_charge_from_grid
                 name: Battery charging
+                type: line
+                yaxis_id: decisions
+                curve: stepline
+                stroke_width: 1
+                color: "#e74c3c"
+                transform: "return x === 'on' ? 1 : 0;"
+                show:
+                  legend_value: false
               - entity: binary_sensor.electricity_planner_car_charge_from_grid
                 name: Car charging
+                type: line
+                yaxis_id: decisions
+                curve: stepline
+                stroke_width: 1
+                color: "#f39c12"
+                transform: "return x === 'on' ? 0.8 : 0;"
+                show:
+                  legend_value: false
 
           - type: markdown
             title: Price Forecast Insights
