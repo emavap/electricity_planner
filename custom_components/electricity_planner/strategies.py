@@ -5,6 +5,12 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 import logging
 
+from .const import (
+    DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
+    DEFAULT_EMERGENCY_SOC,
+    DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
+    DEFAULT_VERY_LOW_PRICE_THRESHOLD,
+)
 from .defaults import DEFAULT_ALGORITHM_THRESHOLDS
 from .dynamic_threshold import DynamicThresholdAnalyzer
 
@@ -31,11 +37,18 @@ class EmergencyChargingStrategy(ChargingStrategy):
     def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
         """Check if emergency charging is needed."""
         battery = context.get("battery_analysis", {})
-        config = context.get("config", {})
+        config = context.get("config", {}) or {}
+        settings = context.get("settings")
         price = context.get("price_analysis", {})
-        
+
         average_soc = battery.get("average_soc", 100)
-        emergency_threshold = config.get("emergency_soc_threshold", 15)
+        emergency_threshold = (
+            getattr(settings, "emergency_soc_threshold", None)
+            if settings is not None
+            else None
+        )
+        if emergency_threshold is None:
+            emergency_threshold = config.get("emergency_soc_threshold", DEFAULT_EMERGENCY_SOC)
         current_price = price.get("current_price", 0)
         
         if average_soc < emergency_threshold:
@@ -86,7 +99,8 @@ class VeryLowPriceStrategy(ChargingStrategy):
         """Check if price is very low."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
-        config = context.get("config", {})
+        config = context.get("config", {}) or {}
+        settings = context.get("settings")
 
         if not price.get("very_low_price", False):
             return False, ""
@@ -96,16 +110,22 @@ class VeryLowPriceStrategy(ChargingStrategy):
         average_soc = battery.get("average_soc")
 
         # If battery data unavailable, default to charging (price is very low!)
+        very_low_threshold = (
+            getattr(settings, "very_low_price_threshold_pct", None)
+            if settings is not None
+            else None
+        )
+        if very_low_threshold is None:
+            very_low_threshold = config.get("very_low_price_threshold", DEFAULT_VERY_LOW_PRICE_THRESHOLD)
+
         if average_soc is None:
             current_price = price.get("current_price", 0)
-            very_low_threshold = config.get("very_low_price_threshold", 30)
             return True, f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_threshold}% (battery data unavailable, charging anyway)"
 
         if average_soc >= max_soc:
             return False, ""  # Let other strategies handle full battery
 
         current_price = price.get("current_price", 0)
-        very_low_threshold = config.get("very_low_price_threshold", 30)
         return True, f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_threshold}% of daily range"
 
     def get_priority(self) -> int:
@@ -119,7 +139,8 @@ class PredictiveChargingStrategy(ChargingStrategy):
         """Check if we should wait for better prices."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
-        config = context.get("config", {})
+        config = context.get("config", {}) or {}
+        settings = context.get("settings")
 
         if not price.get("is_low_price", False):
             return False, ""
@@ -128,7 +149,13 @@ class PredictiveChargingStrategy(ChargingStrategy):
             return False, ""
 
         average_soc = battery.get("average_soc")
-        predictive_min = config.get("predictive_charging_min_soc", 30)
+        predictive_min = (
+            getattr(settings, "predictive_min_soc", None)
+            if settings is not None
+            else None
+        )
+        if predictive_min is None:
+            predictive_min = config.get("predictive_charging_min_soc", DEFAULT_PREDICTIVE_CHARGING_MIN_SOC)
 
         # If battery data unavailable, cannot predict - let other strategies decide
         if average_soc is None:
@@ -202,7 +229,8 @@ class DynamicPriceStrategy(ChargingStrategy):
         """Check if charging should occur based on dynamic price analysis."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
-        config = context.get("config", {})
+        config = context.get("config", {}) or {}
+        settings = context.get("settings")
 
         current_price = price.get("current_price")
         if current_price is None:
@@ -211,7 +239,13 @@ class DynamicPriceStrategy(ChargingStrategy):
         threshold = price.get("price_threshold", 0.15)
 
         # Get base confidence from config (default 60%) and clamp to sensible range
-        config_confidence = config.get("dynamic_threshold_confidence", 60)
+        config_confidence = (
+            getattr(settings, "dynamic_threshold_confidence", None)
+            if settings is not None
+            else None
+        )
+        if config_confidence is None:
+            config_confidence = config.get("dynamic_threshold_confidence", DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE)
         try:
             config_confidence = float(config_confidence) / 100.0
         except (TypeError, ValueError):
@@ -335,9 +369,16 @@ class StrategyManager:
         if current_price is not None and current_price > threshold:
             # Check if emergency charging applies
             battery = context.get("battery_analysis", {})
-            config = context.get("config", {})
+            config = context.get("config", {}) or {}
+            settings = context.get("settings")
             average_soc = battery.get("average_soc", 100)
-            emergency_threshold = config.get("emergency_soc_threshold", 15)
+            emergency_threshold = (
+                getattr(settings, "emergency_soc_threshold", None)
+                if settings is not None
+                else None
+            )
+            if emergency_threshold is None:
+                emergency_threshold = config.get("emergency_soc_threshold", DEFAULT_EMERGENCY_SOC)
             guard_entry = {
                 "strategy": "PriceThresholdGuard",
                 "priority": 0,
