@@ -1145,7 +1145,14 @@ class ChargingDecisionEngine:
         if context.very_low_price:
             return self._car_decision_for_very_low_price(context, data)
 
-        if context.is_low_price_flag or (context.previous_charging and context.effective_low_price):
+        if (
+            context.is_low_price_flag
+            or (
+                context.permissive_mode_active
+                and context.effective_low_price
+            )
+            or (context.previous_charging and context.effective_low_price)
+        ):
             return self._car_decision_for_low_price(context, data)
 
         return self._car_decision_for_high_price(context, data)
@@ -1332,23 +1339,11 @@ class ChargingDecisionEngine:
         return reason
 
     def _format_high_price_reason(self, context: CarDecisionContext) -> str:
-        """Create consistent messaging when price exceeds thresholds."""
-        price = context.display_price
-        base_threshold = context.base_threshold
-        effective_threshold = context.effective_threshold
+        """Create consistent messaging when price exceeds thresholds.
 
-        # If we're only in the permissive range, reflect the base vs permissive thresholds
-        if (
-            context.effective_low_price
-            and price > base_threshold
-            and effective_threshold > base_threshold
-        ):
-            comparison = f"{price:.3f}€/kWh > {base_threshold:.3f}€/kWh"
-            return (
-                f"Price above base threshold ({comparison}) "
-                f"but within permissive limit ({effective_threshold:.3f}€/kWh)"
-            )
-
+        Note: This is only called from _car_decision_for_high_price(), which means
+        the price has exceeded the effective threshold (including any permissive adjustment).
+        """
         return f"Price too high ({context.format_price_comparison('>')})"
 
     def _build_reason_with_solar(
@@ -1449,9 +1444,20 @@ class ChargingDecisionEngine:
                 "car_grid_charging_reason": self._append_permissive_mode_to_reason(base_reason, context),
             }
 
+        # At this point, we know has_min_window is False (checked at line 1425)
+        # The window check uses the effective threshold (which includes permissive adjustment)
+        window_requirement = (
+            f"needs ≤ {context.effective_threshold:.3f}€/kWh for ≥ {context.min_duration}h - "
+            "current forecast shorter"
+        )
+
+        # If permissive mode is active, clarify the threshold breakdown
+        if context.permissive_mode_active and context.permissive_multiplier > 1.0:
+            window_requirement += f" (base {context.base_threshold:.3f}€/kWh)"
+
         base_reason = (
-            f"Waiting for low-price flag before starting ({context.format_price_comparison()} floor, "
-            f"threshold currently {context.base_threshold:.3f}€/kWh)"
+            f"Waiting for low-price window before starting "
+            f"({context.format_price_comparison()} floor, {window_requirement})"
         )
         return {
             "car_grid_charging": False,
@@ -1487,26 +1493,10 @@ class ChargingDecisionEngine:
                 "car_grid_charging_reason": self._append_permissive_mode_to_reason(base_reason, context),
             }
 
-        base_reason = high_price_reason
-
-        if (
-            not context.previous_charging
-            and context.effective_low_price
-            and context.display_price > context.base_threshold
-            and context.effective_threshold > context.base_threshold
-        ):
-            window_clause = (
-                f"waiting for low-price window before starting "
-                f"(needs ≤ {context.base_threshold:.3f}€/kWh for ≥ {context.min_duration}h"
-            )
-            if not context.has_min_window:
-                window_clause += " - current forecast shorter"
-            window_clause += ")"
-            base_reason = f"{high_price_reason} - {window_clause}"
-
+        # Default: price too high, no charging
         return {
             "car_grid_charging": False,
-            "car_grid_charging_reason": self._append_permissive_mode_to_reason(base_reason, context),
+            "car_grid_charging_reason": self._append_permissive_mode_to_reason(high_price_reason, context),
         }
 
     def _calculate_charger_limit(

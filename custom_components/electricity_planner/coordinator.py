@@ -32,6 +32,7 @@ from .const import (
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_USE_AVERAGE_THRESHOLD,
     CONF_MIN_CAR_CHARGING_DURATION,
+    CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
@@ -39,6 +40,7 @@ from .const import (
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_USE_AVERAGE_THRESHOLD,
     DEFAULT_MIN_CAR_CHARGING_DURATION,
+    DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
 )
 from .decision_engine import ChargingDecisionEngine
 
@@ -583,6 +585,11 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         )
         data["average_threshold"] = average_threshold
 
+        car_permissive_multiplier = self.config.get(
+            CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+            DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+        )
+
         # Calculate if we have at least 2 hours of low prices ahead for car charging
         data["has_min_charging_window"] = self._check_minimum_charging_window(
             data.get("nordpool_prices_today"),
@@ -590,6 +597,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             transport_lookup,
             data.get("transport_cost"),
             average_threshold,
+            data.get("car_permissive_mode_active", False),
+            car_permissive_multiplier,
         )
 
         data["forecast_summary"] = self._calculate_forecast_summary(
@@ -992,11 +1001,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         transport_lookup: list[dict[str, Any]] | None,
         current_transport_cost: float | None,
         average_threshold: float | None = None,
+        permissive_mode_active: bool = False,
+        permissive_multiplier: float = DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     ) -> bool:
         """Check if there are at least N consecutive hours of low prices starting from NOW.
 
         This is used for the OFF → ON transition: only allow car charging to start
         if the price will stay low for the configured duration (default 2 hours).
+        When permissive mode is active, the low-price definition uses the
+        permissive multiplier to extend the acceptable threshold.
 
         Returns True if all prices from NOW for the next N hours are below threshold.
         Returns False if any price in the next N hours exceeds threshold.
@@ -1012,9 +1025,24 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         )
 
         if use_average and average_threshold is not None:
-            threshold = average_threshold
+            base_threshold = average_threshold
         else:
-            threshold = self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
+            base_threshold = self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
+
+        try:
+            multiplier_value = float(permissive_multiplier)
+        except (TypeError, ValueError):
+            _LOGGER.warning(
+                "Invalid car permissive threshold multiplier %s, falling back to 1.0",
+                permissive_multiplier,
+            )
+            multiplier_value = 1.0
+
+        effective_threshold = base_threshold
+        permissive_window_enabled = False
+        if permissive_mode_active and multiplier_value > 1.0:
+            effective_threshold = base_threshold * multiplier_value
+            permissive_window_enabled = True
 
         timeline = self._build_price_timeline(
             prices_today,
@@ -1049,21 +1077,31 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         required_duration = timedelta(hours=min_duration_hours)
 
         current_start, current_end, current_price = timeline[current_idx]
-        if current_price > threshold:
+        if current_price > effective_threshold:
+            threshold_note = (
+                f"{'permissive ' if permissive_window_enabled else ''}threshold "
+                f"{effective_threshold:.4f} €/kWh (base {base_threshold:.4f} €/kWh)"
+            )
             _LOGGER.debug(
-                "Current price %.4f €/kWh exceeds threshold %.4f €/kWh - no charging window starting now",
+                "Current price %.4f €/kWh exceeds %s - no charging window starting now",
                 current_price,
-                threshold,
+                threshold_note,
             )
             return False
 
         low_price_duration = current_end - max(now, current_start)
         if low_price_duration >= required_duration:
+            threshold_note = (
+                f"≤ {effective_threshold:.4f} €/kWh "
+                f"(base {base_threshold:.4f} €/kWh)"
+                if permissive_window_enabled
+                else f"≤ {effective_threshold:.4f} €/kWh"
+            )
             _LOGGER.debug(
-                "Found %d-hour charging window entirely within current interval (price %.4f €/kWh ≤ %.4f €/kWh)",
+                "Found %d-hour charging window entirely within current interval (price %.4f €/kWh %s)",
                 min_duration_hours,
                 current_price,
-                threshold,
+                threshold_note,
             )
             return True
 
@@ -1081,11 +1119,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 )
                 break
 
-            if next_price > threshold:
+            if next_price > effective_threshold:
+                threshold_note = (
+                    f"{'permissive ' if permissive_window_enabled else ''}threshold "
+                    f"{effective_threshold:.4f} €/kWh (base {base_threshold:.4f} €/kWh)"
+                )
                 _LOGGER.debug(
-                    "Charging window broken by high price %.4f €/kWh (>%.4f €/kWh)",
+                    "Charging window broken by high price %.4f €/kWh (> %s)",
                     next_price,
-                    threshold,
+                    threshold_note,
                 )
                 break
 
@@ -1097,11 +1139,17 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             previous_end = max(previous_end, next_end)
 
             if low_price_duration >= required_duration:
+                threshold_note = (
+                    f"≤ {effective_threshold:.4f} €/kWh "
+                    f"(base {base_threshold:.4f} €/kWh)"
+                    if permissive_window_enabled
+                    else f"≤ {effective_threshold:.4f} €/kWh"
+                )
                 _LOGGER.debug(
-                    "Found %d-hour charging window: %.1f hours of low prices (≤%.4f €/kWh) ahead",
+                    "Found %d-hour charging window: %.1f hours of low prices (%s) ahead",
                     min_duration_hours,
                     low_price_duration.total_seconds() / 3600,
-                    threshold,
+                    threshold_note,
                 )
                 return True
 

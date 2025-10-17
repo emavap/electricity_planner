@@ -199,12 +199,50 @@ def test_permissive_mode_reason_shows_base_threshold_window():
 
     assert decision["car_grid_charging"] is False
     reason = decision["car_grid_charging_reason"]
-    assert "Price above base threshold" in reason
-    assert "0.196€/kWh > 0.172€/kWh" in reason
-    assert "within permissive limit (0.206€/kWh)" in reason
-    assert "waiting for low-price window before starting" in reason
-    assert "needs ≤ 0.172€/kWh for ≥ 2h" in reason
-    assert "current forecast shorter" in reason
+    assert "Waiting for low-price window before starting" in reason
+    assert "0.196€/kWh ≤ 0.206€/kWh" in reason
+    assert "needs ≤ 0.206€/kWh for ≥ 2h - current forecast shorter" in reason
+    assert "(base 0.172€/kWh)" in reason
+    assert "[Permissive: +20%]" in reason
+
+
+def test_permissive_mode_starts_when_window_available():
+    """Permissive mode should allow starting when window meets permissive threshold."""
+    config = {
+        "min_car_charging_duration": 2,
+        "car_permissive_threshold_multiplier": 1.2,
+    }
+    engine = _create_engine(config)
+
+    price_analysis = {
+        "data_available": True,
+        "current_price": 0.18,
+        "price_threshold": 0.15,
+        "is_low_price": False,
+        "very_low_price": False,
+    }
+
+    decision = engine._decide_car_grid_charging(
+        price_analysis,
+        battery_analysis={
+            "average_soc": 40,
+            "min_soc": 30,
+            "max_soc_threshold": 90,
+            "batteries_full": False,
+        },
+        power_allocation={"solar_for_car": 0},
+        data={
+            "previous_car_charging": False,
+            "has_min_charging_window": True,
+            "car_permissive_mode_active": True,
+        },
+    )
+
+    assert decision["car_grid_charging"] is True
+    reason = decision["car_grid_charging_reason"]
+    assert "Low price" in reason
+    assert "0.180€/kWh ≤ 0.180€/kWh" in reason
+    assert "2h+ window available - starting" in reason
     assert "[Permissive: +20%]" in reason
 
 

@@ -158,7 +158,9 @@ def test_car_stops_when_price_exceeds_locked_threshold():
 
     assert decision["car_grid_charging"] is False
     assert data["car_charging_locked_threshold"] is None
-    assert "Price exceeded threshold" in decision["car_grid_charging_reason"]
+    reason = decision["car_grid_charging_reason"]
+    assert "Price too high" in reason
+    assert "0.230€/kWh > 0.200€/kWh" in reason
 
 
 def test_car_charges_during_very_low_price_with_window():
