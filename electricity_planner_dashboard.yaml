@@ -106,17 +106,32 @@ views:
                 show_name: true
                 show_state: true
 
-          - type: gauge
-            name: Battery SOC
-            entity: sensor.electricity_planner_battery_soc_average
-            min: 0
-            max: 100
-            unit: "%"
-            needle: true
-            severity:
-              red: 0
-              yellow: 30
-              green: 70
+          - type: grid
+            square: false
+            columns: 2
+            cards:
+              - type: gauge
+                name: Battery SOC
+                entity: sensor.electricity_planner_battery_soc_average
+                min: 0
+                max: 100
+                unit: "%"
+                needle: true
+                severity:
+                  red: 0
+                  yellow: 30
+                  green: 70
+              - type: button
+                entity: switch.electricity_planner_car_permissive_mode
+                name: Car permissive
+                icon: mdi:battery-alert
+                icon_height: 60px
+                show_name: true
+                show_state: true
+                tap_action:
+                  action: toggle
+                hold_action:
+                  action: more-info
 
           - type: entities
             title: Decisions

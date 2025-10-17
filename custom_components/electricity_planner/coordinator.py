@@ -546,6 +546,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Preserve car charging locked threshold across updates (for threshold continuity)
         data["car_charging_locked_threshold"] = self.data.get("car_charging_locked_threshold") if self.data else None
 
+        # Preserve car permissive mode state across updates (controlled via switch entity)
+        if self.data:
+            data["car_permissive_mode_active"] = bool(self.data.get("car_permissive_mode_active", False))
+        else:
+            data["car_permissive_mode_active"] = False
+
 
 
         data["transport_cost"] = await self._get_state_value(

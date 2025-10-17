@@ -30,6 +30,7 @@ from .const import (
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     CONF_USE_AVERAGE_THRESHOLD,
     CONF_MIN_CAR_CHARGING_DURATION,
+    CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -52,6 +53,7 @@ from .const import (
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_USE_AVERAGE_THRESHOLD,
     DEFAULT_MIN_CAR_CHARGING_DURATION,
+    DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -202,6 +204,7 @@ class EngineSettings:
     max_car_power: int
     min_car_charging_threshold: int
     min_car_charging_duration: int
+    car_permissive_threshold_multiplier: float
     price_adjustment_multiplier: float
     price_adjustment_offset: float
     feedin_adjustment_multiplier: float
@@ -267,6 +270,12 @@ class EngineSettings:
         min_car_duration = extractor.get_int(
             CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION,
             "min_car_charging_duration", minimum=0, maximum=24
+        )
+
+        # Extract car permissive mode multiplier
+        car_permissive_multiplier = extractor.get_float(
+            CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER, DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+            "car_permissive_threshold_multiplier"
         )
 
         # Extract price adjustments
@@ -340,6 +349,7 @@ class EngineSettings:
             max_car_power=max_car_power,
             min_car_charging_threshold=min_car_threshold,
             min_car_charging_duration=min_car_duration,
+            car_permissive_threshold_multiplier=car_permissive_multiplier,
             price_adjustment_multiplier=price_multiplier,
             price_adjustment_offset=price_offset,
             feedin_adjustment_multiplier=feed_multiplier,
@@ -376,6 +386,8 @@ class CarDecisionContext:
     very_low_percent: float
     is_low_price_flag: bool
     effective_low_price: bool
+    permissive_mode_active: bool
+    permissive_multiplier: float
 
     @property
     def display_price(self) -> float:
@@ -1215,8 +1227,14 @@ class ChargingDecisionEngine:
 
         previous_car_charging = bool(data.get(_PREVIOUS_CAR_CHARGING_KEY))
         locked_threshold = _safe_optional_float(data.get(_CAR_CHARGING_LOCKED_THRESHOLD_KEY))
+
+        # Check if permissive mode is active
+        permissive_mode_active = bool(data.get("car_permissive_mode_active", False))
+        permissive_multiplier = self._settings.car_permissive_threshold_multiplier
+
         effective_threshold = self._resolve_car_threshold(
-            base_threshold, locked_threshold, previous_car_charging
+            base_threshold, locked_threshold, previous_car_charging,
+            permissive_mode_active, permissive_multiplier
         )
 
         current_price = price_analysis.get("current_price")
@@ -1237,6 +1255,8 @@ class ChargingDecisionEngine:
             effective_low_price=(
                 current_price is not None and current_price <= effective_threshold
             ),
+            permissive_mode_active=permissive_mode_active,
+            permissive_multiplier=permissive_multiplier,
         )
 
     def _resolve_car_threshold(
@@ -1244,18 +1264,33 @@ class ChargingDecisionEngine:
         current_threshold: float,
         locked_threshold: Optional[float],
         previous_car_charging: bool,
+        permissive_mode_active: bool,
+        permissive_multiplier: float,
     ) -> float:
-        """Apply hysteresis threshold floor while the car is charging."""
-        if not previous_car_charging or locked_threshold is None:
-            return current_threshold
+        """Apply hysteresis threshold floor while the car is charging, then permissive multiplier if enabled."""
+        # First apply locked threshold floor if charging
+        if previous_car_charging and locked_threshold is not None:
+            threshold = max(locked_threshold, current_threshold)
+            _LOGGER.debug(
+                "Car charging active: using threshold floor %.4f€/kWh (locked=%.4f€/kWh, current=%.4f€/kWh)",
+                threshold,
+                locked_threshold,
+                current_threshold,
+            )
+        else:
+            threshold = current_threshold
 
-        threshold = max(locked_threshold, current_threshold)
-        _LOGGER.debug(
-            "Car charging active: using threshold floor %.4f€/kWh (locked=%.4f€/kWh, current=%.4f€/kWh)",
-            threshold,
-            locked_threshold,
-            current_threshold,
-        )
+        # Then apply permissive multiplier if active
+        if permissive_mode_active and permissive_multiplier > 1.0:
+            permissive_threshold = threshold * permissive_multiplier
+            _LOGGER.debug(
+                "Permissive mode active: threshold %.4f€/kWh → %.4f€/kWh (+%.0f%%)",
+                threshold,
+                permissive_threshold,
+                (permissive_multiplier - 1) * 100,
+            )
+            return permissive_threshold
+
         return threshold
 
     def _lock_car_charging_threshold(
@@ -1285,18 +1320,33 @@ class ChargingDecisionEngine:
             return f"{reason}, solar available ({context.format_solar_watts()})"
         return reason
 
+    def _append_permissive_mode_to_reason(
+        self,
+        reason: str,
+        context: CarDecisionContext,
+    ) -> str:
+        """Append permissive mode info to reason string if active."""
+        if context.permissive_mode_active and context.permissive_multiplier > 1.0:
+            increase_pct = (context.permissive_multiplier - 1.0) * 100
+            return f"{reason} [Permissive: +{increase_pct:.0f}%]"
+        return reason
+
     def _build_reason_with_solar(
         self,
         base_reason: str,
         context: CarDecisionContext,
         include_solar_inline: bool = False,
     ) -> str:
-        """Build charging reason with optional solar allocation details."""
+        """Build charging reason with optional solar allocation details and permissive mode info."""
         if include_solar_inline and context.has_allocated_solar:
-            return f"{base_reason} with solar ({context.format_solar_watts()})"
+            reason = f"{base_reason} with solar ({context.format_solar_watts()})"
         elif context.has_allocated_solar:
-            return self._append_solar_info_to_reason(base_reason, context)
-        return base_reason
+            reason = self._append_solar_info_to_reason(base_reason, context)
+        else:
+            reason = base_reason
+
+        # Always append permissive mode info if active
+        return self._append_permissive_mode_to_reason(reason, context)
 
     def _car_decision_for_very_low_price(
         self,
@@ -1307,30 +1357,41 @@ class ChargingDecisionEngine:
         price = context.display_price
 
         if context.previous_charging:
-            reason = (
+            base_reason = (
                 f"Very low price ({price:.3f}€/kWh) - bottom "
                 f"{context.very_low_percent}% of daily range (continuing)"
             )
+            reason = self._build_reason_with_solar(
+                base_reason, context, include_solar_inline=True
+            )
+            return {
+                "car_grid_charging": True,
+                "car_grid_charging_reason": reason,
+            }
         elif context.has_min_window:
             self._lock_car_charging_threshold(context, data)
-            reason = (
+            base_reason = (
                 f"Very low price ({price:.3f}€/kWh) - bottom "
                 f"{context.very_low_percent}% of daily range ({context.min_duration}h+ window available)"
             )
+            reason = self._build_reason_with_solar(
+                base_reason, context, include_solar_inline=True
+            )
+            return {
+                "car_grid_charging": True,
+                "car_grid_charging_reason": reason,
+            }
         else:
+            base_reason = (
+                f"Very low price ({price:.3f}€/kWh) but less than {context.min_duration}h "
+                "of low prices ahead - waiting for longer window"
+            )
             return {
                 "car_grid_charging": False,
-                "car_grid_charging_reason": (
-                    f"Very low price ({price:.3f}€/kWh) but less than {context.min_duration}h "
-                    "of low prices ahead - waiting for longer window"
+                "car_grid_charging_reason": self._append_permissive_mode_to_reason(
+                    base_reason, context
                 ),
             }
-
-        reason = self._append_solar_info_to_reason(reason, context)
-        return {
-            "car_grid_charging": True,
-            "car_grid_charging_reason": reason,
-        }
 
     def _car_decision_for_low_price(
         self,
@@ -1359,20 +1420,22 @@ class ChargingDecisionEngine:
             }
 
         if context.is_low_price_flag:
+            base_reason = (
+                f"Low price ({context.format_price_comparison()}) but less than {context.min_duration}h "
+                "of low prices ahead - waiting for longer window"
+            )
             return {
                 "car_grid_charging": False,
-                "car_grid_charging_reason": (
-                    f"Low price ({context.format_price_comparison()}) but less than {context.min_duration}h "
-                    "of low prices ahead - waiting for longer window"
-                ),
+                "car_grid_charging_reason": self._append_permissive_mode_to_reason(base_reason, context),
             }
 
+        base_reason = (
+            f"Waiting for low-price flag before starting ({context.format_price_comparison()} floor, "
+            f"threshold currently {context.base_threshold:.3f}€/kWh)"
+        )
         return {
             "car_grid_charging": False,
-            "car_grid_charging_reason": (
-                f"Waiting for low-price flag before starting ({context.format_price_comparison()} floor, "
-                f"threshold currently {context.base_threshold:.3f}€/kWh)"
-            ),
+            "car_grid_charging_reason": self._append_permissive_mode_to_reason(base_reason, context),
         }
 
     def _car_decision_for_high_price(
@@ -1383,27 +1446,30 @@ class ChargingDecisionEngine:
         """Handle high price cases where charging should pause or fall back to solar."""
         if context.previous_charging:
             self._unlock_car_charging_threshold(data)
+            base_reason = (
+                f"Price exceeded threshold ({context.format_price_comparison('>')}) - "
+                "stopping car charging"
+            )
             return {
                 "car_grid_charging": False,
-                "car_grid_charging_reason": (
-                    f"Price exceeded threshold ({context.format_price_comparison('>')}) - "
-                    "stopping car charging"
-                ),
+                "car_grid_charging_reason": self._append_permissive_mode_to_reason(base_reason, context),
             }
 
         if context.has_allocated_solar:
+            base_reason = (
+                f"Price too high ({context.format_price_comparison('>')}) - "
+                f"using allocated solar power only ({context.format_solar_watts()})"
+            )
             return {
                 "car_grid_charging": True,
                 "car_solar_only": True,
-                "car_grid_charging_reason": (
-                    f"Price too high ({context.format_price_comparison('>')}) - "
-                    f"using allocated solar power only ({context.format_solar_watts()})"
-                ),
+                "car_grid_charging_reason": self._append_permissive_mode_to_reason(base_reason, context),
             }
 
+        base_reason = f"Price too high ({context.format_price_comparison('>')})"
         return {
             "car_grid_charging": False,
-            "car_grid_charging_reason": f"Price too high ({context.format_price_comparison('>')})",
+            "car_grid_charging_reason": self._append_permissive_mode_to_reason(base_reason, context),
         }
 
     def _calculate_charger_limit(

@@ -15,6 +15,7 @@ from .const import (
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
+    CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
@@ -22,12 +23,13 @@ from .const import (
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
+    DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 # Current config version
-CURRENT_VERSION = 7
+CURRENT_VERSION = 8
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -152,6 +154,24 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         _LOGGER.info("Migration to version 7 complete")
 
+    if entry.version == 7:
+        # Migrate from version 7 to version 8
+        new_data = {**entry.data}
+
+        # Add car permissive mode multiplier configuration
+        if CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER not in new_data:
+            new_data[CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER] = DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER
+            _LOGGER.info("Added car_permissive_threshold_multiplier: %.1f", DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER)
+
+        # Update entry with new data
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=8
+        )
+
+        _LOGGER.info("Migration to version 8 complete")
+
     return True
 
 
@@ -191,6 +211,10 @@ def migrate_config_data(old_data: Dict[str, Any], from_version: int) -> Dict[str
     if from_version < 7:
         # Version 7 adds optional nordpool_config_entry - no automatic migration needed
         pass
+
+    if from_version < 8:
+        # Add car permissive mode multiplier
+        new_data.setdefault(CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER, DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER)
 
     return new_data
 
