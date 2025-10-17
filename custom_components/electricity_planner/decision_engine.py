@@ -1488,6 +1488,22 @@ class ChargingDecisionEngine:
             }
 
         base_reason = high_price_reason
+
+        if (
+            not context.previous_charging
+            and context.effective_low_price
+            and context.display_price > context.base_threshold
+            and context.effective_threshold > context.base_threshold
+        ):
+            window_clause = (
+                f"waiting for low-price window before starting "
+                f"(needs ≤ {context.base_threshold:.3f}€/kWh for ≥ {context.min_duration}h"
+            )
+            if not context.has_min_window:
+                window_clause += " - current forecast shorter"
+            window_clause += ")"
+            base_reason = f"{high_price_reason} - {window_clause}"
+
         return {
             "car_grid_charging": False,
             "car_grid_charging_reason": self._append_permissive_mode_to_reason(base_reason, context),

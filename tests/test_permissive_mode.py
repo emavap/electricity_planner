@@ -202,6 +202,9 @@ def test_permissive_mode_reason_shows_base_threshold_window():
     assert "Price above base threshold" in reason
     assert "0.196€/kWh > 0.172€/kWh" in reason
     assert "within permissive limit (0.206€/kWh)" in reason
+    assert "waiting for low-price window before starting" in reason
+    assert "needs ≤ 0.172€/kWh for ≥ 2h" in reason
+    assert "current forecast shorter" in reason
     assert "[Permissive: +20%]" in reason
 
 
