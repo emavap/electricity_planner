@@ -79,6 +79,14 @@ from .strategies import StrategyManager
 _LOGGER = logging.getLogger(__name__)
 
 
+def _safe_optional_float(value: Any) -> Optional[float]:
+    """Best-effort conversion of arbitrary input to float."""
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass(frozen=True)
 class EngineSettings:
     """Sanitized configuration values used by the decision engine."""
@@ -313,6 +321,34 @@ class EngineSettings:
             use_average_threshold=use_average_threshold,
             battery_capacities=sanitized_capacities,
         )
+
+
+@dataclass(frozen=True)
+class CarDecisionContext:
+    """Immutable snapshot of the variables that drive car charging decisions."""
+
+    current_price: Optional[float]
+    base_threshold: float
+    effective_threshold: float
+    previous_charging: bool
+    has_min_window: bool
+    min_duration: int
+    allocated_solar: float
+    very_low_price: bool
+    very_low_percent: float
+    is_low_price_flag: bool
+    effective_low_price: bool
+
+    @property
+    def display_price(self) -> float:
+        """Safe value for string formatting when price is missing."""
+        return self.current_price if self.current_price is not None else 0.0
+
+    @property
+    def has_allocated_solar(self) -> bool:
+        """Whether any solar power is earmarked for the car."""
+        return self.allocated_solar > 0
+
 
 class ChargingDecisionEngine:
     """Engine for making charging decisions based on multiple factors."""
@@ -1019,161 +1055,15 @@ class ChargingDecisionEngine:
                 "car_grid_charging_reason": "No price data available",
             }
 
-        allocated_solar = power_allocation.get("solar_for_car", 0)
-        current_price = price_analysis.get("current_price", 0)
-        current_threshold = price_analysis.get("price_threshold", 0.15)
-        previous_car_charging = data.get("previous_car_charging", False)
-        has_min_charging_window = data.get("has_min_charging_window", False)
-        min_duration = self._settings.min_car_charging_duration
+        context = self._build_car_decision_context(price_analysis, power_allocation, data)
 
-        # Apply threshold floor during active charging session to prevent threshold drift interruptions
-        # When car is charging and threshold decreases (e.g., from 24h rolling average update),
-        # use max(locked, current) to prevent stopping. Allow threshold increases.
-        locked_threshold = data.get("car_charging_locked_threshold")
-        if previous_car_charging and locked_threshold is not None:
-            threshold = max(locked_threshold, current_threshold)
-            _LOGGER.debug(
-                "Car charging active: using threshold floor %.4f€/kWh (locked=%.4f€/kWh, current=%.4f€/kWh)",
-                threshold, locked_threshold, current_threshold
-            )
-        else:
-            threshold = current_threshold
+        if context.very_low_price:
+            return self._car_decision_for_very_low_price(context, data)
 
-        effective_low_price = (
-            current_price is not None and threshold is not None and current_price <= threshold
-        )
+        if context.is_low_price_flag or (context.previous_charging and context.effective_low_price):
+            return self._car_decision_for_low_price(context, data)
 
-        is_low_price_flag = price_analysis.get("is_low_price")
-
-        # Prioritise very low prices regardless of solar availability
-        # Very low prices always start charging (if window available) or continue charging
-        if price_analysis.get("very_low_price"):
-            very_low_percent = self._settings.very_low_price_threshold_pct
-            # If already charging, continue regardless of window
-            if previous_car_charging:
-                reason = (
-                    f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_percent}% "
-                    f"of daily range (continuing)"
-                )
-            # If not charging, only start if we have minimum window
-            elif has_min_charging_window:
-                # Lock threshold when starting charging (OFF→ON)
-                data["car_charging_locked_threshold"] = current_threshold
-                _LOGGER.debug(
-                    "Car charging starting: locking threshold at %.4f€/kWh",
-                    current_threshold
-                )
-                reason = (
-                    f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_percent}% "
-                    f"of daily range ({min_duration}h+ window available)"
-                )
-            else:
-                # Very low price but insufficient window - don't start
-                return {
-                    "car_grid_charging": False,
-                    "car_grid_charging_reason": (
-                        f"Very low price ({current_price:.3f}€/kWh) but less than {min_duration}h "
-                        f"of low prices ahead - waiting for longer window"
-                    ),
-                }
-
-            if allocated_solar > 0:
-                reason += f", solar available ({allocated_solar}W)"
-            return {
-                "car_grid_charging": True,
-                "car_grid_charging_reason": reason,
-            }
-
-        # Check if price is low (below threshold)
-        if is_low_price_flag or (previous_car_charging and effective_low_price):
-            # If already charging, continue
-            if previous_car_charging:
-                if allocated_solar > 0:
-                    reason = (
-                        f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) "
-                        f"with solar ({allocated_solar}W) - continuing"
-                    )
-                else:
-                    reason = (
-                        f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) - continuing"
-                    )
-                return {
-                    "car_grid_charging": True,
-                    "car_grid_charging_reason": reason,
-                }
-
-            # Not charging yet - only start if we have minimum window
-            if has_min_charging_window:
-                # Lock threshold when starting charging (OFF→ON)
-                data["car_charging_locked_threshold"] = current_threshold
-                _LOGGER.debug(
-                    "Car charging starting: locking threshold at %.4f€/kWh",
-                    current_threshold
-                )
-                if allocated_solar > 0:
-                    reason = (
-                        f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) "
-                        f"with solar ({allocated_solar}W), {min_duration}h+ window available - starting"
-                    )
-                else:
-                    reason = (
-                        f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh), "
-                        f"{min_duration}h+ window available - starting"
-                    )
-                return {
-                    "car_grid_charging": True,
-                    "car_grid_charging_reason": reason,
-                }
-            elif is_low_price_flag:
-                # Low price but insufficient window - don't start
-                return {
-                    "car_grid_charging": False,
-                    "car_grid_charging_reason": (
-                        f"Low price ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) but less than {min_duration}h "
-                        f"of low prices ahead - waiting for longer window"
-                    ),
-                }
-            else:
-                # Effective low price due to floor but not allowed to start without true low price flag
-                return {
-                    "car_grid_charging": False,
-                    "car_grid_charging_reason": (
-                        f"Waiting for low-price flag before starting ({current_price:.3f}€/kWh ≤ {threshold:.3f}€/kWh floor, "
-                        f"threshold currently {current_threshold:.3f}€/kWh)"
-                    ),
-                }
-
-        # Price is above threshold
-        # If we were charging, stop now (hysteresis OFF condition)
-        if previous_car_charging:
-            # Clear locked threshold when stopping charging (ON→OFF)
-            data["car_charging_locked_threshold"] = None
-            _LOGGER.debug("Car charging stopping: clearing locked threshold")
-            return {
-                "car_grid_charging": False,
-                "car_grid_charging_reason": (
-                    f"Price exceeded threshold ({current_price:.3f}€/kWh > {threshold:.3f}€/kWh) - "
-                    f"stopping car charging"
-                ),
-            }
-
-        # For higher prices fall back to solar-only if available, otherwise skip grid charging.
-        if allocated_solar > 0:
-            return {
-                "car_grid_charging": True,
-                "car_solar_only": True,
-                "car_grid_charging_reason": (
-                    f"Price too high ({current_price:.3f}€/kWh > {threshold:.3f}€/kWh) - "
-                    f"using allocated solar power only ({allocated_solar}W)"
-                ),
-            }
-
-        return {
-            "car_grid_charging": False,
-            "car_grid_charging_reason": (
-                f"Price too high ({current_price:.3f}€/kWh > {threshold:.3f}€/kWh)"
-            ),
-        }
+        return self._car_decision_for_high_price(context, data)
 
     def _decide_feedin_solar(
         self,
@@ -1234,6 +1124,203 @@ class ChargingDecisionEngine:
             "feedin_solar": enable_feedin,
             "feedin_solar_reason": reason,
             "feedin_effective_price": adjusted_feed_price,
+        }
+
+    def _build_car_decision_context(
+        self,
+        price_analysis: Dict[str, Any],
+        power_allocation: Dict[str, Any],
+        data: Dict[str, Any],
+    ) -> CarDecisionContext:
+        """Collect immutable inputs for car charging decision making."""
+        base_threshold_raw = price_analysis.get("price_threshold")
+        base_threshold = (
+            float(base_threshold_raw)
+            if base_threshold_raw is not None
+            else float(self._settings.price_threshold)
+        )
+
+        previous_car_charging = bool(data.get("previous_car_charging"))
+        locked_threshold = _safe_optional_float(data.get("car_charging_locked_threshold"))
+        effective_threshold = self._resolve_car_threshold(
+            base_threshold, locked_threshold, previous_car_charging
+        )
+
+        current_price = price_analysis.get("current_price")
+
+        allocated_solar = _safe_optional_float(power_allocation.get("solar_for_car")) or 0.0
+
+        return CarDecisionContext(
+            current_price=current_price,
+            base_threshold=base_threshold,
+            effective_threshold=effective_threshold,
+            previous_charging=previous_car_charging,
+            has_min_window=bool(data.get("has_min_charging_window")),
+            min_duration=self._settings.min_car_charging_duration,
+            allocated_solar=allocated_solar,
+            very_low_price=bool(price_analysis.get("very_low_price")),
+            very_low_percent=float(self._settings.very_low_price_threshold_pct),
+            is_low_price_flag=bool(price_analysis.get("is_low_price")),
+            effective_low_price=(
+                current_price is not None and current_price <= effective_threshold
+            ),
+        )
+
+    def _resolve_car_threshold(
+        self,
+        current_threshold: float,
+        locked_threshold: Optional[float],
+        previous_car_charging: bool,
+    ) -> float:
+        """Apply hysteresis threshold floor while the car is charging."""
+        if not previous_car_charging or locked_threshold is None:
+            return current_threshold
+
+        threshold = max(locked_threshold, current_threshold)
+        _LOGGER.debug(
+            "Car charging active: using threshold floor %.4f€/kWh (locked=%.4f€/kWh, current=%.4f€/kWh)",
+            threshold,
+            locked_threshold,
+            current_threshold,
+        )
+        return threshold
+
+    def _car_decision_for_very_low_price(
+        self,
+        context: CarDecisionContext,
+        data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Handle very low price cases."""
+        price = context.display_price
+
+        if context.previous_charging:
+            reason = (
+                f"Very low price ({price:.3f}€/kWh) - bottom "
+                f"{context.very_low_percent}% of daily range (continuing)"
+            )
+        elif context.has_min_window:
+            data["car_charging_locked_threshold"] = context.base_threshold
+            _LOGGER.debug(
+                "Car charging starting: locking threshold at %.4f€/kWh",
+                context.base_threshold,
+            )
+            reason = (
+                f"Very low price ({price:.3f}€/kWh) - bottom "
+                f"{context.very_low_percent}% of daily range ({context.min_duration}h+ window available)"
+            )
+        else:
+            return {
+                "car_grid_charging": False,
+                "car_grid_charging_reason": (
+                    f"Very low price ({price:.3f}€/kWh) but less than {context.min_duration}h "
+                    "of low prices ahead - waiting for longer window"
+                ),
+            }
+
+        if context.has_allocated_solar:
+            reason += f", solar available ({int(context.allocated_solar)}W)"
+
+        return {
+            "car_grid_charging": True,
+            "car_grid_charging_reason": reason,
+        }
+
+    def _car_decision_for_low_price(
+        self,
+        context: CarDecisionContext,
+        data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Handle regular low price cases with hysteresis."""
+        price = context.display_price
+        threshold = context.effective_threshold
+
+        if context.previous_charging:
+            if context.has_allocated_solar:
+                reason = (
+                    f"Low price ({price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) "
+                    f"with solar ({int(context.allocated_solar)}W) - continuing"
+                )
+            else:
+                reason = f"Low price ({price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) - continuing"
+
+            return {
+                "car_grid_charging": True,
+                "car_grid_charging_reason": reason,
+            }
+
+        if context.has_min_window:
+            data["car_charging_locked_threshold"] = context.base_threshold
+            _LOGGER.debug(
+                "Car charging starting: locking threshold at %.4f€/kWh",
+                context.base_threshold,
+            )
+            if context.has_allocated_solar:
+                reason = (
+                    f"Low price ({price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) "
+                    f"with solar ({int(context.allocated_solar)}W), {context.min_duration}h+ window available - starting"
+                )
+            else:
+                reason = (
+                    f"Low price ({price:.3f}€/kWh ≤ {threshold:.3f}€/kWh), "
+                    f"{context.min_duration}h+ window available - starting"
+                )
+            return {
+                "car_grid_charging": True,
+                "car_grid_charging_reason": reason,
+            }
+
+        if context.is_low_price_flag:
+            return {
+                "car_grid_charging": False,
+                "car_grid_charging_reason": (
+                    f"Low price ({price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) but less than {context.min_duration}h "
+                    "of low prices ahead - waiting for longer window"
+                ),
+            }
+
+        return {
+            "car_grid_charging": False,
+            "car_grid_charging_reason": (
+                f"Waiting for low-price flag before starting ({price:.3f}€/kWh ≤ {threshold:.3f}€/kWh floor, "
+                f"threshold currently {context.base_threshold:.3f}€/kWh)"
+            ),
+        }
+
+    def _car_decision_for_high_price(
+        self,
+        context: CarDecisionContext,
+        data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Handle high price cases where charging should pause or fall back to solar."""
+        price = context.display_price
+        threshold = context.effective_threshold
+
+        if context.previous_charging:
+            data["car_charging_locked_threshold"] = None
+            _LOGGER.debug("Car charging stopping: clearing locked threshold")
+            return {
+                "car_grid_charging": False,
+                "car_grid_charging_reason": (
+                    f"Price exceeded threshold ({price:.3f}€/kWh > {threshold:.3f}€/kWh) - "
+                    "stopping car charging"
+                ),
+            }
+
+        if context.has_allocated_solar:
+            return {
+                "car_grid_charging": True,
+                "car_solar_only": True,
+                "car_grid_charging_reason": (
+                    f"Price too high ({price:.3f}€/kWh > {threshold:.3f}€/kWh) - "
+                    f"using allocated solar power only ({int(context.allocated_solar)}W)"
+                ),
+            }
+
+        return {
+            "car_grid_charging": False,
+            "car_grid_charging_reason": (
+                f"Price too high ({price:.3f}€/kWh > {threshold:.3f}€/kWh)"
+            ),
         }
 
     def _calculate_charger_limit(
