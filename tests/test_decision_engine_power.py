@@ -234,6 +234,7 @@ def test_transport_cost_added_to_pricing():
 
 
 def test_charger_limit_enforces_restrictions():
+    """When car_grid_charging=False and not solar_only, limit should be 0."""
     engine = _engine()
     price_analysis = {}
     battery_analysis = {"average_soc": 60, "max_soc_threshold": 90}
@@ -241,6 +242,7 @@ def test_charger_limit_enforces_restrictions():
     data = {
         "car_charging_power": 3500,
         "car_grid_charging": False,
+        "car_solar_only": False,
     }
 
     result = engine._calculate_charger_limit(
@@ -250,7 +252,7 @@ def test_charger_limit_enforces_restrictions():
         data,
     )
 
-    assert result["charger_limit"] == 1400
+    assert result["charger_limit"] == 0
     assert "not allowed" in result["charger_limit_reason"]
 
 

@@ -1510,42 +1510,43 @@ class ChargingDecisionEngine:
         car_charging_power = data.get("car_charging_power", 0)
         min_threshold = self._settings.min_car_charging_threshold
         car_limit_cap = min(self._settings.max_car_power, DEFAULT_SYSTEM_LIMITS.max_car_charger_power)
+        car_grid_charging = data.get("car_grid_charging", False)
+        car_solar_only = data.get("car_solar_only", False)
+        allocated_solar = power_allocation.get("solar_for_car", 0)
 
-        if car_charging_power <= min_threshold:
+        if car_charging_power <= min_threshold and not (car_grid_charging or car_solar_only):
             return {
                 "charger_limit": 0,
                 "charger_limit_reason": "Car not currently charging",
             }
-        
-        # Check if car charging is allowed
-        car_grid_charging = data.get("car_grid_charging", False)
-        
+
+        # Handle solar-only charging first
+        if car_solar_only:
+            if allocated_solar > 0:
+                limit = min(allocated_solar, car_limit_cap)
+                return {
+                    "charger_limit": int(limit),
+                    "charger_limit_reason": f"Solar-only car charging - limited to allocated solar power ({int(limit)}W), no grid usage",
+                }
+            else:
+                return {
+                    "charger_limit": 0,
+                    "charger_limit_reason": "Solar-only mode but no solar available",
+                }
+
+        # If grid charging not allowed, set limit to 0
         if not car_grid_charging:
             return {
-                "charger_limit": 1400,
-                "charger_limit_reason": "Car charging not allowed - limited to 1.4kW, battery usage still allowed",
-            }
-        
-        # Handle solar-only charging
-        car_solar_only = data.get("car_solar_only", False)
-        allocated_solar = power_allocation.get("solar_for_car", 0)
-        
-        if car_solar_only and allocated_solar > 0:
-            limit = min(allocated_solar, car_limit_cap)
-            return {
-                "charger_limit": int(limit),
-                "charger_limit_reason": f"Solar-only car charging - limited to allocated solar power ({int(limit)}W), no grid usage",
+                "charger_limit": 0,
+                "charger_limit_reason": "Car grid charging not allowed",
             }
         
         # Calculate based on battery SOC and grid limits
+        # At this point: car_grid_charging=True and not solar_only
         average_soc = battery_analysis.get("average_soc")
-        
+
         if average_soc is None:
-            if not car_grid_charging:
-                return {
-                    "charger_limit": 1400,
-                    "charger_limit_reason": "Battery data unavailable, car charging not allowed - limited to 1.4kW",
-                }
+            # No battery data available - use conservative grid-based limit
             monthly_peak = data.get("monthly_grid_peak", 0)
             max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
             limit = min(max_setpoint, car_limit_cap)
