@@ -166,6 +166,45 @@ def test_permissive_mode_not_shown_when_inactive():
     assert "[Permissive:" not in reason
 
 
+def test_permissive_mode_reason_shows_base_threshold_window():
+    """Reason when waiting should reference base and permissive thresholds clearly."""
+    config = {
+        "car_permissive_threshold_multiplier": 1.2,
+    }
+    engine = _create_engine(config)
+
+    price_analysis = {
+        "data_available": True,
+        "current_price": 0.196,
+        "price_threshold": 0.172,
+        "is_low_price": False,
+        "very_low_price": False,
+    }
+
+    decision = engine._decide_car_grid_charging(
+        price_analysis,
+        battery_analysis={
+            "average_soc": 50,
+            "min_soc": 50,
+            "max_soc_threshold": 90,
+            "batteries_full": False,
+        },
+        power_allocation={"solar_for_car": 0},
+        data={
+            "previous_car_charging": False,
+            "has_min_charging_window": False,
+            "car_permissive_mode_active": True,
+        },
+    )
+
+    assert decision["car_grid_charging"] is False
+    reason = decision["car_grid_charging_reason"]
+    assert "Price above base threshold" in reason
+    assert "0.196€/kWh > 0.172€/kWh" in reason
+    assert "within permissive limit (0.206€/kWh)" in reason
+    assert "[Permissive: +20%]" in reason
+
+
 def test_permissive_mode_shown_for_very_low_price_start():
     """Permissive mode indicator should appear for very low price start decisions."""
     config = {"car_permissive_threshold_multiplier": 1.25}

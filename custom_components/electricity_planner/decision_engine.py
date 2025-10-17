@@ -1331,6 +1331,26 @@ class ChargingDecisionEngine:
             return f"{reason} [Permissive: +{increase_pct:.0f}%]"
         return reason
 
+    def _format_high_price_reason(self, context: CarDecisionContext) -> str:
+        """Create consistent messaging when price exceeds thresholds."""
+        price = context.display_price
+        base_threshold = context.base_threshold
+        effective_threshold = context.effective_threshold
+
+        # If we're only in the permissive range, reflect the base vs permissive thresholds
+        if (
+            context.effective_low_price
+            and price > base_threshold
+            and effective_threshold > base_threshold
+        ):
+            comparison = f"{price:.3f}€/kWh > {base_threshold:.3f}€/kWh"
+            return (
+                f"Price above base threshold ({comparison}) "
+                f"but within permissive limit ({effective_threshold:.3f}€/kWh)"
+            )
+
+        return f"Price too high ({context.format_price_comparison('>')})"
+
     def _build_reason_with_solar(
         self,
         base_reason: str,
@@ -1444,11 +1464,12 @@ class ChargingDecisionEngine:
         data: Dict[str, Any],
     ) -> CarChargingDecision:
         """Handle high price cases where charging should pause or fall back to solar."""
+        high_price_reason = self._format_high_price_reason(context)
+
         if context.previous_charging:
             self._unlock_car_charging_threshold(data)
             base_reason = (
-                f"Price exceeded threshold ({context.format_price_comparison('>')}) - "
-                "stopping car charging"
+                f"{high_price_reason} - stopping car charging"
             )
             return {
                 "car_grid_charging": False,
@@ -1457,7 +1478,7 @@ class ChargingDecisionEngine:
 
         if context.has_allocated_solar:
             base_reason = (
-                f"Price too high ({context.format_price_comparison('>')}) - "
+                f"{high_price_reason} - "
                 f"using allocated solar power only ({context.format_solar_watts()})"
             )
             return {
@@ -1466,7 +1487,7 @@ class ChargingDecisionEngine:
                 "car_grid_charging_reason": self._append_permissive_mode_to_reason(base_reason, context),
             }
 
-        base_reason = f"Price too high ({context.format_price_comparison('>')})"
+        base_reason = high_price_reason
         return {
             "car_grid_charging": False,
             "car_grid_charging_reason": self._append_permissive_mode_to_reason(base_reason, context),
