@@ -4,7 +4,8 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
@@ -78,6 +79,39 @@ from .strategies import StrategyManager
 
 _LOGGER = logging.getLogger(__name__)
 
+# Internal state keys
+_CAR_CHARGING_LOCKED_THRESHOLD_KEY = "car_charging_locked_threshold"
+_PREVIOUS_CAR_CHARGING_KEY = "previous_car_charging"
+_HAS_MIN_CHARGING_WINDOW_KEY = "has_min_charging_window"
+
+
+class PriceCategory(Enum):
+    """Price category classification for car charging decisions."""
+    VERY_LOW = "very_low"
+    LOW = "low"
+    HIGH = "high"
+
+
+class CarChargingDecision(TypedDict, total=False):
+    """Type definition for car charging decision results."""
+    car_grid_charging: bool
+    car_grid_charging_reason: str
+    car_solar_only: bool
+
+
+class BatteryChargingDecision(TypedDict, total=False):
+    """Type definition for battery charging decision results."""
+    battery_grid_charging: bool
+    battery_grid_charging_reason: str
+    strategy_trace: List[str]
+
+
+class FeedinDecision(TypedDict, total=False):
+    """Type definition for solar feed-in decision results."""
+    feedin_solar: bool
+    feedin_solar_reason: str
+    feedin_effective_price: Optional[float]
+
 
 def _safe_optional_float(value: Any) -> Optional[float]:
     """Best-effort conversion of arbitrary input to float."""
@@ -85,6 +119,77 @@ def _safe_optional_float(value: Any) -> Optional[float]:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+@dataclass
+class ConfigExtractor:
+    """Helper to extract and validate configuration values."""
+
+    config: Dict[str, Any]
+    validator: DataValidator
+
+    def get_power_setting(
+        self,
+        key: str,
+        default: int,
+        min_val: int,
+        max_val: int,
+    ) -> int:
+        """Extract and validate a power setting (W)."""
+        return int(
+            self.validator.sanitize_config_value(
+                self.config.get(key, default),
+                min_val=min_val,
+                max_val=max_val,
+                default=default,
+                name=key,
+            )
+        )
+
+    def get_float(
+        self,
+        key: str,
+        default: float,
+        name: Optional[str] = None,
+    ) -> float:
+        """Extract and coerce a float value."""
+        value = self.config.get(key, default)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            _LOGGER.warning(
+                "%s value %s invalid, using default %s",
+                name or key, value, default
+            )
+            return float(default)
+
+    def get_int(
+        self,
+        key: str,
+        default: int,
+        name: Optional[str] = None,
+        minimum: Optional[int] = None,
+        maximum: Optional[int] = None,
+    ) -> int:
+        """Extract and coerce an int value with optional bounds."""
+        coerced = self.get_float(key, default, name or key)
+        if minimum is not None and coerced < minimum:
+            _LOGGER.warning(
+                "%s value %s below minimum %s, using %s",
+                name or key, coerced, minimum, default
+            )
+            return int(default)
+        if maximum is not None and coerced > maximum:
+            _LOGGER.warning(
+                "%s value %s above maximum %s, using %s",
+                name or key, coerced, maximum, default
+            )
+            return int(default)
+        return int(coerced)
+
+    def get_bool(self, key: str, default: bool) -> bool:
+        """Extract a boolean value."""
+        return bool(self.config.get(key, default))
 
 
 @dataclass(frozen=True)
@@ -119,24 +224,9 @@ class EngineSettings:
     @classmethod
     def from_config(cls, config: Dict[str, Any], validator: DataValidator) -> "EngineSettings":
         """Create sanitized settings from raw configuration."""
+        extractor = ConfigExtractor(config, validator)
 
-        def _coerce_float(value: Any, default: float, name: str) -> float:
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                _LOGGER.warning("%s value %s invalid, using default %s", name, value, default)
-                return float(default)
-
-        def _coerce_int(value: Any, default: int, name: str, minimum: Optional[int] = None, maximum: Optional[int] = None) -> int:
-            coerced = _coerce_float(value, default, name)
-            if minimum is not None and coerced < minimum:
-                _LOGGER.warning("%s value %s below minimum %s, using %s", name, coerced, minimum, default)
-                return int(default)
-            if maximum is not None and coerced > maximum:
-                _LOGGER.warning("%s value %s above maximum %s, using %s", name, coerced, maximum, default)
-                return int(default)
-            return int(coerced)
-
+        # Extract battery capacities
         battery_capacity_config = config.get(CONF_BATTERY_CAPACITIES, {}) or {}
         sanitized_capacities: Dict[str, float] = {}
         for entity_id, raw_capacity in battery_capacity_config.items():
@@ -150,149 +240,97 @@ class EngineSettings:
                 continue
             sanitized_capacities[entity_id] = capacity
 
-        max_grid_power = int(
-            validator.sanitize_config_value(
-                config.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER),
-                min_val=1000,
-                max_val=50000,
-                default=DEFAULT_MAX_GRID_POWER,
-                name="max_grid_power",
-            )
+        # Extract power settings
+        max_grid_power = extractor.get_power_setting(
+            CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER, 1000, 50000
+        )
+        base_grid_setpoint = extractor.get_power_setting(
+            CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT, 1000, 15000
+        )
+        max_battery_power = extractor.get_power_setting(
+            CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER, 500, 50000
+        )
+        max_car_power = extractor.get_power_setting(
+            CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER, 500,
+            DEFAULT_SYSTEM_LIMITS.max_car_charger_power * 2
+        )
+        min_car_threshold = extractor.get_power_setting(
+            CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
+            0, max_car_power
+        )
+        significant_solar_threshold = extractor.get_power_setting(
+            CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
+            0, 50000
         )
 
-        base_grid_setpoint = int(
-            validator.sanitize_config_value(
-                config.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT),
-                min_val=1000,
-                max_val=15000,
-                default=DEFAULT_BASE_GRID_SETPOINT,
-                name="base_grid_setpoint",
-            )
+        # Extract durations and counts
+        min_car_duration = extractor.get_int(
+            CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION,
+            "min_car_charging_duration", minimum=0, maximum=24
         )
 
-        max_battery_power = int(
-            validator.sanitize_config_value(
-                config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER),
-                min_val=500,
-                max_val=50000,
-                default=DEFAULT_MAX_BATTERY_POWER,
-                name="max_battery_power",
-            )
+        # Extract price adjustments
+        price_multiplier = extractor.get_float(
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
+            "price_adjustment_multiplier"
+        )
+        price_offset = extractor.get_float(
+            CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET,
+            "price_adjustment_offset"
+        )
+        feed_multiplier = extractor.get_float(
+            CONF_FEEDIN_ADJUSTMENT_MULTIPLIER, DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
+            "feedin_adjustment_multiplier"
+        )
+        feed_offset = extractor.get_float(
+            CONF_FEEDIN_ADJUSTMENT_OFFSET, DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
+            "feedin_adjustment_offset"
         )
 
-        max_car_power = int(
-            validator.sanitize_config_value(
-                config.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER),
-                min_val=500,
-                max_val=DEFAULT_SYSTEM_LIMITS.max_car_charger_power * 2,
-                default=DEFAULT_MAX_CAR_POWER,
-                name="max_car_power",
-            )
+        # Extract price thresholds
+        price_threshold = extractor.get_float(
+            CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD, "price_threshold"
         )
-
-        min_car_threshold = int(
-            validator.sanitize_config_value(
-                config.get(CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD),
-                min_val=0,
-                max_val=max_car_power,
-                default=DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
-                name="min_car_charging_threshold",
-            )
-        )
-
-        min_car_duration = _coerce_int(
-            config.get(CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION),
-            DEFAULT_MIN_CAR_CHARGING_DURATION,
-            "min_car_charging_duration",
-            minimum=0,
-            maximum=24,
-        )
-
-        price_multiplier = _coerce_float(
-            config.get(CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER),
-            DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
-            "price_adjustment_multiplier",
-        )
-        price_offset = _coerce_float(
-            config.get(CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET),
-            DEFAULT_PRICE_ADJUSTMENT_OFFSET,
-            "price_adjustment_offset",
-        )
-
-        feed_multiplier = _coerce_float(
-            config.get(CONF_FEEDIN_ADJUSTMENT_MULTIPLIER, DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER),
-            DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
-            "feedin_adjustment_multiplier",
-        )
-        feed_offset = _coerce_float(
-            config.get(CONF_FEEDIN_ADJUSTMENT_OFFSET, DEFAULT_FEEDIN_ADJUSTMENT_OFFSET),
-            DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
-            "feedin_adjustment_offset",
-        )
-
-        price_threshold = _coerce_float(
-            config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD),
-            DEFAULT_PRICE_THRESHOLD,
-            "price_threshold",
-        )
-
-        very_low_threshold_pct = _coerce_float(
-            config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD),
-            DEFAULT_VERY_LOW_PRICE_THRESHOLD,
-            "very_low_price_threshold",
+        very_low_threshold_pct = extractor.get_float(
+            CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD,
+            "very_low_price_threshold"
         )
         very_low_threshold_ratio = max(0.0, min(very_low_threshold_pct / 100.0, 1.0))
-
-        feedin_threshold = _coerce_float(
-            config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD),
-            DEFAULT_FEEDIN_PRICE_THRESHOLD,
-            "feedin_price_threshold",
+        feedin_threshold = extractor.get_float(
+            CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD,
+            "feedin_price_threshold"
         )
 
-        significant_solar_threshold = int(
-            validator.sanitize_config_value(
-                config.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD),
-                min_val=0,
-                max_val=50000,
-                default=DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
-                name="significant_solar_threshold",
-            )
+        # Extract SOC thresholds
+        min_soc_threshold = extractor.get_float(
+            CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC, "min_soc_threshold"
+        )
+        max_soc_threshold = extractor.get_float(
+            CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC, "max_soc_threshold"
+        )
+        emergency_soc_threshold = extractor.get_float(
+            CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC,
+            "emergency_soc_threshold"
+        )
+        predictive_min_soc = extractor.get_float(
+            CONF_PREDICTIVE_CHARGING_MIN_SOC, DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
+            "predictive_charging_min_soc"
+        )
+        solar_peak_emergency_soc = extractor.get_float(
+            CONF_SOLAR_PEAK_EMERGENCY_SOC, DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
+            "solar_peak_emergency_soc"
         )
 
-        min_soc_threshold = _coerce_float(
-            config.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC),
-            DEFAULT_MIN_SOC,
-            "min_soc_threshold",
+        # Extract boolean flags
+        use_dynamic_threshold = extractor.get_bool(
+            CONF_USE_DYNAMIC_THRESHOLD, DEFAULT_USE_DYNAMIC_THRESHOLD
         )
-        max_soc_threshold = _coerce_float(
-            config.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC),
-            DEFAULT_MAX_SOC,
-            "max_soc_threshold",
+        use_average_threshold = extractor.get_bool(
+            CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD
         )
-
-        emergency_soc_threshold = _coerce_float(
-            config.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC),
-            DEFAULT_EMERGENCY_SOC,
-            "emergency_soc_threshold",
-        )
-        predictive_min_soc = _coerce_float(
-            config.get(CONF_PREDICTIVE_CHARGING_MIN_SOC, DEFAULT_PREDICTIVE_CHARGING_MIN_SOC),
-            DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
-            "predictive_charging_min_soc",
-        )
-        solar_peak_emergency_soc = _coerce_float(
-            config.get(CONF_SOLAR_PEAK_EMERGENCY_SOC, DEFAULT_SOLAR_PEAK_EMERGENCY_SOC),
-            DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
-            "solar_peak_emergency_soc",
-        )
-
-        use_dynamic_threshold = bool(config.get(CONF_USE_DYNAMIC_THRESHOLD, DEFAULT_USE_DYNAMIC_THRESHOLD))
-        use_average_threshold = bool(config.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD))
-
-        dynamic_threshold_confidence = _coerce_float(
-            config.get(CONF_DYNAMIC_THRESHOLD_CONFIDENCE, DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE),
-            DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
-            "dynamic_threshold_confidence",
+        dynamic_threshold_confidence = extractor.get_float(
+            CONF_DYNAMIC_THRESHOLD_CONFIDENCE, DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
+            "dynamic_threshold_confidence"
         )
 
         return cls(
@@ -348,6 +386,23 @@ class CarDecisionContext:
     def has_allocated_solar(self) -> bool:
         """Whether any solar power is earmarked for the car."""
         return self.allocated_solar > 0
+
+    @property
+    def price_category(self) -> PriceCategory:
+        """Categorize the current price level for decision routing."""
+        if self.very_low_price:
+            return PriceCategory.VERY_LOW
+        elif self.is_low_price_flag or (self.previous_charging and self.effective_low_price):
+            return PriceCategory.LOW
+        return PriceCategory.HIGH
+
+    def format_price_comparison(self, operator: str = "≤") -> str:
+        """Format price vs threshold comparison for logging."""
+        return f"{self.display_price:.3f}€/kWh {operator} {self.effective_threshold:.3f}€/kWh"
+
+    def format_solar_watts(self) -> str:
+        """Format allocated solar power as string."""
+        return f"{int(self.allocated_solar)}W"
 
 
 class ChargingDecisionEngine:
@@ -534,13 +589,20 @@ class ChargingDecisionEngine:
                 transport_cost,
             )
 
-        if highest_price is not None:
-            highest_price += transport_cost
-        if lowest_price is not None:
-            lowest_price += transport_cost
-        if next_price is not None:
-            next_price += transport_cost
-        current_price += transport_cost
+        # Add transport cost to all prices
+        adjusted_prices = self._add_transport_cost_to_prices(
+            {
+                "current_price": current_price,
+                "highest_price": highest_price,
+                "lowest_price": lowest_price,
+                "next_price": next_price,
+            },
+            transport_cost
+        )
+        current_price = adjusted_prices["current_price"]
+        highest_price = adjusted_prices["highest_price"]
+        lowest_price = adjusted_prices["lowest_price"]
+        next_price = adjusted_prices["next_price"]
 
         # Determine which threshold to use
         use_average_threshold = self._settings.use_average_threshold
@@ -586,6 +648,17 @@ class ChargingDecisionEngine:
             "significant_price_drop": significant_price_drop,
             "very_low_price": price_position <= very_low_threshold,
             "data_available": True,
+        }
+
+    def _add_transport_cost_to_prices(
+        self,
+        prices: Dict[str, Optional[float]],
+        transport_cost: float,
+    ) -> Dict[str, Optional[float]]:
+        """Add transport cost to all non-None prices."""
+        return {
+            key: (price + transport_cost if price is not None else None)
+            for key, price in prices.items()
         }
 
     def _create_unavailable_price_analysis(
@@ -1140,8 +1213,8 @@ class ChargingDecisionEngine:
             else float(self._settings.price_threshold)
         )
 
-        previous_car_charging = bool(data.get("previous_car_charging"))
-        locked_threshold = _safe_optional_float(data.get("car_charging_locked_threshold"))
+        previous_car_charging = bool(data.get(_PREVIOUS_CAR_CHARGING_KEY))
+        locked_threshold = _safe_optional_float(data.get(_CAR_CHARGING_LOCKED_THRESHOLD_KEY))
         effective_threshold = self._resolve_car_threshold(
             base_threshold, locked_threshold, previous_car_charging
         )
@@ -1155,7 +1228,7 @@ class ChargingDecisionEngine:
             base_threshold=base_threshold,
             effective_threshold=effective_threshold,
             previous_charging=previous_car_charging,
-            has_min_window=bool(data.get("has_min_charging_window")),
+            has_min_window=bool(data.get(_HAS_MIN_CHARGING_WINDOW_KEY)),
             min_duration=self._settings.min_car_charging_duration,
             allocated_solar=allocated_solar,
             very_low_price=bool(price_analysis.get("very_low_price")),
@@ -1185,11 +1258,51 @@ class ChargingDecisionEngine:
         )
         return threshold
 
+    def _lock_car_charging_threshold(
+        self,
+        context: CarDecisionContext,
+        data: Dict[str, Any],
+    ) -> None:
+        """Lock the price threshold when starting car charging (OFF→ON transition)."""
+        data[_CAR_CHARGING_LOCKED_THRESHOLD_KEY] = context.base_threshold
+        _LOGGER.debug(
+            "Car charging starting: locking threshold at %.4f€/kWh",
+            context.base_threshold,
+        )
+
+    def _unlock_car_charging_threshold(self, data: Dict[str, Any]) -> None:
+        """Clear the locked threshold when stopping car charging (ON→OFF transition)."""
+        data[_CAR_CHARGING_LOCKED_THRESHOLD_KEY] = None
+        _LOGGER.debug("Car charging stopping: clearing locked threshold")
+
+    def _append_solar_info_to_reason(
+        self,
+        reason: str,
+        context: CarDecisionContext,
+    ) -> str:
+        """Append solar allocation info to reason string if solar is allocated."""
+        if context.has_allocated_solar:
+            return f"{reason}, solar available ({context.format_solar_watts()})"
+        return reason
+
+    def _build_reason_with_solar(
+        self,
+        base_reason: str,
+        context: CarDecisionContext,
+        include_solar_inline: bool = False,
+    ) -> str:
+        """Build charging reason with optional solar allocation details."""
+        if include_solar_inline and context.has_allocated_solar:
+            return f"{base_reason} with solar ({context.format_solar_watts()})"
+        elif context.has_allocated_solar:
+            return self._append_solar_info_to_reason(base_reason, context)
+        return base_reason
+
     def _car_decision_for_very_low_price(
         self,
         context: CarDecisionContext,
         data: Dict[str, Any],
-    ) -> Dict[str, Any]:
+    ) -> CarChargingDecision:
         """Handle very low price cases."""
         price = context.display_price
 
@@ -1199,11 +1312,7 @@ class ChargingDecisionEngine:
                 f"{context.very_low_percent}% of daily range (continuing)"
             )
         elif context.has_min_window:
-            data["car_charging_locked_threshold"] = context.base_threshold
-            _LOGGER.debug(
-                "Car charging starting: locking threshold at %.4f€/kWh",
-                context.base_threshold,
-            )
+            self._lock_car_charging_threshold(context, data)
             reason = (
                 f"Very low price ({price:.3f}€/kWh) - bottom "
                 f"{context.very_low_percent}% of daily range ({context.min_duration}h+ window available)"
@@ -1217,9 +1326,7 @@ class ChargingDecisionEngine:
                 ),
             }
 
-        if context.has_allocated_solar:
-            reason += f", solar available ({int(context.allocated_solar)}W)"
-
+        reason = self._append_solar_info_to_reason(reason, context)
         return {
             "car_grid_charging": True,
             "car_grid_charging_reason": reason,
@@ -1229,41 +1336,23 @@ class ChargingDecisionEngine:
         self,
         context: CarDecisionContext,
         data: Dict[str, Any],
-    ) -> Dict[str, Any]:
+    ) -> CarChargingDecision:
         """Handle regular low price cases with hysteresis."""
-        price = context.display_price
-        threshold = context.effective_threshold
-
         if context.previous_charging:
-            if context.has_allocated_solar:
-                reason = (
-                    f"Low price ({price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) "
-                    f"with solar ({int(context.allocated_solar)}W) - continuing"
-                )
-            else:
-                reason = f"Low price ({price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) - continuing"
-
+            base_reason = f"Low price ({context.format_price_comparison()}) - continuing"
+            reason = self._build_reason_with_solar(base_reason, context, include_solar_inline=True)
             return {
                 "car_grid_charging": True,
                 "car_grid_charging_reason": reason,
             }
 
         if context.has_min_window:
-            data["car_charging_locked_threshold"] = context.base_threshold
-            _LOGGER.debug(
-                "Car charging starting: locking threshold at %.4f€/kWh",
-                context.base_threshold,
+            self._lock_car_charging_threshold(context, data)
+            base_reason = (
+                f"Low price ({context.format_price_comparison()}), "
+                f"{context.min_duration}h+ window available - starting"
             )
-            if context.has_allocated_solar:
-                reason = (
-                    f"Low price ({price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) "
-                    f"with solar ({int(context.allocated_solar)}W), {context.min_duration}h+ window available - starting"
-                )
-            else:
-                reason = (
-                    f"Low price ({price:.3f}€/kWh ≤ {threshold:.3f}€/kWh), "
-                    f"{context.min_duration}h+ window available - starting"
-                )
+            reason = self._build_reason_with_solar(base_reason, context, include_solar_inline=True)
             return {
                 "car_grid_charging": True,
                 "car_grid_charging_reason": reason,
@@ -1273,7 +1362,7 @@ class ChargingDecisionEngine:
             return {
                 "car_grid_charging": False,
                 "car_grid_charging_reason": (
-                    f"Low price ({price:.3f}€/kWh ≤ {threshold:.3f}€/kWh) but less than {context.min_duration}h "
+                    f"Low price ({context.format_price_comparison()}) but less than {context.min_duration}h "
                     "of low prices ahead - waiting for longer window"
                 ),
             }
@@ -1281,7 +1370,7 @@ class ChargingDecisionEngine:
         return {
             "car_grid_charging": False,
             "car_grid_charging_reason": (
-                f"Waiting for low-price flag before starting ({price:.3f}€/kWh ≤ {threshold:.3f}€/kWh floor, "
+                f"Waiting for low-price flag before starting ({context.format_price_comparison()} floor, "
                 f"threshold currently {context.base_threshold:.3f}€/kWh)"
             ),
         }
@@ -1290,18 +1379,14 @@ class ChargingDecisionEngine:
         self,
         context: CarDecisionContext,
         data: Dict[str, Any],
-    ) -> Dict[str, Any]:
+    ) -> CarChargingDecision:
         """Handle high price cases where charging should pause or fall back to solar."""
-        price = context.display_price
-        threshold = context.effective_threshold
-
         if context.previous_charging:
-            data["car_charging_locked_threshold"] = None
-            _LOGGER.debug("Car charging stopping: clearing locked threshold")
+            self._unlock_car_charging_threshold(data)
             return {
                 "car_grid_charging": False,
                 "car_grid_charging_reason": (
-                    f"Price exceeded threshold ({price:.3f}€/kWh > {threshold:.3f}€/kWh) - "
+                    f"Price exceeded threshold ({context.format_price_comparison('>')}) - "
                     "stopping car charging"
                 ),
             }
@@ -1311,16 +1396,14 @@ class ChargingDecisionEngine:
                 "car_grid_charging": True,
                 "car_solar_only": True,
                 "car_grid_charging_reason": (
-                    f"Price too high ({price:.3f}€/kWh > {threshold:.3f}€/kWh) - "
-                    f"using allocated solar power only ({int(context.allocated_solar)}W)"
+                    f"Price too high ({context.format_price_comparison('>')}) - "
+                    f"using allocated solar power only ({context.format_solar_watts()})"
                 ),
             }
 
         return {
             "car_grid_charging": False,
-            "car_grid_charging_reason": (
-                f"Price too high ({price:.3f}€/kWh > {threshold:.3f}€/kWh)"
-            ),
+            "car_grid_charging_reason": f"Price too high ({context.format_price_comparison('>')})",
         }
 
     def _calculate_charger_limit(
