@@ -41,6 +41,7 @@ from .const import (
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     CONF_USE_AVERAGE_THRESHOLD,
     CONF_MIN_CAR_CHARGING_DURATION,
+    CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -63,6 +64,7 @@ from .const import (
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_USE_AVERAGE_THRESHOLD,
     DEFAULT_MIN_CAR_CHARGING_DURATION,
+    DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -322,6 +324,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     min=1, max=6, step=1, unit_of_measurement="hours"
                 )
             ),
+            vol.Optional(
+                CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+                default=DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1.1, max=1.5, step=0.1, mode="slider"
+                )
+            ),
         })
 
         return self.async_show_form(
@@ -461,7 +471,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
             return self.async_create_entry(title="", data=updated_options)
 
-        current_config = self.config_entry.data
+        # Merge stored data with runtime options so that defaults reflect the latest settings.
+        current_config = {**self.config_entry.data, **self.config_entry.options}
 
         battery_entities = current_config.get(CONF_BATTERY_SOC_ENTITIES, [])
         current_capacities = current_config.get(CONF_BATTERY_CAPACITIES, {})

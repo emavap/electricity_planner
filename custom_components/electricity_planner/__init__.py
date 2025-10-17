@@ -31,7 +31,7 @@ from .migrations import async_migrate_entry
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH]
 
 MANUAL_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
     {
@@ -68,7 +68,7 @@ CLEAR_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Electricity Planner from a config entry."""
     # Perform migration if needed
-    if entry.version < 7:
+    if entry.version < 8:
         await async_migrate_entry(hass, entry)
     
     coordinator = ElectricityPlannerCoordinator(hass, entry)

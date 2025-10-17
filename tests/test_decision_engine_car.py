@@ -40,7 +40,7 @@ def test_car_uses_grid_when_price_low_even_with_solar_allocation():
     reason = decision["car_grid_charging_reason"]
     assert "Low price" in reason
     assert "solar" in reason
-    assert "starting" in reason
+    assert "window available" in reason
     assert "car_solar_only" not in decision
     assert data["car_charging_locked_threshold"] == pytest.approx(0.15, rel=1e-6)
 
@@ -158,7 +158,67 @@ def test_car_stops_when_price_exceeds_locked_threshold():
 
     assert decision["car_grid_charging"] is False
     assert data["car_charging_locked_threshold"] is None
-    assert "Price exceeded threshold" in decision["car_grid_charging_reason"]
+    reason = decision["car_grid_charging_reason"]
+    assert "Price too high" in reason
+    assert "0.230€/kWh > 0.200€/kWh" in reason
+
+
+def test_car_charges_during_very_low_price_with_window():
+    """Very low prices should trigger charging when minimum window is available."""
+    engine = _create_engine()
+
+    price_analysis = {
+        "data_available": True,
+        "current_price": 0.06,
+        "price_threshold": 0.15,
+        "is_low_price": True,
+        "very_low_price": True,
+    }
+    data = {
+        "previous_car_charging": False,
+        "has_min_charging_window": True,
+    }
+
+    decision = engine._decide_car_grid_charging(
+        price_analysis,
+        battery_analysis={},
+        power_allocation={"solar_for_car": 1200},
+        data=data,
+    )
+
+    assert decision["car_grid_charging"] is True
+    reason = decision["car_grid_charging_reason"]
+    assert "Very low price" in reason
+    assert "window available" in reason
+    assert "solar" in reason
+    assert data["car_charging_locked_threshold"] == pytest.approx(0.15, rel=1e-6)
+
+
+def test_car_waits_for_window_even_with_very_low_price():
+    """Very low prices without a sufficient window should not start charging."""
+    engine = _create_engine()
+
+    price_analysis = {
+        "data_available": True,
+        "current_price": 0.05,
+        "price_threshold": 0.15,
+        "is_low_price": True,
+        "very_low_price": True,
+    }
+    decision = engine._decide_car_grid_charging(
+        price_analysis,
+        battery_analysis={},
+        power_allocation={"solar_for_car": 2000},
+        data={
+            "previous_car_charging": False,
+            "has_min_charging_window": False,
+        },
+    )
+
+    assert decision["car_grid_charging"] is False
+    reason = decision["car_grid_charging_reason"]
+    assert "Very low price" in reason
+    assert "waiting for longer window" in reason
 
 
 def test_solar_not_allocated_to_car_until_batteries_high_soc():

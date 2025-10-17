@@ -14,12 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Options Flow** – writes changes to config entry options (instead of data) and persists per-battery capacity inputs without mutating the original entry.
+- **Options Defaults** – forms now preload values from merged entry data + options, so previously saved adjustments appear when reopening the wizard.
 - **Service UX** – services auto-select the sole coordinator when only one instance is running; `entry_id` is now optional in both UI strings and Lovelace calls.
 - **Dashboard** – bundled dashboard YAML shows manual override status and includes ready-made buttons leveraging the new services.
 
 ### Fixed
 - **Negative Price Windows** – forecast window logic accounts for zero or negative €/kWh pricing while still exposing the best average price.
 - **Manual Override Expiry** – overrides clear cleanly after expiry and strategy traces note overrides explicitly, preventing stale decisions.
+- **Feed-in Threshold Attributes** – feed-in binary sensor attributes now source thresholds from the coordinator’s merged configuration, keeping dashboards aligned after option tweaks.
 
 ## [2.8.0] - 2025-10-15
 

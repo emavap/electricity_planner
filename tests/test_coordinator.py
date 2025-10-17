@@ -21,6 +21,7 @@ from custom_components.electricity_planner.const import (
     ATTR_TARGET,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_CAR_CHARGING_POWER_ENTITY,
+    CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     CONF_HIGHEST_PRICE_ENTITY,
@@ -616,6 +617,53 @@ def test_check_minimum_charging_window_respects_duration(fake_hass, monkeypatch)
         prices_today, None, None, None, None
     )
     assert result is False
+
+
+def test_minimum_charging_window_uses_permissive_threshold(fake_hass, monkeypatch):
+    """Permissive mode should expand the low-price window using the permissive threshold."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_PRICE_THRESHOLD: 0.17,  # Base threshold 0.17 €/kWh
+            CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER: 1.2,  # 20% boost
+            "price_adjustment_multiplier": 1.0,
+            "price_adjustment_offset": 0.0,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Eight consecutive intervals (2h) at 0.19 €/kWh (above base threshold but within permissive)
+    intervals = [
+        _make_price_interval(base_time + timedelta(minutes=15 * i), 190.0)
+        for i in range(8)
+    ]
+    prices_today = {"BE": intervals}
+    multiplier = config[CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER]
+
+    base_window = coordinator._check_minimum_charging_window(
+        prices_today,
+        None,
+        None,
+        None,
+        None,
+        False,
+        multiplier,
+    )
+    assert base_window is False
+
+    permissive_window = coordinator._check_minimum_charging_window(
+        prices_today,
+        None,
+        None,
+        None,
+        None,
+        True,
+        multiplier,
+    )
+    assert permissive_window is True
 
 
 def test_check_minimum_charging_window_single_interval_too_short(fake_hass, monkeypatch):

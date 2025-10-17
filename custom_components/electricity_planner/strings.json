@@ -40,7 +40,8 @@
           "grid_battery_charging_limit_soc": "Grid Battery Charging Limit SOC",
           "very_low_price_threshold": "Very Low Price Threshold",
           "significant_solar_threshold": "Significant Solar Threshold",
-          "feedin_price_threshold": "Feed-in Solar Price Threshold"
+          "feedin_price_threshold": "Feed-in Solar Price Threshold",
+          "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier"
         },
         "data_description": {
           "min_soc_threshold": "Minimum battery charge level to maintain (%)",
@@ -50,7 +51,8 @@
           "grid_battery_charging_limit_soc": "SOC level above which grid battery charging becomes very selective - prefers solar over grid (%)",
           "very_low_price_threshold": "Percentage of daily price range considered 'very low' (e.g., 30 = bottom 30%)",
           "significant_solar_threshold": "Solar surplus power level considered significant enough to prefer over grid (W)",
-          "feedin_price_threshold": "Price threshold above which solar export to grid is enabled (€/kWh)"
+          "feedin_price_threshold": "Price threshold above which solar export to grid is enabled (€/kWh)",
+          "car_permissive_threshold_multiplier": "Multiplier applied to car charging threshold when permissive mode is active (1.2 = +20% higher threshold)"
         }
       }
     },
@@ -125,6 +127,7 @@
           "very_low_price_threshold": "Very Low Price Threshold",
           "significant_solar_threshold": "Significant Solar Threshold",
           "feedin_price_threshold": "Feed-in Solar Price Threshold",
+          "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier",
           "max_battery_power": "Max Battery Power",
           "max_car_power": "Max Car Power",
           "max_grid_power": "Max Grid Power",
