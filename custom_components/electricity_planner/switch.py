@@ -60,7 +60,7 @@ class CarPermissiveModeSwitch(CoordinatorEntity, SwitchEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
-        multiplier = self.coordinator.get_merged_config().get(
+        multiplier = self.coordinator.config.get(
             "car_permissive_threshold_multiplier", 1.2
         )
         increase_pct = (multiplier - 1.0) * 100
