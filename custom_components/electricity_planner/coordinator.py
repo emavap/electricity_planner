@@ -445,7 +445,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 now - self._last_entity_update >= self._min_update_interval):
 
                 self._last_entity_update = now
-                self.async_create_task(self.async_request_refresh())
+                self.hass.async_create_task(self.async_request_refresh())
                 _LOGGER.debug("Entity update triggered for %s (throttled to %ds minimum)",
                             entity_id, self._min_update_interval.total_seconds())
             else:

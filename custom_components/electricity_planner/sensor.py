@@ -872,7 +872,7 @@ class SignificantSolarThresholdSensor(ElectricityPlannerSensorBase):
         self._attr_unique_id = f"{entry.entry_id}_significant_solar_threshold"
         self._attr_icon = "mdi:solar-power"
         self._attr_device_class = SensorDeviceClass.POWER
-        self._attr_unit_of_measurement = "W"
+        self._attr_native_unit_of_measurement = "W"
 
     @property
     def native_value(self) -> int:
@@ -1005,11 +1005,25 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         else:
             min_price = max_price = avg_price = None
 
+        # Trim historical intervals to keep recorder-friendly payload size while
+        # preserving the full forward-looking forecast used by dashboards/thresholds.
+        now = dt_util.now()
+        future_prices: list[dict[str, Any]] = []
+        for price_entry in combined_prices:
+            start_raw = price_entry.get("start")
+            if not start_raw:
+                continue
+            start_dt = dt_util.parse_datetime(start_raw)
+            if start_dt and start_dt >= now:
+                future_prices.append(price_entry)
+        limited_prices = future_prices if future_prices else combined_prices
+
         return {
-            "data": combined_prices,  # Full price data for ApexCharts (already in €/kWh)
+            "data": limited_prices,  # Limited price data for ApexCharts (already in €/kWh)
             "today_available": prices_today is not None,
             "tomorrow_available": prices_tomorrow is not None,
             "total_intervals": len(combined_prices),
+            "displayed_intervals": len(limited_prices),
             "min_price": round(min_price, 4) if min_price is not None else None,
             "max_price": round(max_price, 4) if max_price is not None else None,
             "avg_price": round(avg_price, 4) if avg_price is not None else None,

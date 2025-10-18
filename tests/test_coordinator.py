@@ -226,12 +226,14 @@ async def test_handle_entity_change_respects_throttle(fake_hass, monkeypatch):
     coordinator.async_request_refresh = AsyncMock()
     tasks: list[asyncio.Task] = []
 
+    original_create_task = fake_hass.async_create_task
+
     def capture_task(coro):
-        task = fake_hass.async_create_task(coro)
+        task = original_create_task(coro)
         tasks.append(task)
         return task
 
-    coordinator.async_create_task = capture_task
+    fake_hass.async_create_task = capture_task
 
     event = _event_for(config[CONF_CURRENT_PRICE_ENTITY])
 

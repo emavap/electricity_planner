@@ -1,0 +1,60 @@
+# Services for Electricity Planner integration
+set_manual_override:
+  name: Set Manual Override
+  description: Manually override charging decisions for battery or car
+  fields:
+    target:
+      name: Target
+      description: Which device(s) to override (battery, car, or both)
+      required: true
+      example: "battery"
+      selector:
+        select:
+          options:
+            - "battery"
+            - "car"
+            - "both"
+    action:
+      name: Action
+      description: Whether to force charging ON or wait
+      required: true
+      example: "force_charge"
+      selector:
+        select:
+          options:
+            - "force_charge"
+            - "force_wait"
+    duration:
+      name: Duration (minutes)
+      description: Optional number of minutes before the override automatically clears
+      required: false
+      example: 60
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: "minutes"
+    reason:
+      name: Reason
+      description: Optional reason for the override (for logging)
+      required: false
+      example: "Emergency charging needed"
+      selector:
+        text:
+
+clear_manual_override:
+  name: Clear Manual Override
+  description: Clear any active manual overrides
+  fields:
+    target:
+      name: Target
+      description: Which device(s) override to clear (battery, car, or both)
+      required: false
+      example: "both"
+      default: "both"
+      selector:
+        select:
+          options:
+            - "battery"
+            - "car"
+            - "both"
