@@ -903,7 +903,6 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
             return limited
 
-        # Pass 1: Collect future intervals only
         all_raw_intervals = []
         if prices_today:
             area_code = next(iter(prices_today.keys()), None)
@@ -919,72 +918,50 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             multiplier,
             offset,
             transport_lookup,
-            None,  # Not needed for average threshold calculation
+            None,
             now,
             include_past=True,
         )
         all_intervals = [(start, price) for start, _, price in processed_intervals]
-
-        # Sort by time (oldest first)
         all_intervals.sort(key=lambda x: x[0])
 
-        # Separate future intervals
         future_intervals = [(t, p) for t, p in all_intervals if t >= now]
+        past_intervals = [(t, p) for t, p in all_intervals if t < now]
 
         if not future_intervals:
             _LOGGER.warning("No future price intervals available for average threshold")
             return None
 
-        # Estimate interval resolution (typically 15min or 1h)
-        if len(future_intervals) >= 2:
-            delta = future_intervals[1][0] - future_intervals[0][0]
-            interval_duration = delta if delta > timedelta(0) else infer_interval_resolution()
-        else:
-            interval_duration = infer_interval_resolution()
-
+        interval_duration = infer_interval_resolution()
         if interval_duration <= timedelta(0):
             interval_duration = timedelta(minutes=15)
 
-        # Calculate how many intervals we need for MIN_HOURS
         intervals_needed = max(1, int(MIN_HOURS * 3600 / interval_duration.total_seconds()))
 
-        # Pass 2: If we don't have enough future data, backfill with past
+        combined_intervals = future_intervals
         if len(future_intervals) < intervals_needed:
-            past_intervals_needed = intervals_needed - len(future_intervals)
-            past_intervals = collect_past_intervals(past_intervals_needed)
+            past_needed = intervals_needed - len(future_intervals)
 
-            if len(past_intervals) >= past_intervals_needed:
-                # Successfully backfilled to meet 24h minimum
-                combined_intervals = past_intervals + future_intervals
-                past_count = len(past_intervals)
-                future_count = len(future_intervals)
+            past_intervals.sort(key=lambda x: x[0], reverse=True)
+            backfill = past_intervals[:past_needed]
+            backfill.reverse()
 
+            if len(backfill) >= past_needed:
+                combined_intervals = backfill + future_intervals
                 _LOGGER.debug(
-                    "Average threshold: using %d past + %d future intervals (%.1fh total) to meet %dh minimum",
-                    past_count, future_count,
-                    (past_count + future_count) * interval_duration.total_seconds() / 3600,
-                    MIN_HOURS
+                    "Average threshold: using %d past + %d future intervals (%.1fh total)",
+                    len(backfill), len(future_intervals),
+                    len(combined_intervals) * interval_duration.total_seconds() / 3600,
                 )
             else:
-                # Not enough past data available - use what we have
-                combined_intervals = future_intervals
-                past_count = 0
-                future_count = len(future_intervals)
                 _LOGGER.debug(
-                    "Average threshold: insufficient past data (have %d intervals, need %d) – using %d future intervals only",
-                    len(past_intervals),
-                    past_intervals_needed,
-                    future_count,
+                    "Average threshold: insufficient past data, using %d future intervals only",
+                    len(future_intervals),
                 )
         else:
-            # Enough future data
-            combined_intervals = future_intervals
-            past_count = 0
-            future_count = len(future_intervals)
-
             _LOGGER.debug(
                 "Average threshold: using %d future intervals (%.1fh total)",
-                future_count, future_count * interval_duration.total_seconds() / 3600
+                len(future_intervals), len(future_intervals) * interval_duration.total_seconds() / 3600
             )
 
         # Calculate average from combined intervals

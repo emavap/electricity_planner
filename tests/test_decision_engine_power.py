@@ -58,8 +58,8 @@ def test_grid_setpoint_without_battery_data():
         charger_limit=6000,
     )
 
-    assert result["grid_setpoint"] == int(4000 * 0.9)
-    assert "grid only for car" in result["grid_setpoint_reason"]
+    assert result["grid_setpoint"] == 3600
+    assert "car 3600W" in result["grid_setpoint_reason"]
 
 
 def test_grid_setpoint_distributes_between_car_and_battery():
@@ -85,10 +85,10 @@ def test_grid_setpoint_distributes_between_car_and_battery():
         charger_limit=7000,
     )
 
-    assert result["grid_setpoint"] == int(8000 * 0.9)
+    assert result["grid_setpoint"] == 7200
     reason = result["grid_setpoint_reason"]
-    assert "car 4500W" in reason
-    assert "battery 2700W" in reason
+    assert "car 5280W" in reason
+    assert "battery 1920W" in reason
 
 
 def test_grid_setpoint_zero_for_solar_only_car():
