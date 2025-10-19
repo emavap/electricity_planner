@@ -350,13 +350,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                         continue
                     start_time_utc = dt_util.as_utc(start_time)
 
-                    end_time = None
+                    end_time: datetime | None = None
                     end_time_str = interval.get("end")
                     if end_time_str:
                         try:
-                            end_time = dt_util.parse_datetime(end_time_str)
-                            if end_time <= start_time:
-                                end_time = None
+                            parsed_end = dt_util.parse_datetime(end_time_str)
+                            if parsed_end is not None:
+                                end_time_utc = dt_util.as_utc(parsed_end)
+                                if end_time_utc > start_time_utc:
+                                    end_time = end_time_utc
                         except Exception:
                             end_time = None
 
@@ -1424,26 +1426,31 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                         "average_price": average_price,
                     }
 
+        def _iso_local(dt_obj: datetime) -> str:
+            """Return ISO string in Home Assistant's local timezone."""
+            localized = dt_util.as_local(dt_obj)
+            return localized.isoformat()
+
         summary: dict[str, Any] = {
             "available": True,
-            "cheapest_interval_start": cheapest_segment[0].isoformat(),
-            "cheapest_interval_end": cheapest_segment[1].isoformat(),
+            "cheapest_interval_start": _iso_local(cheapest_segment[0]),
+            "cheapest_interval_end": _iso_local(cheapest_segment[1]),
             "cheapest_interval_price": round(cheapest_segment[2], 4),
             "average_threshold": minimum_average_threshold,
-            "evaluated_at": now.isoformat(),
+            "evaluated_at": _iso_local(now),
         }
 
         if stale:
             summary["stale"] = True
         if self._last_price_timeline_generated_at:
-            summary["timeline_generated_at"] = self._last_price_timeline_generated_at.isoformat()
+            summary["timeline_generated_at"] = _iso_local(self._last_price_timeline_generated_at)
 
         if best_window:
             summary.update(
                 {
                     "best_window_hours": min_duration_hours,
-                    "best_window_start": best_window["start"].isoformat(),
-                    "best_window_end": best_window["end"].isoformat(),
+                    "best_window_start": _iso_local(best_window["start"]),
+                    "best_window_end": _iso_local(best_window["end"]),
                     "best_window_average_price": round(best_window["average_price"], 4),
                 }
             )

@@ -997,9 +997,11 @@ def test_forecast_summary_uses_price_timeline(fake_hass, monkeypatch):
 
     assert summary["available"] is True
     assert summary["cheapest_interval_price"] == pytest.approx(0.04, rel=1e-6)
-    assert summary["cheapest_interval_start"] == (base_time + timedelta(hours=2)).isoformat()
+    parsed_cheapest_start = dt_util.parse_datetime(summary["cheapest_interval_start"])
+    assert dt_util.as_utc(parsed_cheapest_start) == base_time + timedelta(hours=2)
     assert summary["best_window_average_price"] == pytest.approx(0.04, rel=1e-6)
-    assert summary["best_window_start"] == (base_time + timedelta(hours=2)).isoformat()
+    parsed_best_start = dt_util.parse_datetime(summary["best_window_start"])
+    assert dt_util.as_utc(parsed_best_start) == base_time + timedelta(hours=2)
 
 
 def test_forecast_summary_handles_negative_prices(fake_hass, monkeypatch):
@@ -1041,13 +1043,14 @@ def test_forecast_summary_handles_negative_prices(fake_hass, monkeypatch):
         average,
     )
 
-    expected_start = (base_time + timedelta(minutes=60)).isoformat()
+    expected_start = base_time + timedelta(minutes=60)
 
     assert summary["available"] is True
     assert summary["cheapest_interval_price"] == pytest.approx(-0.005, rel=1e-6)
     assert summary["best_window_average_price"] == pytest.approx(-0.005, rel=1e-6)
     assert summary["best_window_average_price"] <= 0
-    assert summary["best_window_start"] == expected_start
+    parsed_best_start = dt_util.parse_datetime(summary["best_window_start"])
+    assert dt_util.as_utc(parsed_best_start) == expected_start
 
 
 def test_missing_price_data_marks_forecast_stale(fake_hass, monkeypatch):
