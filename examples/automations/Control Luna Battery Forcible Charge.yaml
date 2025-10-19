@@ -1,5 +1,7 @@
 alias: Control Luna Battery Forcible Charge
-description: Enable forcible charge at half grid setpoint when > 2000W, otherwise stop
+description: >-
+  Enable forcible charge when excess grid power is available (grid setpoint - house consumption).
+  Luna gets half the excess power since it's one of two batteries in the system.
 triggers:
   - entity_id: sensor.electricity_planner_grid_setpoint
     trigger: state
@@ -16,29 +18,43 @@ conditions:
         state: unavailable
 actions:
   - choose:
+      # Enable forcible charge when excess power > 1500W
       - conditions:
-          - condition: numeric_state
-            entity_id: sensor.electricity_planner_grid_setpoint
-            above: 2000
+          - condition: template
+            value_template: >-
+              {{
+                (states('sensor.electricity_planner_grid_setpoint') | float(0)) -
+                (states('sensor.house_power_consumption_estimated') | float(0))
+                > 1500
+              }}
         sequence:
           - action: huawei_solar.forcible_charge
             data:
+              # Charge power = (grid_setpoint - house_consumption) / 2
+              # Divide by 2 because Luna is one of two batteries - each gets half the excess
               power: >-
-                {{ (
+                {{
                   (
                     [
-                      (states('sensor.electricity_planner_grid_setpoint') | float(0)) -
-                      (states('sensor.evcharger_power_2') | float(0)),
+                      (
+                        (states('sensor.electricity_planner_grid_setpoint') | float(0)) -
+                        (states('sensor.house_power_consumption_estimated') | float(0))
+                      ) / 2,
                       0
                     ] | max
-                  ) / 2
-                ) | int }}
+                  ) | int
+                }}
               device_id: 5f18f808c2a17aeb3c78b435012f6713
               duration: 15
+      # Stop forcible charge when excess power <= 1500W
       - conditions:
-          - condition: numeric_state
-            entity_id: sensor.electricity_planner_grid_setpoint
-            below: 2000
+          - condition: template
+            value_template: >-
+              {{
+                (states('sensor.electricity_planner_grid_setpoint') | float(0)) -
+                (states('sensor.house_power_consumption_estimated') | float(0))
+                <= 1500
+              }}
         sequence:
           - action: huawei_solar.stop_forcible_charge
             data:
