@@ -85,7 +85,6 @@ from .helpers import (
 )
 
 from .strategies import StrategyManager
-from .power_calculator import calculate_charger_limit, calculate_grid_setpoint
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -522,19 +521,18 @@ class ChargingDecisionEngine:
             price_analysis, battery_analysis, power_allocation, data
         )
         decision_data.update(car_decision)
-        
         # Calculate power limits
         decision_data_for_downstream = {**data, **decision_data}
         
-        charger_limit_decision = calculate_charger_limit(
-            price_analysis, battery_analysis, power_allocation, decision_data_for_downstream, self._settings
+        charger_limit_decision = self._calculate_charger_limit(
+            price_analysis, battery_analysis, power_allocation, decision_data_for_downstream
         )
         decision_data.update(charger_limit_decision)
         decision_data_for_downstream.update(charger_limit_decision)
         
-        grid_setpoint_decision = calculate_grid_setpoint(
+        grid_setpoint_decision = self._calculate_grid_setpoint(
             price_analysis, battery_analysis, power_allocation, decision_data_for_downstream,
-            decision_data.get("charger_limit", 0), self._settings
+            decision_data.get("charger_limit", 0)
         )
         decision_data.update(grid_setpoint_decision)
         
@@ -749,12 +747,9 @@ class ChargingDecisionEngine:
         weight_sum = sum(positive_weights.values())
 
         if weight_sum <= 0:
-            base_share = total // len(phases)
-            remainder = total - (base_share * len(phases))
-            allocation = {phase: base_share for phase in phases}
-            for phase in phases[:remainder]:
-                allocation[phase] += 1
-            return allocation
+            # If no weights are provided, cannot distribute.
+            # Fallback to equal distribution is ambiguous; prefer returning zeros.
+            return {phase: 0 for phase in phases}
 
         raw_allocations = {
             phase: (total * positive_weights[phase] / weight_sum) for phase in phases
@@ -1732,3 +1727,92 @@ class ChargingDecisionEngine:
             "car_grid_charging": False,
             "car_grid_charging_reason": self._append_permissive_mode_to_reason(high_price_reason, context),
         }
+
+    def _calculate_charger_limit(
+        self,
+        price_analysis: Dict[str, Any],
+        battery_analysis: Dict[str, Any],
+        power_allocation: Dict[str, Any],
+        data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Calculate the maximum power for the car charger based on decisions."""
+        car_grid_charging = data.get("car_grid_charging", False)
+        car_solar_only = data.get("car_solar_only", False)
+        solar_for_car = power_allocation.get("solar_for_car", 0)
+
+        if car_solar_only:
+            return {
+                "charger_limit": int(solar_for_car),
+                "charger_limit_reason": f"Solar-only car charging ({solar_for_car}W)",
+            }
+
+        if not car_grid_charging:
+            return {
+                "charger_limit": 0,
+                "charger_limit_reason": "Car charging from grid is not allowed",
+            }
+
+        return {
+            "charger_limit": self._settings.max_car_power,
+            "charger_limit_reason": f"Car charging from grid allowed (max {self._settings.max_car_power}W)",
+        }
+
+
+    def _calculate_grid_setpoint(
+        self,
+        price_analysis: Dict[str, Any],
+        battery_analysis: Dict[str, Any],
+        power_allocation: Dict[str, Any],
+        data: Dict[str, Any],
+        charger_limit: int,
+    ) -> Dict[str, Any]:
+        """Calculate grid setpoint based on charging decisions."""
+        car_grid_charging = data.get("car_grid_charging", False)
+        battery_grid_charging = data.get("battery_grid_charging", False)
+        car_solar_only = data.get("car_solar_only", False)
+
+        if car_solar_only:
+            return {
+                "grid_setpoint": 0,
+                "grid_setpoint_reason": "Solar-only car charging, no grid import",
+            }
+
+        # Calculate power needed from grid for car and battery
+        grid_for_car = 0
+        if car_grid_charging:
+            solar_for_car = power_allocation.get("solar_for_car", 0)
+            car_current_solar = power_allocation.get("car_current_solar_usage", 0)
+            car_power_total = min(charger_limit, self._settings.max_car_power)
+            grid_for_car = max(0, car_power_total - solar_for_car - car_current_solar)
+
+        grid_for_battery = 0
+        if battery_grid_charging and battery_analysis.get("average_soc") is not None:
+            soc_room = battery_analysis["max_soc_threshold"] - battery_analysis["average_soc"]
+            soc_ratio = min(1.0, max(0.0, soc_room / 20.0))  # Scale up as battery gets emptier
+            grid_for_battery = int(self._settings.max_battery_power * soc_ratio)
+
+        total_grid_draw = grid_for_car + grid_for_battery
+
+        # Enforce monthly peak limit
+        monthly_peak = data.get("monthly_grid_peak")
+        if monthly_peak is not None and monthly_peak > 0:
+            peak_limit = monthly_peak * (1 - DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN)
+            if total_grid_draw > peak_limit:
+                scale_factor = peak_limit / total_grid_draw if total_grid_draw > 0 else 0
+                grid_for_car = int(grid_for_car * scale_factor)
+                grid_for_battery = int(grid_for_battery * scale_factor)
+                total_grid_draw = peak_limit
+
+        # Enforce base grid setpoint (e.g., house load) and absolute max
+        grid_setpoint = min(
+            max(total_grid_draw, self._settings.base_grid_setpoint if total_grid_draw > 0 else 0),
+            self._settings.max_grid_power,
+        )
+
+        reason = (
+            f"Grid setpoint: car {grid_for_car}W, battery {grid_for_battery}W "
+            f"(total {total_grid_draw}W), base {self._settings.base_grid_setpoint}W, "
+            f"limit {self._settings.max_grid_power}W -> {grid_setpoint}W"
+        )
+
+        return {"grid_setpoint": int(grid_setpoint), "grid_setpoint_reason": reason, "grid_components": {"car": grid_for_car, "battery": grid_for_battery}}

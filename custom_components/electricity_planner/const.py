@@ -88,7 +88,7 @@ DEFAULT_FEEDIN_ADJUSTMENT_OFFSET = 0.0  # €/kWh offset
 # Algorithm Constants
 DEFAULT_SIGNIFICANT_PRICE_DROP_THRESHOLD = 0.15  # 15% price drop threshold
 DEFAULT_BASE_GRID_SETPOINT = 2500  # Conservative base grid limit (W)
-DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN = 0.9  # Use 90% of monthly peak
+DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN = 0.1  # Use 90% of monthly peak
 DEFAULT_CAR_PRIORITY_SOC_THRESHOLD = 70  # Above this SOC, car can use surplus
 DEFAULT_CRITICAL_SOC_THRESHOLD = 30  # Below this is considered critical
 DEFAULT_MEDIUM_SOC_THRESHOLD = 50  # Medium SOC charging threshold
