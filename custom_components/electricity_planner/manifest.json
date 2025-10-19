@@ -2,6 +2,7 @@
   "domain": "electricity_planner",
   "name": "Electricity Planner",
   "icon": "mdi:flash",
+  "logo": "logo.png",
   "codeowners": ["@emavap"],
   "config_flow": true,
   "dependencies": [],
