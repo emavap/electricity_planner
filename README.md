@@ -31,7 +31,8 @@ Electricity Planner is a Home Assistant custom integration that turns Nord Pool 
 
 1. Settings → Devices & Services → `+ Add Integration` → search for **Electricity Planner**.
 2. Wizard steps:
-   - **Entities** – select Nord Pool, battery, solar, consumption, EV sensors.
+   - **Topology** – choose between single-phase and three-phase operation.
+   - **Entities** – select Nord Pool, battery, solar, consumption, EV sensors (per-phase when three-phase is selected).
    - **SOC Thresholds** – min/max SOC, emergency threshold, predictive threshold.
    - **Price Thresholds** – static ceiling, very-low-price %, feed‑in limits.
    - **Power Limits** – max battery/car/grid power, minimum EV detection threshold.

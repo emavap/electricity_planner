@@ -99,9 +99,18 @@ class BatteryGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
         """Return the state attributes."""
         if not self.coordinator.data:
             return {}
-        return {
+
+        attributes = {
             "reason": self.coordinator.data.get("battery_grid_charging_reason"),
         }
+
+        # Add per-phase breakdown for three-phase systems
+        phase_results = self.coordinator.data.get("phase_results")
+        if phase_results:
+            attributes["phase_results"] = phase_results
+            attributes["phase_mode"] = self.coordinator.data.get("phase_mode")
+
+        return attributes
 
 
 class CarGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
@@ -127,9 +136,18 @@ class CarGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
         """Return the state attributes."""
         if not self.coordinator.data:
             return {}
-        return {
+
+        attributes = {
             "reason": self.coordinator.data.get("car_grid_charging_reason"),
         }
+
+        # Add per-phase breakdown for three-phase systems
+        phase_results = self.coordinator.data.get("phase_results")
+        if phase_results:
+            attributes["phase_results"] = phase_results
+            attributes["phase_mode"] = self.coordinator.data.get("phase_mode")
+
+        return attributes
 
 
 class LowPriceBinarySensor(ElectricityPlannerBinarySensorBase):

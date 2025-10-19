@@ -11,6 +11,16 @@ from homeassistant.helpers.entity_registry import async_get as async_get_entity_
 
 from .const import (
     DOMAIN,
+    CONF_PHASE_MODE,
+    PHASE_MODE_SINGLE,
+    PHASE_MODE_THREE,
+    CONF_PHASES,
+    PHASE_IDS,
+    DEFAULT_PHASE_NAMES,
+    CONF_PHASE_NAME,
+    CONF_PHASE_SOLAR_ENTITY,
+    CONF_PHASE_CONSUMPTION_ENTITY,
+    CONF_PHASE_CAR_ENTITY,
     CONF_NORDPOOL_CONFIG_ENTRY,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
@@ -18,6 +28,7 @@ from .const import (
     CONF_NEXT_PRICE_ENTITY,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_BATTERY_CAPACITIES,
+    CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_SOLAR_PRODUCTION_ENTITY,
     CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_CAR_CHARGING_POWER_ENTITY,
@@ -75,7 +86,7 @@ from .const import (
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Electricity Planner."""
 
-    VERSION = 7
+    VERSION = 9
 
     def __init__(self):
         """Initialize the config flow."""
@@ -84,67 +95,232 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step - Entity Selection."""
+        """Handle the initial step - topology selection."""
         if user_input is not None:
-            self.data.update(user_input)
-            return await self.async_step_battery_capacities()
+            phase_mode = user_input.get(CONF_PHASE_MODE, PHASE_MODE_SINGLE)
+            self.data[CONF_PHASE_MODE] = phase_mode
+            return await self.async_step_entities()
 
-
-        schema = vol.Schema({
-            vol.Optional(CONF_NORDPOOL_CONFIG_ENTRY): selector.ConfigEntrySelector(
-                selector.ConfigEntrySelectorConfig(integration="nordpool")
-            ),
-            vol.Required(CONF_CURRENT_PRICE_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Required(CONF_HIGHEST_PRICE_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Required(CONF_LOWEST_PRICE_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Required(CONF_NEXT_PRICE_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Required(CONF_BATTERY_SOC_ENTITIES): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="sensor",
-                    multiple=True
+        default_mode = self.data.get(CONF_PHASE_MODE, PHASE_MODE_SINGLE)
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_PHASE_MODE, default=default_mode): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            {
+                                "label": "Single-phase system",
+                                "value": PHASE_MODE_SINGLE,
+                            },
+                            {
+                                "label": "Three-phase system (L1/L2/L3)",
+                                "value": PHASE_MODE_THREE,
+                            },
+                        ],
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
                 )
-            ),
-            vol.Required(CONF_SOLAR_PRODUCTION_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Required(CONF_HOUSE_CONSUMPTION_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(CONF_CAR_CHARGING_POWER_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(CONF_MONTHLY_GRID_PEAK_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(CONF_TRANSPORT_COST_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-        })
+            }
+        )
 
         return self.async_show_form(
             step_id="user",
             data_schema=schema,
             description_placeholders={
-                "nordpool_config_entry": "Nord Pool config entry (optional, enables full day price data)",
-                "current_price": "Current electricity price from Nord Pool",
-                "highest_price": "Highest price today from Nord Pool",
-                "lowest_price": "Lowest price today from Nord Pool",
-                "next_price": "Next hour price from Nord Pool",
-                "battery_soc": "Battery State of Charge entities",
-                "solar_production": "Current solar production in W",
-                "house_consumption": "Current house power consumption in W",
-                "car_charging": "Car charging power in W (optional)",
-                "monthly_grid_peak": "Current month grid peak in W (optional)",
-                "transport_cost": "Optional transport cost sensor (€/kWh) added to buy price",
+                "phase_mode": "Select single-phase or three-phase operation. Three-phase enables per-phase inputs."
             },
+        )
+
+    async def async_step_entities(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Collect entity configuration based on phase topology."""
+        phase_mode: str = self.data.get(CONF_PHASE_MODE, PHASE_MODE_SINGLE)
+        existing_phases: dict[str, Any] = self.data.get(CONF_PHASES, {})
+
+        if user_input is not None:
+            processed_input = dict(user_input)
+
+            if phase_mode == PHASE_MODE_THREE:
+                phases_config: dict[str, dict[str, Any]] = {}
+
+                for phase_id in PHASE_IDS:
+                    solar_key = f"{phase_id}_{CONF_PHASE_SOLAR_ENTITY}"
+                    consumption_key = f"{phase_id}_{CONF_PHASE_CONSUMPTION_ENTITY}"
+                    car_key = f"{phase_id}_{CONF_PHASE_CAR_ENTITY}"
+
+                    solar_entity = processed_input.pop(solar_key, None)
+                    consumption_entity = processed_input.pop(consumption_key, None)
+                    car_entity = processed_input.pop(car_key, None)
+
+                    phases_config[phase_id] = {
+                        CONF_PHASE_NAME: existing_phases.get(phase_id, {}).get(
+                            CONF_PHASE_NAME, DEFAULT_PHASE_NAMES[phase_id]
+                        ),
+                        CONF_PHASE_SOLAR_ENTITY: solar_entity,
+                        CONF_PHASE_CONSUMPTION_ENTITY: consumption_entity,
+                    }
+                    if car_entity:
+                        phases_config[phase_id][CONF_PHASE_CAR_ENTITY] = car_entity
+
+                self.data[CONF_PHASES] = phases_config
+                # Remove legacy single-phase bindings to avoid stale config
+                for legacy_key in (
+                    CONF_SOLAR_PRODUCTION_ENTITY,
+                    CONF_HOUSE_CONSUMPTION_ENTITY,
+                    CONF_CAR_CHARGING_POWER_ENTITY,
+                ):
+                    self.data.pop(legacy_key, None)
+            else:
+                # Ensure phase-specific configuration is cleared when returning to single-phase mode
+                self.data.pop(CONF_PHASES, None)
+                self.data.pop(CONF_BATTERY_PHASE_ASSIGNMENTS, None)
+
+            self.data.update(processed_input)
+            return await self.async_step_battery_capacities()
+
+        schema_dict: dict[Any, Any] = {
+            vol.Optional(
+                CONF_NORDPOOL_CONFIG_ENTRY,
+                default=self.data.get(CONF_NORDPOOL_CONFIG_ENTRY),
+            ): selector.ConfigEntrySelector(
+                selector.ConfigEntrySelectorConfig(integration="nordpool")
+            ),
+            vol.Required(
+                CONF_CURRENT_PRICE_ENTITY,
+                default=self.data.get(CONF_CURRENT_PRICE_ENTITY),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(
+                CONF_HIGHEST_PRICE_ENTITY,
+                default=self.data.get(CONF_HIGHEST_PRICE_ENTITY),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(
+                CONF_LOWEST_PRICE_ENTITY,
+                default=self.data.get(CONF_LOWEST_PRICE_ENTITY),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(
+                CONF_NEXT_PRICE_ENTITY,
+                default=self.data.get(CONF_NEXT_PRICE_ENTITY),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(
+                CONF_BATTERY_SOC_ENTITIES,
+                default=self.data.get(CONF_BATTERY_SOC_ENTITIES, []),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor", multiple=True)
+            ),
+        }
+
+        if phase_mode == PHASE_MODE_SINGLE:
+            schema_dict.update(
+                {
+                    vol.Required(
+                        CONF_SOLAR_PRODUCTION_ENTITY,
+                        default=self.data.get(CONF_SOLAR_PRODUCTION_ENTITY),
+                    ): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="sensor")
+                    ),
+                    vol.Required(
+                        CONF_HOUSE_CONSUMPTION_ENTITY,
+                        default=self.data.get(CONF_HOUSE_CONSUMPTION_ENTITY),
+                    ): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="sensor")
+                    ),
+                    vol.Optional(
+                        CONF_CAR_CHARGING_POWER_ENTITY,
+                        default=self.data.get(CONF_CAR_CHARGING_POWER_ENTITY),
+                    ): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="sensor")
+                    ),
+                }
+            )
+        else:
+            phases_config = self.data.get(CONF_PHASES, {})
+            for phase_id in PHASE_IDS:
+                existing = phases_config.get(phase_id, {})
+                solar_key = f"{phase_id}_{CONF_PHASE_SOLAR_ENTITY}"
+                consumption_key = f"{phase_id}_{CONF_PHASE_CONSUMPTION_ENTITY}"
+                car_key = f"{phase_id}_{CONF_PHASE_CAR_ENTITY}"
+
+                schema_dict[
+                    vol.Optional(
+                        solar_key,
+                        default=existing.get(CONF_PHASE_SOLAR_ENTITY),
+                    )
+                ] = selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )
+                schema_dict[
+                    vol.Required(
+                        consumption_key,
+                        default=existing.get(CONF_PHASE_CONSUMPTION_ENTITY),
+                    )
+                ] = selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )
+                schema_dict[
+                    vol.Optional(
+                        car_key,
+                        default=existing.get(CONF_PHASE_CAR_ENTITY),
+                    )
+                ] = selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )
+
+        schema_dict.update(
+            {
+                vol.Optional(
+                    CONF_MONTHLY_GRID_PEAK_ENTITY,
+                    default=self.data.get(CONF_MONTHLY_GRID_PEAK_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_TRANSPORT_COST_ENTITY,
+                    default=self.data.get(CONF_TRANSPORT_COST_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+            }
+        )
+
+        schema = vol.Schema(schema_dict)
+
+        description_placeholders = {
+            "nordpool_config_entry": "Nord Pool config entry (optional, enables full day price data)",
+            "current_price": "Current electricity price from Nord Pool",
+            "highest_price": "Highest price today from Nord Pool",
+            "lowest_price": "Lowest price today from Nord Pool",
+            "next_price": "Next hour price from Nord Pool",
+            "battery_soc": "Battery State of Charge entities",
+            "monthly_grid_peak": "Current month grid peak in W (optional)",
+            "transport_cost": "Optional transport cost sensor (€/kWh) added to buy price",
+        }
+        if phase_mode == PHASE_MODE_SINGLE:
+            description_placeholders.update(
+                {
+                    "solar_production": "Current solar production in W",
+                    "house_consumption": "Current house power consumption in W",
+                    "car_charging": "Car charging power in W (optional)",
+                }
+            )
+        else:
+            description_placeholders.update(
+                {
+                    "phase_inputs": "Provide consumption sensors for each phase; solar/car sensors are optional",
+                }
+            )
+
+        return self.async_show_form(
+            step_id="entities",
+            data_schema=schema,
+            description_placeholders=description_placeholders,
         )
 
     async def async_step_battery_capacities(
@@ -161,6 +337,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     battery_capacities[entity_id] = user_input[entity_key]
 
             self.data[CONF_BATTERY_CAPACITIES] = battery_capacities
+            if (
+                self.data.get(CONF_PHASE_MODE) == PHASE_MODE_THREE
+                and battery_entities
+            ):
+                return await self.async_step_battery_phase_assignment()
             return await self.async_step_settings()
 
         battery_entities = self.data.get(CONF_BATTERY_SOC_ENTITIES, [])
@@ -199,6 +380,75 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="battery_capacities",
+            data_schema=schema,
+            description_placeholders=description_placeholders,
+        )
+
+    async def async_step_battery_phase_assignment(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Assign batteries to phases for three-phase operation."""
+        if self.data.get(CONF_PHASE_MODE) != PHASE_MODE_THREE:
+            return await self.async_step_settings()
+
+        battery_entities = self.data.get(CONF_BATTERY_SOC_ENTITIES, [])
+        if not battery_entities:
+            self.data[CONF_BATTERY_PHASE_ASSIGNMENTS] = {}
+            return await self.async_step_settings()
+
+        existing_assignments = self.data.get(CONF_BATTERY_PHASE_ASSIGNMENTS, {})
+
+        if user_input is not None:
+            assignments: dict[str, list[str]] = {}
+            for entity_id in battery_entities:
+                key = f"phase_assignment_{entity_id.replace('.', '_')}"
+                selected = user_input.get(key) or existing_assignments.get(
+                    entity_id
+                )
+                if not selected:
+                    selected = [PHASE_IDS[0]]
+                assignments[entity_id] = list(selected)
+
+            self.data[CONF_BATTERY_PHASE_ASSIGNMENTS] = assignments
+            return await self.async_step_settings()
+
+        options = [
+            {"value": phase_id, "label": DEFAULT_PHASE_NAMES[phase_id]}
+            for phase_id in PHASE_IDS
+        ]
+
+        schema_fields: dict[Any, Any] = {}
+        entity_registry = async_get_entity_registry(self.hass)
+        description_placeholders: dict[str, str] = {}
+
+        for entity_id in battery_entities:
+            key = f"phase_assignment_{entity_id.replace('.', '_')}"
+            default_assignment = existing_assignments.get(entity_id, [PHASE_IDS[0]])
+
+            schema_fields[
+                vol.Optional(key, default=default_assignment)
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=options,
+                    multiple=True,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            )
+
+            entity_entry = entity_registry.async_get(entity_id)
+            friendly_name = (
+                entity_entry.name
+                if entity_entry and entity_entry.name
+                else entity_id.split(".")[-1]
+            )
+            description_placeholders[key] = (
+                f"Select the phases that can control {friendly_name}"
+            )
+
+        schema = vol.Schema(schema_fields)
+
+        return self.async_show_form(
+            step_id="battery_phase_assignment",
             data_schema=schema,
             description_placeholders=description_placeholders,
         )
@@ -444,6 +694,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return OptionsFlowHandler(config_entry)
 
 
+
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for Electricity Planner."""
 
@@ -454,206 +705,246 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Manage the options."""
+        """Handle the options step (single-form flow for compatibility)."""
+        existing_config = {**self.config_entry.data, **self.config_entry.options}
+        working_data: dict[str, Any] = dict(existing_config)
+
+        battery_entities: list[str] = working_data.get(CONF_BATTERY_SOC_ENTITIES, [])
+        current_capacities: dict[str, float] = working_data.get(
+            CONF_BATTERY_CAPACITIES, {}
+        )
+        current_phase_mode: str = working_data.get(CONF_PHASE_MODE, PHASE_MODE_SINGLE)
+        existing_phases: dict[str, Any] = working_data.get(CONF_PHASES, {})
+        existing_assignments: dict[str, list[str]] = working_data.get(
+            CONF_BATTERY_PHASE_ASSIGNMENTS, {}
+        )
+
         if user_input is not None:
-            # Extract dynamic battery capacity fields and move them under a dedicated key.
             updated_options = dict(user_input)
+            phase_mode = updated_options.pop(CONF_PHASE_MODE, current_phase_mode)
 
-            battery_entities = user_input.get(CONF_BATTERY_SOC_ENTITIES, [])
-            battery_capacities = {}
+            submitted_batteries = updated_options.get(
+                CONF_BATTERY_SOC_ENTITIES, battery_entities
+            )
+            battery_entities = list(submitted_batteries) if submitted_batteries else []
 
+            # Extract battery capacities
+            battery_capacities: dict[str, float] = {}
             for entity_id in battery_entities:
-                entity_key = f"capacity_{entity_id.replace('.', '_')}"
-                if entity_key in updated_options:
-                    battery_capacities[entity_id] = updated_options.pop(entity_key)
+                capacity_key = f"capacity_{entity_id.replace('.', '_')}"
+                if capacity_key in updated_options:
+                    battery_capacities[entity_id] = updated_options.pop(capacity_key)
 
+            # Extract battery phase assignments
+            battery_phase_assignments: dict[str, list[str]] = {}
+            for entity_id in battery_entities:
+                assignment_key = f"phase_assignment_{entity_id.replace('.', '_')}"
+                value = updated_options.pop(assignment_key, None)
+                if value:
+                    battery_phase_assignments[entity_id] = list(value)
+
+            # Extract per-phase sensor configuration
+            phases_config: dict[str, dict[str, Any]] = {}
+            for phase_id in PHASE_IDS:
+                solar_key = f"{phase_id}_{CONF_PHASE_SOLAR_ENTITY}"
+                consumption_key = f"{phase_id}_{CONF_PHASE_CONSUMPTION_ENTITY}"
+                car_key = f"{phase_id}_{CONF_PHASE_CAR_ENTITY}"
+
+                solar_entity = updated_options.pop(solar_key, None)
+                consumption_entity = updated_options.pop(consumption_key, None)
+                car_entity = updated_options.pop(car_key, None)
+
+                phases_config[phase_id] = {
+                    CONF_PHASE_NAME: existing_phases.get(phase_id, {}).get(
+                        CONF_PHASE_NAME, DEFAULT_PHASE_NAMES[phase_id]
+                    ),
+                    CONF_PHASE_SOLAR_ENTITY: solar_entity,
+                    CONF_PHASE_CONSUMPTION_ENTITY: consumption_entity,
+                }
+                if car_entity:
+                    phases_config[phase_id][CONF_PHASE_CAR_ENTITY] = car_entity
+
+            if phase_mode == PHASE_MODE_THREE:
+                # Validate that required phase entities are provided
+                missing_consumption = []
+                for phase_id in PHASE_IDS:
+                    phase_config = phases_config.get(phase_id, {})
+                    if not phase_config.get(CONF_PHASE_CONSUMPTION_ENTITY):
+                        missing_consumption.append(DEFAULT_PHASE_NAMES[phase_id])
+
+                if missing_consumption:
+                    return self.async_show_form(
+                        step_id="init",
+                        data_schema=vol.Schema(schema_dict),
+                        errors={"base": f"Missing consumption sensors for: {', '.join(missing_consumption)}"},
+                        description_placeholders={
+                            "topology": "Three-phase mode requires per-phase consumption sensors; solar inputs remain optional.",
+                        },
+                    )
+
+                updated_options[CONF_PHASE_MODE] = PHASE_MODE_THREE
+                updated_options[CONF_PHASES] = phases_config
+                updated_options[CONF_BATTERY_PHASE_ASSIGNMENTS] = battery_phase_assignments
+                # Remove legacy single-phase keys if not provided
+                updated_options.pop(CONF_SOLAR_PRODUCTION_ENTITY, None)
+                updated_options.pop(CONF_HOUSE_CONSUMPTION_ENTITY, None)
+                updated_options.pop(CONF_CAR_CHARGING_POWER_ENTITY, None)
+            else:
+                updated_options[CONF_PHASE_MODE] = PHASE_MODE_SINGLE
+                updated_options.pop(CONF_PHASES, None)
+                updated_options.pop(CONF_BATTERY_PHASE_ASSIGNMENTS, None)
+
+            # Attach battery metadata
+            updated_options[CONF_BATTERY_SOC_ENTITIES] = battery_entities
             updated_options[CONF_BATTERY_CAPACITIES] = battery_capacities
 
             return self.async_create_entry(title="", data=updated_options)
 
-        # Merge stored data with runtime options so that defaults reflect the latest settings.
-        current_config = {**self.config_entry.data, **self.config_entry.options}
-
-        battery_entities = current_config.get(CONF_BATTERY_SOC_ENTITIES, [])
-        current_capacities = current_config.get(CONF_BATTERY_CAPACITIES, {})
-
-        schema_dict = {
+        schema_dict: dict[Any, Any] = {
+            vol.Required(
+                CONF_PHASE_MODE,
+                default=current_phase_mode,
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        {"label": "Single-phase system", "value": PHASE_MODE_SINGLE},
+                        {"label": "Three-phase system (L1/L2/L3)", "value": PHASE_MODE_THREE},
+                    ],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
             vol.Optional(
                 CONF_NORDPOOL_CONFIG_ENTRY,
-                default=current_config.get(CONF_NORDPOOL_CONFIG_ENTRY)
+                default=working_data.get(CONF_NORDPOOL_CONFIG_ENTRY),
             ): selector.ConfigEntrySelector(
                 selector.ConfigEntrySelectorConfig(integration="nordpool")
             ),
             vol.Required(
                 CONF_CURRENT_PRICE_ENTITY,
-                default=current_config.get(CONF_CURRENT_PRICE_ENTITY)
+                default=working_data.get(CONF_CURRENT_PRICE_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Required(
                 CONF_HIGHEST_PRICE_ENTITY,
-                default=current_config.get(CONF_HIGHEST_PRICE_ENTITY)
+                default=working_data.get(CONF_HIGHEST_PRICE_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Required(
                 CONF_LOWEST_PRICE_ENTITY,
-                default=current_config.get(CONF_LOWEST_PRICE_ENTITY)
+                default=working_data.get(CONF_LOWEST_PRICE_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Required(
                 CONF_NEXT_PRICE_ENTITY,
-                default=current_config.get(CONF_NEXT_PRICE_ENTITY)
+                default=working_data.get(CONF_NEXT_PRICE_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Required(
                 CONF_BATTERY_SOC_ENTITIES,
-                default=battery_entities
+                default=battery_entities,
             ): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="sensor",
-                    multiple=True
-                )
+                selector.EntitySelectorConfig(domain="sensor", multiple=True)
             ),
         }
 
-        for entity_id in battery_entities:
-            entity_key = f"capacity_{entity_id.replace('.', '_')}"
-            default_capacity = current_capacities.get(entity_id, 10.0)
-            schema_dict[vol.Optional(entity_key, default=default_capacity)] = selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1.0,
-                    max=200.0,
-                    step=0.5,
-                    unit_of_measurement="kWh",
-                    mode=selector.NumberSelectorMode.BOX
-                )
-            )
+        # Add single-phase or three-phase specific fields
+        if current_phase_mode == PHASE_MODE_SINGLE:
+            schema_dict.update({
+                vol.Optional(
+                    CONF_SOLAR_PRODUCTION_ENTITY,
+                    default=working_data.get(CONF_SOLAR_PRODUCTION_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_HOUSE_CONSUMPTION_ENTITY,
+                    default=working_data.get(CONF_HOUSE_CONSUMPTION_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_CAR_CHARGING_POWER_ENTITY,
+                    default=working_data.get(CONF_CAR_CHARGING_POWER_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+            })
 
+        # Common optional fields
         schema_dict.update({
-            vol.Required(
-                CONF_SOLAR_PRODUCTION_ENTITY,
-                default=current_config.get(CONF_SOLAR_PRODUCTION_ENTITY)
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Required(
-                CONF_HOUSE_CONSUMPTION_ENTITY,
-                default=current_config.get(CONF_HOUSE_CONSUMPTION_ENTITY)
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(
-                CONF_CAR_CHARGING_POWER_ENTITY,
-                default=current_config.get(CONF_CAR_CHARGING_POWER_ENTITY)
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
             vol.Optional(
                 CONF_MONTHLY_GRID_PEAK_ENTITY,
-                default=current_config.get(CONF_MONTHLY_GRID_PEAK_ENTITY)
+                default=working_data.get(CONF_MONTHLY_GRID_PEAK_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Optional(
                 CONF_TRANSPORT_COST_ENTITY,
-                default=current_config.get(CONF_TRANSPORT_COST_ENTITY)
+                default=working_data.get(CONF_TRANSPORT_COST_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Optional(
-                CONF_PRICE_ADJUSTMENT_MULTIPLIER,
-                default=current_config.get(
-                    CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
-                )
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=5, step=0.01
-                )
-            ),
-            vol.Optional(
-                CONF_PRICE_ADJUSTMENT_OFFSET,
-                default=current_config.get(
-                    CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
-                )
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
-                )
-            ),
-            vol.Optional(
-                CONF_FEEDIN_PRICE_THRESHOLD,
-                default=current_config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0.0, max=1.0, step=0.01, unit_of_measurement="€/kWh"
-                )
-            ),
-            vol.Optional(
-                CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
-                default=current_config.get(
-                    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER, DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER
-                )
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=-1, max=5, step=0.01
-                )
-            ),
-            vol.Optional(
-                CONF_FEEDIN_ADJUSTMENT_OFFSET,
-                default=current_config.get(
-                    CONF_FEEDIN_ADJUSTMENT_OFFSET, DEFAULT_FEEDIN_ADJUSTMENT_OFFSET
-                )
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
-                )
-            ),
-            vol.Optional(
                 CONF_MIN_SOC_THRESHOLD,
-                default=current_config.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)
+                default=working_data.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC),
             ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=100, unit_of_measurement="%"
-                )
+                selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")
             ),
             vol.Optional(
                 CONF_MAX_SOC_THRESHOLD,
-                default=current_config.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
+                default=working_data.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC),
             ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=100, unit_of_measurement="%"
-                )
+                selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")
             ),
             vol.Optional(
                 CONF_PRICE_THRESHOLD,
-                default=current_config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
+                default=working_data.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD),
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0, max=1, step=0.01, unit_of_measurement="€/kWh"
                 )
             ),
             vol.Optional(
-                CONF_EMERGENCY_SOC_THRESHOLD,
-                default=current_config.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC)
+                CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+                default=working_data.get(
+                    CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+                ),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=5, step=0.01)
+            ),
+            vol.Optional(
+                CONF_PRICE_ADJUSTMENT_OFFSET,
+                default=working_data.get(
+                    CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
+                ),
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
-                    min=5, max=50, unit_of_measurement="%"
+                    min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
                 )
+            ),
+            vol.Optional(
+                CONF_EMERGENCY_SOC_THRESHOLD,
+                default=working_data.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=5, max=50, unit_of_measurement="%")
             ),
             vol.Optional(
                 CONF_VERY_LOW_PRICE_THRESHOLD,
-                default=current_config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
+                default=working_data.get(
+                    CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD
+                ),
             ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=10, max=50, unit_of_measurement="%"
-                )
+                selector.NumberSelectorConfig(min=10, max=50, unit_of_measurement="%")
             ),
             vol.Optional(
                 CONF_SIGNIFICANT_SOLAR_THRESHOLD,
-                default=current_config.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)
+                default=working_data.get(
+                    CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD
+                ),
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=500, max=5000, step=100, unit_of_measurement="W"
@@ -661,39 +952,65 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ),
             vol.Optional(
                 CONF_FEEDIN_PRICE_THRESHOLD,
-                default=current_config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
+                default=working_data.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD),
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0.0, max=1.0, step=0.01, unit_of_measurement="€/kWh"
                 )
             ),
             vol.Optional(
+                CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+                default=working_data.get(
+                    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER, DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER
+                ),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=-1, max=5, step=0.01)
+            ),
+            vol.Optional(
+                CONF_FEEDIN_ADJUSTMENT_OFFSET,
+                default=working_data.get(
+                    CONF_FEEDIN_ADJUSTMENT_OFFSET, DEFAULT_FEEDIN_ADJUSTMENT_OFFSET
+                ),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
+                )
+            ),
+            vol.Optional(
                 CONF_USE_DYNAMIC_THRESHOLD,
-                default=current_config.get(CONF_USE_DYNAMIC_THRESHOLD, DEFAULT_USE_DYNAMIC_THRESHOLD)
+                default=working_data.get(CONF_USE_DYNAMIC_THRESHOLD, DEFAULT_USE_DYNAMIC_THRESHOLD),
             ): selector.BooleanSelector(),
             vol.Optional(
                 CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
-                default=current_config.get(CONF_DYNAMIC_THRESHOLD_CONFIDENCE, DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE)
+                default=working_data.get(
+                    CONF_DYNAMIC_THRESHOLD_CONFIDENCE, DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE
+                ),
             ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=30, max=90, step=5, unit_of_measurement="%"
-                )
+                selector.NumberSelectorConfig(min=30, max=90, step=5, unit_of_measurement="%")
             ),
             vol.Optional(
                 CONF_USE_AVERAGE_THRESHOLD,
-                default=current_config.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)
+                default=working_data.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD),
             ): selector.BooleanSelector(),
             vol.Optional(
                 CONF_MIN_CAR_CHARGING_DURATION,
-                default=current_config.get(CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION)
+                default=working_data.get(
+                    CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION
+                ),
             ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1, max=6, step=1, unit_of_measurement="hours"
-                )
+                selector.NumberSelectorConfig(min=1, max=6, step=1, unit_of_measurement="hours")
+            ),
+            vol.Optional(
+                CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+                default=working_data.get(
+                    CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER, DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER
+                ),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=1.1, max=1.5, step=0.1, mode="slider")
             ),
             vol.Optional(
                 CONF_MAX_BATTERY_POWER,
-                default=current_config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)
+                default=working_data.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER),
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1000, max=10000, step=500, unit_of_measurement="W"
@@ -701,7 +1018,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ),
             vol.Optional(
                 CONF_MAX_CAR_POWER,
-                default=current_config.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)
+                default=working_data.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER),
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1000, max=22000, step=1000, unit_of_measurement="W"
@@ -709,7 +1026,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ),
             vol.Optional(
                 CONF_MAX_GRID_POWER,
-                default=current_config.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER)
+                default=working_data.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER),
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=3000, max=30000, step=1000, unit_of_measurement="W"
@@ -717,7 +1034,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ),
             vol.Optional(
                 CONF_MIN_CAR_CHARGING_THRESHOLD,
-                default=current_config.get(CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD)
+                default=working_data.get(
+                    CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD
+                ),
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=50, max=500, step=50, unit_of_measurement="W"
@@ -725,23 +1044,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ),
             vol.Optional(
                 CONF_SOLAR_PEAK_EMERGENCY_SOC,
-                default=current_config.get(CONF_SOLAR_PEAK_EMERGENCY_SOC, DEFAULT_SOLAR_PEAK_EMERGENCY_SOC)
+                default=working_data.get(
+                    CONF_SOLAR_PEAK_EMERGENCY_SOC, DEFAULT_SOLAR_PEAK_EMERGENCY_SOC
+                ),
             ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=15, max=40, unit_of_measurement="%"
-                )
+                selector.NumberSelectorConfig(min=15, max=40, unit_of_measurement="%")
             ),
             vol.Optional(
                 CONF_PREDICTIVE_CHARGING_MIN_SOC,
-                default=current_config.get(CONF_PREDICTIVE_CHARGING_MIN_SOC, DEFAULT_PREDICTIVE_CHARGING_MIN_SOC)
+                default=working_data.get(
+                    CONF_PREDICTIVE_CHARGING_MIN_SOC, DEFAULT_PREDICTIVE_CHARGING_MIN_SOC
+                ),
             ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=20, max=60, unit_of_measurement="%"
-                )
+                selector.NumberSelectorConfig(min=20, max=60, unit_of_measurement="%")
             ),
             vol.Optional(
                 CONF_BASE_GRID_SETPOINT,
-                default=current_config.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT)
+                default=working_data.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT),
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1000, max=10000, step=100, unit_of_measurement="W"
@@ -749,5 +1068,73 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ),
         })
 
+        # Dynamic per-battery capacity fields
+        for entity_id in battery_entities:
+            key = f"capacity_{entity_id.replace('.', '_')}"
+            default_capacity = current_capacities.get(entity_id, 10.0)
+            schema_dict[
+                vol.Optional(key, default=default_capacity)
+            ] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1.0,
+                    max=200.0,
+                    step=0.5,
+                    unit_of_measurement="kWh",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            )
+
+        # Per-battery phase assignments (multi-select)
+        phase_options = [
+            {"value": phase_id, "label": DEFAULT_PHASE_NAMES[phase_id]} for phase_id in PHASE_IDS
+        ]
+        for entity_id in battery_entities:
+            key = f"phase_assignment_{entity_id.replace('.', '_')}"
+            default_assignment = existing_assignments.get(entity_id, [])
+            schema_dict[
+                vol.Optional(key, default=default_assignment)
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=phase_options,
+                    multiple=True,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            )
+
+        # Per-phase sensor fields (only in three-phase mode)
+        if current_phase_mode == PHASE_MODE_THREE:
+            for phase_id in PHASE_IDS:
+                phase_config = existing_phases.get(phase_id, {})
+                schema_dict[
+                    vol.Optional(
+                        f"{phase_id}_{CONF_PHASE_SOLAR_ENTITY}",
+                        default=phase_config.get(CONF_PHASE_SOLAR_ENTITY),
+                    )
+                ] = selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )
+                schema_dict[
+                    vol.Optional(
+                        f"{phase_id}_{CONF_PHASE_CONSUMPTION_ENTITY}",
+                        default=phase_config.get(CONF_PHASE_CONSUMPTION_ENTITY),
+                    )
+                ] = selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )
+                schema_dict[
+                    vol.Optional(
+                        f"{phase_id}_{CONF_PHASE_CAR_ENTITY}",
+                        default=phase_config.get(CONF_PHASE_CAR_ENTITY),
+                    )
+                ] = selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )
+
         schema = vol.Schema(schema_dict)
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=schema,
+            description_placeholders={
+                "topology": "Select the grid topology and update entity bindings.",
+            },
+        )

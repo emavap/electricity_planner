@@ -1,143 +1,228 @@
 {
-  "config": {
-    "step": {
-      "user": {
-        "title": "Entity Selection",
-        "description": "Select the entities that provide data for the electricity planner.",
-        "data": {
-          "current_price_entity": "Current Price Entity",
-          "highest_price_entity": "Highest Price Entity", 
-          "lowest_price_entity": "Lowest Price Entity",
-          "next_price_entity": "Next Price Entity",
-          "nordpool_config_entry": "Nord Pool Configuration (Optional)",
-          "battery_soc_entities": "Battery SOC Entities",
-          "solar_production_entity": "Solar Production Entity",
-          "house_consumption_entity": "House Consumption Entity",
-          "car_charging_power_entity": "Car Charging Power Entity (Optional)",
-          "monthly_grid_peak_entity": "Monthly Grid Peak Entity (Optional)"
+    "config": {
+        "step": {
+            "user": {
+                "title": "System Topology",
+                "description": "Select the grid topology before providing entity bindings.",
+                "data": {
+                    "phase_mode": "Topology"
+                },
+                "data_description": {
+                    "phase_mode": "Choose between single-phase or three-phase operation."
+                }
+            },
+            "settings": {
+                "title": "Settings & Thresholds",
+                "description": "Configure charging thresholds and preferences.",
+                "data": {
+                    "min_soc_threshold": "Minimum SOC Threshold",
+                    "max_soc_threshold": "Maximum SOC Threshold",
+                    "price_threshold": "Price Threshold",
+                    "emergency_soc_threshold": "Emergency SOC Threshold",
+                    "grid_battery_charging_limit_soc": "Grid Battery Charging Limit SOC",
+                    "very_low_price_threshold": "Very Low Price Threshold",
+                    "significant_solar_threshold": "Significant Solar Threshold",
+                    "feedin_price_threshold": "Feed-in Solar Price Threshold",
+                    "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier"
+                },
+                "data_description": {
+                    "min_soc_threshold": "Minimum battery charge level to maintain (%)",
+                    "max_soc_threshold": "Maximum battery charge level target (%)",
+                    "price_threshold": "Price threshold for charging decisions (\u20ac/kWh)",
+                    "emergency_soc_threshold": "SOC level below which emergency charging is triggered regardless of price (%)",
+                    "grid_battery_charging_limit_soc": "SOC level above which grid battery charging becomes very selective - prefers solar over grid (%)",
+                    "very_low_price_threshold": "Percentage of daily price range considered 'very low' (e.g., 30 = bottom 30%)",
+                    "significant_solar_threshold": "Solar surplus power level considered significant enough to prefer over grid (W)",
+                    "feedin_price_threshold": "Price threshold above which solar export to grid is enabled (\u20ac/kWh)",
+                    "car_permissive_threshold_multiplier": "Multiplier applied to car charging threshold when permissive mode is active (1.2 = +20% higher threshold)"
+                }
+            },
+            "entities": {
+                "title": "Entity Selection",
+                "description": "Select sensors and entities used by the planner.",
+                "data": {
+                    "current_price_entity": "Current Price Entity",
+                    "highest_price_entity": "Highest Price Entity",
+                    "lowest_price_entity": "Lowest Price Entity",
+                    "next_price_entity": "Next Price Entity",
+                    "nordpool_config_entry": "Nord Pool Configuration (Optional)",
+                    "battery_soc_entities": "Battery SOC Entities",
+                    "solar_production_entity": "Solar Production Entity",
+                    "house_consumption_entity": "House Consumption Entity",
+                    "car_charging_power_entity": "Car Charging Power Entity (Optional)",
+                    "monthly_grid_peak_entity": "Monthly Grid Peak Entity (Optional)",
+                    "transport_cost_entity": "Transport Cost Entity (Optional)",
+                    "phase_1_solar_entity": "Phase 1 Solar Entity (Optional)",
+                    "phase_1_consumption_entity": "Phase 1 Consumption Entity",
+                    "phase_1_car_entity": "Phase 1 Car Power Entity (Optional)",
+                    "phase_2_solar_entity": "Phase 2 Solar Entity (Optional)",
+                    "phase_2_consumption_entity": "Phase 2 Consumption Entity",
+                    "phase_2_car_entity": "Phase 2 Car Power Entity (Optional)",
+                    "phase_3_solar_entity": "Phase 3 Solar Entity (Optional)",
+                    "phase_3_consumption_entity": "Phase 3 Consumption Entity",
+                    "phase_3_car_entity": "Phase 3 Car Power Entity (Optional)"
+                },
+                "data_description": {
+                    "current_price_entity": "Current electricity price from Nord Pool integration",
+                    "highest_price_entity": "Highest electricity price today from Nord Pool",
+                    "lowest_price_entity": "Lowest electricity price today from Nord Pool",
+                    "next_price_entity": "Next hour electricity price from Nord Pool",
+                    "nordpool_config_entry": "Select the Nord Pool config entry to enable full interval price data",
+                    "battery_soc_entities": "Entities providing battery state of charge (%)",
+                    "solar_production_entity": "Current solar production in W",
+                    "house_consumption_entity": "Current house power consumption in W",
+                    "car_charging_power_entity": "Car charging power in W",
+                    "monthly_grid_peak_entity": "Current month grid peak in W for power management",
+                    "transport_cost_entity": "Transport cost sensor in \u20ac/kWh added to buy price",
+                    "phase_1_solar_entity": "Phase L1 solar production sensor (leave blank if unavailable)",
+                    "phase_1_consumption_entity": "Phase L1 house consumption sensor",
+                    "phase_1_car_entity": "Phase L1 EV charger power sensor",
+                    "phase_2_solar_entity": "Phase L2 solar production sensor (leave blank if unavailable)",
+                    "phase_2_consumption_entity": "Phase L2 house consumption sensor",
+                    "phase_2_car_entity": "Phase L2 EV charger power sensor",
+                    "phase_3_solar_entity": "Phase L3 solar production sensor (leave blank if unavailable)",
+                    "phase_3_consumption_entity": "Phase L3 house consumption sensor",
+                    "phase_3_car_entity": "Phase L3 EV charger power sensor"
+                }
+            },
+            "battery_capacities": {
+                "title": "Battery Capacities",
+                "description": "Provide nominal capacity for each battery sensor (kWh)."
+            },
+            "battery_phase_assignment": {
+                "title": "Battery Phase Assignment",
+                "description": "Map each battery to the phases it can charge or discharge."
+            },
+            "safety_limits": {
+                "title": "Safety Limits",
+                "description": "Configure power and SOC safety limits."
+            }
         },
-        "data_description": {
-          "current_price_entity": "Current electricity price from Nord Pool integration",
-          "highest_price_entity": "Highest electricity price today from Nord Pool",
-          "lowest_price_entity": "Lowest electricity price today from Nord Pool", 
-          "next_price_entity": "Next hour electricity price from Nord Pool",
-          "nordpool_config_entry": "Select the Nord Pool config entry to enable full interval price data",
-          "battery_soc_entities": "Entities providing battery state of charge (%)",
-          "solar_production_entity": "Current solar production in W",
-          "house_consumption_entity": "Current house power consumption in W",
-          "car_charging_power_entity": "Car charging power in W",
-          "monthly_grid_peak_entity": "Current month grid peak in W for power management"
-        }
-      },
-      "settings": {
-        "title": "Settings & Thresholds",
-        "description": "Configure charging thresholds and preferences.",
-        "data": {
-          "min_soc_threshold": "Minimum SOC Threshold",
-          "max_soc_threshold": "Maximum SOC Threshold",
-          "price_threshold": "Price Threshold",
-          "emergency_soc_threshold": "Emergency SOC Threshold",
-          "grid_battery_charging_limit_soc": "Grid Battery Charging Limit SOC",
-          "very_low_price_threshold": "Very Low Price Threshold",
-          "significant_solar_threshold": "Significant Solar Threshold",
-          "feedin_price_threshold": "Feed-in Solar Price Threshold",
-          "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier"
+        "error": {
+            "cannot_connect": "Failed to connect",
+            "invalid_config": "Invalid configuration",
+            "unknown": "Unexpected error"
         },
-        "data_description": {
-          "min_soc_threshold": "Minimum battery charge level to maintain (%)",
-          "max_soc_threshold": "Maximum battery charge level target (%)",
-          "price_threshold": "Price threshold for charging decisions (€/kWh)",
-          "emergency_soc_threshold": "SOC level below which emergency charging is triggered regardless of price (%)",
-          "grid_battery_charging_limit_soc": "SOC level above which grid battery charging becomes very selective - prefers solar over grid (%)",
-          "very_low_price_threshold": "Percentage of daily price range considered 'very low' (e.g., 30 = bottom 30%)",
-          "significant_solar_threshold": "Solar surplus power level considered significant enough to prefer over grid (W)",
-          "feedin_price_threshold": "Price threshold above which solar export to grid is enabled (€/kWh)",
-          "car_permissive_threshold_multiplier": "Multiplier applied to car charging threshold when permissive mode is active (1.2 = +20% higher threshold)"
+        "abort": {
+            "already_configured": "Device is already configured"
         }
-      }
     },
-    "error": {
-      "cannot_connect": "Failed to connect",
-      "invalid_config": "Invalid configuration",
-      "unknown": "Unexpected error"
+    "services": {
+        "set_manual_override": {
+            "name": "Set Manual Override",
+            "description": "Force battery or car charging decisions (charge or wait) for a specified duration.",
+            "fields": {
+                "entry_id": {
+                    "name": "Config Entry ID",
+                    "description": "Optional config entry ID of the Electricity Planner instance (required when multiple instances are configured)."
+                },
+                "target": {
+                    "name": "Target",
+                    "description": "Which system to override: battery, car, or both."
+                },
+                "action": {
+                    "name": "Action",
+                    "description": "Force charge (enable charging) or force wait (disable charging)."
+                },
+                "duration": {
+                    "name": "Duration",
+                    "description": "Override duration in minutes (1-1440). Optional - omit for indefinite override."
+                },
+                "reason": {
+                    "name": "Reason",
+                    "description": "Optional reason for the override (for logging and diagnostics)."
+                }
+            }
+        },
+        "clear_manual_override": {
+            "name": "Clear Manual Override",
+            "description": "Remove active manual overrides and return to automatic decision making.",
+            "fields": {
+                "entry_id": {
+                    "name": "Config Entry ID",
+                    "description": "Optional config entry ID of the Electricity Planner instance (required when multiple instances are configured)."
+                },
+                "target": {
+                    "name": "Target",
+                    "description": "Which system to clear: battery, car, or both (default: both)."
+                }
+            }
+        }
     },
-    "abort": {
-      "already_configured": "Device is already configured"
-    }
-  },
-  "services": {
-    "set_manual_override": {
-      "name": "Set Manual Override",
-      "description": "Force battery or car charging decisions (charge or wait) for a specified duration.",
-      "fields": {
-        "entry_id": {
-          "name": "Config Entry ID",
-          "description": "Optional config entry ID of the Electricity Planner instance (required when multiple instances are configured)."
-        },
-        "target": {
-          "name": "Target",
-          "description": "Which system to override: battery, car, or both."
-        },
-        "action": {
-          "name": "Action",
-          "description": "Force charge (enable charging) or force wait (disable charging)."
-        },
-        "duration": {
-          "name": "Duration",
-          "description": "Override duration in minutes (1-1440). Optional - omit for indefinite override."
-        },
-        "reason": {
-          "name": "Reason",
-          "description": "Optional reason for the override (for logging and diagnostics)."
+    "options": {
+        "step": {
+            "init": {
+                "title": "System Topology",
+                "description": "Select whether the planner operates in single-phase or three-phase mode.",
+                "data": {
+                    "battery_soc_entities": "Battery SOC Entities",
+                    "solar_production_entity": "Solar Production Entity",
+                    "house_consumption_entity": "House Consumption Entity",
+                    "car_charging_power_entity": "Car Charging Power Entity (Optional)",
+                    "monthly_grid_peak_entity": "Monthly Grid Peak Entity (Optional)",
+                    "nordpool_config_entry": "Nord Pool Configuration (Optional)",
+                    "min_soc_threshold": "Minimum SOC Threshold",
+                    "max_soc_threshold": "Maximum SOC Threshold",
+                    "price_threshold": "Price Threshold",
+                    "emergency_soc_threshold": "Emergency SOC Threshold",
+                    "grid_battery_charging_limit_soc": "Grid Battery Charging Limit SOC",
+                    "very_low_price_threshold": "Very Low Price Threshold",
+                    "significant_solar_threshold": "Significant Solar Threshold",
+                    "feedin_price_threshold": "Feed-in Solar Price Threshold",
+                    "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier",
+                    "max_battery_power": "Max Battery Power",
+                    "max_car_power": "Max Car Power",
+                    "max_grid_power": "Max Grid Power",
+                    "min_car_charging_threshold": "Min Car Charging Threshold",
+                    "emergency_soc_override": "Emergency SOC Override",
+                    "winter_night_soc_override": "Winter Night SOC Override",
+                    "solar_peak_emergency_soc": "Solar Peak Emergency SOC",
+                    "predictive_charging_min_soc": "Predictive Charging Min SOC",
+                    "phase_mode": "Topology"
+                }
+            },
+            "entities": {
+                "title": "Entity Selection",
+                "description": "Update entity bindings for the planner.",
+                "data": {
+                    "current_price_entity": "Current Price Entity",
+                    "highest_price_entity": "Highest Price Entity",
+                    "lowest_price_entity": "Lowest Price Entity",
+                    "next_price_entity": "Next Price Entity",
+                    "nordpool_config_entry": "Nord Pool Configuration (Optional)",
+                    "battery_soc_entities": "Battery SOC Entities",
+                    "solar_production_entity": "Solar Production Entity",
+                    "house_consumption_entity": "House Consumption Entity",
+                    "car_charging_power_entity": "Car Charging Power Entity (Optional)",
+                    "monthly_grid_peak_entity": "Monthly Grid Peak Entity (Optional)",
+                    "transport_cost_entity": "Transport Cost Entity (Optional)",
+                    "phase_1_solar_entity": "Phase 1 Solar Entity (Optional)",
+                    "phase_1_consumption_entity": "Phase 1 Consumption Entity",
+                    "phase_1_car_entity": "Phase 1 Car Power Entity (Optional)",
+                    "phase_2_solar_entity": "Phase 2 Solar Entity (Optional)",
+                    "phase_2_consumption_entity": "Phase 2 Consumption Entity",
+                    "phase_2_car_entity": "Phase 2 Car Power Entity (Optional)",
+                    "phase_3_solar_entity": "Phase 3 Solar Entity (Optional)",
+                    "phase_3_consumption_entity": "Phase 3 Consumption Entity",
+                    "phase_3_car_entity": "Phase 3 Car Power Entity (Optional)"
+                }
+            },
+            "battery_capacities": {
+                "title": "Battery Capacities",
+                "description": "Update nominal capacity for each battery sensor."
+            },
+            "battery_phase_assignment": {
+                "title": "Battery Phase Assignment",
+                "description": "Assign batteries to the phases that can charge or discharge them."
+            },
+            "settings": {
+                "title": "Settings & Thresholds",
+                "description": "Configure charging thresholds and preferences."
+            },
+            "safety_limits": {
+                "title": "Safety Limits",
+                "description": "Configure power and SOC safety limits."
+            }
         }
-      }
-    },
-    "clear_manual_override": {
-      "name": "Clear Manual Override",
-      "description": "Remove active manual overrides and return to automatic decision making.",
-      "fields": {
-        "entry_id": {
-          "name": "Config Entry ID",
-          "description": "Optional config entry ID of the Electricity Planner instance (required when multiple instances are configured)."
-        },
-        "target": {
-          "name": "Target",
-          "description": "Which system to clear: battery, car, or both (default: both)."
-        }
-      }
     }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Update Settings",
-        "description": "Update charging thresholds and preferences.",
-        "data": {
-          "battery_soc_entities": "Battery SOC Entities",
-          "solar_production_entity": "Solar Production Entity",
-          "house_consumption_entity": "House Consumption Entity",
-          "car_charging_power_entity": "Car Charging Power Entity (Optional)",
-          "monthly_grid_peak_entity": "Monthly Grid Peak Entity (Optional)",
-          "nordpool_config_entry": "Nord Pool Configuration (Optional)",
-          "min_soc_threshold": "Minimum SOC Threshold",
-          "max_soc_threshold": "Maximum SOC Threshold",
-          "price_threshold": "Price Threshold",
-          "emergency_soc_threshold": "Emergency SOC Threshold",
-          "grid_battery_charging_limit_soc": "Grid Battery Charging Limit SOC",
-          "very_low_price_threshold": "Very Low Price Threshold",
-          "significant_solar_threshold": "Significant Solar Threshold",
-          "feedin_price_threshold": "Feed-in Solar Price Threshold",
-          "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier",
-          "max_battery_power": "Max Battery Power",
-          "max_car_power": "Max Car Power",
-          "max_grid_power": "Max Grid Power",
-          "min_car_charging_threshold": "Min Car Charging Threshold",
-          "emergency_soc_override": "Emergency SOC Override",
-          "winter_night_soc_override": "Winter Night SOC Override",
-          "solar_peak_emergency_soc": "Solar Peak Emergency SOC",
-          "predictive_charging_min_soc": "Predictive Charging Min SOC"
-        }
-      }
-    }
-  }
 }

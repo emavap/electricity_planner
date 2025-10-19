@@ -11,6 +11,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_PHASE_MODE,
+    PHASE_MODE_SINGLE,
+    PHASE_MODE_THREE,
+    PHASE_IDS,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
@@ -435,6 +439,13 @@ class ChargingDecisionEngine:
         
         self.power_validator = PowerAllocationValidator()
 
+    async def evaluate_charging_decision(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Evaluate whether to charge batteries and car from grid."""
+        phase_mode = data.get(CONF_PHASE_MODE)
+        if phase_mode == PHASE_MODE_THREE:
+            return await self._evaluate_three_phase(data)
+        return await self._evaluate_single_phase(data)
+
     def _get_max_grid_power(self) -> int:
         """Get maximum allowed grid power with safety margin."""
         return self._settings.max_grid_power
@@ -447,8 +458,8 @@ class ChargingDecisionEngine:
             return int(monthly_peak * DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN)
         return base_setpoint
 
-    async def evaluate_charging_decision(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Evaluate whether to charge batteries and car from grid based on comprehensive data."""
+    async def _evaluate_single_phase(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Evaluate charging decisions for a single logical phase."""
         decision_data = self._initialize_decision_data()
         
         # Validate critical data availability
@@ -541,6 +552,230 @@ class ChargingDecisionEngine:
         
         return decision_data
 
+    async def _evaluate_three_phase(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Evaluate charging decisions when operating in three-phase mode."""
+        # Run the standard single-phase evaluation on aggregated totals
+        aggregated_data = dict(data)
+        aggregated_data["phase_mode"] = PHASE_MODE_SINGLE
+        overall_decision = await self._evaluate_single_phase(aggregated_data)
+
+        phase_results = self._distribute_phase_decisions(overall_decision, data)
+        overall_decision["phase_results"] = phase_results
+        overall_decision["phase_mode"] = PHASE_MODE_THREE
+        return overall_decision
+
+    def _distribute_phase_decisions(
+        self,
+        overall_decision: Dict[str, Any],
+        data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Break down the aggregated decision into per-phase guidance.
+
+        This method takes the overall charging decision (which was computed on
+        aggregated system totals) and distributes power allocations across the
+        three phases based on battery assignments and capacity weighting.
+
+        Algorithm:
+        1. Battery power is distributed proportionally by capacity
+           - Each phase with assigned batteries receives power based on its
+             share of total battery capacity
+           - If phase 1 has 10kWh and phase 2 has 5kWh, phase 1 gets 66.7%
+             and phase 2 gets 33.3% of battery charging power
+
+        2. Car power is distributed equally across phases with car sensors
+           - Each phase gets 1/N of the total car power allocation
+           - If car power is 11kW and 2 phases have car sensors, each gets 5.5kW
+
+        3. Grid setpoint = battery allocation + car allocation per phase
+           - Each phase gets a grid_setpoint value for grid import control
+           - Phases without assignments get 0W setpoint
+
+        Returns:
+            Dict mapping phase_id -> {
+                "battery_allowed": bool,
+                "car_allowed": bool,
+                "grid_setpoint": int (W),
+                "grid_components": {"battery": int, "car": int},
+                "charger_limit": int (W),
+                "battery_entities": list[str],
+                "capacity_share": float (0-1)
+            }
+        """
+        phase_details: Dict[str, Dict[str, Any]] = data.get("phase_details") or {}
+        if not phase_details:
+            return {}
+
+        ordered_phases = [phase for phase in PHASE_IDS if phase in phase_details]
+        if not ordered_phases:
+            ordered_phases = list(phase_details.keys())
+
+        phase_capacity_map: Dict[str, float] = data.get("phase_capacity_map", {})
+        phase_batteries: Dict[str, List[Dict[str, Any]]] = data.get("phase_batteries", {})
+        total_capacity_weight = sum(
+            max(phase_capacity_map.get(phase, 0.0), 0.0) for phase in ordered_phases
+        )
+
+        grid_components = overall_decision.get("grid_components") or {}
+        total_grid_setpoint = int(overall_decision.get("grid_setpoint", 0) or 0)
+        battery_component = grid_components.get("battery")
+        car_component = grid_components.get("car")
+
+        if battery_component is None:
+            battery_component = total_grid_setpoint if overall_decision.get("battery_grid_charging") else 0
+        if car_component is None:
+            car_component = max(0, total_grid_setpoint - int(battery_component))
+
+        battery_component = int(battery_component or 0)
+        car_component = int(car_component or 0)
+
+        # Determine capacity-weighted distribution for battery power
+        # Battery power is allocated proportionally based on each phase's
+        # share of total battery capacity (kWh)
+        battery_phases = [
+            phase for phase in ordered_phases if phase_batteries.get(phase)
+        ]
+        battery_weight_map = {
+            phase: max(phase_capacity_map.get(phase, 0.0), 0.0)
+            for phase in ordered_phases
+        }
+        if not battery_phases and battery_component > 0:
+            battery_phases = ordered_phases
+
+        battery_allocations = (
+            self._distribute_quantity(
+                battery_component,
+                battery_phases,
+                {phase: battery_weight_map.get(phase, 0.0) for phase in battery_phases},
+            )
+            if battery_component > 0 and battery_phases
+            else {phase: 0 for phase in ordered_phases}
+        )
+
+        # Determine weighting for car component
+        # Car power is distributed equally across phases with car sensors (not by current draw)
+        car_weight_map: Dict[str, float] = {}
+        car_phases: List[str] = []
+        for phase in ordered_phases:
+            details = phase_details.get(phase, {})
+            car_power = details.get("car_charging_power")
+            has_car = details.get("has_car_sensor") or (car_power is not None)
+            if has_car:
+                car_phases.append(phase)
+                car_weight_map[phase] = 1.0  # Equal weight for all car phases
+
+        if car_component > 0 and not car_phases:
+            car_phases = ordered_phases
+            car_weight_map = {phase: 1.0 for phase in ordered_phases}
+
+        car_allocations = (
+            self._distribute_quantity(
+                car_component,
+                car_phases,
+                {phase: car_weight_map.get(phase, 0.0) for phase in car_phases},
+            )
+            if car_component > 0 and car_phases
+            else {phase: 0 for phase in ordered_phases}
+        )
+
+        charger_limit_total = int(overall_decision.get("charger_limit", 0) or 0)
+        charger_allocations = (
+            self._distribute_quantity(
+                charger_limit_total,
+                car_phases,
+                {phase: car_weight_map.get(phase, 0.0) for phase in car_phases},
+            )
+            if charger_limit_total > 0 and car_phases
+            else {phase: 0 for phase in ordered_phases}
+        )
+
+        phase_results: Dict[str, Any] = {}
+        battery_reason = overall_decision.get("battery_grid_charging_reason")
+        car_reason = overall_decision.get("car_grid_charging_reason")
+
+        for phase in ordered_phases:
+            grid_from_battery = battery_allocations.get(phase, 0)
+            grid_from_car = car_allocations.get(phase, 0)
+            grid_setpoint = grid_from_battery + grid_from_car
+
+            has_battery = bool(phase_batteries.get(phase))
+            battery_allowed = overall_decision.get("battery_grid_charging", False) and has_battery
+
+            if overall_decision.get("battery_grid_charging", False) and not has_battery:
+                phase_battery_reason = "No batteries assigned to this phase"
+            else:
+                phase_battery_reason = battery_reason
+
+            car_enabled_globally = overall_decision.get("car_grid_charging", False)
+            phase_has_car = phase in car_phases
+            car_allowed = car_enabled_globally and phase_has_car
+
+            if car_enabled_globally and not phase_has_car:
+                phase_car_reason = "No EV feed configured for this phase"
+            else:
+                phase_car_reason = car_reason
+
+            phase_results[phase] = {
+                "grid_setpoint": int(grid_setpoint),
+                "grid_components": {
+                    "battery": int(grid_from_battery),
+                    "car": int(grid_from_car),
+                },
+                "battery_grid_charging": bool(battery_allowed),
+                "battery_grid_charging_reason": phase_battery_reason,
+                "car_grid_charging": bool(car_allowed),
+                "car_grid_charging_reason": phase_car_reason,
+                "charger_limit": int(charger_allocations.get(phase, 0)),
+                "battery_entities": [
+                    battery["entity_id"] for battery in phase_batteries.get(phase, [])
+                ],
+                "capacity_share": (
+                    phase_capacity_map.get(phase, 0.0) / total_capacity_weight
+                    if total_capacity_weight > 0
+                    else 0.0
+                ),
+                "capacity_share_kwh": phase_capacity_map.get(phase, 0.0),
+            }
+
+        return phase_results
+
+    def _distribute_quantity(
+        self,
+        total: int,
+        phases: List[str],
+        weights: Dict[str, float],
+    ) -> Dict[str, int]:
+        """Distribute an integer total across phases using weighted rounding."""
+        if total <= 0 or not phases:
+            return {phase: 0 for phase in phases}
+
+        positive_weights = {phase: max(weights.get(phase, 0.0), 0.0) for phase in phases}
+        weight_sum = sum(positive_weights.values())
+
+        if weight_sum <= 0:
+            base_share = total // len(phases)
+            remainder = total - (base_share * len(phases))
+            allocation = {phase: base_share for phase in phases}
+            for phase in phases[:remainder]:
+                allocation[phase] += 1
+            return allocation
+
+        raw_allocations = {
+            phase: (total * positive_weights[phase] / weight_sum) for phase in phases
+        }
+        allocation = {phase: int(raw_allocations[phase] // 1) for phase in phases}
+        remainder = int(total - sum(allocation.values()))
+
+        if remainder > 0:
+            fractional_order = sorted(
+                phases,
+                key=lambda phase: raw_allocations[phase] - allocation[phase],
+                reverse=True,
+            )
+            for phase in fractional_order[:remainder]:
+                allocation[phase] += 1
+
+        return allocation
+
     def _initialize_decision_data(self) -> Dict[str, Any]:
         """Initialize the decision data structure."""
         return {
@@ -559,6 +794,8 @@ class ChargingDecisionEngine:
             "power_analysis": {},
             "battery_analysis": {},
             "solar_analysis": {},
+            "phase_results": {},
+            "phase_mode": PHASE_MODE_SINGLE,
         }
 
     def _create_no_data_decision(self, decision_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1604,10 +1841,12 @@ class ChargingDecisionEngine:
                 return {
                     "grid_setpoint": int(grid_setpoint),
                     "grid_setpoint_reason": f"Battery data unavailable - grid only for car ({int(grid_setpoint)}W)",
+                    "grid_components": {"battery": 0, "car": int(grid_setpoint)},
                 }
             return {
                 "grid_setpoint": 0,
                 "grid_setpoint_reason": "Battery data unavailable - no grid power allocated",
+                "grid_components": {"battery": 0, "car": 0},
             }
         
         # Solar-only car charging
@@ -1616,6 +1855,7 @@ class ChargingDecisionEngine:
             return {
                 "grid_setpoint": 0,
                 "grid_setpoint_reason": "Solar-only car charging detected - grid setpoint 0W",
+                "grid_components": {"battery": 0, "car": 0},
             }
         
         # Calculate grid needs
@@ -1656,4 +1896,8 @@ class ChargingDecisionEngine:
         return {
             "grid_setpoint": int(grid_setpoint),
             "grid_setpoint_reason": reason,
+            "grid_components": {
+                "battery": int(battery_grid_need),
+                "car": int(car_grid_need),
+            },
         }
