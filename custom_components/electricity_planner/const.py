@@ -16,6 +16,7 @@ CONF_PHASE_NAME = "name"
 CONF_PHASE_SOLAR_ENTITY = "solar_entity"
 CONF_PHASE_CONSUMPTION_ENTITY = "consumption_entity"
 CONF_PHASE_CAR_ENTITY = "car_entity"
+CONF_PHASE_BATTERY_POWER_ENTITY = "battery_power_entity"  # Actual battery power on this phase (W, negative = charging)
 
 CONF_NORDPOOL_CONFIG_ENTRY = "nordpool_config_entry"
 CONF_CURRENT_PRICE_ENTITY = "current_price_entity"
@@ -25,6 +26,7 @@ CONF_NEXT_PRICE_ENTITY = "next_price_entity"
 CONF_BATTERY_SOC_ENTITIES = "battery_soc_entities"
 CONF_BATTERY_CAPACITIES = "battery_capacities"
 CONF_BATTERY_PHASE_ASSIGNMENTS = "battery_phase_assignments"
+CONF_BATTERY_POWER_SENSORS = "battery_power_sensors"  # Per-phase battery power (W)
 CONF_SOLAR_PRODUCTION_ENTITY = "solar_production_entity"
 CONF_HOUSE_CONSUMPTION_ENTITY = "house_consumption_entity"
 CONF_CAR_CHARGING_POWER_ENTITY = "car_charging_power_entity"

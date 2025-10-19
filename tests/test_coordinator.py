@@ -31,6 +31,7 @@ from custom_components.electricity_planner.const import (
     CONF_PHASE_SOLAR_ENTITY,
     CONF_PHASE_CONSUMPTION_ENTITY,
     CONF_PHASE_CAR_ENTITY,
+    CONF_PHASE_BATTERY_POWER_ENTITY,
     CONF_BATTERY_CAPACITIES,
     CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_LOWEST_PRICE_ENTITY,
@@ -285,6 +286,50 @@ async def test_fetch_all_data_three_phase_partial_solar(fake_hass, monkeypatch):
     assert data["phase_details"]["phase_2"]["solar_production"] is None
     assert data["phase_details"]["phase_3"]["solar_production"] is None
     assert data["phase_batteries"]["phase_3"] == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_data_three_phase_with_battery_power_sensors(fake_hass, monkeypatch):
+    """Test that battery power sensors are correctly read in three-phase mode."""
+    config = _three_phase_config()
+    # Add battery power sensors to phase configuration
+    config[CONF_PHASES]["phase_1"][CONF_PHASE_BATTERY_POWER_ENTITY] = "sensor.battery_power_l1"
+    config[CONF_PHASES]["phase_2"][CONF_PHASE_BATTERY_POWER_ENTITY] = "sensor.battery_power_l2"
+
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Price sensors
+    fake_hass.states.set("sensor.current_price", "0.15")
+    fake_hass.states.set("sensor.highest_price", "0.32")
+    fake_hass.states.set("sensor.lowest_price", "0.05")
+    fake_hass.states.set("sensor.next_price", "0.11")
+
+    # Battery SOC sensors
+    fake_hass.states.set("sensor.battery_soc_1", "40")
+    fake_hass.states.set("sensor.battery_soc_2", "60")
+
+    # Phase-specific sensors
+    fake_hass.states.set("sensor.solar_l1", "1200")
+    fake_hass.states.set("sensor.load_l1", "800")
+    fake_hass.states.set("sensor.battery_power_l1", "-500")  # Negative = charging
+    fake_hass.states.set("sensor.solar_l2", "600")
+    fake_hass.states.set("sensor.load_l2", "900")
+    fake_hass.states.set("sensor.car_l2", "700")
+    fake_hass.states.set("sensor.battery_power_l2", "300")  # Positive = discharging
+    fake_hass.states.set("sensor.solar_l3", "300")
+    fake_hass.states.set("sensor.load_l3", "200")
+
+    data = await coordinator._fetch_all_data()
+
+    assert data["phase_mode"] == PHASE_MODE_THREE
+
+    phase_details = data["phase_details"]
+    assert phase_details["phase_1"]["battery_power"] == pytest.approx(-500.0)
+    assert phase_details["phase_1"]["has_battery_power_sensor"] is True
+    assert phase_details["phase_2"]["battery_power"] == pytest.approx(300.0)
+    assert phase_details["phase_2"]["has_battery_power_sensor"] is True
+    assert phase_details["phase_3"]["battery_power"] is None
+    assert phase_details["phase_3"]["has_battery_power_sensor"] is False
 
 
 @pytest.mark.asyncio

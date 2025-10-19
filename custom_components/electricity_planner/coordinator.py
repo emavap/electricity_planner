@@ -24,6 +24,7 @@ from .const import (
     CONF_PHASE_SOLAR_ENTITY,
     CONF_PHASE_CONSUMPTION_ENTITY,
     CONF_PHASE_CAR_ENTITY,
+    CONF_PHASE_BATTERY_POWER_ENTITY,
     CONF_NORDPOOL_CONFIG_ENTRY,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
@@ -31,12 +32,12 @@ from .const import (
     CONF_NEXT_PRICE_ENTITY,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_BATTERY_CAPACITIES,
+    CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_SOLAR_PRODUCTION_ENTITY,
     CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_TRANSPORT_COST_ENTITY,
-    CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
@@ -154,6 +155,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     CONF_PHASE_SOLAR_ENTITY,
                     CONF_PHASE_CONSUMPTION_ENTITY,
                     CONF_PHASE_CAR_ENTITY,
+                    CONF_PHASE_BATTERY_POWER_ENTITY,
                 ):
                     phase_entity = phase_config.get(entity_key)
                     if phase_entity:
@@ -613,26 +615,35 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 phase_name = phase_config.get(
                     CONF_PHASE_NAME, DEFAULT_PHASE_NAMES.get(phase_id, phase_id)
                 )
+
+                # Solar: Read actual per-phase production from sensor
                 solar_entity = phase_config.get(CONF_PHASE_SOLAR_ENTITY)
-                consumption_entity = phase_config.get(CONF_PHASE_CONSUMPTION_ENTITY)
-                car_entity = phase_config.get(CONF_PHASE_CAR_ENTITY)
-
                 solar_val = await self._get_state_value(solar_entity)
-                consumption_val = await self._get_state_value(consumption_entity)
-                car_val = await self._get_state_value(car_entity)
 
-                if solar_val is not None:
+                if solar_val is not None and solar_val > 0:
                     solar_present = True
                     total_solar_value += solar_val
+
+                # Consumption: from per-phase sensor (required)
+                consumption_entity = phase_config.get(CONF_PHASE_CONSUMPTION_ENTITY)
+                consumption_val = await self._get_state_value(consumption_entity)
                 if consumption_val is not None:
                     consumption_present = True
                     total_consumption_value += consumption_val
+
+                # Car: from per-phase sensor (optional)
+                car_entity = phase_config.get(CONF_PHASE_CAR_ENTITY)
+                car_val = await self._get_state_value(car_entity)
                 if car_val is not None:
                     car_present = True
                     total_car_value += car_val
 
+                # Battery power: from per-phase sensor (optional, negative = charging)
+                battery_power_entity = phase_config.get(CONF_PHASE_BATTERY_POWER_ENTITY)
+                battery_power_val = await self._get_state_value(battery_power_entity)
+
                 phase_surplus = None
-                if solar_val is not None and consumption_val is not None:
+                if solar_val is not None and solar_val > 0 and consumption_val is not None:
                     phase_surplus = max(0, solar_val - consumption_val)
 
                 phase_details[phase_id] = {
@@ -640,8 +651,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     "solar_production": solar_val,
                     "house_consumption": consumption_val,
                     "car_charging_power": car_val,
+                    "battery_power": battery_power_val,  # Actual battery power (W, negative = charging)
                     "solar_surplus": phase_surplus,
                     "has_car_sensor": car_entity is not None,
+                    "has_battery_power_sensor": battery_power_entity is not None,
                 }
 
             if phase_details:
@@ -668,6 +681,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 data["solar_surplus"],
             )
         else:
+            # Single-phase mode
             solar_production = await self._get_state_value(
                 self.config.get(CONF_SOLAR_PRODUCTION_ENTITY)
             )

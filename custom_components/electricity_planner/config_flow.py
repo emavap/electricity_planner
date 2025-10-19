@@ -21,6 +21,7 @@ from .const import (
     CONF_PHASE_SOLAR_ENTITY,
     CONF_PHASE_CONSUMPTION_ENTITY,
     CONF_PHASE_CAR_ENTITY,
+    CONF_PHASE_BATTERY_POWER_ENTITY,
     CONF_NORDPOOL_CONFIG_ENTRY,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
@@ -86,7 +87,7 @@ from .const import (
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Electricity Planner."""
 
-    VERSION = 9
+    VERSION = 10
 
     def __init__(self):
         """Initialize the config flow."""
@@ -147,10 +148,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     solar_key = f"{phase_id}_{CONF_PHASE_SOLAR_ENTITY}"
                     consumption_key = f"{phase_id}_{CONF_PHASE_CONSUMPTION_ENTITY}"
                     car_key = f"{phase_id}_{CONF_PHASE_CAR_ENTITY}"
+                    battery_power_key = f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}"
 
                     solar_entity = processed_input.pop(solar_key, None)
                     consumption_entity = processed_input.pop(consumption_key, None)
                     car_entity = processed_input.pop(car_key, None)
+                    battery_power_entity = processed_input.pop(battery_power_key, None)
 
                     phases_config[phase_id] = {
                         CONF_PHASE_NAME: existing_phases.get(phase_id, {}).get(
@@ -161,6 +164,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     }
                     if car_entity:
                         phases_config[phase_id][CONF_PHASE_CAR_ENTITY] = car_entity
+                    if battery_power_entity:
+                        phases_config[phase_id][CONF_PHASE_BATTERY_POWER_ENTITY] = battery_power_entity
 
                 self.data[CONF_PHASES] = phases_config
                 # Remove legacy single-phase bindings to avoid stale config
@@ -247,6 +252,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 solar_key = f"{phase_id}_{CONF_PHASE_SOLAR_ENTITY}"
                 consumption_key = f"{phase_id}_{CONF_PHASE_CONSUMPTION_ENTITY}"
                 car_key = f"{phase_id}_{CONF_PHASE_CAR_ENTITY}"
+                battery_power_key = f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}"
 
                 schema_dict[
                     vol.Optional(
@@ -268,6 +274,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Optional(
                         car_key,
                         default=existing.get(CONF_PHASE_CAR_ENTITY),
+                    )
+                ] = selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )
+                schema_dict[
+                    vol.Optional(
+                        battery_power_key,
+                        default=existing.get(CONF_PHASE_BATTERY_POWER_ENTITY),
                     )
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
@@ -749,10 +763,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 solar_key = f"{phase_id}_{CONF_PHASE_SOLAR_ENTITY}"
                 consumption_key = f"{phase_id}_{CONF_PHASE_CONSUMPTION_ENTITY}"
                 car_key = f"{phase_id}_{CONF_PHASE_CAR_ENTITY}"
+                battery_power_key = f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}"
 
                 solar_entity = updated_options.pop(solar_key, None)
                 consumption_entity = updated_options.pop(consumption_key, None)
                 car_entity = updated_options.pop(car_key, None)
+                battery_power_entity = updated_options.pop(battery_power_key, None)
 
                 phases_config[phase_id] = {
                     CONF_PHASE_NAME: existing_phases.get(phase_id, {}).get(
@@ -763,6 +779,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 }
                 if car_entity:
                     phases_config[phase_id][CONF_PHASE_CAR_ENTITY] = car_entity
+                if battery_power_entity:
+                    phases_config[phase_id][CONF_PHASE_BATTERY_POWER_ENTITY] = battery_power_entity
 
             if phase_mode == PHASE_MODE_THREE:
                 # Validate that required phase entities are provided
@@ -1125,6 +1143,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     vol.Optional(
                         f"{phase_id}_{CONF_PHASE_CAR_ENTITY}",
                         default=phase_config.get(CONF_PHASE_CAR_ENTITY),
+                    )
+                ] = selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )
+                schema_dict[
+                    vol.Optional(
+                        f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}",
+                        default=phase_config.get(CONF_PHASE_BATTERY_POWER_ENTITY),
                     )
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")

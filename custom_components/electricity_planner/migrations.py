@@ -33,7 +33,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 # Current config version
-CURRENT_VERSION = 9
+CURRENT_VERSION = 10
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -194,6 +194,17 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         _LOGGER.info("Migration to version 9 complete")
 
+    if entry.version == 9:
+        # Migrate from version 9 to version 10
+        # No data changes needed - version 10 adds optional battery_power_entity per phase
+        # which will be added through UI if user chooses to configure it
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data},
+            version=10
+        )
+        _LOGGER.info("Migration to version 10 complete")
+
     return True
 
 
@@ -224,6 +235,10 @@ def migrate_config_data(old_data: Dict[str, Any], from_version: int) -> Dict[str
         new_data.setdefault(CONF_PHASE_MODE, PHASE_MODE_SINGLE)
         new_data.setdefault(CONF_PHASES, {})
         new_data.setdefault(CONF_BATTERY_PHASE_ASSIGNMENTS, {})
+
+    if from_version < 10:
+        # Version 10 adds optional battery_power_entity per phase - no automatic migration needed
+        pass
 
     if from_version < 5:
         # Remove unused config option
