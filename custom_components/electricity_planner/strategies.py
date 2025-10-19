@@ -10,6 +10,16 @@ from .const import (
     DEFAULT_EMERGENCY_SOC,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
+    SOC_BUFFER_FOR_SOLAR_WASTE,
+    LOW_SOC_THRESHOLD,
+    HIGH_SOC_THRESHOLD,
+    MEDIUM_SOC_THRESHOLD,
+    CONFIDENCE_BASE,
+    CONFIDENCE_RANGE_MIN,
+    CONFIDENCE_RANGE_MAX,
+    CONFIDENCE_LOW_SOC_ADJUSTMENT,
+    CONFIDENCE_HIGH_SOC_ADJUSTMENT,
+    CONFIDENCE_SOLAR_ADJUSTMENT,
 )
 from .defaults import DEFAULT_ALGORITHM_THRESHOLDS
 from .dynamic_threshold import DynamicThresholdAnalyzer
@@ -82,7 +92,7 @@ class SolarPriorityStrategy(ChargingStrategy):
             return False, f"Using allocated solar power ({allocated_solar}W) for batteries instead of grid"
         
         # Prevent solar waste when batteries nearly full
-        if remaining_solar > 0 and average_soc >= max_soc - DEFAULT_ALGORITHM_THRESHOLDS.soc_buffer:
+        if remaining_solar > 0 and average_soc >= max_soc - SOC_BUFFER_FOR_SOLAR_WASTE:
             return False, (f"Battery {average_soc:.0f}% nearly full with {remaining_solar}W "
                           f"solar surplus - preventing solar waste")
         
@@ -196,26 +206,26 @@ class SOCBasedChargingStrategy(ChargingStrategy):
             return False, ""
 
         # Low SOC + no solar → charge
-        if average_soc < DEFAULT_ALGORITHM_THRESHOLDS.low_soc_threshold and not has_significant_solar:
+        if average_soc < LOW_SOC_THRESHOLD and not has_significant_solar:
             return True, (f"Low SOC {average_soc:.0f}% + no significant solar "
                          f"(surplus: {solar_surplus}W) - charge while price low")
 
         # Medium SOC + significant solar → skip and wait for solar
-        if (average_soc >= DEFAULT_ALGORITHM_THRESHOLDS.low_soc_threshold and
-            average_soc <= DEFAULT_ALGORITHM_THRESHOLDS.high_soc_threshold and
+        if (average_soc >= LOW_SOC_THRESHOLD and
+            average_soc <= HIGH_SOC_THRESHOLD and
             has_significant_solar):
             return False, (f"SOC {average_soc:.0f}% sufficient + significant solar "
                           f"(surplus: {solar_surplus}W) - waiting for solar instead of grid")
 
         # Medium SOC → charge at low price
-        if average_soc < DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold:
-            return True, (f"Medium SOC {average_soc:.0f}% < {DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold}% - "
+        if average_soc < MEDIUM_SOC_THRESHOLD:
+            return True, (f"Medium SOC {average_soc:.0f}% < {MEDIUM_SOC_THRESHOLD}% - "
                          f"charge at low price")
 
         return False, ""
 
     def get_priority(self) -> int:
-        return 6  # Last - safety net (was 7, now 6 after removing SolarAwareChargingStrategy)
+        return 6  # Last - safety net
 
 
 class DynamicPriceStrategy(ChargingStrategy):
@@ -249,8 +259,8 @@ class DynamicPriceStrategy(ChargingStrategy):
         try:
             config_confidence = float(config_confidence) / 100.0
         except (TypeError, ValueError):
-            config_confidence = 0.6
-        config_confidence = min(max(config_confidence, 0.3), 0.9)
+            config_confidence = CONFIDENCE_BASE
+        config_confidence = min(max(config_confidence, CONFIDENCE_RANGE_MIN), CONFIDENCE_RANGE_MAX)
 
         # Prepare SOC/solar adjustments before running the analyzer so reasons align
         average_soc = battery.get("average_soc", 50)
@@ -261,21 +271,21 @@ class DynamicPriceStrategy(ChargingStrategy):
         confidence_threshold = config_confidence
 
         # Adjust based on SOC (make it easier to charge when battery is low)
-        if average_soc < 40:
-            confidence_threshold = max(0.3, confidence_threshold - 0.1)
-        elif average_soc >= 70:
-            confidence_threshold = min(0.9, confidence_threshold + 0.1)
+        if average_soc < LOW_SOC_THRESHOLD:
+            confidence_threshold = max(CONFIDENCE_RANGE_MIN, confidence_threshold + CONFIDENCE_LOW_SOC_ADJUSTMENT)
+        elif average_soc >= HIGH_SOC_THRESHOLD:
+            confidence_threshold = min(CONFIDENCE_RANGE_MAX, confidence_threshold + CONFIDENCE_HIGH_SOC_ADJUSTMENT)
 
         # Adjust based on actual solar surplus
         # Significant surplus → need +10% more confidence (be picky, wait for solar)
         # No surplus → need -10% less confidence (less picky, no solar available)
         if has_significant_solar:
-            confidence_threshold = min(0.9, confidence_threshold + 0.1)
+            confidence_threshold = min(CONFIDENCE_RANGE_MAX, confidence_threshold + CONFIDENCE_SOLAR_ADJUSTMENT)
             solar_context = f"significant solar surplus ({solar_surplus}W) - waiting for better prices"
         elif solar_surplus > 0:
             solar_context = f"minor solar surplus ({solar_surplus}W)"
         else:
-            confidence_threshold = max(0.3, confidence_threshold - 0.1)
+            confidence_threshold = max(CONFIDENCE_RANGE_MIN, confidence_threshold - CONFIDENCE_SOLAR_ADJUSTMENT)
             solar_context = "no solar surplus - accepting okay prices"
 
         # Initialize analyzer if needed, or update threshold if config changed

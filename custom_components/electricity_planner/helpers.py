@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -287,3 +287,135 @@ def format_reason(
             reason += f" ({', '.join(detail_parts)})"
     
     return reason
+
+
+def _resolve_transport_cost(
+    transport_lookup: list[dict[str, Any]] | None,
+    start_time_utc: datetime,
+    reference_now: datetime | None = None,
+) -> float:
+    """Resolve transport cost for a specific timestamp."""
+    if not transport_lookup:
+        return 0.0
+
+    if reference_now is None:
+        reference_now = dt_util.utcnow()
+
+    # For future times, try to reuse the value from the same hour a week ago
+    if start_time_utc > reference_now:
+        week_ago = start_time_utc - timedelta(days=7)
+        cost_from_pattern: float | None = None
+        for entry in transport_lookup:
+            entry_cost = entry.get("cost")
+            if entry_cost is None:
+                continue
+            entry_start_str = entry.get("start")
+            if entry_start_str is None:
+                cost_from_pattern = float(entry_cost)
+                continue
+            entry_start = dt_util.parse_datetime(entry_start_str)
+            if entry_start is None:
+                continue
+            entry_start_utc = dt_util.as_utc(entry_start)
+            if entry_start_utc <= week_ago:
+                cost_from_pattern = float(entry_cost)
+            else:
+                break
+
+        if cost_from_pattern is not None:
+            return cost_from_pattern
+
+    # Otherwise use the most recent cost we have
+    cost: float | None = None
+    for entry in transport_lookup:
+        entry_cost = entry.get("cost")
+        if entry_cost is None:
+            continue
+        entry_start_str = entry.get("start")
+        if entry_start_str is None:
+            cost = float(entry_cost)
+            continue
+        entry_start = dt_util.parse_datetime(entry_start_str)
+        if entry_start is None:
+            continue
+        entry_start_utc = dt_util.as_utc(entry_start)
+        if entry_start_utc <= start_time_utc:
+            cost = float(entry_cost)
+        else:
+            break
+
+    return cost if cost is not None else 0.0
+
+
+def process_price_intervals(
+    intervals: List[Dict[str, Any]],
+    price_multiplier: float,
+    price_offset: float,
+    transport_cost_lookup: List[Dict[str, Any]],
+    current_transport_cost: float,
+    now: datetime,
+    include_past: bool = False,
+) -> List[Tuple[datetime, datetime, float]]:
+    """Process price intervals from Nord Pool data."""
+    processed_intervals = []
+    for interval in intervals:
+        try:
+            start_time_str = interval.get("start")
+            if not start_time_str:
+                continue
+
+            start_time = dt_util.parse_datetime(start_time_str)
+            if start_time is None:
+                continue
+            start_time_utc = dt_util.as_utc(start_time)
+
+            if not include_past and start_time_utc < now - timedelta(hours=1):
+                continue
+
+            price_value = None
+            for key in ("value", "value_exc_vat", "price"):
+                value = interval.get(key)
+                if isinstance(value, (int, float)):
+                    price_value = float(value)
+                    break
+                if isinstance(value, str):
+                    try:
+                        price_value = float(value)
+                        break
+                    except (ValueError, TypeError):
+                        continue
+
+            if price_value is None:
+                continue
+
+            price_kwh = price_value / 1000
+            adjusted_price = (price_kwh * price_multiplier) + price_offset
+
+            transport_cost = _resolve_transport_cost(
+                transport_cost_lookup, start_time_utc, reference_now=now
+            )
+            if transport_cost == 0.0 and current_transport_cost is not None:
+                transport_cost = current_transport_cost
+
+            final_price = adjusted_price + transport_cost
+
+            end_time: datetime | None = None
+            end_time_str = interval.get("end")
+            if end_time_str:
+                try:
+                    parsed_end = dt_util.parse_datetime(end_time_str)
+                    if parsed_end is not None:
+                        end_time_utc = dt_util.as_utc(parsed_end)
+                        if end_time_utc > start_time_utc:
+                            end_time = end_time_utc
+                except Exception:
+                    end_time = None
+
+            processed_intervals.append((start_time_utc, end_time, final_price))
+
+        except Exception as err:
+            _LOGGER.debug(
+                "Error processing interval for price timeline: %s", err
+            )
+            continue
+    return processed_intervals

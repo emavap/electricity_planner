@@ -56,6 +56,7 @@ from .const import (
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
 )
 from .decision_engine import ChargingDecisionEngine
+from .helpers import process_price_intervals
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -165,64 +166,6 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             async_track_state_change_event(
                 self.hass, entities_to_track, self._handle_entity_change
             )
-
-    def _resolve_transport_cost(
-        self,
-        transport_lookup: list[dict[str, Any]] | None,
-        start_time_utc: datetime,
-        reference_now: datetime | None = None,
-    ) -> float:
-        """Resolve transport cost for a specific timestamp."""
-        if not transport_lookup:
-            return 0.0
-
-        if reference_now is None:
-            reference_now = dt_util.utcnow()
-
-        # For future times, try to reuse the value from the same hour a week ago
-        if start_time_utc > reference_now:
-            week_ago = start_time_utc - timedelta(days=7)
-            cost_from_pattern: float | None = None
-            for entry in transport_lookup:
-                entry_cost = entry.get("cost")
-                if entry_cost is None:
-                    continue
-                entry_start_str = entry.get("start")
-                if entry_start_str is None:
-                    cost_from_pattern = float(entry_cost)
-                    continue
-                entry_start = dt_util.parse_datetime(entry_start_str)
-                if entry_start is None:
-                    continue
-                entry_start_utc = dt_util.as_utc(entry_start)
-                if entry_start_utc <= week_ago:
-                    cost_from_pattern = float(entry_cost)
-                else:
-                    break
-
-            if cost_from_pattern is not None:
-                return cost_from_pattern
-
-        # Otherwise use the most recent cost we have
-        cost: float | None = None
-        for entry in transport_lookup:
-            entry_cost = entry.get("cost")
-            if entry_cost is None:
-                continue
-            entry_start_str = entry.get("start")
-            if entry_start_str is None:
-                cost = float(entry_cost)
-                continue
-            entry_start = dt_util.parse_datetime(entry_start_str)
-            if entry_start is None:
-                continue
-            entry_start_utc = dt_util.as_utc(entry_start)
-            if entry_start_utc <= start_time_utc:
-                cost = float(entry_cost)
-            else:
-                break
-
-        return cost if cost is not None else 0.0
 
     def _resolve_override_targets(self, target: str) -> tuple[str, ...]:
         """Resolve override target string into coordinator keys."""
@@ -336,84 +279,25 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
         )
 
-        future_intervals: list[tuple[datetime, datetime | None, float]] = []
-
-        def process_intervals(intervals: list[dict[str, Any]]) -> None:
-            for interval in intervals:
-                try:
-                    start_time_str = interval.get("start")
-                    if not start_time_str:
-                        continue
-
-                    start_time = dt_util.parse_datetime(start_time_str)
-                    if start_time is None:
-                        continue
-                    start_time_utc = dt_util.as_utc(start_time)
-
-                    end_time: datetime | None = None
-                    end_time_str = interval.get("end")
-                    if end_time_str:
-                        try:
-                            parsed_end = dt_util.parse_datetime(end_time_str)
-                            if parsed_end is not None:
-                                end_time_utc = dt_util.as_utc(parsed_end)
-                                if end_time_utc > start_time_utc:
-                                    end_time = end_time_utc
-                        except Exception:
-                            end_time = None
-
-                    # Skip intervals that have completely ended
-                    if end_time is not None:
-                        if end_time <= now:
-                            continue
-                    else:
-                        # Assume hourly interval if no end provided
-                        if start_time_utc < now - timedelta(hours=1):
-                            continue
-
-                    price_value = None
-                    for key in ("value", "value_exc_vat", "price"):
-                        value = interval.get(key)
-                        if isinstance(value, (int, float)):
-                            price_value = float(value)
-                            break
-                        if isinstance(value, str):
-                            try:
-                                price_value = float(value)
-                                break
-                            except (ValueError, TypeError):
-                                continue
-
-                    if price_value is None:
-                        continue
-
-                    price_kwh = price_value / 1000
-                    adjusted_price = (price_kwh * multiplier) + offset
-
-                    transport_cost = self._resolve_transport_cost(
-                        transport_lookup, start_time_utc, reference_now=now
-                    )
-                    if transport_cost == 0.0 and current_transport_cost is not None:
-                        transport_cost = current_transport_cost
-
-                    final_price = adjusted_price + transport_cost
-                    future_intervals.append((start_time_utc, end_time, final_price))
-
-                except Exception as err:
-                    _LOGGER.debug(
-                        "Error processing interval for price timeline: %s", err
-                    )
-                    continue
-
+        all_intervals = []
         if prices_today:
             area_code = next(iter(prices_today.keys()), None)
             if area_code and isinstance(prices_today[area_code], list):
-                process_intervals(prices_today[area_code])
-
+                all_intervals.extend(prices_today[area_code])
         if prices_tomorrow:
             area_code = next(iter(prices_tomorrow.keys()), None)
             if area_code and isinstance(prices_tomorrow[area_code], list):
-                process_intervals(prices_tomorrow[area_code])
+                all_intervals.extend(prices_tomorrow[area_code])
+
+        future_intervals = process_price_intervals(
+            all_intervals,
+            multiplier,
+            offset,
+            transport_lookup,
+            current_transport_cost,
+            now,
+            include_past=False,
+        )
 
         future_intervals.sort(key=lambda item: item[0])
 
@@ -908,67 +792,6 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
         )
 
-        def process_intervals(intervals: list[dict[str, Any]], include_past: bool = False, include_future: bool = True) -> None:
-            """Process intervals and add them to all_intervals list.
-
-            Args:
-                intervals: List of price intervals to process
-                include_past: Include intervals that have ended (start_time < now)
-                include_future: Include intervals that haven't ended (start_time >= now)
-            """
-            for interval in intervals:
-                try:
-                    start_time_str = interval.get("start")
-                    if not start_time_str:
-                        continue
-
-                    start_time = dt_util.parse_datetime(start_time_str)
-                    if start_time is None:
-                        continue
-                    start_time_utc = dt_util.as_utc(start_time)
-
-                    # Filter based on time
-                    is_past = start_time_utc < now
-                    if is_past and not include_past:
-                        continue
-                    if not is_past and not include_future:
-                        continue
-
-                    # Extract price (try different keys like Nord Pool sensor does)
-                    price_value = None
-                    for key in ("value", "value_exc_vat", "price"):
-                        value = interval.get(key)
-                        if isinstance(value, (int, float)):
-                            price_value = float(value)
-                            break
-                        if isinstance(value, str):
-                            try:
-                                price_value = float(value)
-                                break
-                            except (ValueError, TypeError):
-                                continue
-
-                    if price_value is None:
-                        continue
-
-                    # Convert from €/MWh to €/kWh
-                    price_kwh = price_value / 1000
-
-                    # Apply adjustments
-                    adjusted_price = (price_kwh * multiplier) + offset
-
-                    # Add transport cost
-                    transport_cost = self._resolve_transport_cost(
-                        transport_lookup, start_time_utc, reference_now=now
-                    )
-
-                    final_price = adjusted_price + transport_cost
-                    all_intervals.append((start_time_utc, final_price))
-
-                except Exception as err:
-                    _LOGGER.debug("Error processing interval for average threshold: %s", err)
-                    continue
-
         def infer_interval_resolution() -> timedelta:
             """Infer typical Nord Pool interval duration from provided data.
 
@@ -1081,15 +904,26 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             return limited
 
         # Pass 1: Collect future intervals only
+        all_raw_intervals = []
         if prices_today:
             area_code = next(iter(prices_today.keys()), None)
             if area_code and isinstance(prices_today[area_code], list):
-                process_intervals(prices_today[area_code], include_past=False, include_future=True)
-
+                all_raw_intervals.extend(prices_today[area_code])
         if prices_tomorrow:
             area_code = next(iter(prices_tomorrow.keys()), None)
             if area_code and isinstance(prices_tomorrow[area_code], list):
-                process_intervals(prices_tomorrow[area_code], include_past=False, include_future=True)
+                all_raw_intervals.extend(prices_tomorrow[area_code])
+
+        processed_intervals = process_price_intervals(
+            all_raw_intervals,
+            multiplier,
+            offset,
+            transport_lookup,
+            None,  # Not needed for average threshold calculation
+            now,
+            include_past=True,
+        )
+        all_intervals = [(start, price) for start, _, price in processed_intervals]
 
         # Sort by time (oldest first)
         all_intervals.sort(key=lambda x: x[0])
