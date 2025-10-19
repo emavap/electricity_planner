@@ -31,7 +31,8 @@ Electricity Planner is a Home Assistant custom integration that turns Nord Pool 
 
 1. Settings → Devices & Services → `+ Add Integration` → search for **Electricity Planner**.
 2. Wizard steps:
-   - **Entities** – select Nord Pool, battery, solar, consumption, EV sensors.
+   - **Topology** – choose between single-phase and three-phase operation.
+   - **Entities** – select Nord Pool, battery, solar, consumption, EV sensors (per-phase when three-phase is selected).
    - **SOC Thresholds** – min/max SOC, emergency threshold, predictive threshold.
    - **Price Thresholds** – static ceiling, very-low-price %, feed‑in limits.
    - **Power Limits** – max battery/car/grid power, minimum EV detection threshold.
@@ -56,6 +57,9 @@ Electricity Planner is a Home Assistant custom integration that turns Nord Pool 
 | `sensor.electricity_planner_car_charger_limit` | Recommended EVSE limit |
 | Diagnostic sensors (current price, feed-in price, thresholds, solar surplus, etc.) | Visualisation and troubleshooting |
 
+> **Three-phase note:** both `*_grid_charging` binary sensors expose a `phase_results` attribute containing per-phase grid setpoints, component breakdowns, reasons, and capacity shares. `sensor.electricity_planner_decision_diagnostics` mirrors this data alongside `phase_details`, `phase_capacity_map`, and `phase_batteries` for dashboard cards or advanced automations.
+> Under the hood the decision engine always evaluates a single aggregated “virtual phase”; three-phase mode simply aggregates telemetry before the run and then distributes the resulting power limits back across phases. Tests now assert that three-phase decisions match single-phase logic, so you can move between topologies without behavioural drift.
+
 ---
 
 ## 2. How It Thinks – Decision Pipeline
@@ -74,6 +78,21 @@ Electricity Planner is a Home Assistant custom integration that turns Nord Pool 
    - Very-low prices still require the minimum window before starting
 8. **Feed-in & safety outputs** – compute charger limit, grid setpoint, and whether to export surplus via the configured feed-in pricing model.
 9. **Diagnostics** – publish every step and reason through `sensor.electricity_planner_decision_diagnostics`.
+
+### Three-Phase Power Distribution (Topology = three_phase)
+
+When three-phase mode is enabled, the planner keeps the decision logic identical to the single-phase algorithm while layering a per-phase aggregation/distribution pass:
+
+1. **Per-phase inputs** – each configured leg (L1/L2/L3) supplies its own solar production and consumption sensors (both required), plus an optional EV/car power sensor.
+2. **Battery-to-phase mapping** – every battery can be assigned to one or more phases. Capacity values (kWh) are used as weights; if you omit a capacity, the coordinator falls back to a neutral `1.0` so the battery still receives allocations.
+3. **Aggregate decision** – the decision engine sums the per-phase inputs into a single “virtual phase” and runs the standard strategy stack. This keeps all price, SOC, and safety behaviour identical between topologies.
+4. **Phase distribution** – the aggregated decision is broken back down:
+   - Battery grid power is split proportionally to the capacity share of each phase.
+   - Car grid power and EV charger limits are split evenly across the phases that have a car sensor configured.
+   - Phases without relevant hardware (no batteries, no EV sensor) automatically receive a 0W allocation and explanatory reason (“No batteries assigned to this phase”).
+5. **Diagnostics & dashboards** – `phase_results`, `phase_details`, `phase_capacity_map`, and `phase_batteries` attributes expose the per-phase breakdown for automation templates and dashboards. `capacity_share` shows the fractional weight (0–1), while `capacity_share_kwh` reports the raw weighted kWh.
+
+Because the aggregated decision is made before the distribution step, cross-phase energy shifts are supported: for example, solar production on L1 can charge a battery assigned to all three phases and, after distribution, provide grid import headroom for L2/L3 loads.
 
 ---
 
@@ -234,6 +253,8 @@ docker run --rm -v "$PWD":/app -w /app -e PYTHONPATH=/app electricity-planner-te
 pip install -r requirements-dev.txt
 export PYTHONPATH=.
 pytest
+# Run just the phase parity and distribution checks:
+pytest -k "three_phase_preserves_single_phase_logic or distribute_phase_decisions_spreads_car_without_phase_sensors or three_phase_falls_back_to_global_car_sensor"
 ```
 
 Use a virtual environment (e.g., `python3 -m venv .venv && source .venv/bin/activate`) to keep dependencies isolated. All tests are written to run without spinning up Home Assistant itself—the project stubs the coordinator and entity layers where necessary.

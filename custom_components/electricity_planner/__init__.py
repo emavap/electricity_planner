@@ -68,7 +68,7 @@ CLEAR_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Electricity Planner from a config entry."""
     # Perform migration if needed
-    if entry.version < 8:
+    if entry.version < 10:
         await async_migrate_entry(hass, entry)
     
     coordinator = ElectricityPlannerCoordinator(hass, entry)

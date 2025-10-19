@@ -1,0 +1,522 @@
+# Three-Phase Electricity Planner Dashboard
+# REQUIRED: Install "Gauge Card Pro" from HACS
+# https://github.com/benjamin-dcs/gauge-card-pro
+# REQUIRED: Install "ApexCharts Card" from HACS
+# https://github.com/RomRider/apexcharts-card
+# REQUIRED: Install "Template Entity Row" from HACS
+# https://github.com/thomasloven/lovelace-template-entity-row
+# This dashboard shows per-phase power allocations and decisions for three-phase systems
+views:
+  - title: 3-Phase Planner
+    path: electricity-planner-3phase
+    icon: mdi:electric-switch
+    panel: true
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: markdown
+            content: |
+              ## ⚡ Electricity Planner - Three-Phase Dashboard
+
+              This dashboard shows per-phase decisions and power allocations.
+              Each phase (L1, L2, L3) operates independently based on battery assignments.
+
+          # Price gauges (shared across all phases)
+          - type: grid
+            square: false
+            columns: 2
+            cards:
+              - type: custom:gauge-card-pro
+                entity: sensor.electricity_planner_current_electricity_price
+                header: Buy price
+                min: -0.9
+                max: 0.9
+                unit: "€/kWh"
+                needle: true
+                scale: "50px"
+                segments: |-
+                  {% set dynamic_threshold = state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') %}
+                  {% set decision_sensor = 'sensor.electricity_planner_decision_diagnostics' %}
+                  {% if states(decision_sensor) in ['unknown', 'unavailable', None] %}
+                    {% set decision_sensor = 'sensor.electricity_planner_decision_diagnostics_diagnostic' %}
+                  {% endif %}
+                  {% set price_analysis = state_attr(decision_sensor, 'price_analysis') %}
+                  {% set average_threshold = price_analysis.average_threshold if price_analysis else None %}
+                  {% set fixed_threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float %}
+
+                  {% if average_threshold != None %}
+                    {% set max_threshold = average_threshold | float %}
+                  {% else %}
+                    {% set max_threshold = fixed_threshold %}
+                  {% endif %}
+
+                  {% if dynamic_threshold != None %}
+                    {% set threshold = dynamic_threshold | float %}
+                  {% else %}
+                    {% set threshold = max_threshold %}
+                  {% endif %}
+                  {{
+                    [
+                      { "from": -0.9, "color": "green" },
+                      { "from": threshold, "color": "yellow" },
+                      { "from": max_threshold, "color": "red" }
+                    ]
+                  }}
+
+              - type: gauge
+                name: Battery SOC (Average)
+                entity: sensor.electricity_planner_battery_soc_average
+                min: 0
+                max: 100
+                unit: "%"
+                needle: true
+                severity:
+                  red: 0
+                  yellow: 30
+                  green: 70
+
+          # Overall decisions (aggregated)
+          - type: entities
+            title: Overall Decisions (Aggregated)
+            show_header_toggle: false
+            entities:
+              - entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                name: Battery charging (any phase)
+                secondary_info: last-changed
+              - type: attribute
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                attribute: reason
+                name: Battery reason
+              - entity: binary_sensor.electricity_planner_car_charge_from_grid
+                name: Car charging (any phase)
+                secondary_info: last-changed
+              - type: attribute
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
+                attribute: reason
+                name: Car reason
+
+          # Phase 1 (L1) Details
+          - type: markdown
+            content: |
+              ---
+              ## 📊 Phase 1 (L1) Details
+
+          - type: grid
+            square: false
+            columns: 3
+            cards:
+              - type: button
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                name: L1 Battery
+                icon: mdi:battery-charging
+                icon_height: 60px
+                show_name: true
+                show_state: false
+                card_mod:
+                  style: |
+                    ha-card {
+                      {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                      {% set phase1 = phase_results.phase_1 if phase_results else None %}
+                      {% if phase1 and phase1.battery_grid_charging %}
+                        background-color: var(--success-color);
+                      {% else %}
+                        background-color: var(--card-background-color);
+                      {% endif %}
+                    }
+              - type: button
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
+                name: L1 Car
+                icon: mdi:car-electric
+                icon_height: 60px
+                show_name: true
+                show_state: false
+                card_mod:
+                  style: |
+                    ha-card {
+                      {% set phase_results = state_attr('binary_sensor.electricity_planner_car_charge_from_grid', 'phase_results') %}
+                      {% set phase1 = phase_results.phase_1 if phase_results else None %}
+                      {% if phase1 and phase1.car_grid_charging %}
+                        background-color: var(--warning-color);
+                      {% else %}
+                        background-color: var(--card-background-color);
+                      {% endif %}
+                    }
+              - type: markdown
+                content: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase1 = phase_results.phase_1 if phase_results else None %}
+                  {% if phase1 %}
+                  **Grid:** {{ phase1.grid_setpoint }}W
+                  **Battery:** {{ phase1.grid_components.battery }}W
+                  **Car:** {{ phase1.grid_components.car }}W
+                  **Limit:** {{ phase1.charger_limit }}W
+                  {% else %}
+                  _Phase data unavailable_
+                  {% endif %}
+
+          - type: entities
+            title: Phase 1 (L1) Status
+            show_header_toggle: false
+            entities:
+              - type: custom:template-entity-row
+                name: Battery charging
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase1 = phase_results.phase_1 if phase_results else None %}
+                  {{ 'On' if phase1 and phase1.battery_grid_charging else 'Off' }}
+                icon: mdi:battery-charging
+              - type: attribute
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                attribute: phase_results
+                name: Battery reason
+                format: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase1 = phase_results.phase_1 if phase_results else None %}
+                  {{ phase1.battery_grid_charging_reason if phase1 else 'N/A' }}
+              - type: custom:template-entity-row
+                name: Car charging
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_car_charge_from_grid', 'phase_results') %}
+                  {% set phase1 = phase_results.phase_1 if phase_results else None %}
+                  {{ 'On' if phase1 and phase1.car_grid_charging else 'Off' }}
+                icon: mdi:car-electric
+              - type: attribute
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
+                attribute: phase_results
+                name: Car reason
+                format: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_car_charge_from_grid', 'phase_results') %}
+                  {% set phase1 = phase_results.phase_1 if phase_results else None %}
+                  {{ phase1.car_grid_charging_reason if phase1 else 'N/A' }}
+              - type: custom:template-entity-row
+                name: Grid setpoint
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase1 = phase_results.phase_1 if phase_results else None %}
+                  {{ phase1.grid_setpoint if phase1 else 0 }}
+                unit: W
+                icon: mdi:transmission-tower
+              - type: custom:template-entity-row
+                name: Charger limit
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_car_charge_from_grid', 'phase_results') %}
+                  {% set phase1 = phase_results.phase_1 if phase_results else None %}
+                  {{ phase1.charger_limit if phase1 else 0 }}
+                unit: W
+                icon: mdi:ev-station
+              - type: custom:template-entity-row
+                name: Assigned batteries
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase1 = phase_results.phase_1 if phase_results else None %}
+                  {% if phase1 and phase1.battery_entities %}
+                  {{ phase1.battery_entities | length }} ({{ (phase1.capacity_share * 100) | round(1) }}%, {{ phase1.capacity_share_kwh | round(1) }} kWh)
+                  {% else %}
+                  None
+                  {% endif %}
+                icon: mdi:battery-outline
+
+          # Phase 2 (L2) Details
+          - type: markdown
+            content: |
+              ---
+              ## 📊 Phase 2 (L2) Details
+
+          - type: grid
+            square: false
+            columns: 3
+            cards:
+              - type: button
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                name: L2 Battery
+                icon: mdi:battery-charging
+                icon_height: 60px
+                show_name: true
+                show_state: false
+                card_mod:
+                  style: |
+                    ha-card {
+                      {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                      {% set phase2 = phase_results.phase_2 if phase_results else None %}
+                      {% if phase2 and phase2.battery_grid_charging %}
+                        background-color: var(--success-color);
+                      {% else %}
+                        background-color: var(--card-background-color);
+                      {% endif %}
+                    }
+              - type: button
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
+                name: L2 Car
+                icon: mdi:car-electric
+                icon_height: 60px
+                show_name: true
+                show_state: false
+                card_mod:
+                  style: |
+                    ha-card {
+                      {% set phase_results = state_attr('binary_sensor.electricity_planner_car_charge_from_grid', 'phase_results') %}
+                      {% set phase2 = phase_results.phase_2 if phase_results else None %}
+                      {% if phase2 and phase2.car_grid_charging %}
+                        background-color: var(--warning-color);
+                      {% else %}
+                        background-color: var(--card-background-color);
+                      {% endif %}
+                    }
+              - type: markdown
+                content: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase2 = phase_results.phase_2 if phase_results else None %}
+                  {% if phase2 %}
+                  **Grid:** {{ phase2.grid_setpoint }}W
+                  **Battery:** {{ phase2.grid_components.battery }}W
+                  **Car:** {{ phase2.grid_components.car }}W
+                  **Limit:** {{ phase2.charger_limit }}W
+                  {% else %}
+                  _Phase data unavailable_
+                  {% endif %}
+
+          - type: entities
+            title: Phase 2 (L2) Status
+            show_header_toggle: false
+            entities:
+              - type: custom:template-entity-row
+                name: Battery charging
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase2 = phase_results.phase_2 if phase_results else None %}
+                  {{ 'On' if phase2 and phase2.battery_grid_charging else 'Off' }}
+                icon: mdi:battery-charging
+              - type: attribute
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                attribute: phase_results
+                name: Battery reason
+                format: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase2 = phase_results.phase_2 if phase_results else None %}
+                  {{ phase2.battery_grid_charging_reason if phase2 else 'N/A' }}
+              - type: custom:template-entity-row
+                name: Car charging
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_car_charge_from_grid', 'phase_results') %}
+                  {% set phase2 = phase_results.phase_2 if phase_results else None %}
+                  {{ 'On' if phase2 and phase2.car_grid_charging else 'Off' }}
+                icon: mdi:car-electric
+              - type: attribute
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
+                attribute: phase_results
+                name: Car reason
+                format: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_car_charge_from_grid', 'phase_results') %}
+                  {% set phase2 = phase_results.phase_2 if phase_results else None %}
+                  {{ phase2.car_grid_charging_reason if phase2 else 'N/A' }}
+              - type: custom:template-entity-row
+                name: Grid setpoint
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase2 = phase_results.phase_2 if phase_results else None %}
+                  {{ phase2.grid_setpoint if phase2 else 0 }}
+                unit: W
+                icon: mdi:transmission-tower
+              - type: custom:template-entity-row
+                name: Charger limit
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_car_charge_from_grid', 'phase_results') %}
+                  {% set phase2 = phase_results.phase_2 if phase_results else None %}
+                  {{ phase2.charger_limit if phase2 else 0 }}
+                unit: W
+                icon: mdi:ev-station
+              - type: custom:template-entity-row
+                name: Assigned batteries
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase2 = phase_results.phase_2 if phase_results else None %}
+                  {% if phase2 and phase2.battery_entities %}
+                  {{ phase2.battery_entities | length }} ({{ (phase2.capacity_share * 100) | round(1) }}%, {{ phase2.capacity_share_kwh | round(1) }} kWh)
+                  {% else %}
+                  None
+                  {% endif %}
+                icon: mdi:battery-outline
+
+          # Phase 3 (L3) Details
+          - type: markdown
+            content: |
+              ---
+              ## 📊 Phase 3 (L3) Details
+
+          - type: grid
+            square: false
+            columns: 3
+            cards:
+              - type: button
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                name: L3 Battery
+                icon: mdi:battery-charging
+                icon_height: 60px
+                show_name: true
+                show_state: false
+                card_mod:
+                  style: |
+                    ha-card {
+                      {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                      {% set phase3 = phase_results.phase_3 if phase_results else None %}
+                      {% if phase3 and phase3.battery_grid_charging %}
+                        background-color: var(--success-color);
+                      {% else %}
+                        background-color: var(--card-background-color);
+                      {% endif %}
+                    }
+              - type: button
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
+                name: L3 Car
+                icon: mdi:car-electric
+                icon_height: 60px
+                show_name: true
+                show_state: false
+                card_mod:
+                  style: |
+                    ha-card {
+                      {% set phase_results = state_attr('binary_sensor.electricity_planner_car_charge_from_grid', 'phase_results') %}
+                      {% set phase3 = phase_results.phase_3 if phase_results else None %}
+                      {% if phase3 and phase3.car_grid_charging %}
+                        background-color: var(--warning-color);
+                      {% else %}
+                        background-color: var(--card-background-color);
+                      {% endif %}
+                    }
+              - type: markdown
+                content: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase3 = phase_results.phase_3 if phase_results else None %}
+                  {% if phase3 %}
+                  **Grid:** {{ phase3.grid_setpoint }}W
+                  **Battery:** {{ phase3.grid_components.battery }}W
+                  **Car:** {{ phase3.grid_components.car }}W
+                  **Limit:** {{ phase3.charger_limit }}W
+                  {% else %}
+                  _Phase data unavailable_
+                  {% endif %}
+
+          - type: entities
+            title: Phase 3 (L3) Status
+            show_header_toggle: false
+            entities:
+              - type: custom:template-entity-row
+                name: Battery charging
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase3 = phase_results.phase_3 if phase_results else None %}
+                  {{ 'On' if phase3 and phase3.battery_grid_charging else 'Off' }}
+                icon: mdi:battery-charging
+              - type: attribute
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                attribute: phase_results
+                name: Battery reason
+                format: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase3 = phase_results.phase_3 if phase_results else None %}
+                  {{ phase3.battery_grid_charging_reason if phase3 else 'N/A' }}
+              - type: custom:template-entity-row
+                name: Car charging
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_car_charge_from_grid', 'phase_results') %}
+                  {% set phase3 = phase_results.phase_3 if phase_results else None %}
+                  {{ 'On' if phase3 and phase3.car_grid_charging else 'Off' }}
+                icon: mdi:car-electric
+              - type: attribute
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
+                attribute: phase_results
+                name: Car reason
+                format: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_car_charge_from_grid', 'phase_results') %}
+                  {% set phase3 = phase_results.phase_3 if phase_results else None %}
+                  {{ phase3.car_grid_charging_reason if phase3 else 'N/A' }}
+              - type: custom:template-entity-row
+                name: Grid setpoint
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase3 = phase_results.phase_3 if phase_results else None %}
+                  {{ phase3.grid_setpoint if phase3 else 0 }}
+                unit: W
+                icon: mdi:transmission-tower
+              - type: custom:template-entity-row
+                name: Charger limit
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_car_charge_from_grid', 'phase_results') %}
+                  {% set phase3 = phase_results.phase_3 if phase_results else None %}
+                  {{ phase3.charger_limit if phase3 else 0 }}
+                unit: W
+                icon: mdi:ev-station
+              - type: custom:template-entity-row
+                name: Assigned batteries
+                state: |
+                  {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                  {% set phase3 = phase_results.phase_3 if phase_results else None %}
+                  {% if phase3 and phase3.battery_entities %}
+                  {{ phase3.battery_entities | length }} ({{ (phase3.capacity_share * 100) | round(1) }}%, {{ phase3.capacity_share_kwh | round(1) }} kWh)
+                  {% else %}
+                  None
+                  {% endif %}
+                icon: mdi:battery-outline
+
+          # Power Distribution Visualization
+          - type: markdown
+            content: |
+              ---
+              ## 🔌 Power Distribution Summary
+
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Grid Setpoint per Phase (Current)
+            graph_span: 1h
+            apex_config:
+              chart:
+                type: bar
+                height: 300
+              plotOptions:
+                bar:
+                  horizontal: false
+                  columnWidth: "50%"
+              dataLabels:
+                enabled: true
+                formatter: |
+                  EVAL:function(value) {
+                    return value + ' W';
+                  }
+              xaxis:
+                categories:
+                  - Phase 1 (L1)
+                  - Phase 2 (L2)
+                  - Phase 3 (L3)
+              yaxis:
+                title:
+                  text: Power (W)
+                labels:
+                  formatter: |
+                    EVAL:function(value) {
+                      return value + ' W';
+                    }
+            series:
+              - name: Grid setpoint
+                data:
+                  - |-
+                    {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                    {% set phase1 = phase_results.phase_1 if phase_results else None %}
+                    {{ phase1.grid_setpoint if phase1 else 0 }}
+                  - |-
+                    {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                    {% set phase2 = phase_results.phase_2 if phase_results else None %}
+                    {{ phase2.grid_setpoint if phase2 else 0 }}
+                  - |-
+                    {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
+                    {% set phase3 = phase_results.phase_3 if phase_results else None %}
+                    {{ phase3.grid_setpoint if phase3 else 0 }}
+
+          - type: markdown
+            content: |
+              ### Notes
+              - **Grid setpoint** = Battery component + Car component per phase
+              - **Capacity share** = % of total battery capacity assigned to each phase
+              - **Charger limit** = Maximum power the car charger can use on this phase
+              - Battery power is distributed proportionally based on capacity
+              - Car power is distributed equally across phases with car sensors

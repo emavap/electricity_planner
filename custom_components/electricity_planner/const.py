@@ -2,6 +2,22 @@
 
 DOMAIN = "electricity_planner"
 
+CONF_PHASE_MODE = "phase_mode"
+PHASE_MODE_SINGLE = "single_phase"
+PHASE_MODE_THREE = "three_phase"
+CONF_PHASES = "phases"
+PHASE_IDS = ("phase_1", "phase_2", "phase_3")
+DEFAULT_PHASE_NAMES = {
+    "phase_1": "Phase 1",
+    "phase_2": "Phase 2",
+    "phase_3": "Phase 3",
+}
+CONF_PHASE_NAME = "name"
+CONF_PHASE_SOLAR_ENTITY = "solar_entity"
+CONF_PHASE_CONSUMPTION_ENTITY = "consumption_entity"
+CONF_PHASE_CAR_ENTITY = "car_entity"
+CONF_PHASE_BATTERY_POWER_ENTITY = "battery_power_entity"  # Actual battery power on this phase (W, negative = charging)
+
 CONF_NORDPOOL_CONFIG_ENTRY = "nordpool_config_entry"
 CONF_CURRENT_PRICE_ENTITY = "current_price_entity"
 CONF_HIGHEST_PRICE_ENTITY = "highest_price_entity"
@@ -9,6 +25,8 @@ CONF_LOWEST_PRICE_ENTITY = "lowest_price_entity"
 CONF_NEXT_PRICE_ENTITY = "next_price_entity"
 CONF_BATTERY_SOC_ENTITIES = "battery_soc_entities"
 CONF_BATTERY_CAPACITIES = "battery_capacities"
+CONF_BATTERY_PHASE_ASSIGNMENTS = "battery_phase_assignments"
+CONF_BATTERY_POWER_SENSORS = "battery_power_sensors"  # Per-phase battery power (W)
 CONF_SOLAR_PRODUCTION_ENTITY = "solar_production_entity"
 CONF_HOUSE_CONSUMPTION_ENTITY = "house_consumption_entity"
 CONF_CAR_CHARGING_POWER_ENTITY = "car_charging_power_entity"
@@ -102,4 +120,4 @@ MANUAL_OVERRIDE_TARGET_BATTERY = "battery"
 MANUAL_OVERRIDE_TARGET_CAR = "car"
 MANUAL_OVERRIDE_TARGET_BOTH = "both"
 
-INTEGRATION_VERSION = "3.1.0"
+INTEGRATION_VERSION = "4.0.0"

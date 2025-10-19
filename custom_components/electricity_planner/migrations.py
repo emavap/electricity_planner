@@ -16,6 +16,9 @@ from .const import (
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+    CONF_PHASE_MODE,
+    CONF_PHASES,
+    CONF_BATTERY_PHASE_ASSIGNMENTS,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
@@ -24,12 +27,13 @@ from .const import (
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+    PHASE_MODE_SINGLE,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 # Current config version
-CURRENT_VERSION = 8
+CURRENT_VERSION = 10
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -163,7 +167,6 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             new_data[CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER] = DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER
             _LOGGER.info("Added car_permissive_threshold_multiplier: %.1f", DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER)
 
-        # Update entry with new data
         hass.config_entries.async_update_entry(
             entry,
             data=new_data,
@@ -171,6 +174,36 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
         _LOGGER.info("Migration to version 8 complete")
+
+    if entry.version == 8:
+        # Migrate from version 8 to version 9
+        new_data = {**entry.data}
+
+        if CONF_PHASE_MODE not in new_data:
+            new_data[CONF_PHASE_MODE] = PHASE_MODE_SINGLE
+            _LOGGER.info("Set default phase_mode to single-phase")
+
+        new_data.setdefault(CONF_PHASES, {})
+        new_data.setdefault(CONF_BATTERY_PHASE_ASSIGNMENTS, {})
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=9
+        )
+
+        _LOGGER.info("Migration to version 9 complete")
+
+    if entry.version == 9:
+        # Migrate from version 9 to version 10
+        # No data changes needed - version 10 adds optional battery_power_entity per phase
+        # which will be added through UI if user chooses to configure it
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data},
+            version=10
+        )
+        _LOGGER.info("Migration to version 10 complete")
 
     return True
 
@@ -197,6 +230,15 @@ def migrate_config_data(old_data: Dict[str, Any], from_version: int) -> Dict[str
         deprecated_keys = ["emergency_soc_override", "winter_night_soc_override"]
         for key in deprecated_keys:
             new_data.pop(key, None)
+
+    if from_version < 9:
+        new_data.setdefault(CONF_PHASE_MODE, PHASE_MODE_SINGLE)
+        new_data.setdefault(CONF_PHASES, {})
+        new_data.setdefault(CONF_BATTERY_PHASE_ASSIGNMENTS, {})
+
+    if from_version < 10:
+        # Version 10 adds optional battery_power_entity per phase - no automatic migration needed
+        pass
 
     if from_version < 5:
         # Remove unused config option

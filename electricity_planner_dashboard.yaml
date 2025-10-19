@@ -452,7 +452,9 @@ views:
                 curve: stepline
                 stroke_width: 1
                 color: "#e74c3c"
-                transform: "return x === 'on' ? 1 : 0;"
+                transform: |
+                  const normalized = typeof x === 'string' ? x.toLowerCase() : x;
+                  return normalized === 'on' || normalized === 'true' || normalized === true || normalized === 1 ? 1 : 0;
                 show:
                   legend_value: false
               - entity: binary_sensor.electricity_planner_car_charge_from_grid
@@ -462,7 +464,9 @@ views:
                 curve: stepline
                 stroke_width: 1
                 color: "#f39c12"
-                transform: "return x === 'on' ? 0.8 : 0;"
+                transform: |
+                  const normalized = typeof x === 'string' ? x.toLowerCase() : x;
+                  return normalized === 'on' || normalized === 'true' || normalized === true || normalized === 1 ? 0.8 : 0;
                 show:
                   legend_value: false
 
