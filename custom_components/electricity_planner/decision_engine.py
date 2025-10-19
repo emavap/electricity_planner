@@ -603,6 +603,11 @@ class ChargingDecisionEngine:
         """
         phase_details: Dict[str, Dict[str, Any]] = data.get("phase_details") or {}
         if not phase_details:
+            _LOGGER.warning(
+                "Three-phase mode active but no phase details available - "
+                "check that at least one sensor is configured for each phase"
+            )
+            # Return overall decision without phase breakdown
             return {}
 
         ordered_phases = [phase for phase in PHASE_IDS if phase in phase_details]

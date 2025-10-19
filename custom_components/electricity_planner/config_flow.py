@@ -155,17 +155,39 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     car_entity = processed_input.pop(car_key, None)
                     battery_power_entity = processed_input.pop(battery_power_key, None)
 
-                    phases_config[phase_id] = {
-                        CONF_PHASE_NAME: existing_phases.get(phase_id, {}).get(
-                            CONF_PHASE_NAME, DEFAULT_PHASE_NAMES[phase_id]
-                        ),
-                        CONF_PHASE_SOLAR_ENTITY: solar_entity,
-                        CONF_PHASE_CONSUMPTION_ENTITY: consumption_entity,
-                    }
-                    if car_entity:
-                        phases_config[phase_id][CONF_PHASE_CAR_ENTITY] = car_entity
-                    if battery_power_entity:
-                        phases_config[phase_id][CONF_PHASE_BATTERY_POWER_ENTITY] = battery_power_entity
+                    existing_phase = existing_phases.get(phase_id, {})
+
+                    # Only create phase entry if at least one sensor is provided or phase already exists
+                    # This prevents creating "ghost" phase configs with all None values
+                    if (
+                        solar_entity is not None
+                        or consumption_entity is not None
+                        or car_entity is not None
+                        or battery_power_entity is not None
+                        or existing_phase
+                    ):
+                        phase_entry = {
+                            CONF_PHASE_NAME: existing_phase.get(
+                                CONF_PHASE_NAME, DEFAULT_PHASE_NAMES[phase_id]
+                            ),
+                            CONF_PHASE_SOLAR_ENTITY: solar_entity
+                            if solar_entity is not None
+                            else existing_phase.get(CONF_PHASE_SOLAR_ENTITY),
+                            CONF_PHASE_CONSUMPTION_ENTITY: consumption_entity
+                            if consumption_entity is not None
+                            else existing_phase.get(CONF_PHASE_CONSUMPTION_ENTITY),
+                        }
+                        if car_entity or existing_phase.get(CONF_PHASE_CAR_ENTITY):
+                            phase_entry[CONF_PHASE_CAR_ENTITY] = (
+                                car_entity if car_entity is not None
+                                else existing_phase.get(CONF_PHASE_CAR_ENTITY)
+                            )
+                        if battery_power_entity or existing_phase.get(CONF_PHASE_BATTERY_POWER_ENTITY):
+                            phase_entry[CONF_PHASE_BATTERY_POWER_ENTITY] = (
+                                battery_power_entity if battery_power_entity is not None
+                                else existing_phase.get(CONF_PHASE_BATTERY_POWER_ENTITY)
+                            )
+                        phases_config[phase_id] = phase_entry
 
                 self.data[CONF_PHASES] = phases_config
                 # Remove legacy single-phase bindings to avoid stale config
