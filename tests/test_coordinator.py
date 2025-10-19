@@ -300,6 +300,45 @@ async def test_fetch_all_data_three_phase_with_battery_power_sensors(fake_hass, 
 
 
 @pytest.mark.asyncio
+async def test_three_phase_falls_back_to_global_car_sensor(fake_hass, monkeypatch):
+    """When no per-phase car sensors exist, fall back to aggregated car power entity."""
+    config = _three_phase_config()
+    for phase_config in config[CONF_PHASES].values():
+        phase_config.pop(CONF_PHASE_CAR_ENTITY, None)
+    config[CONF_CAR_CHARGING_POWER_ENTITY] = "sensor.car_power"
+
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Price sensors (minimal required for fetch)
+    fake_hass.states.set("sensor.current_price", "0.15")
+    fake_hass.states.set("sensor.highest_price", "0.32")
+    fake_hass.states.set("sensor.lowest_price", "0.05")
+    fake_hass.states.set("sensor.next_price", "0.11")
+
+    # Battery SOC sensors
+    fake_hass.states.set("sensor.battery_soc_1", "55")
+    fake_hass.states.set("sensor.battery_soc_2", "65")
+
+    # Phase-specific sensors without car entities
+    fake_hass.states.set("sensor.solar_l1", "1000")
+    fake_hass.states.set("sensor.load_l1", "800")
+    fake_hass.states.set("sensor.solar_l2", "900")
+    fake_hass.states.set("sensor.load_l2", "700")
+    fake_hass.states.set("sensor.solar_l3", "600")
+    fake_hass.states.set("sensor.load_l3", "500")
+
+    # Aggregated car power sensor should be used
+    fake_hass.states.set("sensor.car_power", "1800")
+
+    data = await coordinator._fetch_all_data()
+
+    assert data["car_charging_power"] == pytest.approx(1800.0)
+    for phase_id, details in data["phase_details"].items():
+        assert details["car_charging_power"] is None
+        assert details["has_car_sensor"] is False
+
+
+@pytest.mark.asyncio
 async def test_async_update_data_merges_decisions(fake_hass, monkeypatch):
     config = _base_config()
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)

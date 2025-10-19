@@ -1,4 +1,5 @@
-"""Tests for grid setpoint, charger limits, and feed-in decisions."""
+"""Tests for grid setpoint, charger limits, feed-in, and phase handling."""
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,7 +17,9 @@ from custom_components.electricity_planner.const import (
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_PHASE_MODE,
+    PHASE_MODE_SINGLE,
     PHASE_MODE_THREE,
+    PHASE_IDS,
 )
 from custom_components.electricity_planner.decision_engine import ChargingDecisionEngine
 
@@ -324,6 +327,150 @@ def test_price_adjustment_fallback_only_when_no_adjustment():
     # Without adjustments configured, raw prices are used normally
     assert price_analysis["data_available"] is True
     assert price_analysis["current_price"] == 0.08
+
+
+@pytest.mark.asyncio
+async def test_three_phase_preserves_single_phase_logic(monkeypatch):
+    """Three-phase evaluation should reuse single-phase decision logic."""
+    fixed_now = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "custom_components.electricity_planner.decision_engine.dt_util.utcnow",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "custom_components.electricity_planner.decision_engine.dt_util.now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "custom_components.electricity_planner.helpers.dt_util.utcnow",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "custom_components.electricity_planner.helpers.dt_util.now",
+        lambda: fixed_now,
+    )
+
+    engine = _engine()
+    base_payload = {
+        CONF_PHASE_MODE: PHASE_MODE_SINGLE,
+        "current_price": 0.12,
+        "highest_price": 0.30,
+        "lowest_price": 0.05,
+        "next_price": 0.10,
+        "battery_soc": [{"entity_id": "sensor.battery_main", "soc": 45}],
+        "solar_production": 4200,
+        "house_consumption": 3200,
+        "solar_surplus": 1000,
+        "car_charging_power": 0,
+        "monthly_grid_peak": 5000,
+        "transport_cost": 0.0,
+        "transport_cost_lookup": [],
+        "nordpool_prices_today": None,
+        "nordpool_prices_tomorrow": None,
+        "car_permissive_mode_active": False,
+    }
+
+    single_phase_result = await engine.evaluate_charging_decision(dict(base_payload))
+
+    three_phase_payload = dict(base_payload)
+    three_phase_payload.update(
+        {
+            CONF_PHASE_MODE: PHASE_MODE_THREE,
+            "phase_capacity_map": {phase: (10.0 if phase == "phase_1" else 0.0) for phase in PHASE_IDS},
+            "phase_batteries": {
+                "phase_1": [
+                    {
+                        "entity_id": "sensor.battery_main",
+                        "soc": 45,
+                        "capacity": 10.0,
+                    }
+                ],
+                "phase_2": [],
+                "phase_3": [],
+            },
+            "phase_details": {
+                "phase_1": {
+                    "name": "Phase 1",
+                    "solar_production": 4200,
+                    "house_consumption": 3200,
+                    "solar_surplus": 1000,
+                    "car_charging_power": 0,
+                    "battery_power": None,
+                    "has_car_sensor": True,
+                    "has_battery_power_sensor": False,
+                }
+            },
+        }
+    )
+
+    three_phase_result = await engine.evaluate_charging_decision(three_phase_payload)
+
+    for key, value in single_phase_result.items():
+        if key in {"phase_results", "phase_mode"}:
+            continue
+        assert three_phase_result[key] == value
+
+    assert three_phase_result["phase_mode"] == PHASE_MODE_THREE
+    assert three_phase_result["phase_results"]["phase_1"]["grid_setpoint"] == single_phase_result["grid_setpoint"]
+    assert set(three_phase_result["phase_results"].keys()) == {"phase_1"}
+
+
+def test_distribute_phase_decisions_returns_empty_without_phase_details():
+    engine = _engine()
+    overall = {
+        "grid_setpoint": 0,
+        "battery_grid_charging": False,
+        "car_grid_charging": False,
+        "grid_components": {"battery": 0, "car": 0},
+        "battery_grid_charging_reason": "Idle",
+        "car_grid_charging_reason": "Idle",
+        "charger_limit": 0,
+    }
+
+    result = engine._distribute_phase_decisions(overall, {})
+    assert result == {}
+
+
+def test_distribute_phase_decisions_spreads_car_without_phase_sensors():
+    engine = _engine()
+    overall = {
+        "grid_setpoint": 6000,
+        "grid_components": {"battery": 0, "car": 6000},
+        "battery_grid_charging": False,
+        "battery_grid_charging_reason": "Battery idle",
+        "car_grid_charging": True,
+        "car_grid_charging_reason": "Car allowed",
+        "charger_limit": 6000,
+    }
+    phase_details = {
+        phase: {
+            "name": phase.upper(),
+            "solar_production": None,
+            "house_consumption": None,
+            "solar_surplus": None,
+            "car_charging_power": None,
+            "battery_power": None,
+            "has_car_sensor": False,
+            "has_battery_power_sensor": False,
+        }
+        for phase in PHASE_IDS
+    }
+    phase_capacity_map = {phase: 0.0 for phase in PHASE_IDS}
+    phase_batteries = {phase: [] for phase in PHASE_IDS}
+
+    result = engine._distribute_phase_decisions(
+        overall,
+        {
+            "phase_details": phase_details,
+            "phase_capacity_map": phase_capacity_map,
+            "phase_batteries": phase_batteries,
+        },
+    )
+
+    for phase in PHASE_IDS:
+        assert result[phase]["grid_components"]["car"] == 2000
+        assert result[phase]["charger_limit"] == 2000
+        assert result[phase]["car_grid_charging"] is True
 
 
 def test_distribute_phase_decisions_applies_capacity_weights():

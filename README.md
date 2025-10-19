@@ -58,6 +58,7 @@ Electricity Planner is a Home Assistant custom integration that turns Nord Pool 
 | Diagnostic sensors (current price, feed-in price, thresholds, solar surplus, etc.) | Visualisation and troubleshooting |
 
 > **Three-phase note:** both `*_grid_charging` binary sensors expose a `phase_results` attribute containing per-phase grid setpoints, component breakdowns, reasons, and capacity shares. `sensor.electricity_planner_decision_diagnostics` mirrors this data alongside `phase_details`, `phase_capacity_map`, and `phase_batteries` for dashboard cards or advanced automations.
+> Under the hood the decision engine always evaluates a single aggregated “virtual phase”; three-phase mode simply aggregates telemetry before the run and then distributes the resulting power limits back across phases. Tests now assert that three-phase decisions match single-phase logic, so you can move between topologies without behavioural drift.
 
 ---
 
@@ -252,6 +253,8 @@ docker run --rm -v "$PWD":/app -w /app -e PYTHONPATH=/app electricity-planner-te
 pip install -r requirements-dev.txt
 export PYTHONPATH=.
 pytest
+# Run just the phase parity and distribution checks:
+pytest -k "three_phase_preserves_single_phase_logic or distribute_phase_decisions_spreads_car_without_phase_sensors or three_phase_falls_back_to_global_car_sensor"
 ```
 
 Use a virtual environment (e.g., `python3 -m venv .venv && source .venv/bin/activate`) to keep dependencies isolated. All tests are written to run without spinning up Home Assistant itself—the project stubs the coordinator and entity layers where necessary.
