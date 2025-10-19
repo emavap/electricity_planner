@@ -1,6 +1,7 @@
 {
   "domain": "electricity_planner",
   "name": "Electricity Planner",
+  "icon": "mdi:flash",
   "codeowners": ["@emavap"],
   "config_flow": true,
   "dependencies": [],
