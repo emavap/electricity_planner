@@ -13,7 +13,6 @@ Each phase displays:
 - **Charger limit** - Maximum car charger power on this phase
 - **Assigned batteries** - Number of batteries and capacity share on this phase
 - **Reasons** - Detailed explanation for each charging decision
-- *Tip*: Solar sensors can be omitted on phases without production; leave them blank in the integration form.
 
 ### Overall Dashboard Elements
 - **Price gauges** - Current buy price with dynamic thresholds

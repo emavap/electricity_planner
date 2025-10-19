@@ -263,7 +263,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="sensor")
                 )
                 schema_dict[
-                    vol.Required(
+                    vol.Optional(
                         consumption_key,
                         default=existing.get(CONF_PHASE_CONSUMPTION_ENTITY),
                     )
@@ -327,7 +327,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         else:
             description_placeholders.update(
                 {
-                    "phase_inputs": "Provide consumption sensors for each phase; solar/car sensors are optional",
+                    "phase_inputs": "Provide solar, consumption, car, and battery power sensors for each phase (all optional)",
                 }
             )
 
@@ -770,36 +770,45 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 car_entity = updated_options.pop(car_key, None)
                 battery_power_entity = updated_options.pop(battery_power_key, None)
 
-                phases_config[phase_id] = {
-                    CONF_PHASE_NAME: existing_phases.get(phase_id, {}).get(
-                        CONF_PHASE_NAME, DEFAULT_PHASE_NAMES[phase_id]
-                    ),
-                    CONF_PHASE_SOLAR_ENTITY: solar_entity,
-                    CONF_PHASE_CONSUMPTION_ENTITY: consumption_entity,
-                }
-                if car_entity:
-                    phases_config[phase_id][CONF_PHASE_CAR_ENTITY] = car_entity
-                if battery_power_entity:
-                    phases_config[phase_id][CONF_PHASE_BATTERY_POWER_ENTITY] = battery_power_entity
+                existing_phase = existing_phases.get(phase_id, {})
+                if (
+                    solar_entity is not None
+                    or consumption_entity is not None
+                    or car_entity is not None
+                    or battery_power_entity is not None
+                    or existing_phase
+                ):
+                    phase_entry = {
+                        CONF_PHASE_NAME: existing_phase.get(
+                            CONF_PHASE_NAME, DEFAULT_PHASE_NAMES[phase_id]
+                        ),
+                        CONF_PHASE_SOLAR_ENTITY: solar_entity
+                        if solar_entity is not None
+                        else existing_phase.get(CONF_PHASE_SOLAR_ENTITY),
+                        CONF_PHASE_CONSUMPTION_ENTITY: consumption_entity
+                        if consumption_entity is not None
+                        else existing_phase.get(CONF_PHASE_CONSUMPTION_ENTITY),
+                    }
+                    car_value = (
+                        car_entity
+                        if car_entity is not None
+                        else existing_phase.get(CONF_PHASE_CAR_ENTITY)
+                    )
+                    if car_value:
+                        phase_entry[CONF_PHASE_CAR_ENTITY] = car_value
+
+                    battery_power_value = (
+                        battery_power_entity
+                        if battery_power_entity is not None
+                        else existing_phase.get(CONF_PHASE_BATTERY_POWER_ENTITY)
+                    )
+                    if battery_power_value:
+                        phase_entry[CONF_PHASE_BATTERY_POWER_ENTITY] = battery_power_value
+
+                    phases_config[phase_id] = phase_entry
 
             if phase_mode == PHASE_MODE_THREE:
-                # Validate that required phase entities are provided
-                missing_consumption = []
-                for phase_id in PHASE_IDS:
-                    phase_config = phases_config.get(phase_id, {})
-                    if not phase_config.get(CONF_PHASE_CONSUMPTION_ENTITY):
-                        missing_consumption.append(DEFAULT_PHASE_NAMES[phase_id])
-
-                if missing_consumption:
-                    return self.async_show_form(
-                        step_id="init",
-                        data_schema=vol.Schema(schema_dict),
-                        errors={"base": f"Missing consumption sensors for: {', '.join(missing_consumption)}"},
-                        description_placeholders={
-                            "topology": "Three-phase mode requires per-phase consumption sensors; solar inputs remain optional.",
-                        },
-                    )
-
+                # No validation - all per-phase sensors are optional, leave configuration to user
                 updated_options[CONF_PHASE_MODE] = PHASE_MODE_THREE
                 updated_options[CONF_PHASES] = phases_config
                 updated_options[CONF_BATTERY_PHASE_ASSIGNMENTS] = battery_phase_assignments

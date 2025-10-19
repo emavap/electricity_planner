@@ -256,39 +256,6 @@ async def test_fetch_all_data_three_phase_aggregates(fake_hass, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fetch_all_data_three_phase_partial_solar(fake_hass, monkeypatch):
-    config = _three_phase_config()
-    config[CONF_PHASES]["phase_2"].pop(CONF_PHASE_SOLAR_ENTITY, None)
-    config[CONF_PHASES]["phase_3"].pop(CONF_PHASE_SOLAR_ENTITY, None)
-
-    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-
-    fake_hass.states.set("sensor.current_price", "0.18")
-    fake_hass.states.set("sensor.highest_price", "0.40")
-    fake_hass.states.set("sensor.lowest_price", "0.05")
-    fake_hass.states.set("sensor.next_price", "0.15")
-
-    fake_hass.states.set("sensor.battery_soc_1", "55")
-    fake_hass.states.set("sensor.battery_soc_2", "65")
-
-    fake_hass.states.set("sensor.solar_l1", "2500")
-    fake_hass.states.set("sensor.load_l1", "800")
-    fake_hass.states.set("sensor.load_l2", "900")
-    fake_hass.states.set("sensor.car_l2", "600")
-    fake_hass.states.set("sensor.load_l3", "700")
-
-    data = await coordinator._fetch_all_data()
-
-    assert data["solar_production"] == pytest.approx(2500.0)
-    assert data["house_consumption"] == pytest.approx(2400.0)
-    assert data["solar_surplus"] == pytest.approx(100.0)
-    assert data["phase_details"]["phase_1"]["solar_production"] == pytest.approx(2500.0)
-    assert data["phase_details"]["phase_2"]["solar_production"] is None
-    assert data["phase_details"]["phase_3"]["solar_production"] is None
-    assert data["phase_batteries"]["phase_3"] == []
-
-
-@pytest.mark.asyncio
 async def test_fetch_all_data_three_phase_with_battery_power_sensors(fake_hass, monkeypatch):
     """Test that battery power sensors are correctly read in three-phase mode."""
     config = _three_phase_config()

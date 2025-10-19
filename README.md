@@ -57,6 +57,8 @@ Electricity Planner is a Home Assistant custom integration that turns Nord Pool 
 | `sensor.electricity_planner_car_charger_limit` | Recommended EVSE limit |
 | Diagnostic sensors (current price, feed-in price, thresholds, solar surplus, etc.) | Visualisation and troubleshooting |
 
+> **Three-phase note:** both `*_grid_charging` binary sensors expose a `phase_results` attribute containing per-phase grid setpoints, component breakdowns, reasons, and capacity shares. `sensor.electricity_planner_decision_diagnostics` mirrors this data alongside `phase_details`, `phase_capacity_map`, and `phase_batteries` for dashboard cards or advanced automations.
+
 ---
 
 ## 2. How It Thinks – Decision Pipeline
@@ -75,6 +77,21 @@ Electricity Planner is a Home Assistant custom integration that turns Nord Pool 
    - Very-low prices still require the minimum window before starting
 8. **Feed-in & safety outputs** – compute charger limit, grid setpoint, and whether to export surplus via the configured feed-in pricing model.
 9. **Diagnostics** – publish every step and reason through `sensor.electricity_planner_decision_diagnostics`.
+
+### Three-Phase Power Distribution (Topology = three_phase)
+
+When three-phase mode is enabled, the planner keeps the decision logic identical to the single-phase algorithm while layering a per-phase aggregation/distribution pass:
+
+1. **Per-phase inputs** – each configured leg (L1/L2/L3) supplies its own solar production and consumption sensors (both required), plus an optional EV/car power sensor.
+2. **Battery-to-phase mapping** – every battery can be assigned to one or more phases. Capacity values (kWh) are used as weights; if you omit a capacity, the coordinator falls back to a neutral `1.0` so the battery still receives allocations.
+3. **Aggregate decision** – the decision engine sums the per-phase inputs into a single “virtual phase” and runs the standard strategy stack. This keeps all price, SOC, and safety behaviour identical between topologies.
+4. **Phase distribution** – the aggregated decision is broken back down:
+   - Battery grid power is split proportionally to the capacity share of each phase.
+   - Car grid power and EV charger limits are split evenly across the phases that have a car sensor configured.
+   - Phases without relevant hardware (no batteries, no EV sensor) automatically receive a 0W allocation and explanatory reason (“No batteries assigned to this phase”).
+5. **Diagnostics & dashboards** – `phase_results`, `phase_details`, `phase_capacity_map`, and `phase_batteries` attributes expose the per-phase breakdown for automation templates and dashboards. `capacity_share` shows the fractional weight (0–1), while `capacity_share_kwh` reports the raw weighted kWh.
+
+Because the aggregated decision is made before the distribution step, cross-phase energy shifts are supported: for example, solar production on L1 can charge a battery assigned to all three phases and, after distribution, provide grid import headroom for L2/L3 loads.
 
 ---
 
