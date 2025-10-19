@@ -26,6 +26,14 @@ from custom_components.electricity_planner.const import (
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     CONF_HIGHEST_PRICE_ENTITY,
     CONF_HOUSE_CONSUMPTION_ENTITY,
+    CONF_PHASE_MODE,
+    CONF_PHASES,
+    CONF_PHASE_SOLAR_ENTITY,
+    CONF_PHASE_CONSUMPTION_ENTITY,
+    CONF_PHASE_CAR_ENTITY,
+    CONF_PHASE_BATTERY_POWER_ENTITY,
+    CONF_BATTERY_CAPACITIES,
+    CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_LOWEST_PRICE_ENTITY,
     CONF_NEXT_PRICE_ENTITY,
     CONF_PRICE_THRESHOLD,
@@ -40,6 +48,7 @@ from custom_components.electricity_planner.const import (
     MANUAL_OVERRIDE_TARGET_CAR,
     SERVICE_CLEAR_MANUAL_OVERRIDE,
     SERVICE_SET_MANUAL_OVERRIDE,
+    PHASE_MODE_THREE,
 )
 from homeassistant.exceptions import HomeAssistantError
 
@@ -108,6 +117,42 @@ def _base_config():
     }
 
 
+def _three_phase_config():
+    config = _base_config()
+    config.pop(CONF_SOLAR_PRODUCTION_ENTITY, None)
+    config.pop(CONF_HOUSE_CONSUMPTION_ENTITY, None)
+    config.pop(CONF_CAR_CHARGING_POWER_ENTITY, None)
+    config.update(
+        {
+            CONF_PHASE_MODE: PHASE_MODE_THREE,
+            CONF_PHASES: {
+                "phase_1": {
+                    CONF_PHASE_SOLAR_ENTITY: "sensor.solar_l1",
+                    CONF_PHASE_CONSUMPTION_ENTITY: "sensor.load_l1",
+                },
+                "phase_2": {
+                    CONF_PHASE_SOLAR_ENTITY: "sensor.solar_l2",
+                    CONF_PHASE_CONSUMPTION_ENTITY: "sensor.load_l2",
+                    CONF_PHASE_CAR_ENTITY: "sensor.car_l2",
+                },
+                "phase_3": {
+                    CONF_PHASE_SOLAR_ENTITY: "sensor.solar_l3",
+                    CONF_PHASE_CONSUMPTION_ENTITY: "sensor.load_l3",
+                },
+            },
+            CONF_BATTERY_CAPACITIES: {
+                "sensor.battery_soc_1": 10.0,
+                "sensor.battery_soc_2": 6.0,
+            },
+            CONF_BATTERY_PHASE_ASSIGNMENTS: {
+                "sensor.battery_soc_1": ["phase_1", "phase_2"],
+                "sensor.battery_soc_2": ["phase_2"],
+            },
+        }
+    )
+    return config
+
+
 def _create_coordinator(fake_hass, config, monkeypatch, options=None):
     entry = MockConfigEntry(domain=DOMAIN, data=config, options=options or {})
     monkeypatch.setattr(
@@ -152,6 +197,145 @@ async def test_fetch_all_data_computes_surplus_and_filters_unavailable(fake_hass
     assert data["solar_surplus"] == 1000
     assert data["battery_soc"] == [{"entity_id": "sensor.battery_soc_1", "soc": 45.0}]
     assert data["car_charging_power"] == 1400.0
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_data_three_phase_aggregates(fake_hass, monkeypatch):
+    config = _three_phase_config()
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Price sensors
+    fake_hass.states.set("sensor.current_price", "0.15")
+    fake_hass.states.set("sensor.highest_price", "0.32")
+    fake_hass.states.set("sensor.lowest_price", "0.05")
+    fake_hass.states.set("sensor.next_price", "0.11")
+
+    # Battery SOC sensors
+    fake_hass.states.set("sensor.battery_soc_1", "40")
+    fake_hass.states.set("sensor.battery_soc_2", "60")
+
+    # Phase-specific sensors
+    fake_hass.states.set("sensor.solar_l1", "1200")
+    fake_hass.states.set("sensor.load_l1", "800")
+    fake_hass.states.set("sensor.solar_l2", "600")
+    fake_hass.states.set("sensor.load_l2", "900")
+    fake_hass.states.set("sensor.car_l2", "700")
+    fake_hass.states.set("sensor.solar_l3", "300")
+    fake_hass.states.set("sensor.load_l3", "200")
+
+    data = await coordinator._fetch_all_data()
+
+    assert data["phase_mode"] == PHASE_MODE_THREE
+    assert data["solar_production"] == pytest.approx(2100.0)
+    assert data["house_consumption"] == pytest.approx(1900.0)
+    assert data["solar_surplus"] == pytest.approx(200.0)
+    assert data["car_charging_power"] == pytest.approx(700.0)
+
+    phase_details = data["phase_details"]
+    assert phase_details["phase_1"]["solar_surplus"] == pytest.approx(400.0)
+    assert phase_details["phase_2"]["solar_surplus"] == 0
+    assert phase_details["phase_2"]["car_charging_power"] == pytest.approx(700.0)
+
+    capacity_map = data["phase_capacity_map"]
+    assert capacity_map["phase_1"] == pytest.approx(5.0)
+    assert capacity_map["phase_2"] == pytest.approx(11.0)
+    assert capacity_map["phase_3"] == pytest.approx(0.0)
+
+    phase_batteries = data["phase_batteries"]
+    assert [b["entity_id"] for b in phase_batteries["phase_1"]] == ["sensor.battery_soc_1"]
+    assert [b["entity_id"] for b in phase_batteries["phase_2"]] == [
+        "sensor.battery_soc_1",
+        "sensor.battery_soc_2",
+    ]
+
+    battery_1 = next(
+        b for b in data["battery_details"] if b["entity_id"] == "sensor.battery_soc_1"
+    )
+    assert battery_1["capacity"] == pytest.approx(10.0)
+    assert battery_1["phases"] == ["phase_1", "phase_2"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_data_three_phase_with_battery_power_sensors(fake_hass, monkeypatch):
+    """Test that battery power sensors are correctly read in three-phase mode."""
+    config = _three_phase_config()
+    # Add battery power sensors to phase configuration
+    config[CONF_PHASES]["phase_1"][CONF_PHASE_BATTERY_POWER_ENTITY] = "sensor.battery_power_l1"
+    config[CONF_PHASES]["phase_2"][CONF_PHASE_BATTERY_POWER_ENTITY] = "sensor.battery_power_l2"
+
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Price sensors
+    fake_hass.states.set("sensor.current_price", "0.15")
+    fake_hass.states.set("sensor.highest_price", "0.32")
+    fake_hass.states.set("sensor.lowest_price", "0.05")
+    fake_hass.states.set("sensor.next_price", "0.11")
+
+    # Battery SOC sensors
+    fake_hass.states.set("sensor.battery_soc_1", "40")
+    fake_hass.states.set("sensor.battery_soc_2", "60")
+
+    # Phase-specific sensors
+    fake_hass.states.set("sensor.solar_l1", "1200")
+    fake_hass.states.set("sensor.load_l1", "800")
+    fake_hass.states.set("sensor.battery_power_l1", "-500")  # Negative = charging
+    fake_hass.states.set("sensor.solar_l2", "600")
+    fake_hass.states.set("sensor.load_l2", "900")
+    fake_hass.states.set("sensor.car_l2", "700")
+    fake_hass.states.set("sensor.battery_power_l2", "300")  # Positive = discharging
+    fake_hass.states.set("sensor.solar_l3", "300")
+    fake_hass.states.set("sensor.load_l3", "200")
+
+    data = await coordinator._fetch_all_data()
+
+    assert data["phase_mode"] == PHASE_MODE_THREE
+
+    phase_details = data["phase_details"]
+    assert phase_details["phase_1"]["battery_power"] == pytest.approx(-500.0)
+    assert phase_details["phase_1"]["has_battery_power_sensor"] is True
+    assert phase_details["phase_2"]["battery_power"] == pytest.approx(300.0)
+    assert phase_details["phase_2"]["has_battery_power_sensor"] is True
+    assert phase_details["phase_3"]["battery_power"] is None
+    assert phase_details["phase_3"]["has_battery_power_sensor"] is False
+
+
+@pytest.mark.asyncio
+async def test_three_phase_falls_back_to_global_car_sensor(fake_hass, monkeypatch):
+    """When no per-phase car sensors exist, fall back to aggregated car power entity."""
+    config = _three_phase_config()
+    for phase_config in config[CONF_PHASES].values():
+        phase_config.pop(CONF_PHASE_CAR_ENTITY, None)
+    config[CONF_CAR_CHARGING_POWER_ENTITY] = "sensor.car_power"
+
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Price sensors (minimal required for fetch)
+    fake_hass.states.set("sensor.current_price", "0.15")
+    fake_hass.states.set("sensor.highest_price", "0.32")
+    fake_hass.states.set("sensor.lowest_price", "0.05")
+    fake_hass.states.set("sensor.next_price", "0.11")
+
+    # Battery SOC sensors
+    fake_hass.states.set("sensor.battery_soc_1", "55")
+    fake_hass.states.set("sensor.battery_soc_2", "65")
+
+    # Phase-specific sensors without car entities
+    fake_hass.states.set("sensor.solar_l1", "1000")
+    fake_hass.states.set("sensor.load_l1", "800")
+    fake_hass.states.set("sensor.solar_l2", "900")
+    fake_hass.states.set("sensor.load_l2", "700")
+    fake_hass.states.set("sensor.solar_l3", "600")
+    fake_hass.states.set("sensor.load_l3", "500")
+
+    # Aggregated car power sensor should be used
+    fake_hass.states.set("sensor.car_power", "1800")
+
+    data = await coordinator._fetch_all_data()
+
+    assert data["car_charging_power"] == pytest.approx(1800.0)
+    for phase_id, details in data["phase_details"].items():
+        assert details["car_charging_power"] is None
+        assert details["has_car_sensor"] is False
 
 
 @pytest.mark.asyncio
@@ -243,6 +427,50 @@ async def test_handle_entity_change_respects_throttle(fake_hass, monkeypatch):
     assert len(tasks) == 1
     assert coordinator.async_request_refresh.await_count == 1
 
+    clock["now"] = base_time + timedelta(seconds=5)
+    coordinator._handle_entity_change(event)
+    assert len(tasks) == 1
+
+    clock["now"] = base_time + timedelta(seconds=15)
+    coordinator._handle_entity_change(event)
+    for task in tasks[1:]:
+        await task
+    assert len(tasks) == 2
+    assert coordinator.async_request_refresh.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_handle_entity_change_includes_three_phase_entities(fake_hass, monkeypatch):
+    config = _three_phase_config()
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    base_time = datetime(2024, 2, 1, 8, 0, tzinfo=timezone.utc)
+    clock = {"now": base_time}
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: clock["now"], raising=False
+    )
+
+    coordinator.async_request_refresh = AsyncMock()
+    tasks: list[asyncio.Task] = []
+    original_create_task = fake_hass.async_create_task
+
+    def capture_task(coro):
+        task = original_create_task(coro)
+        tasks.append(task)
+        return task
+
+    fake_hass.async_create_task = capture_task
+
+    phase_solar_entity = config[CONF_PHASES]["phase_1"][CONF_PHASE_SOLAR_ENTITY]
+    event = _event_for(phase_solar_entity)
+
+    coordinator._handle_entity_change(event)
+    for task in tasks:
+        await task
+    assert len(tasks) == 1
+    assert coordinator.async_request_refresh.await_count == 1
+
+    # Throttle still applies for rapid subsequent updates
     clock["now"] = base_time + timedelta(seconds=5)
     coordinator._handle_entity_change(event)
     assert len(tasks) == 1

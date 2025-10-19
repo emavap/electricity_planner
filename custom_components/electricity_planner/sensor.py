@@ -14,6 +14,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
+    PHASE_MODE_SINGLE,
     CONF_PRICE_THRESHOLD,
     CONF_FEEDIN_PRICE_THRESHOLD,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -146,7 +147,7 @@ class ChargingDecisionSensor(ElectricityPlannerSensorBase):
 
         price_data_available = self.coordinator.data.get("price_analysis", {}).get("data_available", False)
 
-        return {
+        attributes = {
             "battery_grid_charging": self.coordinator.data.get("battery_grid_charging"),
             "car_grid_charging": self.coordinator.data.get("car_grid_charging"),
             "battery_grid_charging_reason": self.coordinator.data.get("battery_grid_charging_reason"),
@@ -154,7 +155,14 @@ class ChargingDecisionSensor(ElectricityPlannerSensorBase):
             "next_evaluation": self.coordinator.data.get("next_evaluation"),
             "data_available": True,
             "price_data_available": price_data_available,
+            "phase_mode": self.coordinator.data.get("phase_mode", PHASE_MODE_SINGLE),
         }
+
+        phase_results = self.coordinator.data.get("phase_results") or {}
+        if phase_results:
+            attributes["phase_results"] = phase_results
+
+        return attributes
 
 
 class BatteryAnalysisSensor(ElectricityPlannerSensorBase):
@@ -396,7 +404,7 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
         monthly_peak = self.coordinator.data.get("monthly_grid_peak", 0)
         max_grid_setpoint = max(monthly_peak, 2500) if monthly_peak and monthly_peak > 2500 else 2500
 
-        return {
+        attributes = {
             "grid_setpoint_reason": self.coordinator.data.get("grid_setpoint_reason", ""),
             "charger_limit": self.coordinator.data.get("charger_limit", 0),
             "current_car_power": self.coordinator.data.get("power_analysis", {}).get("car_charging_power", 0),
@@ -405,6 +413,22 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
             "monthly_grid_peak": monthly_peak,
             "max_grid_setpoint": max_grid_setpoint,
         }
+
+        attributes["phase_mode"] = self.coordinator.data.get("phase_mode", PHASE_MODE_SINGLE)
+
+        phase_results = self.coordinator.data.get("phase_results") or {}
+        if phase_results:
+            attributes["phase_results"] = phase_results
+            attributes["phase_grid_setpoints"] = {
+                phase: result.get("grid_setpoint")
+                for phase, result in phase_results.items()
+            }
+            attributes["phase_grid_components"] = {
+                phase: result.get("grid_components")
+                for phase, result in phase_results.items()
+            }
+
+        return attributes
 
 
 class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
@@ -475,7 +499,13 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "grid_setpoint": self.coordinator.data.get("grid_setpoint", 0),
                 "charger_limit_reason": self.coordinator.data.get("charger_limit_reason", ""),
                 "grid_setpoint_reason": self.coordinator.data.get("grid_setpoint_reason", ""),
+                "grid_components": self.coordinator.data.get("grid_components", {}),
+                "phase_mode": self.coordinator.data.get("phase_mode", PHASE_MODE_SINGLE),
+                "phase_results": self.coordinator.data.get("phase_results", {}),
             },
+            "phase_details": self.coordinator.data.get("phase_details", {}),
+            "phase_capacity_map": self.coordinator.data.get("phase_capacity_map", {}),
+            "phase_batteries": self.coordinator.data.get("phase_batteries", {}),
 
             # Price analysis (for validation)
             "price_analysis": {
