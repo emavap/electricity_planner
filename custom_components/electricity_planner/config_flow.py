@@ -1133,22 +1133,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 )
             )
 
-        # Per-battery phase assignments (multi-select)
-        phase_options = [
-            {"value": phase_id, "label": DEFAULT_PHASE_NAMES[phase_id]} for phase_id in PHASE_IDS
-        ]
-        for entity_id in battery_entities:
-            key = f"phase_assignment_{entity_id.replace('.', '_')}"
-            default_assignment = existing_assignments.get(entity_id, [])
-            schema_dict[
-                vol.Optional(key, default=default_assignment)
-            ] = selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=phase_options,
-                    multiple=True,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
+        # Per-battery phase assignments (multi-select) - only relevant in three-phase mode
+        if current_phase_mode == PHASE_MODE_THREE:
+            phase_options = [
+                {"value": phase_id, "label": DEFAULT_PHASE_NAMES[phase_id]} for phase_id in PHASE_IDS
+            ]
+            for entity_id in battery_entities:
+                key = f"phase_assignment_{entity_id.replace('.', '_')}"
+                default_assignment = existing_assignments.get(entity_id, [])
+                schema_dict[
+                    vol.Optional(key, default=default_assignment)
+                ] = selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=phase_options,
+                        multiple=True,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
                 )
-            )
 
         # Per-phase sensor fields (only in three-phase mode)
         if current_phase_mode == PHASE_MODE_THREE:
