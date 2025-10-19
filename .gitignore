@@ -11,6 +11,7 @@ Thumbs.db
 *.png
 !docs/*.png
 !images/*.png
+!custom_components/**/*.png
 
 # IDE and editor files
 .vscode/
