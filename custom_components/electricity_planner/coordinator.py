@@ -102,6 +102,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Car charging state tracking for hysteresis
         self._previous_car_charging: bool = False
 
+        # Price interval tracking for threshold stability
+        self._current_price_interval_start: datetime | None = None
+        self._battery_threshold_snapshot: float | None = None
+
         # Manual override tracking
         self._manual_overrides: dict[str, dict[str, Any] | None] = {
             "battery_grid_charging": None,
@@ -499,13 +503,53 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("Entity update skipped for %s (throttled, %.1fs remaining)",
                             entity_id, time_remaining)
 
+    def _get_current_price_interval_start(self) -> datetime:
+        """Get the start time of the current 15-minute price interval."""
+        now = dt_util.now()
+        # Round down to nearest 15 minutes
+        minutes = (now.minute // 15) * 15
+        return now.replace(minute=minutes, second=0, microsecond=0)
+
+    def _update_battery_threshold_snapshot_if_needed(self, price_threshold: float | None) -> None:
+        """Update battery threshold snapshot when entering a new price interval."""
+        if price_threshold is None:
+            return
+
+        current_interval = self._get_current_price_interval_start()
+
+        # Update if this is the first interval or if we've entered a new interval
+        if self._current_price_interval_start is None or current_interval != self._current_price_interval_start:
+            self._current_price_interval_start = current_interval
+            self._battery_threshold_snapshot = price_threshold
+            _LOGGER.debug(
+                "New price interval starting at %s: snapshotting battery threshold at %.4f€/kWh",
+                current_interval.strftime("%H:%M"),
+                price_threshold
+            )
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Update data via library."""
         try:
             data = await self._fetch_all_data()
 
+            # Determine the current price threshold (with dynamic/average logic)
+            use_average = self.config.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)
+            average_threshold = data.get("average_threshold")
+
+            if use_average and average_threshold is not None:
+                current_threshold = average_threshold
+            else:
+                current_threshold = self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
+
+            # Update battery threshold snapshot if we've entered a new 15-min interval
+            self._update_battery_threshold_snapshot_if_needed(current_threshold)
+
             # Add previous car charging state for hysteresis logic
             data["previous_car_charging"] = self._previous_car_charging
+
+            # Pass the stable threshold snapshot to decision engine
+            if self._battery_threshold_snapshot is not None:
+                data["battery_stable_threshold"] = self._battery_threshold_snapshot
 
             charging_decision = await self.decision_engine.evaluate_charging_decision(data)
             charging_decision = self._apply_manual_overrides(charging_decision)

@@ -236,7 +236,21 @@ class DynamicPriceStrategy(ChargingStrategy):
         if current_price is None:
             return False, ""
 
-        threshold = price.get("price_threshold", 0.15)
+        # Use stable threshold snapshot for current 15-min interval if available
+        # This prevents threshold fluctuations from causing on/off cycles within same price period
+        stable_threshold = context.get("battery_stable_threshold")
+        base_threshold = price.get("price_threshold", 0.15)
+
+        if stable_threshold is not None:
+            threshold = stable_threshold
+            if abs(stable_threshold - base_threshold) > 0.001:  # Only log if different
+                _LOGGER.debug(
+                    "Using stable threshold snapshot %.4f€/kWh for current interval (current calculated: %.4f€/kWh)",
+                    stable_threshold,
+                    base_threshold,
+                )
+        else:
+            threshold = base_threshold
 
         # Get base confidence from config (default 60%) and clamp to sensible range
         config_confidence = (
@@ -364,7 +378,18 @@ class StrategyManager:
         trace: List[Dict[str, Any]] = []
         price = context.get("price_analysis", {})
         current_price = price.get("current_price")
-        threshold = price.get("price_threshold", 0.15)
+        stable_threshold = context.get("battery_stable_threshold")
+        if stable_threshold is not None:
+            threshold = stable_threshold
+            base_threshold = price.get("price_threshold")
+            if base_threshold is not None and abs(base_threshold - stable_threshold) > 0.001:
+                _LOGGER.debug(
+                    "PriceThresholdGuard using stable snapshot %.4f€/kWh (current calculated: %.4f€/kWh)",
+                    stable_threshold,
+                    base_threshold,
+                )
+        else:
+            threshold = price.get("price_threshold", 0.15)
 
         if current_price is not None and current_price > threshold:
             # Check if emergency charging applies

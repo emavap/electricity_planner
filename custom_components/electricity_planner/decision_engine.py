@@ -508,7 +508,7 @@ class ChargingDecisionEngine:
         
         # Make charging decisions
         battery_decision = self._decide_battery_grid_charging(
-            price_analysis, battery_analysis, power_allocation, power_analysis, time_context
+            price_analysis, battery_analysis, power_allocation, power_analysis, time_context, data
         )
         decision_data.update(battery_decision)
 
@@ -1284,8 +1284,9 @@ class ChargingDecisionEngine:
         power_allocation: Dict[str, Any],
         power_analysis: Dict[str, Any],
         time_context: Dict[str, Any],
+        data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Decide battery charging using strategy pattern."""
+        """Decide battery charging using strategy pattern with hysteresis."""
         # Safety checks
         if battery_analysis.get("batteries_count", 0) == 0:
             return {
@@ -1341,6 +1342,9 @@ class ChargingDecisionEngine:
                 "strategy_trace": [],
             }
 
+        # Get stable threshold snapshot for current interval (prevents fluctuations)
+        stable_threshold = data.get("battery_stable_threshold")
+
         # Create context for strategies
         context = {
             "price_analysis": price_analysis,
@@ -1349,6 +1353,7 @@ class ChargingDecisionEngine:
             "power_analysis": power_analysis,
             "time_context": time_context,
             "config": self.config,
+            "battery_stable_threshold": stable_threshold,
         }
 
         # Use strategy manager
