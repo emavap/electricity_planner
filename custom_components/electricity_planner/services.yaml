@@ -3,6 +3,13 @@ set_manual_override:
   name: Set Manual Override
   description: Manually override charging decisions for battery or car
   fields:
+    entry_id:
+      name: Config Entry
+      description: Target a specific Electricity Planner config entry when multiple are loaded
+      required: false
+      example: "abcd1234efgh5678"
+      selector:
+        text:
     target:
       name: Target
       description: Which device(s) to override (battery, car, or both)
@@ -46,6 +53,13 @@ clear_manual_override:
   name: Clear Manual Override
   description: Clear any active manual overrides
   fields:
+    entry_id:
+      name: Config Entry
+      description: Target a specific Electricity Planner config entry when multiple are loaded
+      required: false
+      example: "abcd1234efgh5678"
+      selector:
+        text:
     target:
       name: Target
       description: Which device(s) override to clear (battery, car, or both)

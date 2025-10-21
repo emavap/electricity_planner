@@ -175,10 +175,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         transport_lookup: list[dict[str, Any]] | None,
         start_time_utc: datetime,
         reference_now: datetime | None = None,
-    ) -> float:
+    ) -> float | None:
         """Resolve transport cost for a specific timestamp."""
         if not transport_lookup:
-            return 0.0
+            return None
 
         if reference_now is None:
             reference_now = dt_util.utcnow()
@@ -226,7 +226,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             else:
                 break
 
-        return cost if cost is not None else 0.0
+        return cost
 
     def _resolve_override_targets(self, target: str) -> tuple[str, ...]:
         """Resolve override target string into coordinator keys."""
@@ -397,8 +397,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     transport_cost = self._resolve_transport_cost(
                         transport_lookup, start_time_utc, reference_now=now
                     )
-                    if transport_cost == 0.0 and current_transport_cost is not None:
-                        transport_cost = current_transport_cost
+                    if transport_cost is None:
+                        transport_cost = (
+                            current_transport_cost
+                            if current_transport_cost is not None
+                            else 0.0
+                        )
 
                     final_price = adjusted_price + transport_cost
                     future_intervals.append((start_time_utc, end_time, final_price))
@@ -1005,6 +1009,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     transport_cost = self._resolve_transport_cost(
                         transport_lookup, start_time_utc, reference_now=now
                     )
+                    if transport_cost is None:
+                        transport_cost = 0.0
 
                     final_price = adjusted_price + transport_cost
                     all_intervals.append((start_time_utc, final_price))
@@ -1111,6 +1117,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     transport_cost = self._resolve_transport_cost(
                         transport_lookup, start_time_utc, reference_now=now
                     )
+                    if transport_cost is None:
+                        transport_cost = 0.0
                     final_price = adjusted_price + transport_cost
 
                     past_intervals.append((start_time_utc, final_price))
