@@ -35,6 +35,7 @@ from .const import (
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_TRANSPORT_COST_ENTITY,
+    CONF_GRID_POWER_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
@@ -320,6 +321,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_TRANSPORT_COST_ENTITY,
                     default=self.data.get(CONF_TRANSPORT_COST_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_GRID_POWER_ENTITY,
+                    default=self.data.get(CONF_GRID_POWER_ENTITY),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -938,6 +945,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Optional(
+                CONF_GRID_POWER_ENTITY,
+                default=working_data.get(CONF_GRID_POWER_ENTITY),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
                 CONF_MIN_SOC_THRESHOLD,
                 default=working_data.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC),
             ): selector.NumberSelector(
@@ -1133,22 +1146,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 )
             )
 
-        # Per-battery phase assignments (multi-select)
-        phase_options = [
-            {"value": phase_id, "label": DEFAULT_PHASE_NAMES[phase_id]} for phase_id in PHASE_IDS
-        ]
-        for entity_id in battery_entities:
-            key = f"phase_assignment_{entity_id.replace('.', '_')}"
-            default_assignment = existing_assignments.get(entity_id, [])
-            schema_dict[
-                vol.Optional(key, default=default_assignment)
-            ] = selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=phase_options,
-                    multiple=True,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
+        # Per-battery phase assignments (multi-select) - only relevant in three-phase mode
+        if current_phase_mode == PHASE_MODE_THREE:
+            phase_options = [
+                {"value": phase_id, "label": DEFAULT_PHASE_NAMES[phase_id]} for phase_id in PHASE_IDS
+            ]
+            for entity_id in battery_entities:
+                key = f"phase_assignment_{entity_id.replace('.', '_')}"
+                default_assignment = existing_assignments.get(entity_id, [])
+                schema_dict[
+                    vol.Optional(key, default=default_assignment)
+                ] = selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=phase_options,
+                        multiple=True,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
                 )
-            )
 
         # Per-phase sensor fields (only in three-phase mode)
         if current_phase_mode == PHASE_MODE_THREE:

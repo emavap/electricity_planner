@@ -39,7 +39,9 @@ class DynamicThresholdAnalyzer:
         if acceptable_range > 0:
             price_quality = (self.max_threshold - current_price) / acceptable_range
         else:
-            price_quality = 1.0  # All prices equal, charge anytime
+            # No headroom left below the configured threshold (or all prices equal)
+            acceptable_range = 0.0
+            price_quality = 0.0
 
         # Dynamic threshold based on daily range
         # More selective when range is wide, less selective when narrow
@@ -55,6 +57,10 @@ class DynamicThresholdAnalyzer:
         else:  # Low volatility (<30% range)
             # Less selective - charge at bottom 80% of acceptable range
             dynamic_threshold = lowest_today + (acceptable_range * 0.8)
+
+        # Ensure the derived threshold never exceeds the configured maximum
+        if dynamic_threshold > self.max_threshold:
+            dynamic_threshold = self.max_threshold
 
         # Simple next-hour check (only if we have real data)
         next_hour_better = False

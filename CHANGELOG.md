@@ -5,6 +5,21 @@ All notable changes to the Electricity Planner integration will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2025-10-21
+
+### Added
+- **Multi-Instance Service Support** – Manual override services (`set_manual_override` / `clear_manual_override`) now accept optional `entry_id` parameter
+  - Enables targeting specific integration instances when multiple are configured
+  - Maintains backward compatibility with single-instance setups (auto-selects sole entry)
+  - Clear error messages when `entry_id` is required but not provided
+
+### Improved
+- **Transport Cost Fallback Logic** – Enhanced reliability when transport cost time windows end
+  - `_resolve_transport_cost()` now returns `None` when lookup unavailable (semantic clarity)
+  - Graceful fallback to current sensor value before defaulting to 0.0
+  - Prevents incorrect zero costs when valid sensor data available
+  - Better handling in average threshold calculation for accurate pricing
+
 ## [3.0.0] - 2025-10-18
 
 ### Added

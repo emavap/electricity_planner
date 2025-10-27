@@ -57,3 +57,18 @@ def test_low_volatility_accepts_broader_range():
     assert result["dynamic_threshold"] == pytest.approx(0.11 + (0.05 * 0.8))
     assert result["should_charge"] is True
     assert result["confidence"] >= 0.5
+
+
+def test_dynamic_threshold_respects_configured_maximum():
+    """Dynamic threshold must never exceed the configured ceiling."""
+    analyzer = DynamicThresholdAnalyzer(threshold=0.15, base_confidence=0.6)
+    result = analyzer.analyze_price_window(
+        current_price=0.15,
+        highest_today=0.22,
+        lowest_today=0.17,  # Entire price curve above the allowed threshold
+        next_price=0.12,
+    )
+    assert result["dynamic_threshold"] == pytest.approx(0.15)
+    assert result["should_charge"] is False
+    assert result["confidence"] < 0.6
+    assert "below dynamic threshold" not in result["reason"]

@@ -38,6 +38,8 @@ from .const import (
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_TRANSPORT_COST_ENTITY,
+    CONF_GRID_POWER_ENTITY,
+    CONF_BASE_GRID_SETPOINT,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
@@ -45,6 +47,7 @@ from .const import (
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_USE_AVERAGE_THRESHOLD,
     CONF_MIN_CAR_CHARGING_DURATION,
+    CONF_MIN_CAR_CHARGING_THRESHOLD,
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
@@ -53,6 +56,8 @@ from .const import (
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_USE_AVERAGE_THRESHOLD,
     DEFAULT_MIN_CAR_CHARGING_DURATION,
+    DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
+    DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
 )
 from .decision_engine import ChargingDecisionEngine
@@ -102,6 +107,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Car charging state tracking for hysteresis
         self._previous_car_charging: bool = False
 
+        # Price interval tracking for threshold stability
+        self._current_price_interval_start: datetime | None = None
+        self._battery_threshold_snapshot: float | None = None
+
         # Manual override tracking
         self._manual_overrides: dict[str, dict[str, Any] | None] = {
             "battery_grid_charging": None,
@@ -109,6 +118,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         }
         self._last_price_timeline: list[tuple[datetime, datetime, float]] | None = None
         self._last_price_timeline_generated_at: datetime | None = None
+
+        # Car peak limit tracking (15-minute hold after 5 minutes of sustained peak exceedance)
+        self._car_peak_limited_until: datetime | None = None
+        self._car_peak_limit_started_at: datetime | None = None
 
         super().__init__(
             hass,
@@ -145,7 +158,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             entities_to_track.extend(self.config[CONF_BATTERY_SOC_ENTITIES])
 
         # Power entities
-        for entity_key in [CONF_SOLAR_PRODUCTION_ENTITY, CONF_HOUSE_CONSUMPTION_ENTITY, CONF_CAR_CHARGING_POWER_ENTITY, CONF_MONTHLY_GRID_PEAK_ENTITY]:
+        for entity_key in [CONF_SOLAR_PRODUCTION_ENTITY, CONF_HOUSE_CONSUMPTION_ENTITY, CONF_CAR_CHARGING_POWER_ENTITY, CONF_MONTHLY_GRID_PEAK_ENTITY, CONF_GRID_POWER_ENTITY]:
             if self.config.get(entity_key):
                 entities_to_track.append(self.config[entity_key])
 
@@ -171,10 +184,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         transport_lookup: list[dict[str, Any]] | None,
         start_time_utc: datetime,
         reference_now: datetime | None = None,
-    ) -> float:
+    ) -> float | None:
         """Resolve transport cost for a specific timestamp."""
         if not transport_lookup:
-            return 0.0
+            return None
 
         if reference_now is None:
             reference_now = dt_util.utcnow()
@@ -222,7 +235,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             else:
                 break
 
-        return cost if cost is not None else 0.0
+        return cost
 
     def _resolve_override_targets(self, target: str) -> tuple[str, ...]:
         """Resolve override target string into coordinator keys."""
@@ -267,12 +280,79 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 _LOGGER.info("Manual override cleared for %s", coordinator_key)
             self._manual_overrides[coordinator_key] = None
 
-    def _apply_manual_overrides(self, decision: dict[str, Any]) -> dict[str, Any]:
+    def _update_peak_limit_state(self, data: dict[str, Any]) -> None:
+        """Track 15-minute car charging limit after 5 minutes of sustained peak exceedance."""
+        now = dt_util.utcnow()
+
+        # Check if hold period expired
+        if self._car_peak_limited_until and now >= self._car_peak_limited_until:
+            self._car_peak_limited_until = None
+            _LOGGER.debug("Car peak limit hold expired")
+
+        # Calculate threshold (5% over effective peak)
+        monthly_peak = data.get("monthly_grid_peak")
+        base_grid_setpoint = self.config.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT)
+        effective_peak = max(monthly_peak or 0, base_grid_setpoint)
+        peak_threshold = effective_peak * 1.05 if effective_peak > 0 else None
+
+        # Check current state
+        grid_power = data.get("grid_power")
+        car_power = data.get("car_charging_power") or 0.0
+        min_car_threshold = self.config.get(
+            CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD
+        )
+        car_charging = car_power >= min_car_threshold
+        currently_limited = bool(self._car_peak_limited_until and now < self._car_peak_limited_until)
+
+        # Only monitor if car is charging, not already limited, and we have valid data
+        if peak_threshold and grid_power is not None and car_charging and not currently_limited:
+            grid_import = abs(min(0.0, float(grid_power)))
+
+            if grid_import > peak_threshold:
+                # Start or continue monitoring
+                if self._car_peak_limit_started_at is None:
+                    self._car_peak_limit_started_at = now
+                    _LOGGER.debug(
+                        "Grid import %.0fW > %.0fW: starting 5-minute monitoring",
+                        grid_import, peak_threshold
+                    )
+                else:
+                    # Check if sustained for 5 minutes
+                    exceed_duration = now - self._car_peak_limit_started_at
+                    if exceed_duration >= timedelta(minutes=5):
+                        self._car_peak_limited_until = now + timedelta(minutes=15)
+                        self._car_peak_limit_started_at = None  # Reset monitoring
+                        _LOGGER.info(
+                            "Grid import %.0fW exceeded %.0fW for 5 minutes. "
+                            "Halving car charger limit for 15 minutes.",
+                            grid_import, peak_threshold
+                        )
+                        currently_limited = True
+            else:
+                # Dropped below threshold - reset monitoring
+                if self._car_peak_limit_started_at is not None:
+                    _LOGGER.debug(
+                        "Grid import back below threshold (%.0fW <= %.0fW) - monitoring reset",
+                        grid_import, peak_threshold
+                    )
+                self._car_peak_limit_started_at = None
+        else:
+            # Not eligible for monitoring - reset
+            self._car_peak_limit_started_at = None
+
+        # Expose minimal data
+        data["car_peak_limited"] = currently_limited
+        data["car_peak_limit_threshold"] = peak_threshold
+
+    def _apply_manual_overrides(
+        self, decision: dict[str, Any]
+    ) -> tuple[dict[str, Any], set[str]]:
         """Apply active manual overrides to the decision payload."""
         now = dt_util.utcnow()
         overrides_info: dict[str, Any] = {}
         base_trace = decision.get("strategy_trace") or []
         augmented_trace = list(base_trace)
+        changed_targets: set[str] = set()
 
         for coordinator_key, override in self._manual_overrides.items():
             if not override:
@@ -286,7 +366,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             manual_reason: str = override.get("reason") or (
                 "Manual override to charge" if override.get("value") else "Manual override to wait"
             )
+            previous_value = decision.get(coordinator_key)
             decision[coordinator_key] = override["value"]
+            if previous_value != override["value"]:
+                changed_targets.add(coordinator_key)
 
             reason_key = f"{coordinator_key}_reason"
             existing_reason = decision.get(reason_key)
@@ -318,7 +401,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         else:
             decision.setdefault("manual_overrides", {})
 
-        return decision
+        return decision, changed_targets
 
     def _build_price_timeline(
         self,
@@ -350,13 +433,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                         continue
                     start_time_utc = dt_util.as_utc(start_time)
 
-                    end_time = None
+                    end_time: datetime | None = None
                     end_time_str = interval.get("end")
                     if end_time_str:
                         try:
-                            end_time = dt_util.parse_datetime(end_time_str)
-                            if end_time <= start_time:
-                                end_time = None
+                            parsed_end = dt_util.parse_datetime(end_time_str)
+                            if parsed_end is not None:
+                                end_time_utc = dt_util.as_utc(parsed_end)
+                                if end_time_utc > start_time_utc:
+                                    end_time = end_time_utc
                         except Exception:
                             end_time = None
 
@@ -391,8 +476,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     transport_cost = self._resolve_transport_cost(
                         transport_lookup, start_time_utc, reference_now=now
                     )
-                    if transport_cost == 0.0 and current_transport_cost is not None:
-                        transport_cost = current_transport_cost
+                    if transport_cost is None:
+                        transport_cost = (
+                            current_transport_cost
+                            if current_transport_cost is not None
+                            else 0.0
+                        )
 
                     final_price = adjusted_price + transport_cost
                     future_intervals.append((start_time_utc, end_time, final_price))
@@ -497,16 +586,64 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("Entity update skipped for %s (throttled, %.1fs remaining)",
                             entity_id, time_remaining)
 
+    def _get_current_price_interval_start(self) -> datetime:
+        """Get the start time of the current 15-minute price interval."""
+        now = dt_util.now()
+        # Round down to nearest 15 minutes
+        minutes = (now.minute // 15) * 15
+        return now.replace(minute=minutes, second=0, microsecond=0)
+
+    def _update_battery_threshold_snapshot_if_needed(self, price_threshold: float | None) -> None:
+        """Update battery threshold snapshot when entering a new price interval."""
+        if price_threshold is None:
+            return
+
+        current_interval = self._get_current_price_interval_start()
+
+        # Update if this is the first interval or if we've entered a new interval
+        if self._current_price_interval_start is None or current_interval != self._current_price_interval_start:
+            self._current_price_interval_start = current_interval
+            self._battery_threshold_snapshot = price_threshold
+            _LOGGER.debug(
+                "New price interval starting at %s: snapshotting battery threshold at %.4f€/kWh",
+                current_interval.strftime("%H:%M"),
+                price_threshold
+            )
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Update data via library."""
         try:
             data = await self._fetch_all_data()
 
+            # Determine the current price threshold (with dynamic/average logic)
+            use_average = self.config.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)
+            average_threshold = data.get("average_threshold")
+
+            if use_average and average_threshold is not None:
+                current_threshold = average_threshold
+            else:
+                current_threshold = self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
+
+            # Update battery threshold snapshot if we've entered a new 15-min interval
+            self._update_battery_threshold_snapshot_if_needed(current_threshold)
+
             # Add previous car charging state for hysteresis logic
             data["previous_car_charging"] = self._previous_car_charging
 
+            # Pass the stable threshold snapshot to decision engine
+            if self._battery_threshold_snapshot is not None:
+                data["battery_stable_threshold"] = self._battery_threshold_snapshot
+
+            # Update peak import limit state based on current grid power
+            self._update_peak_limit_state(data)
+
             charging_decision = await self.decision_engine.evaluate_charging_decision(data)
-            charging_decision = self._apply_manual_overrides(charging_decision)
+            charging_decision, override_targets = self._apply_manual_overrides(charging_decision)
+
+            if override_targets:
+                charging_decision = self.decision_engine.recalculate_after_override(
+                    data, charging_decision, override_targets
+                )
 
             data.update(charging_decision)
 
@@ -712,6 +849,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         data["monthly_grid_peak"] = await self._get_state_value(
             self.config.get(CONF_MONTHLY_GRID_PEAK_ENTITY)
+        )
+
+        data["grid_power"] = await self._get_state_value(
+            self.config.get(CONF_GRID_POWER_ENTITY)
         )
 
         # Preserve car charging locked threshold across updates (for threshold continuity)
@@ -959,6 +1100,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     transport_cost = self._resolve_transport_cost(
                         transport_lookup, start_time_utc, reference_now=now
                     )
+                    if transport_cost is None:
+                        transport_cost = 0.0
 
                     final_price = adjusted_price + transport_cost
                     all_intervals.append((start_time_utc, final_price))
@@ -1065,6 +1208,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     transport_cost = self._resolve_transport_cost(
                         transport_lookup, start_time_utc, reference_now=now
                     )
+                    if transport_cost is None:
+                        transport_cost = 0.0
                     final_price = adjusted_price + transport_cost
 
                     past_intervals.append((start_time_utc, final_price))
@@ -1424,26 +1569,31 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                         "average_price": average_price,
                     }
 
+        def _iso_local(dt_obj: datetime) -> str:
+            """Return ISO string in Home Assistant's local timezone."""
+            localized = dt_util.as_local(dt_obj)
+            return localized.isoformat()
+
         summary: dict[str, Any] = {
             "available": True,
-            "cheapest_interval_start": cheapest_segment[0].isoformat(),
-            "cheapest_interval_end": cheapest_segment[1].isoformat(),
+            "cheapest_interval_start": _iso_local(cheapest_segment[0]),
+            "cheapest_interval_end": _iso_local(cheapest_segment[1]),
             "cheapest_interval_price": round(cheapest_segment[2], 4),
             "average_threshold": minimum_average_threshold,
-            "evaluated_at": now.isoformat(),
+            "evaluated_at": _iso_local(now),
         }
 
         if stale:
             summary["stale"] = True
         if self._last_price_timeline_generated_at:
-            summary["timeline_generated_at"] = self._last_price_timeline_generated_at.isoformat()
+            summary["timeline_generated_at"] = _iso_local(self._last_price_timeline_generated_at)
 
         if best_window:
             summary.update(
                 {
                     "best_window_hours": min_duration_hours,
-                    "best_window_start": best_window["start"].isoformat(),
-                    "best_window_end": best_window["end"].isoformat(),
+                    "best_window_start": _iso_local(best_window["start"]),
+                    "best_window_end": _iso_local(best_window["end"]),
                     "best_window_average_price": round(best_window["average_price"], 4),
                 }
             )

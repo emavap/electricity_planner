@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-labelledby="title desc">
+  <title id="title">Electricity Planner Logo</title>
+  <desc id="desc">Stylised lightning bolt combined with grid to reflect planning of electric consumption.</desc>
+  <defs>
+    <linearGradient id="boltGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffd766"/>
+      <stop offset="100%" stop-color="#f39c12"/>
+    </linearGradient>
+    <linearGradient id="gridGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f4c81"/>
+      <stop offset="100%" stop-color="#102a43"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="240" height="240" rx="28" fill="#061b2d"/>
+  <g transform="translate(40 40)">
+    <rect x="0" y="0" width="160" height="160" rx="20" fill="url(#gridGradient)"/>
+    <path d="M20 40h120M20 80h120M20 120h120" stroke="#2c6cb0" stroke-width="6" stroke-linecap="round" opacity="0.5"/>
+    <path d="M60 20v120M100 20v120" stroke="#2c6cb0" stroke-width="6" stroke-linecap="round" opacity="0.5"/>
+    <path d="M92 12L60 104h36l-12 68 52-108h-36l12-52z" fill="url(#boltGradient)" stroke="#fef3c7" stroke-width="6" stroke-linejoin="round"/>
+    <circle cx="120" cy="132" r="18" fill="#0f4c81" stroke="#fef3c7" stroke-width="6"/>
+    <path d="M120 120v24" stroke="#ffd766" stroke-width="6" stroke-linecap="round"/>
+  </g>
+</svg>

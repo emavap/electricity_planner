@@ -35,7 +35,8 @@ views:
                 needle: true
                 scale: "50px"
                 segments: |-
-                  {% set dynamic_threshold = state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') %}
+                  {% set price_sensor = 'sensor.electricity_planner_current_electricity_price' %}
+                  {% set dynamic_threshold = state_attr(price_sensor, 'dynamic_threshold') %}
                   {% set decision_sensor = 'sensor.electricity_planner_decision_diagnostics' %}
                   {% if states(decision_sensor) in ['unknown', 'unavailable', None] %}
                     {% set decision_sensor = 'sensor.electricity_planner_decision_diagnostics_diagnostic' %}
@@ -43,16 +44,22 @@ views:
                   {% set price_analysis = state_attr(decision_sensor, 'price_analysis') %}
                   {% set average_threshold = price_analysis.average_threshold if price_analysis else None %}
                   {% set fixed_threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float %}
+                  {% set price_threshold = state_attr(price_sensor, 'price_threshold') %}
 
-                  {% if average_threshold != None %}
+                  {% if price_threshold not in [None, 'unknown', 'unavailable'] %}
+                    {% set max_threshold = price_threshold | float %}
+                  {% elif average_threshold not in [None, 'unknown', 'unavailable'] %}
                     {% set max_threshold = average_threshold | float %}
                   {% else %}
                     {% set max_threshold = fixed_threshold %}
                   {% endif %}
 
-                  {% if dynamic_threshold != None %}
+                  {% if dynamic_threshold not in [None, 'unknown', 'unavailable'] %}
                     {% set threshold = dynamic_threshold | float %}
                   {% else %}
+                    {% set threshold = max_threshold %}
+                  {% endif %}
+                  {% if threshold > max_threshold %}
                     {% set threshold = max_threshold %}
                   {% endif %}
                   {{

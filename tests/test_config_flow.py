@@ -21,6 +21,7 @@ from custom_components.electricity_planner.const import (
     CONF_NEXT_PRICE_ENTITY,
     CONF_SOLAR_PRODUCTION_ENTITY,
     CONF_HOUSE_CONSUMPTION_ENTITY,
+    CONF_PHASE_MODE,
     CONF_MAX_BATTERY_POWER,
     CONF_MAX_CAR_POWER,
     CONF_MAX_GRID_POWER,
@@ -59,6 +60,7 @@ from custom_components.electricity_planner.const import (
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
     DEFAULT_MAX_SOC,
+    PHASE_MODE_SINGLE,
     DOMAIN,
 )
 
@@ -146,3 +148,29 @@ async def test_options_flow_defaults_reflect_existing_options():
 
     capacity_field = f"capacity_{battery_entity.replace('.', '_')}"
     assert default_for(capacity_field) == pytest.approx(11.5)
+
+
+@pytest.mark.asyncio
+async def test_options_flow_hides_phase_assignment_when_single_phase():
+    battery_entity = "sensor.main_battery"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_BATTERY_SOC_ENTITIES: [battery_entity],
+        },
+        options={
+            CONF_BATTERY_SOC_ENTITIES: [battery_entity],
+            CONF_BATTERY_CAPACITIES: {battery_entity: 8.0},
+            # Explicitly ensure stored phase mode is single
+            CONF_PHASE_MODE: PHASE_MODE_SINGLE,
+        },
+    )
+
+    handler = OptionsFlowHandler(entry)
+    result = await handler.async_step_init()
+
+    assert result["type"] == FlowResultType.FORM
+    schema = result["data_schema"].schema
+
+    phase_assignment_field = f"phase_assignment_{battery_entity.replace('.', '_')}"
+    assert not any(getattr(field, "schema", None) == phase_assignment_field for field in schema)
