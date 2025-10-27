@@ -1746,6 +1746,32 @@ class ChargingDecisionEngine:
             "car_grid_charging_reason": self._append_permissive_mode_to_reason(high_price_reason, context),
         }
 
+    def _apply_peak_import_limit(
+        self, result: Dict[str, Any], data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Halve charger limit while peak import protection is active."""
+        if not data.get("car_peak_limited"):
+            return result
+
+        limit = result.get("charger_limit", 0)
+        if limit <= 0:
+            return result
+
+        reduced_limit = limit // 2  # Integer division
+        existing_reason = result.get("charger_limit_reason", "")
+        peak_reason = f"Peak import exceeded - halved to {reduced_limit}W for 15min"
+
+        result["charger_limit"] = reduced_limit
+        result["charger_limit_reason"] = (
+            f"{existing_reason} | {peak_reason}" if existing_reason else peak_reason
+        )
+
+        _LOGGER.info(
+            "Peak import protection: reducing charger limit from %dW to %dW",
+            limit, reduced_limit
+        )
+        return result
+
     def _calculate_charger_limit(
         self,
         price_analysis: Dict[str, Any],
@@ -1771,10 +1797,10 @@ class ChargingDecisionEngine:
         if car_solar_only:
             if allocated_solar > 0:
                 limit = min(allocated_solar, car_limit_cap)
-                return {
+                return self._apply_peak_import_limit({
                     "charger_limit": int(limit),
                     "charger_limit_reason": f"Solar-only car charging - limited to allocated solar power ({int(limit)}W), no grid usage",
-                }
+                }, data)
             else:
                 return {
                     "charger_limit": 0,
@@ -1787,7 +1813,7 @@ class ChargingDecisionEngine:
                 "charger_limit": 0,
                 "charger_limit_reason": "Car grid charging not allowed",
             }
-        
+
         # Calculate based on battery SOC and grid limits
         # At this point: car_grid_charging=True and not solar_only
         average_soc = battery_analysis.get("average_soc")
@@ -1797,33 +1823,56 @@ class ChargingDecisionEngine:
             monthly_peak = data.get("monthly_grid_peak", 0)
             max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
             limit = min(max_setpoint, car_limit_cap)
-            return {
+            return self._apply_peak_import_limit({
                 "charger_limit": int(limit),
                 "charger_limit_reason": f"Battery data unavailable - conservative limit ({int(limit)}W)",
-            }
-        
+            }, data)
+
         max_soc_threshold = battery_analysis.get("max_soc_threshold", 80)
         monthly_peak = data.get("monthly_grid_peak", 0)
         max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
 
+        # Check for low SOC power sharing: when battery SOC is critically low and both
+        # battery and car are charging from grid, limit car to 50% to prioritize battery
+        battery_grid_charging = data.get("battery_grid_charging", False)
+        predictive_min_soc = self.config.get(
+            CONF_PREDICTIVE_CHARGING_MIN_SOC, DEFAULT_PREDICTIVE_CHARGING_MIN_SOC
+        )
+
+        if (average_soc < predictive_min_soc and
+            battery_grid_charging and
+            car_grid_charging):
+            limit = min(max_setpoint / 2, car_limit_cap)
+            _LOGGER.info(
+                "Low SOC power sharing: battery %.0f%% < %.0f%%, limiting car to 50%% of grid (%dW)",
+                average_soc, predictive_min_soc, int(limit)
+            )
+            return self._apply_peak_import_limit({
+                "charger_limit": int(limit),
+                "charger_limit_reason": (
+                    f"Low battery SOC ({average_soc:.0f}% < {predictive_min_soc}%) - "
+                    f"sharing grid power with batteries (car limited to 50% = {int(limit)}W)"
+                ),
+            }, data)
+
         if average_soc < max_soc_threshold:
             limit = min(max_setpoint, car_limit_cap)
-            return {
+            return self._apply_peak_import_limit({
                 "charger_limit": int(limit),
                 "charger_limit_reason": (f"Battery {average_soc:.0f}% < {max_soc_threshold}% - "
                                         f"car limited to grid setpoint ({int(limit)}W), surplus for batteries"),
-            }
-        
+            }, data)
+
         available_surplus = power_allocation.get("remaining_solar", 0)
         available_power = available_surplus + max_setpoint
         limit = min(available_power, car_limit_cap)
-        
-        return {
+
+        return self._apply_peak_import_limit({
             "charger_limit": int(limit),
             "charger_limit_reason": (f"Battery {average_soc:.0f}% ≥ {max_soc_threshold}% - "
                                     f"car can use remaining surplus + grid ({int(limit)}W = "
                                     f"{available_surplus}W + {max_setpoint}W)"),
-        }
+        }, data)
 
     def _calculate_grid_setpoint(
         self,

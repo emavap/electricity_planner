@@ -38,6 +38,8 @@ from .const import (
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_TRANSPORT_COST_ENTITY,
+    CONF_GRID_POWER_ENTITY,
+    CONF_BASE_GRID_SETPOINT,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
@@ -45,6 +47,7 @@ from .const import (
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_USE_AVERAGE_THRESHOLD,
     CONF_MIN_CAR_CHARGING_DURATION,
+    CONF_MIN_CAR_CHARGING_THRESHOLD,
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
@@ -53,6 +56,8 @@ from .const import (
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_USE_AVERAGE_THRESHOLD,
     DEFAULT_MIN_CAR_CHARGING_DURATION,
+    DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
+    DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
 )
 from .decision_engine import ChargingDecisionEngine
@@ -114,6 +119,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._last_price_timeline: list[tuple[datetime, datetime, float]] | None = None
         self._last_price_timeline_generated_at: datetime | None = None
 
+        # Car peak limit tracking (15-minute hold after 5 minutes of sustained peak exceedance)
+        self._car_peak_limited_until: datetime | None = None
+        self._car_peak_limit_started_at: datetime | None = None
+
         super().__init__(
             hass,
             _LOGGER,
@@ -149,7 +158,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             entities_to_track.extend(self.config[CONF_BATTERY_SOC_ENTITIES])
 
         # Power entities
-        for entity_key in [CONF_SOLAR_PRODUCTION_ENTITY, CONF_HOUSE_CONSUMPTION_ENTITY, CONF_CAR_CHARGING_POWER_ENTITY, CONF_MONTHLY_GRID_PEAK_ENTITY]:
+        for entity_key in [CONF_SOLAR_PRODUCTION_ENTITY, CONF_HOUSE_CONSUMPTION_ENTITY, CONF_CAR_CHARGING_POWER_ENTITY, CONF_MONTHLY_GRID_PEAK_ENTITY, CONF_GRID_POWER_ENTITY]:
             if self.config.get(entity_key):
                 entities_to_track.append(self.config[entity_key])
 
@@ -270,6 +279,70 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             if self._manual_overrides.get(coordinator_key):
                 _LOGGER.info("Manual override cleared for %s", coordinator_key)
             self._manual_overrides[coordinator_key] = None
+
+    def _update_peak_limit_state(self, data: dict[str, Any]) -> None:
+        """Track 15-minute car charging limit after 5 minutes of sustained peak exceedance."""
+        now = dt_util.utcnow()
+
+        # Check if hold period expired
+        if self._car_peak_limited_until and now >= self._car_peak_limited_until:
+            self._car_peak_limited_until = None
+            _LOGGER.debug("Car peak limit hold expired")
+
+        # Calculate threshold (5% over effective peak)
+        monthly_peak = data.get("monthly_grid_peak")
+        base_grid_setpoint = self.config.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT)
+        effective_peak = max(monthly_peak or 0, base_grid_setpoint)
+        peak_threshold = effective_peak * 1.05 if effective_peak > 0 else None
+
+        # Check current state
+        grid_power = data.get("grid_power")
+        car_power = data.get("car_charging_power") or 0.0
+        min_car_threshold = self.config.get(
+            CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD
+        )
+        car_charging = car_power >= min_car_threshold
+        currently_limited = bool(self._car_peak_limited_until and now < self._car_peak_limited_until)
+
+        # Only monitor if car is charging, not already limited, and we have valid data
+        if peak_threshold and grid_power is not None and car_charging and not currently_limited:
+            grid_import = abs(min(0.0, float(grid_power)))
+
+            if grid_import > peak_threshold:
+                # Start or continue monitoring
+                if self._car_peak_limit_started_at is None:
+                    self._car_peak_limit_started_at = now
+                    _LOGGER.debug(
+                        "Grid import %.0fW > %.0fW: starting 5-minute monitoring",
+                        grid_import, peak_threshold
+                    )
+                else:
+                    # Check if sustained for 5 minutes
+                    exceed_duration = now - self._car_peak_limit_started_at
+                    if exceed_duration >= timedelta(minutes=5):
+                        self._car_peak_limited_until = now + timedelta(minutes=15)
+                        self._car_peak_limit_started_at = None  # Reset monitoring
+                        _LOGGER.info(
+                            "Grid import %.0fW exceeded %.0fW for 5 minutes. "
+                            "Halving car charger limit for 15 minutes.",
+                            grid_import, peak_threshold
+                        )
+                        currently_limited = True
+            else:
+                # Dropped below threshold - reset monitoring
+                if self._car_peak_limit_started_at is not None:
+                    _LOGGER.debug(
+                        "Grid import back below threshold (%.0fW <= %.0fW) - monitoring reset",
+                        grid_import, peak_threshold
+                    )
+                self._car_peak_limit_started_at = None
+        else:
+            # Not eligible for monitoring - reset
+            self._car_peak_limit_started_at = None
+
+        # Expose minimal data
+        data["car_peak_limited"] = currently_limited
+        data["car_peak_limit_threshold"] = peak_threshold
 
     def _apply_manual_overrides(
         self, decision: dict[str, Any]
@@ -561,6 +634,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             if self._battery_threshold_snapshot is not None:
                 data["battery_stable_threshold"] = self._battery_threshold_snapshot
 
+            # Update peak import limit state based on current grid power
+            self._update_peak_limit_state(data)
+
             charging_decision = await self.decision_engine.evaluate_charging_decision(data)
             charging_decision, override_targets = self._apply_manual_overrides(charging_decision)
 
@@ -773,6 +849,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         data["monthly_grid_peak"] = await self._get_state_value(
             self.config.get(CONF_MONTHLY_GRID_PEAK_ENTITY)
+        )
+
+        data["grid_power"] = await self._get_state_value(
+            self.config.get(CONF_GRID_POWER_ENTITY)
         )
 
         # Preserve car charging locked threshold across updates (for threshold continuity)

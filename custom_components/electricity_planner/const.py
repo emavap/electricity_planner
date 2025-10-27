@@ -32,6 +32,7 @@ CONF_HOUSE_CONSUMPTION_ENTITY = "house_consumption_entity"
 CONF_CAR_CHARGING_POWER_ENTITY = "car_charging_power_entity"
 CONF_MONTHLY_GRID_PEAK_ENTITY = "monthly_grid_peak_entity"
 CONF_TRANSPORT_COST_ENTITY = "transport_cost_entity"
+CONF_GRID_POWER_ENTITY = "grid_power_entity"
 
 CONF_MIN_SOC_THRESHOLD = "min_soc_threshold"
 CONF_MAX_SOC_THRESHOLD = "max_soc_threshold"

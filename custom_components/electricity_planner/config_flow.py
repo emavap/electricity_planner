@@ -35,6 +35,7 @@ from .const import (
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_TRANSPORT_COST_ENTITY,
+    CONF_GRID_POWER_ENTITY,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
@@ -320,6 +321,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_TRANSPORT_COST_ENTITY,
                     default=self.data.get(CONF_TRANSPORT_COST_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_GRID_POWER_ENTITY,
+                    default=self.data.get(CONF_GRID_POWER_ENTITY),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -934,6 +941,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(
                 CONF_TRANSPORT_COST_ENTITY,
                 default=working_data.get(CONF_TRANSPORT_COST_ENTITY),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_GRID_POWER_ENTITY,
+                default=working_data.get(CONF_GRID_POWER_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),

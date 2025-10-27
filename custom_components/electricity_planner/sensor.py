@@ -281,7 +281,7 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
             return {}
 
         power_analysis = self.coordinator.data["power_analysis"]
-        return {
+        attributes = {
             "solar_production": power_analysis.get("solar_production"),
             "house_consumption": power_analysis.get("house_consumption"),
             "house_consumption_without_car": power_analysis.get("house_consumption_without_car"),
@@ -295,6 +295,21 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
             "solar_coverage_ratio": power_analysis.get("solar_coverage_ratio"),
             "has_excess_solar_available": power_analysis.get("has_excess_solar_available"),  # Available for any use
         }
+
+        # Add grid power snapshot (if configured)
+        grid_power = self.coordinator.data.get("grid_power")
+        if grid_power is not None:
+            attributes["grid_power"] = grid_power
+            attributes["grid_import"] = abs(min(0, grid_power))  # Positive value for import
+            attributes["grid_export"] = max(0, grid_power)  # Positive value for export
+
+        # Expose peak import limiting status
+        attributes["car_peak_limited"] = bool(self.coordinator.data.get("car_peak_limited", False))
+        peak_threshold = self.coordinator.data.get("car_peak_limit_threshold")
+        if peak_threshold is not None:
+            attributes["car_peak_limit_threshold_w"] = peak_threshold
+
+        return attributes
 
 
 class DataAvailabilitySensor(ElectricityPlannerSensorBase):
