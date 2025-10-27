@@ -306,7 +306,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         # Only monitor if car is charging, not already limited, and we have valid data
         if peak_threshold and grid_power is not None and car_charging and not currently_limited:
-            grid_import = abs(min(0.0, float(grid_power)))
+            # Grid power convention: positive = import, negative = export
+            grid_import = max(0.0, float(grid_power))
 
             if grid_import > peak_threshold:
                 # Start or continue monitoring
