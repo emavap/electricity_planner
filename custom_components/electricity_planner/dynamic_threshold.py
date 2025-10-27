@@ -1,7 +1,7 @@
 """Dynamic charging strategies for smarter threshold-based decisions."""
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 
 class DynamicThresholdAnalyzer:

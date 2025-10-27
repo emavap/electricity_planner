@@ -143,6 +143,30 @@ class TestCircuitBreaker:
         assert breaker.state == "closed"
         assert breaker.failure_count == 0
 
+    def test_circuit_breaker_recovers_after_long_downtime(self, monkeypatch):
+        breaker = helpers.CircuitBreaker(failure_threshold=1, recovery_timeout=10, name="cb")
+        base_time = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+        current = {"value": base_time}
+
+        monkeypatch.setattr(helpers.dt_util, "utcnow", lambda: current["value"])
+
+        def blow_up():
+            raise ValueError("boom")
+
+        with pytest.raises(ValueError):
+            breaker.call(blow_up)
+
+        assert breaker.state == "open"
+
+        # Advance time by multiple days to ensure total_seconds() is used
+        current["value"] = base_time + timedelta(days=2)
+
+        # Should transition to half-open and succeed
+        result = breaker.call(lambda: "ok")
+        assert result == "ok"
+        assert breaker.state == "closed"
+        assert breaker.failure_count == 0
+
 
 class TestPowerAllocationValidator:
     """Tests for power allocation validation."""
@@ -197,6 +221,25 @@ class TestPowerAllocationValidator:
 def test_apply_price_adjustment():
     assert helpers.apply_price_adjustment(0.10, 1.12, 0.008) == pytest.approx(0.10 * 1.12 + 0.008)
     assert helpers.apply_price_adjustment(None, 1.1, 0.0) is None
+
+
+def test_format_reason_formats_details():
+    reason = helpers.format_reason(
+        "Charge",
+        "threshold met",
+        {
+            "current_price": 0.1234,
+            "battery_soc": 48.6,
+            "solar_surplus": 1523.2,
+            "note": "ok",
+        },
+    )
+
+    assert reason.startswith("Charge: threshold met")
+    assert "current_price=0.123€/kWh" in reason
+    assert "battery_soc=49%" in reason
+    assert "solar_surplus=1523W" in reason
+    assert "note=ok" in reason
 
 
 def test_format_reason_with_numeric_details():

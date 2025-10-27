@@ -202,7 +202,8 @@ class CircuitBreaker:
         """Check if enough time has passed to attempt reset."""
         if self.last_failure_time is None:
             return False
-        return (dt_util.utcnow() - self.last_failure_time).seconds >= self.recovery_timeout
+        elapsed = dt_util.utcnow() - self.last_failure_time
+        return elapsed.total_seconds() >= self.recovery_timeout
     
     def _on_success(self):
         """Handle successful call."""
