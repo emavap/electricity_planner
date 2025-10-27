@@ -1911,3 +1911,50 @@ class ChargingDecisionEngine:
                 "car": int(car_grid_need),
             },
         }
+
+    def recalculate_after_override(
+        self,
+        baseline_data: Dict[str, Any],
+        decision: Dict[str, Any],
+        override_targets: set[str],
+    ) -> Dict[str, Any]:
+        """Refresh dependent power limits after manual overrides adjust charging flags."""
+        if not override_targets:
+            return decision
+
+        price_analysis = decision.get("price_analysis") or {}
+        if not isinstance(price_analysis, dict):
+            price_analysis = {}
+
+        battery_analysis = decision.get("battery_analysis") or {}
+        if not isinstance(battery_analysis, dict):
+            battery_analysis = {}
+
+        power_allocation = decision.get("power_allocation") or {}
+        if not isinstance(power_allocation, dict):
+            power_allocation = {}
+
+        combined_data: Dict[str, Any] = {}
+        if isinstance(baseline_data, dict):
+            combined_data.update(baseline_data)
+        combined_data.update(decision)
+
+        if "car_grid_charging" in override_targets:
+            charger_limit_decision = self._calculate_charger_limit(
+                price_analysis, battery_analysis, power_allocation, combined_data
+            )
+            decision.update(charger_limit_decision)
+            combined_data.update(charger_limit_decision)
+
+        if override_targets.intersection({"battery_grid_charging", "car_grid_charging"}):
+            charger_limit = decision.get("charger_limit", 0)
+            grid_setpoint_decision = self._calculate_grid_setpoint(
+                price_analysis,
+                battery_analysis,
+                power_allocation,
+                combined_data,
+                charger_limit,
+            )
+            decision.update(grid_setpoint_decision)
+
+        return decision

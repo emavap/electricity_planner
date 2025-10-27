@@ -944,14 +944,15 @@ async def test_manual_override_application_and_expiry(fake_hass, monkeypatch):
         "strategy_trace": [],
     }
 
-    overridden = coordinator._apply_manual_overrides(decision)
+    overridden, changed = coordinator._apply_manual_overrides(decision)
+    assert changed == {"battery_grid_charging"}
     assert overridden["battery_grid_charging"] is True
     assert "override" in overridden["battery_grid_charging_reason"]
     assert overridden["manual_overrides"]["battery_grid_charging"]["reason"] == "boost"
     assert overridden["strategy_trace"][-1]["strategy"] == "ManualOverride"
 
     _freeze_time(monkeypatch, base_time + timedelta(minutes=31))
-    follow_up = coordinator._apply_manual_overrides(
+    follow_up, cleared = coordinator._apply_manual_overrides(
         {
             "battery_grid_charging": False,
             "battery_grid_charging_reason": "reset",
@@ -959,7 +960,65 @@ async def test_manual_override_application_and_expiry(fake_hass, monkeypatch):
         }
     )
     assert follow_up["battery_grid_charging"] is False
+    assert cleared == set()
     assert coordinator._manual_overrides["battery_grid_charging"] is None
+
+
+@pytest.mark.asyncio
+async def test_manual_override_recomputes_gridpoint(fake_hass, monkeypatch):
+    """Forcing battery charge should refresh grid setpoint and components."""
+    base_time = datetime(2025, 6, 1, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    decision = {
+        "battery_grid_charging": False,
+        "battery_grid_charging_reason": "automatic decision",
+        "car_grid_charging": False,
+        "car_grid_charging_reason": "automatic decision",
+        "grid_setpoint": 0,
+        "grid_setpoint_reason": "No grid charging needed",
+        "grid_components": {"battery": 0, "car": 0},
+        "charger_limit": 0,
+        "charger_limit_reason": "Car idle",
+        "battery_analysis": {"average_soc": 25, "max_soc_threshold": 80},
+        "price_analysis": {},
+        "power_allocation": {
+            "solar_for_car": 0,
+            "car_current_solar_usage": 0,
+            "remaining_solar": 0,
+        },
+        "strategy_trace": [],
+    }
+
+    baseline_data = {
+        "current_price": 0.1,
+        "monthly_grid_peak": 0,
+        "car_charging_power": 0,
+        "car_grid_charging": False,
+        "car_solar_only": False,
+    }
+
+    await coordinator.async_set_manual_override(
+        target="battery",
+        value=True,
+        duration=None,
+        reason="force charge",
+    )
+
+    overridden, changed = coordinator._apply_manual_overrides(decision)
+    assert changed == {"battery_grid_charging"}
+
+    updated = coordinator.decision_engine.recalculate_after_override(
+        baseline_data, overridden, changed
+    )
+
+    expected_setpoint = coordinator.decision_engine._settings.base_grid_setpoint
+    assert updated["grid_setpoint"] == expected_setpoint
+    assert updated["grid_components"]["battery"] == expected_setpoint
+    assert updated["grid_components"]["car"] == 0
+    assert "battery" in updated["grid_setpoint_reason"]
 
 
 def test_forecast_summary_uses_price_timeline(fake_hass, monkeypatch):

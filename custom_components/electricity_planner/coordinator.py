@@ -271,12 +271,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 _LOGGER.info("Manual override cleared for %s", coordinator_key)
             self._manual_overrides[coordinator_key] = None
 
-    def _apply_manual_overrides(self, decision: dict[str, Any]) -> dict[str, Any]:
+    def _apply_manual_overrides(
+        self, decision: dict[str, Any]
+    ) -> tuple[dict[str, Any], set[str]]:
         """Apply active manual overrides to the decision payload."""
         now = dt_util.utcnow()
         overrides_info: dict[str, Any] = {}
         base_trace = decision.get("strategy_trace") or []
         augmented_trace = list(base_trace)
+        changed_targets: set[str] = set()
 
         for coordinator_key, override in self._manual_overrides.items():
             if not override:
@@ -290,7 +293,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             manual_reason: str = override.get("reason") or (
                 "Manual override to charge" if override.get("value") else "Manual override to wait"
             )
+            previous_value = decision.get(coordinator_key)
             decision[coordinator_key] = override["value"]
+            if previous_value != override["value"]:
+                changed_targets.add(coordinator_key)
 
             reason_key = f"{coordinator_key}_reason"
             existing_reason = decision.get(reason_key)
@@ -322,7 +328,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         else:
             decision.setdefault("manual_overrides", {})
 
-        return decision
+        return decision, changed_targets
 
     def _build_price_timeline(
         self,
@@ -556,7 +562,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 data["battery_stable_threshold"] = self._battery_threshold_snapshot
 
             charging_decision = await self.decision_engine.evaluate_charging_decision(data)
-            charging_decision = self._apply_manual_overrides(charging_decision)
+            charging_decision, override_targets = self._apply_manual_overrides(charging_decision)
+
+            if override_targets:
+                charging_decision = self.decision_engine.recalculate_after_override(
+                    data, charging_decision, override_targets
+                )
 
             data.update(charging_decision)
 
