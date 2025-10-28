@@ -23,6 +23,7 @@ from typing import Any
 import voluptuous as vol
 import yaml
 
+from homeassistant.components import frontend
 from homeassistant.components.lovelace import const as ll_const
 from homeassistant.components.lovelace import dashboard as ll_dashboard
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
@@ -156,6 +157,11 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
 
     _LOGGER.debug("Saving dashboard configuration...")
     await _save_dashboard(storage, dashboard_config)
+
+    # Register the dashboard panel in the frontend (CRITICAL for sidebar visibility)
+    title = entry.title or "Electricity Planner"
+    _register_dashboard_panel(hass, url_path, title, storage.config)
+
     _LOGGER.info("Dashboard setup completed for entry: %s", entry.entry_id)
 
 
@@ -272,20 +278,64 @@ async def _save_dashboard(storage: ll_dashboard.LovelaceStorage, config: dict[st
         _LOGGER.error("Failed to write managed dashboard: %s", error)
 
 
+def _register_dashboard_panel(
+    hass: HomeAssistant,
+    url_path: str,
+    title: str,
+    dashboard_config: dict[str, Any] | None,
+) -> None:
+    """Register the dashboard as a frontend panel (makes it visible in sidebar)."""
+    if dashboard_config is None:
+        _LOGGER.warning("Cannot register panel: dashboard_config is None")
+        return
+
+    panel_kwargs = {
+        "frontend_url_path": url_path,
+        "require_admin": dashboard_config.get(ll_const.CONF_REQUIRE_ADMIN, False),
+        "config": {"mode": ll_const.MODE_STORAGE},
+    }
+
+    # Add sidebar info if dashboard should be visible
+    if dashboard_config.get(ll_const.CONF_SHOW_IN_SIDEBAR, True):
+        panel_kwargs["sidebar_title"] = dashboard_config.get(ll_const.CONF_TITLE, title)
+        panel_kwargs["sidebar_icon"] = dashboard_config.get(ll_const.CONF_ICON, "mdi:lightning-bolt")
+
+    try:
+        _LOGGER.debug("Registering frontend panel for %s", url_path)
+        frontend.async_register_built_in_panel(
+            hass,
+            ll_const.DOMAIN,
+            **panel_kwargs,
+        )
+        _LOGGER.info("Successfully registered dashboard panel in sidebar: %s", title)
+    except ValueError as err:
+        # Panel already registered (e.g., from previous setup)
+        _LOGGER.debug("Panel registration skipped for %s (already exists): %s", url_path, err)
+    except Exception as err:
+        _LOGGER.error("Failed to register dashboard panel for %s: %s", url_path, err)
+
+
 def _get_lovelace_handles(hass: HomeAssistant) -> DashboardHandles | None:
     """Return Lovelace storage handles when running in storage mode."""
-    lovelace_data = hass.data.get(ll_const.DOMAIN)
+    # Try both the LOVELACE_DATA constant and DOMAIN constant for compatibility
+    lovelace_data = hass.data.get(getattr(ll_const, 'LOVELACE_DATA', ll_const.DOMAIN))
     if not lovelace_data:
         _LOGGER.debug("Lovelace domain data not found in hass.data (HA may not be fully started or Lovelace not in storage mode)")
         return None
 
+    # Get or create the dashboards collection
     collection = lovelace_data.get("dashboards_collection")
-    dashboards = lovelace_data.get("dashboards")
-
     if collection is None:
-        _LOGGER.debug("dashboards_collection not found in lovelace data (keys: %s)", list(lovelace_data.keys()))
-        return None
+        _LOGGER.debug("Creating new DashboardsCollection instance")
+        try:
+            collection = ll_dashboard.DashboardsCollection(hass)
+            # Note: We don't await async_load here since this is a sync function
+            # The collection will be loaded when needed
+        except Exception as err:
+            _LOGGER.warning("Failed to create DashboardsCollection: %s", err)
+            return None
 
+    dashboards = lovelace_data.get("dashboards")
     if dashboards is None:
         _LOGGER.debug("dashboards dict not found in lovelace data (keys: %s)", list(lovelace_data.keys()))
         return None
