@@ -5,6 +5,18 @@ All notable changes to the Electricity Planner integration will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.0] - 2025-10-29
+
+### Fixed
+- **Managed Dashboard Restored** – Reimplemented automatic dashboard provisioning using Home Assistant's Lovelace storage collection, so each config entry now gets a working dashboard again.
+  - Creates or updates dashboards via `DashboardsCollection` and `LovelaceStorage`
+  - Cleans up dashboards on unload only when they belong to the same config entry
+  - Waits for entity registry population to ensure replacements resolve correctly
+  - Falls back to retry after Home Assistant startup if Lovelace isn't ready yet
+
+### Added
+- **Dashboard Automation Tests** – Lightweight unit tests verify entity replacements, skip conditions, and safe removal behaviour to guard against future regressions.
+
 ## [4.2.2] - 2025-10-28
 
 ### Fixed

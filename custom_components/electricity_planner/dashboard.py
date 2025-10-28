@@ -1,14 +1,14 @@
-"""Dashboard automation helpers for the Electricity Planner integration.
+"""Managed Lovelace dashboard support for Electricity Planner.
 
-This module automatically provisions a managed Lovelace dashboard for each config entry,
-eliminating the need for manual YAML configuration while maintaining per-instance entity IDs.
+Each config entry gets its own Lovelace dashboard stored in Home Assistant's
+storage-backed collection. The dashboard mirrors the bundled YAML template but
+is rewritten with the entity ids that the user actually configured, so every
+installation gets a working view without manual edits.
 
-IMPORTANT: The generated dashboard requires these HACS frontend cards to function properly:
-- gauge-card-pro (https://github.com/benjamin-dcs/gauge-card-pro) - for price gauges
-- apexcharts-card (https://github.com/RomRider/apexcharts-card) - for historical charts
-- button-card (https://github.com/custom-cards/button-card) - for manual override controls
-
-Users must install these cards from HACS before the dashboard will render correctly.
+The generated dashboard expects these HACS cards to be installed:
+- gauge-card-pro – price gauges
+- apexcharts-card – historical charts
+- button-card – manual override buttons
 """
 from __future__ import annotations
 
@@ -20,15 +20,18 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any
 
+import voluptuous as vol
 import yaml
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.components.lovelace import const as ll_const
+from homeassistant.components.lovelace import dashboard as ll_dashboard
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import slugify
 
-from homeassistant.components.lovelace import dashboard as ll_dashboard
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,13 +39,13 @@ MANAGED_KEY = "electricity_planner_managed"
 MANAGED_VERSION = 1
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 
-# How long to wait for the core entities created by the platforms to appear in the
-# entity registry before giving up on automatic dashboard creation (seconds)
 ENTITY_WAIT_TIMEOUT = 30
 ENTITY_WAIT_INTERVAL = 1.0
 
+PENDING_SET_KEY = "dashboard_pending"
 
-@dataclass(frozen=True)
+
+@dataclass(slots=True)
 class EntityReference:
     """Mapping between template placeholders and unique ID suffixes."""
 
@@ -56,8 +59,6 @@ ENTITY_REFERENCES: tuple[EntityReference, ...] = (
     EntityReference("binary_sensor.electricity_planner_data_nord_pool_available", "data_availability"),
     EntityReference("binary_sensor.electricity_planner_price_below_threshold", "low_price"),
     EntityReference("binary_sensor.electricity_planner_solar_producing_power", "solar_production"),
-    # Feed-in sensor has two placeholder entries to support backward compatibility
-    # and different entity naming conventions. Both map to the same unique_id suffix.
     EntityReference("binary_sensor.electricity_planner_solar_feed_in_grid", "feedin_solar"),
     EntityReference("binary_sensor.solar_feed_in_grid", "feedin_solar"),
     EntityReference("sensor.electricity_planner_current_electricity_price", "price_analysis"),
@@ -86,46 +87,47 @@ CORE_ENTITY_SUFFIXES: tuple[str, ...] = (
 )
 
 
-async def async_setup_or_update_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> None:
+@dataclass(slots=True)
+class DashboardHandles:
+    """Wires into Lovelace storage mode internals."""
+
+    collection: ll_dashboard.DashboardsCollection
+    dashboards: dict[str, ll_dashboard.LovelaceStorage]
+
+
+async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
     """Create or update the managed dashboard for the given config entry."""
-    _LOGGER.info("Starting dashboard setup for entry: %s", entry.title or entry.entry_id)
+    handles = _get_lovelace_handles(hass)
+    if handles is None:
+        _maybe_schedule_retry(hass, entry)
+        return
 
     try:
         entity_map = await _async_wait_for_entity_map(hass, entry)
     except asyncio.TimeoutError:
-        _LOGGER.warning(
-            "Timed out waiting for Electricity Planner entities before creating dashboard. "
-            "Will attempt to create dashboard with currently available entities."
-        )
+        _LOGGER.debug("Timed out waiting for entities before building dashboard for %s", entry.entry_id)
         entity_map = _build_entity_map(hass, entry)
 
     if not entity_map:
-        _LOGGER.warning(
-            "No entities registered for entry %s; skipping dashboard auto-creation. "
-            "This usually means entities haven't been created yet. Try reloading the integration.",
-            entry.entry_id
-        )
+        _LOGGER.debug("No registered entities for %s; skipping dashboard creation", entry.entry_id)
+        return
+
+    template_text = _load_template_text()
+    if not template_text:
+        _LOGGER.debug("Dashboard template %s missing; skipping creation", TEMPLATE_FILENAME)
         return
 
     replacements = _build_replacements(entry, entity_map)
-    template_text = _load_template_text()
-    if not template_text:
-        _LOGGER.error(
-            "Dashboard template %s not found; skipping auto-creation. "
-            "Please ensure the file exists in the integration directory.",
-            TEMPLATE_FILENAME
-        )
-        return
-
     rendered_template = _apply_replacements(template_text, replacements)
+
     try:
         dashboard_config = yaml.safe_load(rendered_template)
     except yaml.YAMLError as error:
-        _LOGGER.error("Failed to parse dashboard template: %s", error)
+        _LOGGER.warning("Failed to parse dashboard template: %s", error)
         return
 
     if not isinstance(dashboard_config, dict) or "views" not in dashboard_config:
-        _LOGGER.debug("Dashboard template did not resolve to a Lovelace config; skipping")
+        _LOGGER.debug("Rendered dashboard template invalid; skipping")
         return
 
     dashboard_config[MANAGED_KEY] = {
@@ -133,68 +135,154 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry: ConfigEntr
         "version": MANAGED_VERSION,
     }
 
-    title = entry.title or "Electricity Planner"
     url_path = _dashboard_url_path(entry)
-
-    try:
-        existing_config = await ll_dashboard.async_get_dashboard(hass, url_path)
-        managed_by_us = existing_config.get(MANAGED_KEY, {}).get("entry_id") == entry.entry_id
-        if not managed_by_us:
-            _LOGGER.debug(
-                "Dashboard %s already exists and is not managed by Electricity Planner; leaving untouched",
-                url_path,
-            )
-            return
-
-        if _configs_equal(existing_config, dashboard_config):
-            _LOGGER.debug("Dashboard %s already up to date", url_path)
-            return
-
-        await ll_dashboard.async_update_dashboard(hass, url_path, dashboard_config)
-        _LOGGER.info("Updated Electricity Planner dashboard at /d/%s", url_path)
-    except ll_dashboard.LovelaceNotFoundError:
-        try:
-            await ll_dashboard.async_create_dashboard(
-                hass,
-                url_path,
-                dashboard_config,
-                title=title,
-                icon="mdi:lightning-bolt",
-                show_in_sidebar=True,
-                require_admin=False,
-            )
-            _LOGGER.info("Created Electricity Planner dashboard at /d/%s", url_path)
-        except (ll_dashboard.LovelaceError, HomeAssistantError) as error:
-            _LOGGER.warning("Unable to create Electricity Planner dashboard: %s", error)
-    except (ll_dashboard.LovelaceError, HomeAssistantError) as error:
-        _LOGGER.warning("Unable to update Electricity Planner dashboard: %s", error)
-
-
-async def async_remove_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove the managed dashboard when the config entry is unloaded."""
-    url_path = _dashboard_url_path(entry)
-
-    try:
-        existing_config = await ll_dashboard.async_get_dashboard(hass, url_path)
-    except ll_dashboard.LovelaceNotFoundError:
+    storage = await _ensure_dashboard_record(hass, handles, entry, url_path)
+    if storage is None:
         return
-    except (ll_dashboard.LovelaceError, HomeAssistantError) as error:
+
+    await _save_dashboard(storage, dashboard_config)
+
+
+async def async_remove_dashboard(hass: HomeAssistant, entry) -> None:
+    """Remove the managed dashboard when the config entry is unloaded."""
+    handles = _get_lovelace_handles(hass)
+    if handles is None:
+        return
+
+    url_path = _dashboard_url_path(entry)
+    storage = handles.dashboards.get(url_path)
+    if storage is None or storage.config is None:
+        return
+
+    try:
+        existing_config = await storage.async_load(False)
+    except ll_dashboard.ConfigNotFound:
+        existing_config = None
+    except HomeAssistantError as error:
         _LOGGER.debug("Unable to inspect dashboard %s during removal: %s", url_path, error)
         return
 
-    managed_by_us = existing_config.get(MANAGED_KEY, {}).get("entry_id") == entry.entry_id
-    if not managed_by_us:
+    is_managed = (
+        existing_config is not None
+        and existing_config.get(MANAGED_KEY, {}).get("entry_id") == entry.entry_id
+    )
+    if not is_managed:
+        return
+
+    item_id = storage.config.get("id")
+    if not item_id:
         return
 
     try:
-        await ll_dashboard.async_delete_dashboard(hass, url_path)
-        _LOGGER.info("Removed Electricity Planner dashboard at /d/%s", url_path)
-    except (ll_dashboard.LovelaceError, HomeAssistantError) as error:
-        _LOGGER.debug("Unable to remove dashboard %s: %s", url_path, error)
+        await handles.collection.async_delete_item(item_id)
+    except (vol.Invalid, HomeAssistantError) as error:
+        _LOGGER.debug("Unable to delete dashboard %s: %s", url_path, error)
 
 
-async def _async_wait_for_entity_map(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, str]:
-    """Poll the entity registry until the core entities for this entry exist."""
+async def _ensure_dashboard_record(
+    hass: HomeAssistant,
+    handles: DashboardHandles,
+    entry,
+    url_path: str,
+) -> ll_dashboard.LovelaceStorage | None:
+    """Create or update the Lovelace storage entry metadata."""
+    title = entry.title or "Electricity Planner"
+    create_data = {
+        ll_const.CONF_URL_PATH: url_path,
+        ll_const.CONF_TITLE: title,
+        ll_const.CONF_ICON: "mdi:lightning-bolt",
+        ll_const.CONF_REQUIRE_ADMIN: False,
+        ll_const.CONF_SHOW_IN_SIDEBAR: True,
+        ll_const.CONF_ALLOW_SINGLE_WORD: True,
+    }
+
+    storage = handles.dashboards.get(url_path)
+    if storage is None:
+        try:
+            await handles.collection.async_create_item(create_data)
+        except (vol.Invalid, HomeAssistantError) as error:
+            _LOGGER.warning("Unable to register managed dashboard %s: %s", url_path, error)
+            return None
+        storage = handles.dashboards.get(url_path)
+        if storage is None:
+            _LOGGER.debug("Loveless storage not registered yet for %s", url_path)
+            return None
+    elif storage.config:
+        item_id = storage.config.get("id")
+        updates: dict[str, Any] = {}
+        for field in (
+            ll_const.CONF_TITLE,
+            ll_const.CONF_ICON,
+            ll_const.CONF_REQUIRE_ADMIN,
+            ll_const.CONF_SHOW_IN_SIDEBAR,
+        ):
+            if storage.config.get(field) != create_data[field]:
+                updates[field] = create_data[field]
+        if updates and item_id:
+            try:
+                await handles.collection.async_update_item(item_id, updates)
+            except (vol.Invalid, HomeAssistantError) as error:
+                _LOGGER.debug("Unable to update dashboard metadata for %s: %s", url_path, error)
+
+    return storage
+
+
+async def _save_dashboard(storage: ll_dashboard.LovelaceStorage, config: dict[str, Any]) -> None:
+    """Persist the Lovelace dashboard if it changed."""
+    try:
+        existing = await storage.async_load(False)
+    except ll_dashboard.ConfigNotFound:
+        existing = None
+    except HomeAssistantError as error:
+        _LOGGER.debug("Unable to load existing dashboard state: %s", error)
+        existing = None
+
+    if existing is not None and _configs_equal(existing, config):
+        return
+
+    try:
+        await storage.async_save(config)
+    except HomeAssistantError as error:
+        _LOGGER.warning("Failed to write managed dashboard: %s", error)
+
+
+def _get_lovelace_handles(hass: HomeAssistant) -> DashboardHandles | None:
+    """Return Lovelace storage handles when running in storage mode."""
+    lovelace_data = hass.data.get(ll_const.DOMAIN)
+    if not lovelace_data:
+        return None
+
+    collection = lovelace_data.get("dashboards_collection")
+    dashboards = lovelace_data.get("dashboards")
+
+    if collection is None or dashboards is None:
+        return None
+
+    return DashboardHandles(collection=collection, dashboards=dashboards)
+
+
+def _maybe_schedule_retry(hass: HomeAssistant, entry) -> None:
+    """Retry once Home Assistant finishes starting if Lovelace is not ready yet."""
+    if hass.is_running:
+        _LOGGER.debug("Lovelace storage not available; dashboard creation skipped for %s", entry.entry_id)
+        return
+
+    data = hass.data.setdefault(DOMAIN, {})
+    pending: set[str] = data.setdefault(PENDING_SET_KEY, set())
+    if entry.entry_id in pending:
+        return
+    pending.add(entry.entry_id)
+
+    @callback
+    def _retry_later(_event) -> None:
+        pending.discard(entry.entry_id)
+        hass.async_create_task(async_setup_or_update_dashboard(hass, entry))
+
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _retry_later)
+
+
+async def _async_wait_for_entity_map(hass: HomeAssistant, entry) -> dict[str, str]:
+    """Poll the entity registry until key entities for this entry exist."""
     end = hass.loop.time() + ENTITY_WAIT_TIMEOUT
     while True:
         entity_map = _build_entity_map(hass, entry)
@@ -205,30 +293,28 @@ async def _async_wait_for_entity_map(hass: HomeAssistant, entry: ConfigEntry) ->
         await asyncio.sleep(ENTITY_WAIT_INTERVAL)
 
 
-def _build_entity_map(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, str]:
+def _build_entity_map(hass: HomeAssistant, entry) -> dict[str, str]:
     """Return a mapping of unique_id -> entity_id for the config entry."""
     registry = er.async_get(hass)
     mapped: dict[str, str] = {}
     for entity_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
-        if entity_entry.entity_id:
+        if entity_entry.unique_id and entity_entry.entity_id:
             mapped[entity_entry.unique_id] = entity_entry.entity_id
     return mapped
 
 
-def _build_replacements(entry: ConfigEntry, entity_map: dict[str, str]) -> dict[str, str]:
+def _build_replacements(entry, entity_map: dict[str, str]) -> dict[str, str]:
     """Create replacement map from template placeholders to real entity IDs."""
     replacements: dict[str, str] = {}
-
     for ref in ENTITY_REFERENCES:
         unique_id = f"{entry.entry_id}_{ref.unique_suffix}"
         entity_id = entity_map.get(unique_id)
         if entity_id:
             replacements[ref.placeholder] = entity_id
-
     return replacements
 
 
-def _dashboard_url_path(entry: ConfigEntry) -> str:
+def _dashboard_url_path(entry) -> str:
     """Return a deterministic dashboard URL path for the entry."""
     slug = slugify(entry.title or "")
     if not slug:
