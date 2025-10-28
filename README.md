@@ -27,6 +27,18 @@ Electricity Planner is a Home Assistant custom integration that turns Nord Pool 
 | **HACS** | 1. HACS → Integrations → `+` → Custom repository `https://github.com/emavap/electricity_planner` (Integration)<br>2. Install the integration<br>3. Restart Home Assistant |
 | **Manual** | 1. Download the latest release archive<br>2. Copy `custom_components/electricity_planner/` into `<config>/custom_components/`<br>3. Restart Home Assistant |
 
+### Dashboard Prerequisites (Required for Auto-Generated Dashboard)
+
+The integration automatically creates a Lovelace dashboard for each instance. For it to render correctly, install these HACS frontend cards **before** adding the integration:
+
+| Card | Purpose | Installation |
+|------|---------|--------------|
+| [**Gauge Card Pro**](https://github.com/benjamin-dcs/gauge-card-pro) | Dynamic price threshold gauges | HACS → Frontend → `+` → Search "Gauge Card Pro" |
+| [**ApexCharts Card**](https://github.com/RomRider/apexcharts-card) | Historical price charts and forecasts | HACS → Frontend → `+` → Search "ApexCharts Card" |
+| [**Button Card**](https://github.com/custom-cards/button-card) | Manual override controls | HACS → Frontend → `+` → Search "Button Card" |
+
+> **Note:** The dashboard appears automatically in the sidebar after integration setup. If you see card errors, install the missing frontend dependencies above and refresh your browser.
+
 ### First-Time Configuration
 
 1. Settings → Devices & Services → `+ Add Integration` → search for **Electricity Planner**.
