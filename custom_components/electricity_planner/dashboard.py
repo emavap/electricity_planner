@@ -393,15 +393,15 @@ def _get_lovelace_handles(hass: HomeAssistant) -> DashboardHandles | None:
         _LOGGER.error("Failed to create DashboardsCollection: %s", err, exc_info=True)
         return None
 
-    # Get the dashboards dict from lovelace_data
-    dashboards = lovelace_data.get("dashboards")
-    if dashboards is None:
-        _LOGGER.warning("dashboards dict not found in lovelace data (keys: %s)", list(lovelace_data.keys()))
-        # Create empty dashboards dict if it doesn't exist
-        dashboards = {}
-        lovelace_data["dashboards"] = dashboards
+    # Get the dashboards dict from lovelace_data (use property access, not dict .get())
+    try:
+        dashboards = lovelace_data.dashboards
+        _LOGGER.debug("Found %d existing dashboards", len(dashboards))
+    except AttributeError:
+        # Fallback for older HA versions
+        _LOGGER.debug("Using dict access fallback for dashboards")
+        dashboards = lovelace_data.get("dashboards", {})
 
-    _LOGGER.debug("Found %d existing dashboards", len(dashboards))
     return DashboardHandles(collection=collection, dashboards=dashboards)
 
 
