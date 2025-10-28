@@ -5,14 +5,19 @@ All notable changes to the Electricity Planner integration will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [4.2.1] - 2025-10-28
+## [4.2.2] - 2025-10-28
 
 ### Fixed
-- **Dashboard Creation Logging** – Improved visibility of dashboard setup process
-  - Changed DEBUG to WARNING/ERROR for critical failure paths
-  - Added entry point log message to confirm setup starts
-  - Users can now diagnose dashboard issues without enabling debug mode
-  - Helpful context added to all error messages
+- **Dashboard Creation Temporarily Disabled** – Automatic dashboard creation disabled while implementing proper Home Assistant storage API
+  - Previous implementation used non-existent HA Lovelace functions causing crashes
+  - Dashboard YAML template still included for manual import
+  - Proper implementation coming in next release
+
+## [4.2.1] - 2025-10-28 [YANKED - DO NOT USE]
+
+### Issues
+- Crashes on integration unload due to incorrect API usage
+- Please use 4.2.2 instead
 
 ## [4.2.0] - 2025-10-28
 

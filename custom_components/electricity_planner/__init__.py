@@ -27,7 +27,8 @@ from .const import (
     SERVICE_SET_MANUAL_OVERRIDE,
 )
 from .coordinator import ElectricityPlannerCoordinator
-from .dashboard import async_remove_dashboard, async_setup_or_update_dashboard
+# Dashboard creation temporarily disabled - API implementation in progress
+# from .dashboard import async_remove_dashboard, async_setup_or_update_dashboard
 from .migrations import async_migrate_entry
 
 _LOGGER = logging.getLogger(__name__)
@@ -81,7 +82,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _register_services_once(hass)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    hass.async_create_task(async_setup_or_update_dashboard(hass, entry))
+    # Dashboard creation temporarily disabled - API implementation in progress
+    # hass.async_create_task(async_setup_or_update_dashboard(hass, entry))
 
     return True
 
@@ -90,7 +92,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
-        await async_remove_dashboard(hass, entry)
+        # Dashboard removal temporarily disabled - API implementation in progress
+        # await async_remove_dashboard(hass, entry)
 
     return unload_ok
 

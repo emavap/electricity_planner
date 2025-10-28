@@ -27,9 +27,11 @@ Electricity Planner is a Home Assistant custom integration that turns Nord Pool 
 | **HACS** | 1. HACS → Integrations → `+` → Custom repository `https://github.com/emavap/electricity_planner` (Integration)<br>2. Install the integration<br>3. Restart Home Assistant |
 | **Manual** | 1. Download the latest release archive<br>2. Copy `custom_components/electricity_planner/` into `<config>/custom_components/`<br>3. Restart Home Assistant |
 
-### Dashboard Prerequisites (Required for Auto-Generated Dashboard)
+### Optional Dashboard Setup
 
-The integration automatically creates a Lovelace dashboard for each instance. For it to render correctly, install these HACS frontend cards **before** adding the integration:
+The integration includes a pre-built Lovelace dashboard template. To use it:
+
+**Prerequisites - Install these HACS frontend cards:**
 
 | Card | Purpose | Installation |
 |------|---------|--------------|
@@ -37,7 +39,14 @@ The integration automatically creates a Lovelace dashboard for each instance. Fo
 | [**ApexCharts Card**](https://github.com/RomRider/apexcharts-card) | Historical price charts and forecasts | HACS → Frontend → `+` → Search "ApexCharts Card" |
 | [**Button Card**](https://github.com/custom-cards/button-card) | Manual override controls | HACS → Frontend → `+` → Search "Button Card" |
 
-> **Note:** The dashboard appears automatically in the sidebar after integration setup. If you see card errors, install the missing frontend dependencies above and refresh your browser.
+**To add the dashboard:**
+1. Download `dashboard_template.yaml` from the [latest release](https://github.com/emavap/electricity_planner/releases/latest)
+2. Settings → Dashboards → Add Dashboard
+3. Type: "Panel (1 card)"
+4. Paste the template YAML
+5. Replace placeholder entity IDs with your actual sensor names
+
+> **Note:** Automatic dashboard provisioning is coming in a future release. For now, manual import is required.
 
 ### First-Time Configuration
 
