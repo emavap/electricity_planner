@@ -193,19 +193,24 @@ async def _ensure_dashboard_record(
         ll_const.CONF_ICON: "mdi:lightning-bolt",
         ll_const.CONF_REQUIRE_ADMIN: False,
         ll_const.CONF_SHOW_IN_SIDEBAR: True,
-        ll_const.CONF_ALLOW_SINGLE_WORD: True,
     }
+
+    # Add CONF_ALLOW_SINGLE_WORD only if it exists (added in newer HA versions)
+    if hasattr(ll_const, 'CONF_ALLOW_SINGLE_WORD'):
+        create_data[ll_const.CONF_ALLOW_SINGLE_WORD] = True
 
     storage = handles.dashboards.get(url_path)
     if storage is None:
         try:
+            _LOGGER.debug("Creating new dashboard with url_path=%s, title=%s", url_path, title)
             await handles.collection.async_create_item(create_data)
+            _LOGGER.info("Successfully created dashboard: %s", title)
         except (vol.Invalid, HomeAssistantError) as error:
             _LOGGER.warning("Unable to register managed dashboard %s: %s", url_path, error)
             return None
         storage = handles.dashboards.get(url_path)
         if storage is None:
-            _LOGGER.debug("Loveless storage not registered yet for %s", url_path)
+            _LOGGER.debug("Lovelace storage not registered yet for %s", url_path)
             return None
     elif storage.config:
         item_id = storage.config.get("id")
