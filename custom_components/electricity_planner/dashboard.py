@@ -97,37 +97,49 @@ class DashboardHandles:
 
 async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
     """Create or update the managed dashboard for the given config entry."""
+    _LOGGER.info("Starting dashboard creation for entry: %s (title: %s)", entry.entry_id, entry.title)
+
     handles = _get_lovelace_handles(hass)
     if handles is None:
+        _LOGGER.warning("Lovelace handles not available, scheduling retry")
         _maybe_schedule_retry(hass, entry)
         return
 
+    _LOGGER.debug("Lovelace handles retrieved successfully")
+
     try:
         entity_map = await _async_wait_for_entity_map(hass, entry)
+        _LOGGER.debug("Entity map built with %d entities", len(entity_map))
     except asyncio.TimeoutError:
-        _LOGGER.debug("Timed out waiting for entities before building dashboard for %s", entry.entry_id)
+        _LOGGER.warning("Timed out waiting for entities before building dashboard for %s", entry.entry_id)
         entity_map = _build_entity_map(hass, entry)
+        _LOGGER.debug("Fallback entity map built with %d entities", len(entity_map))
 
     if not entity_map:
-        _LOGGER.debug("No registered entities for %s; skipping dashboard creation", entry.entry_id)
+        _LOGGER.warning("No registered entities for %s; skipping dashboard creation", entry.entry_id)
         return
 
     template_text = _load_template_text()
     if not template_text:
-        _LOGGER.debug("Dashboard template %s missing; skipping creation", TEMPLATE_FILENAME)
+        _LOGGER.error("Dashboard template %s missing; skipping creation", TEMPLATE_FILENAME)
         return
 
+    _LOGGER.debug("Dashboard template loaded successfully (%d chars)", len(template_text))
+
     replacements = _build_replacements(entry, entity_map)
+    _LOGGER.debug("Built %d entity replacements", len(replacements))
     rendered_template = _apply_replacements(template_text, replacements)
 
     try:
         dashboard_config = yaml.safe_load(rendered_template)
+        _LOGGER.debug("Dashboard template parsed successfully")
     except yaml.YAMLError as error:
-        _LOGGER.warning("Failed to parse dashboard template: %s", error)
+        _LOGGER.error("Failed to parse dashboard template: %s", error)
         return
 
     if not isinstance(dashboard_config, dict) or "views" not in dashboard_config:
-        _LOGGER.debug("Rendered dashboard template invalid; skipping")
+        _LOGGER.error("Rendered dashboard template invalid; skipping (type=%s, has_views=%s)",
+                     type(dashboard_config), "views" in dashboard_config if isinstance(dashboard_config, dict) else False)
         return
 
     dashboard_config[MANAGED_KEY] = {
@@ -136,11 +148,15 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
     }
 
     url_path = _dashboard_url_path(entry)
+    _LOGGER.debug("Dashboard URL path: %s", url_path)
     storage = await _ensure_dashboard_record(hass, handles, entry, url_path)
     if storage is None:
+        _LOGGER.error("Failed to ensure dashboard record")
         return
 
+    _LOGGER.debug("Saving dashboard configuration...")
     await _save_dashboard(storage, dashboard_config)
+    _LOGGER.info("Dashboard setup completed for entry: %s", entry.entry_id)
 
 
 async def async_remove_dashboard(hass: HomeAssistant, entry) -> None:
@@ -236,33 +252,45 @@ async def _save_dashboard(storage: ll_dashboard.LovelaceStorage, config: dict[st
     """Persist the Lovelace dashboard if it changed."""
     try:
         existing = await storage.async_load(False)
+        _LOGGER.debug("Loaded existing dashboard config for comparison")
     except ll_dashboard.ConfigNotFound:
+        _LOGGER.debug("No existing dashboard config found, will create new")
         existing = None
     except HomeAssistantError as error:
-        _LOGGER.debug("Unable to load existing dashboard state: %s", error)
+        _LOGGER.warning("Unable to load existing dashboard state: %s", error)
         existing = None
 
     if existing is not None and _configs_equal(existing, config):
+        _LOGGER.debug("Dashboard config unchanged, skipping save")
         return
 
     try:
+        _LOGGER.debug("Saving dashboard config with %d views", len(config.get("views", [])))
         await storage.async_save(config)
+        _LOGGER.info("Dashboard config saved successfully")
     except HomeAssistantError as error:
-        _LOGGER.warning("Failed to write managed dashboard: %s", error)
+        _LOGGER.error("Failed to write managed dashboard: %s", error)
 
 
 def _get_lovelace_handles(hass: HomeAssistant) -> DashboardHandles | None:
     """Return Lovelace storage handles when running in storage mode."""
     lovelace_data = hass.data.get(ll_const.DOMAIN)
     if not lovelace_data:
+        _LOGGER.debug("Lovelace domain data not found in hass.data (HA may not be fully started or Lovelace not in storage mode)")
         return None
 
     collection = lovelace_data.get("dashboards_collection")
     dashboards = lovelace_data.get("dashboards")
 
-    if collection is None or dashboards is None:
+    if collection is None:
+        _LOGGER.debug("dashboards_collection not found in lovelace data (keys: %s)", list(lovelace_data.keys()))
         return None
 
+    if dashboards is None:
+        _LOGGER.debug("dashboards dict not found in lovelace data (keys: %s)", list(lovelace_data.keys()))
+        return None
+
+    _LOGGER.debug("Found %d existing dashboards", len(dashboards))
     return DashboardHandles(collection=collection, dashboards=dashboards)
 
 
