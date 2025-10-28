@@ -88,22 +88,33 @@ CORE_ENTITY_SUFFIXES: tuple[str, ...] = (
 
 async def async_setup_or_update_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Create or update the managed dashboard for the given config entry."""
+    _LOGGER.info("Starting dashboard setup for entry: %s", entry.title or entry.entry_id)
+
     try:
         entity_map = await _async_wait_for_entity_map(hass, entry)
     except asyncio.TimeoutError:
-        _LOGGER.debug(
-            "Timed out waiting for Electricity Planner entities before creating dashboard"
+        _LOGGER.warning(
+            "Timed out waiting for Electricity Planner entities before creating dashboard. "
+            "Will attempt to create dashboard with currently available entities."
         )
         entity_map = _build_entity_map(hass, entry)
 
     if not entity_map:
-        _LOGGER.debug("No entities registered for entry %s; skipping dashboard auto-creation", entry.entry_id)
+        _LOGGER.warning(
+            "No entities registered for entry %s; skipping dashboard auto-creation. "
+            "This usually means entities haven't been created yet. Try reloading the integration.",
+            entry.entry_id
+        )
         return
 
     replacements = _build_replacements(entry, entity_map)
     template_text = _load_template_text()
     if not template_text:
-        _LOGGER.debug("Dashboard template %s not found; skipping auto-creation", TEMPLATE_FILENAME)
+        _LOGGER.error(
+            "Dashboard template %s not found; skipping auto-creation. "
+            "Please ensure the file exists in the integration directory.",
+            TEMPLATE_FILENAME
+        )
         return
 
     rendered_template = _apply_replacements(template_text, replacements)
