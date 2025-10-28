@@ -108,6 +108,15 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
 
     _LOGGER.debug("Lovelace handles retrieved successfully")
 
+    # Load the dashboards collection if needed
+    try:
+        if hasattr(handles.collection, 'async_load'):
+            await handles.collection.async_load()
+            _LOGGER.debug("DashboardsCollection loaded successfully")
+    except Exception as err:
+        _LOGGER.error("Failed to load DashboardsCollection: %s", err, exc_info=True)
+        return
+
     try:
         entity_map = await _async_wait_for_entity_map(hass, entry)
         _LOGGER.debug("Entity map built with %d entities", len(entity_map))
@@ -221,35 +230,68 @@ async def _ensure_dashboard_record(
     if hasattr(ll_const, 'CONF_ALLOW_SINGLE_WORD'):
         create_data[ll_const.CONF_ALLOW_SINGLE_WORD] = True
 
-    storage = handles.dashboards.get(url_path)
-    if storage is None:
+    # Check if dashboard already exists in the collection
+    dashboard_item: dict[str, Any] | None = None
+    existing_item_id: str | None = None
+    for item in handles.collection.data.values():
+        if item.get(ll_const.CONF_URL_PATH) == url_path:
+            dashboard_item = item
+            existing_item_id = item.get("id")
+            _LOGGER.debug("Found existing dashboard item with id=%s", existing_item_id)
+            break
+
+    created_item = False
+    if dashboard_item is None:
         try:
             _LOGGER.debug("Creating new dashboard with url_path=%s, title=%s", url_path, title)
-            await handles.collection.async_create_item(create_data)
-            _LOGGER.info("Successfully created dashboard: %s", title)
-        except (vol.Invalid, HomeAssistantError) as error:
-            _LOGGER.warning("Unable to register managed dashboard %s: %s", url_path, error)
+            _LOGGER.debug("Create data: %s", create_data)
+            dashboard_item = await handles.collection.async_create_item(create_data)
+            created_item = True
+            existing_item_id = dashboard_item.get("id")
+            _LOGGER.info("Successfully created dashboard item: %s (id=%s)", title, existing_item_id)
+        except vol.Invalid as error:
+            _LOGGER.error("Validation error creating dashboard %s: %s", url_path, error, exc_info=True)
             return None
-        storage = handles.dashboards.get(url_path)
-        if storage is None:
-            _LOGGER.debug("Lovelace storage not registered yet for %s", url_path)
+        except HomeAssistantError as error:
+            _LOGGER.error("Home Assistant error creating dashboard %s: %s", url_path, error, exc_info=True)
             return None
-    elif storage.config:
-        item_id = storage.config.get("id")
-        updates: dict[str, Any] = {}
-        for field in (
-            ll_const.CONF_TITLE,
-            ll_const.CONF_ICON,
-            ll_const.CONF_REQUIRE_ADMIN,
-            ll_const.CONF_SHOW_IN_SIDEBAR,
-        ):
-            if storage.config.get(field) != create_data[field]:
-                updates[field] = create_data[field]
-        if updates and item_id:
+        except Exception as error:
+            _LOGGER.error("Unexpected error creating dashboard %s: %s", url_path, error, exc_info=True)
+            return None
+    else:
+        # Dashboard item exists, check if we need to update metadata
+        desired_fields = {
+            ll_const.CONF_TITLE: title,
+            ll_const.CONF_ICON: "mdi:lightning-bolt",
+            ll_const.CONF_REQUIRE_ADMIN: False,
+            ll_const.CONF_SHOW_IN_SIDEBAR: True,
+        }
+        updates: dict[str, Any] = {
+            key: value
+            for key, value in desired_fields.items()
+            if dashboard_item.get(key) != value
+        }
+        if updates and existing_item_id:
             try:
-                await handles.collection.async_update_item(item_id, updates)
-            except (vol.Invalid, HomeAssistantError) as error:
-                _LOGGER.debug("Unable to update dashboard metadata for %s: %s", url_path, error)
+                dashboard_item = await handles.collection.async_update_item(existing_item_id, updates)
+                _LOGGER.debug("Updated dashboard metadata for %s: %s", url_path, updates)
+            except Exception as error:
+                _LOGGER.warning("Unable to update dashboard metadata for %s: %s", url_path, error)
+
+    if dashboard_item is None:
+        _LOGGER.error("dashboard_item is None after create/update")
+        return None
+
+    # Create or get the LovelaceStorage object
+    existing_dashboard = handles.dashboards.get(url_path)
+    if isinstance(existing_dashboard, ll_dashboard.LovelaceStorage):
+        existing_dashboard.config = dashboard_item
+        storage = existing_dashboard
+        _LOGGER.debug("Updated existing LovelaceStorage for %s", url_path)
+    else:
+        storage = ll_dashboard.LovelaceStorage(hass, dashboard_item)
+        handles.dashboards[url_path] = storage
+        _LOGGER.debug("Created new LovelaceStorage for %s", url_path)
 
     return storage
 
@@ -317,28 +359,31 @@ def _register_dashboard_panel(
 
 def _get_lovelace_handles(hass: HomeAssistant) -> DashboardHandles | None:
     """Return Lovelace storage handles when running in storage mode."""
-    # Try both the LOVELACE_DATA constant and DOMAIN constant for compatibility
-    lovelace_data = hass.data.get(getattr(ll_const, 'LOVELACE_DATA', ll_const.DOMAIN))
+    # Use LOVELACE_DATA constant (not DOMAIN) to get the lovelace data structure
+    lovelace_data_key = getattr(ll_const, 'LOVELACE_DATA', 'lovelace')
+    lovelace_data = hass.data.get(lovelace_data_key)
+
     if not lovelace_data:
-        _LOGGER.debug("Lovelace domain data not found in hass.data (HA may not be fully started or Lovelace not in storage mode)")
+        _LOGGER.debug("Lovelace data not found at key '%s' (HA may not be fully started or Lovelace not in storage mode)", lovelace_data_key)
         return None
 
-    # Get or create the dashboards collection
-    collection = lovelace_data.get("dashboards_collection")
-    if collection is None:
-        _LOGGER.debug("Creating new DashboardsCollection instance")
-        try:
-            collection = ll_dashboard.DashboardsCollection(hass)
-            # Note: We don't await async_load here since this is a sync function
-            # The collection will be loaded when needed
-        except Exception as err:
-            _LOGGER.warning("Failed to create DashboardsCollection: %s", err)
-            return None
+    _LOGGER.debug("Found lovelace_data with keys: %s", list(lovelace_data.keys()) if isinstance(lovelace_data, dict) else type(lovelace_data))
 
+    # Create a new DashboardsCollection instance (as HeatingControl does)
+    try:
+        collection = ll_dashboard.DashboardsCollection(hass)
+        _LOGGER.debug("Created DashboardsCollection instance")
+    except Exception as err:
+        _LOGGER.error("Failed to create DashboardsCollection: %s", err, exc_info=True)
+        return None
+
+    # Get the dashboards dict from lovelace_data
     dashboards = lovelace_data.get("dashboards")
     if dashboards is None:
-        _LOGGER.debug("dashboards dict not found in lovelace data (keys: %s)", list(lovelace_data.keys()))
-        return None
+        _LOGGER.warning("dashboards dict not found in lovelace data (keys: %s)", list(lovelace_data.keys()))
+        # Create empty dashboards dict if it doesn't exist
+        dashboards = {}
+        lovelace_data["dashboards"] = dashboards
 
     _LOGGER.debug("Found %d existing dashboards", len(dashboards))
     return DashboardHandles(collection=collection, dashboards=dashboards)
