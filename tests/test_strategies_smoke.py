@@ -246,6 +246,25 @@ def test_strategy_manager_respects_price_threshold():
     assert "exceeds maximum threshold" in reason
 
 
+def test_strategy_manager_uses_stable_threshold_snapshot():
+    """Ensure the guard honours the captured stable threshold."""
+    manager = StrategyManager(use_dynamic_threshold=True)
+    context = {
+        "price_analysis": {
+            "current_price": 0.13,
+            "price_threshold": 0.15,
+        },
+        "battery_analysis": {"average_soc": 80},
+        "config": {"emergency_soc_threshold": 20},
+        "battery_stable_threshold": 0.12,
+    }
+
+    should_charge, reason = manager.evaluate(context)
+    assert should_charge is False
+    assert "0.120€/kWh" in reason or "0.120" in reason
+    assert "exceeds maximum threshold" in reason
+
+
 if __name__ == "__main__":
     # Run smoke tests
     test_emergency_charging_triggers_when_soc_low()

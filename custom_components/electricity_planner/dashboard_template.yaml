@@ -1,0 +1,708 @@
+# REQUIRED HACS Custom Cards (install before using this dashboard):
+# 1. Gauge Card Pro - https://github.com/benjamin-dcs/gauge-card-pro
+# 2. ApexCharts Card - https://github.com/RomRider/apexcharts-card
+# 3. Button Card - https://github.com/custom-cards/button-card
+#
+# This dashboard uses dynamic thresholds that update in real-time:
+# - Buy price gauge: green → yellow (dynamic threshold) → red (max threshold)
+# - Feed-in price gauge: red (negative) → yellow (zero) → green (feed-in threshold)
+# - Manual override buttons prompt for duration dynamically
+views:
+  - title: Electricity Planner
+    path: electricity-planner
+    icon: mdi:lightning-bolt
+    panel: true
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: markdown
+            content: |
+              ## ⚡ Electricity Planner Dashboard
+          - type: grid
+            square: false
+            columns: 2
+            cards:
+              - type: custom:gauge-card-pro
+                entity: sensor.electricity_planner_current_electricity_price
+                header: Buy price
+                min: -0.9
+                max: 0.9
+                unit: "€/kWh"
+                needle: true
+                scale: "50px"
+                segments: |-
+                  {% set price_sensor = 'sensor.electricity_planner_current_electricity_price' %}
+                  {% set dynamic_threshold = state_attr(price_sensor, 'dynamic_threshold') %}
+                  {% set decision_sensor = 'sensor.electricity_planner_decision_diagnostics' %}
+                  {% if states(decision_sensor) in ['unknown', 'unavailable', None] %}
+                    {% set decision_sensor = 'sensor.electricity_planner_decision_diagnostics_diagnostic' %}
+                  {% endif %}
+                  {% set price_analysis = state_attr(decision_sensor, 'price_analysis') %}
+                  {% set average_threshold = price_analysis.average_threshold if price_analysis else None %}
+                  {% set fixed_threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float %}
+                  {% set price_threshold = state_attr(price_sensor, 'price_threshold') %}
+
+                  {# Prefer the actively used threshold from price analysis, fallback to average (if available) or configured fixed #}
+                  {% if price_threshold not in [None, 'unknown', 'unavailable'] %}
+                    {% set max_threshold = price_threshold | float %}
+                  {% elif average_threshold not in [None, 'unknown', 'unavailable'] %}
+                    {% set max_threshold = average_threshold | float %}
+                  {% else %}
+                    {% set max_threshold = fixed_threshold %}
+                  {% endif %}
+
+                  {# Determine the dynamic threshold if present and clamp it to the maximum threshold so segments stay ordered #}
+                  {% if dynamic_threshold not in [None, 'unknown', 'unavailable'] %}
+                    {% set threshold = (dynamic_threshold | float) %}
+                  {% else %}
+                    {% set threshold = max_threshold %}
+                  {% endif %}
+                  {% if threshold > max_threshold %}
+                    {% set threshold = max_threshold %}
+                  {% endif %}
+                  {{
+                    [
+                      { "from": -0.9, "color": "green" },
+                      { "from": threshold, "color": "yellow" },
+                      { "from": max_threshold, "color": "red" }
+                    ]
+                  }}
+
+              - type: custom:gauge-card-pro
+                entity: sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price
+                header: Feed-in price
+                min: -0.9
+                max: 0.9
+                unit: "€/kWh"
+                needle: true
+                scale: "50px"
+                segments: |-
+                  {% set threshold = states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float %}
+                  {{
+                    [
+                      { "from": -0.9, "color": "red" },
+                      { "from": 0, "color": "yellow" },
+                      { "from": threshold, "color": "green" }
+                    ]
+                  }}
+
+          - type: grid
+            square: false
+            columns: 3
+            cards:
+              - type: button
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                name: Battery
+                icon: mdi:battery-charging
+                icon_height: 60px
+                show_name: true
+                show_state: true
+
+              - type: button
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
+                name: Car
+                icon: mdi:car-electric
+                icon_height: 60px
+                show_name: true
+                show_state: true
+                tap_action:
+                  action: more-info
+
+              - type: button
+                entity: binary_sensor.electricity_planner_data_nord_pool_available
+                name: Data OK
+                icon: mdi:database-check
+                icon_height: 60px
+                show_name: true
+                show_state: true
+
+          - type: grid
+            square: false
+            columns: 2
+            cards:
+              - type: gauge
+                name: Battery SOC
+                entity: sensor.electricity_planner_battery_soc_average
+                min: 0
+                max: 100
+                unit: "%"
+                needle: true
+                severity:
+                  red: 0
+                  yellow: 30
+                  green: 70
+              - type: button
+                entity: switch.electricity_planner_car_permissive_mode
+                name: Car permissive
+                icon: mdi:battery-alert
+                icon_height: 60px
+                show_name: true
+                show_state: true
+                tap_action:
+                  action: toggle
+                hold_action:
+                  action: more-info
+
+          - type: entities
+            title: Decisions
+            show_header_toggle: false
+            entities:
+              - entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                name: Battery charging
+                secondary_info: last-changed
+              - type: attribute
+                entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                attribute: reason
+                name: Battery reason
+              - entity: binary_sensor.electricity_planner_car_charge_from_grid
+                name: Car charging
+                secondary_info: last-changed
+              - type: attribute
+                entity: binary_sensor.electricity_planner_car_charge_from_grid
+                attribute: reason
+                name: Car reason
+              - entity: binary_sensor.electricity_planner_solar_feed_in_grid
+                name: Solar feed-in
+                secondary_info: last-changed
+              - type: attribute
+                entity: binary_sensor.electricity_planner_solar_feed_in_grid
+                attribute: reason
+                name: Feed-in reason
+
+          - type: custom:apexcharts-card
+            header:
+              title: Nord Pool Electricity Prices (History + Future)
+              show: true
+            graph_span: 38h
+            span:
+              start: hour
+              offset: -2h
+            now:
+              show: true
+              label: Now
+            apex_config:
+              chart:
+                height: 350
+                stacked: true
+              tooltip:
+                enabled: false
+              xaxis:
+                labels:
+                  datetimeFormatter:
+                    hour: "HH:mm"
+              yaxis:
+                decimalsInFloat: 4
+                tickAmount: 20
+                labels:
+                  formatter: |
+                    EVAL:function(value) {
+                      return value.toFixed(4) + ' €/kWh';
+                    }
+            series:
+              # Transport cost column - shows the fixed transport cost component
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Transport cost
+                type: column
+                color: "#95a5a6"
+                data_generator: |
+                  // Extract transport cost from each price interval and format for chart
+                  return entity.attributes.data.map((interval) => {
+                    const transport = interval.transport_cost ?? 0;
+                    return [new Date(interval.start).getTime(), Math.max(transport, 0)];
+                  });
+                show:
+                  legend_value: false
+              # Energy price column - shows market price minus transport cost
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Energy price
+                type: column
+                color: "#3498db"
+                data_generator: |
+                  // Calculate pure energy price by subtracting transport from total
+                  return entity.attributes.data.map((interval) => {
+                    const transport = interval.transport_cost ?? 0;
+                    const energy = (interval.price ?? 0) - transport;
+                    return [new Date(interval.start).getTime(), Math.max(energy, 0)];
+                  });
+                show:
+                  legend_value: false
+              # Total price line - shows complete price including all components
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Total price
+                type: line
+                stroke_width: 2
+                color: "#2ecc71"
+                curve: straight
+                show:
+                  legend_value: false
+                data_generator: |
+                  // Plot the complete total price per interval
+                  return entity.attributes.data.map((interval) => {
+                    return [new Date(interval.start).getTime(), interval.price ?? 0];
+                  });
+              # Max threshold line - shows the configured or average threshold
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Max Threshold
+                type: line
+                stroke_width: 2
+                color: "#e74c3c"
+                curve: straight
+                show:
+                  legend_value: false
+                data_generator: |
+                  // Determine the active max threshold (average if enabled, otherwise fixed)
+                  const diagnosticsEntity = hass.states['sensor.electricity_planner_decision_diagnostics'] ?? hass.states['sensor.electricity_planner_decision_diagnostics_diagnostic'];
+                  const priceAnalysis = diagnosticsEntity?.attributes?.price_analysis;
+                  const averageThreshold = priceAnalysis?.average_threshold;
+
+                  const maxThresholdEntity = hass.states['sensor.electricity_planner_diagnostics_monitoring_price_threshold'];
+                  const fixedThreshold = maxThresholdEntity ? parseFloat(maxThresholdEntity.state) : 0.15;
+
+                  // Prefer average threshold if dynamic mode is enabled
+                  let maxThreshold = fixedThreshold;
+                  if (averageThreshold != null && averageThreshold !== undefined) {
+                    maxThreshold = parseFloat(averageThreshold);
+                  }
+
+                  // Draw horizontal line across the entire time range
+                  if (!entity.attributes.data || entity.attributes.data.length === 0) {
+                    return [];
+                  }
+
+                  const intervals = entity.attributes.data;
+                  const startTime = new Date(intervals[0].start).getTime();
+                  const endTime = new Date(intervals[intervals.length - 1].start).getTime();
+
+                  return [
+                    [startTime, maxThreshold],
+                    [endTime, maxThreshold]
+                  ];
+              # Dynamic threshold line - shows temporary threshold adjustments
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Dynamic Threshold
+                type: line
+                stroke_width: 3
+                color: "#f39c12"
+                curve: straight
+                show:
+                  legend_value: false
+                data_generator: |
+                  // Display dynamic threshold when active (typically more restrictive than max)
+                  const currentPriceEntity = hass.states['sensor.electricity_planner_current_electricity_price'];
+                  const dynamicThreshold = currentPriceEntity?.attributes?.dynamic_threshold;
+
+                  // Hide this line if no dynamic threshold is currently active
+                  if (dynamicThreshold == null || dynamicThreshold === undefined) {
+                    return [];
+                  }
+
+                  const threshold = parseFloat(dynamicThreshold);
+
+                  // Draw horizontal line across the entire time range
+                  if (!entity.attributes.data || entity.attributes.data.length === 0) {
+                    return [];
+                  }
+
+                  const intervals = entity.attributes.data;
+                  const startTime = new Date(intervals[0].start).getTime();
+                  const endTime = new Date(intervals[intervals.length - 1].start).getTime();
+
+                  return [
+                    [startTime, threshold],
+                    [endTime, threshold]
+                  ];
+
+          - type: entities
+            title: Price components
+            show_header_toggle: false
+            entities:
+              - entity: sensor.electricity_planner_current_electricity_price
+                name: Total price
+              - type: attribute
+                entity: sensor.electricity_planner_current_electricity_price
+                attribute: raw_current_price
+                name: Energy market price
+                unit: "€/kWh"
+              - type: attribute
+                entity: sensor.electricity_planner_current_electricity_price
+                attribute: transport_cost
+                name: Transport cost
+                unit: "€/kWh"
+
+          - type: grid
+            square: false
+            columns: 2
+            cards:
+              - type: markdown
+                title: Price adjustments
+                content: |
+                  **Highest price today:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'highest_price') | float | round(4) }} €/kWh
+
+                  **Lowest price today:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'lowest_price') | float | round(4) }} €/kWh
+
+                  **Raw Nord Pool price:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'raw_current_price') | float | round(4) }} €/kWh
+
+                  **Transport cost:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'transport_cost') | float | round(4) }} €/kWh
+
+                  **Consumption multiplier:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'price_adjustment_multiplier') | float | round(4) }}
+
+                  **Consumption offset:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'price_adjustment_offset') | float | round(4) }} €/kWh
+
+                  **Feed-in multiplier:** {{ state_attr('sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price', 'feedin_multiplier') | float | round(4) }}
+
+                  **Feed-in offset:** {{ state_attr('sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price', 'feedin_offset') | float | round(4) }} €/kWh
+
+                  **Feed-in threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float | round(4) }} €/kWh
+
+              - type: markdown
+                title: Thresholds
+                content: |
+                  **Max price threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float | round(4) }} €/kWh
+
+                  **Dynamic threshold:** {% set dyn_threshold = state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') %}{{ (dyn_threshold | float | round(4) ~ ' €/kWh') if dyn_threshold != None else 'Not active' }}
+
+                  {% set decision_sensor = 'sensor.electricity_planner_decision_diagnostics' %}
+                  {% if states(decision_sensor) in ['unknown', 'unavailable', None] %}
+                    {% set decision_sensor = 'sensor.electricity_planner_decision_diagnostics_diagnostic' %}
+                  {% endif %}
+                  **Average threshold:** {% set price_analysis = state_attr(decision_sensor, 'price_analysis') %}{{ (price_analysis['average_threshold'] | float | round(4) ~ ' €/kWh') if price_analysis and price_analysis.get('average_threshold') != None else 'Not available' }}
+
+                  **Feed-in threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float | round(4) }} €/kWh
+
+                  _Note: To toggle average threshold mode, go to Settings → Devices & Services → Electricity Planner → Configure_
+
+          - type: entities
+            title: Power & status
+            show_header_toggle: false
+            entities:
+              - entity: sensor.electricity_planner_solar_surplus_power
+                name: Solar surplus
+
+              - entity: binary_sensor.electricity_planner_solar_producing_power
+                name: Solar producing
+
+              - entity: binary_sensor.electricity_planner_price_below_threshold
+                name: Price below threshold
+
+              - entity: sensor.electricity_planner_data_unavailable_duration
+                name: Data unavailable time
+
+              - entity: sensor.electricity_planner_car_charger_limit
+                name: Car charger limit
+
+              - entity: sensor.electricity_planner_grid_setpoint
+                name: Grid setpoint
+
+          - type: markdown
+            title: Algorithm thresholds
+            content: |
+              **Very low price threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_very_low_price_threshold') }}%
+
+              **Emergency SOC:** {{ states('sensor.electricity_planner_diagnostics_monitoring_emergency_soc_threshold') }}%
+
+              **Significant solar:** {{ states('sensor.electricity_planner_diagnostics_monitoring_significant_solar_threshold') }}W
+
+              {% set decision_sensor = 'sensor.electricity_planner_decision_diagnostics' %}
+              {% if states(decision_sensor) in ['unknown', 'unavailable', None] %}
+              {% set decision_sensor = 'sensor.electricity_planner_decision_diagnostics_diagnostic' %}
+              {% endif %}
+              **Min car charging duration:** {% set config_limits = state_attr(decision_sensor, 'configured_limits') %}{{ config_limits.get('min_car_charging_duration', 'unknown') if config_limits else 'unknown' }} hours
+
+              _Note: To change car charging duration, go to Settings → Devices & Services → Electricity Planner → Configure_
+
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Price & Decisions (24h)
+            graph_span: 24h
+            span:
+              end: hour
+            apex_config:
+              chart:
+                height: 320
+              tooltip:
+                shared: true
+              dataLabels:
+                enabled: false
+              markers:
+                size: 0
+              xaxis:
+                type: datetime
+                labels:
+                  datetimeFormatter:
+                    hour: "HH:mm"
+              yaxis:
+                - id: price
+                  decimalsInFloat: 4
+                  labels:
+                    formatter: |
+                      EVAL:function(value) {
+                        return value.toFixed(4) + ' €/kWh';
+                      }
+                - id: decisions
+                  opposite: true
+                  min: -0.05
+                  max: 1.05
+                  title:
+                    text: "Decision active"
+                  labels:
+                    formatter: |
+                      EVAL:function(value) {
+                        if (value >= 0.75) { return 'On'; }
+                        if (value <= 0.25) { return 'Off'; }
+                        return '';
+                      }
+            series:
+              - entity: sensor.electricity_planner_current_electricity_price
+                name: Total price
+                type: line
+                curve: smooth
+                stroke_width: 2
+                color: "#2ecc71"
+                float_precision: 4
+                yaxis_id: price
+                show:
+                  legend_value: false
+              - entity: binary_sensor.electricity_planner_battery_charge_from_grid
+                name: Battery charging
+                type: line
+                yaxis_id: decisions
+                curve: stepline
+                stroke_width: 1
+                color: "#e74c3c"
+                transform: |
+                  const normalized = typeof x === 'string' ? x.toLowerCase() : x;
+                  return normalized === 'on' || normalized === 'true' || normalized === true || normalized === 1 ? 1 : 0;
+                show:
+                  legend_value: false
+              - entity: binary_sensor.electricity_planner_car_charge_from_grid
+                name: Car charging
+                type: line
+                yaxis_id: decisions
+                curve: stepline
+                stroke_width: 1
+                color: "#f39c12"
+                transform: |
+                  const normalized = typeof x === 'string' ? x.toLowerCase() : x;
+                  return normalized === 'on' || normalized === 'true' || normalized === true || normalized === 1 ? 0.8 : 0;
+                show:
+                  legend_value: false
+
+          - type: markdown
+            title: Price Forecast Insights
+            content: |
+              {% set forecast = states('sensor.electricity_planner_diagnostics_monitoring_price_forecast_insights') %}
+              {% set forecast_available = state_attr('sensor.electricity_planner_diagnostics_monitoring_price_forecast_insights', 'available') %}
+              {% set cheapest_price = state_attr('sensor.electricity_planner_diagnostics_monitoring_price_forecast_insights', 'cheapest_interval_price') %}
+              {% if forecast_available and cheapest_price is not none %}
+              {% set is_stale = state_attr('sensor.electricity_planner_diagnostics_monitoring_price_forecast_insights', 'stale') %}
+              {% set timeline_generated_at = state_attr('sensor.electricity_planner_diagnostics_monitoring_price_forecast_insights', 'timeline_generated_at') %}
+              {% set cheapest_start = state_attr('sensor.electricity_planner_diagnostics_monitoring_price_forecast_insights', 'cheapest_interval_start') %}
+              {% set cheapest_end = state_attr('sensor.electricity_planner_diagnostics_monitoring_price_forecast_insights', 'cheapest_interval_end') %}
+              {% set best_window_start = state_attr('sensor.electricity_planner_diagnostics_monitoring_price_forecast_insights', 'best_window_start') %}
+              {% set best_window_end = state_attr('sensor.electricity_planner_diagnostics_monitoring_price_forecast_insights', 'best_window_end') %}
+              {% set best_window_hours = state_attr('sensor.electricity_planner_diagnostics_monitoring_price_forecast_insights', 'best_window_hours') %}
+              {% set best_window_price = state_attr('sensor.electricity_planner_diagnostics_monitoring_price_forecast_insights', 'best_window_average_price') %}
+              {% set evaluated_at = state_attr('sensor.electricity_planner_diagnostics_monitoring_price_forecast_insights', 'evaluated_at') %}
+
+              {% if is_stale %}
+              ⚠️ **Forecast data is stale** - Nord Pool price data temporarily unavailable
+
+              _Last generated at {{ timeline_generated_at | default('unknown', true) | as_datetime | default(timeline_generated_at) | string if timeline_generated_at else 'unknown' }}_
+
+              ---
+
+              {% endif %}
+              **Cheapest upcoming interval:**
+
+              - **Time:** {{ cheapest_start | as_datetime | default(cheapest_start) | string if cheapest_start else 'unknown' }} - {{ cheapest_end | as_datetime | default(cheapest_end) | string if cheapest_end else 'unknown' }}
+              - **Price:** {{ cheapest_price | float | round(4) }} €/kWh
+
+              {% if best_window_start %}
+              **Best charging window ({{ best_window_hours }}h):**
+
+              - **Time:** {{ best_window_start | as_datetime | default(best_window_start) | string }} - {{ best_window_end | as_datetime | default(best_window_end) | string }}
+              - **Average price:** {{ best_window_price | float | round(4) }} €/kWh
+              {% else %}
+              **Best charging window:** Not enough consecutive low-price hours available
+              {% endif %}
+
+              {% if not is_stale and evaluated_at %}
+              _Evaluated at {{ evaluated_at | as_datetime | default(evaluated_at) | string }}_
+              {% endif %}
+              {% else %}
+              _Forecast not available_
+
+              **Requirements:**
+              - Nord Pool config entry must be configured in Electricity Planner settings
+              - Go to: Settings → Devices & Services → Electricity Planner → Configure
+              - Enter your Nord Pool integration config entry ID
+
+              _This feature provides detailed price forecast analysis including cheapest intervals and best charging windows._
+              {% endif %}
+
+          # Manual Override Controls
+          - type: markdown
+            title: Manual override status
+            content: >
+              {% set diag_entity = 'sensor.electricity_planner_decision_diagnostics' %}
+              {% if states(diag_entity) in ['unknown', 'unavailable', None] %}
+              {% set diag_entity = 'sensor.electricity_planner_decision_diagnostics_diagnostic' %}
+              {% endif %}
+              {% set decisions = state_attr(diag_entity, 'decisions') %}
+              {% set overrides = decisions.manual_overrides if decisions else state_attr(diag_entity, 'manual_overrides') %}
+              {% if overrides %}
+              {% for key, value in overrides.items() %}
+              {% set target_name = key | replace('_', ' ') | title %}
+              {% set mode = 'charging' if value.value else 'waiting' %}
+              {% set until = value.expires_at | default(None) %}
+              {% set reason = value.reason | default('') %}
+              **{{ target_name }}:** {{ mode }}{% if until %} (until {{ as_datetime(until).astimezone().strftime('%H:%M') }}){% endif %}{% if reason %} — {{ reason }}{% endif %}
+
+              {% endfor %}
+              {% else %}
+              _No manual overrides active_
+              {% endif %}
+
+          # Manual override buttons - force charging or waiting states with user-defined durations
+          - type: horizontal-stack
+            cards:
+              - type: custom:button-card
+                name: Battery charge
+                icon: mdi:battery-arrow-up
+                size: 20%
+                styles:
+                  card:
+                    - height: 60px
+                  name:
+                    - font-size: 11px
+                  icon:
+                    - width: 20px
+                tap_action:
+                  action: call-service
+                  service: electricity_planner.set_manual_override
+                  service_data: |
+                    [[[
+                      // Prompt user for override duration (default 2 hours)
+                      const input = prompt('Battery override duration (minutes)', '120');
+                      if (input === null) {
+                        return;  // User cancelled
+                      }
+                      // Parse and clamp duration between 1 minute and 24 hours
+                      const minutes = parseInt(input, 10);
+                      const duration = Number.isFinite(minutes) ? Math.min(Math.max(minutes, 1), 1440) : 120;
+                      return {
+                        target: 'battery',
+                        action: 'force_charge',
+                        duration,
+                        reason: 'Dashboard boost'
+                      };
+                    ]]]
+              - type: custom:button-card
+                name: Battery wait
+                icon: mdi:battery-remove
+                size: 20%
+                styles:
+                  card:
+                    - height: 60px
+                  name:
+                    - font-size: 11px
+                  icon:
+                    - width: 20px
+                tap_action:
+                  action: call-service
+                  service: electricity_planner.set_manual_override
+                  service_data: |
+                    [[[
+                      // Prompt user for override duration (default 2 hours)
+                      const input = prompt('Battery override duration (minutes)', '120');
+                      if (input === null) {
+                        return;  // User cancelled
+                      }
+                      // Parse and clamp duration between 1 minute and 24 hours
+                      const minutes = parseInt(input, 10);
+                      const duration = Number.isFinite(minutes) ? Math.min(Math.max(minutes, 1), 1440) : 120;
+                      return {
+                        target: 'battery',
+                        action: 'force_wait',
+                        duration,
+                        reason: 'Dashboard pause'
+                      };
+                    ]]]
+              - type: custom:button-card
+                name: Car charge
+                icon: mdi:car-arrow-right
+                size: 20%
+                styles:
+                  card:
+                    - height: 60px
+                  name:
+                    - font-size: 11px
+                  icon:
+                    - width: 20px
+                tap_action:
+                  action: call-service
+                  service: electricity_planner.set_manual_override
+                  service_data: |
+                    [[[
+                      // Prompt user for override duration (default 2 hours)
+                      const input = prompt('Car override duration (minutes)', '120');
+                      if (input === null) {
+                        return;  // User cancelled
+                      }
+                      // Parse and clamp duration between 1 minute and 24 hours
+                      const minutes = parseInt(input, 10);
+                      const duration = Number.isFinite(minutes) ? Math.min(Math.max(minutes, 1), 1440) : 120;
+                      return {
+                        target: 'car',
+                        action: 'force_charge',
+                        duration,
+                        reason: 'Dashboard boost'
+                      };
+                    ]]]
+              - type: custom:button-card
+                name: Car wait
+                icon: mdi:car-clock
+                size: 20%
+                styles:
+                  card:
+                    - height: 60px
+                  name:
+                    - font-size: 11px
+                  icon:
+                    - width: 20px
+                tap_action:
+                  action: call-service
+                  service: electricity_planner.set_manual_override
+                  service_data: |
+                    [[[
+                      // Prompt user for override duration (default 2 hours)
+                      const input = prompt('Car override duration (minutes)', '120');
+                      if (input === null) {
+                        return;  // User cancelled
+                      }
+                      // Parse and clamp duration between 1 minute and 24 hours
+                      const minutes = parseInt(input, 10);
+                      const duration = Number.isFinite(minutes) ? Math.min(Math.max(minutes, 1), 1440) : 120;
+                      return {
+                        target: 'car',
+                        action: 'force_wait',
+                        duration,
+                        reason: 'Dashboard pause'
+                      };
+                    ]]]
+              - type: custom:button-card
+                name: Clear all
+                icon: mdi:restore
+                size: 20%
+                styles:
+                  card:
+                    - height: 60px
+                  name:
+                    - font-size: 11px
+                  icon:
+                    - width: 20px
+                tap_action:
+                  action: call-service
+                  service: electricity_planner.clear_manual_override
+                  data:

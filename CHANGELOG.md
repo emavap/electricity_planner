@@ -5,6 +5,45 @@ All notable changes to the Electricity Planner integration will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.0] - 2025-10-29
+
+### Fixed
+- **Managed Dashboard Restored** – Reimplemented automatic dashboard provisioning using Home Assistant's Lovelace storage collection, so each config entry now gets a working dashboard again.
+  - Creates or updates dashboards via `DashboardsCollection` and `LovelaceStorage`
+  - Cleans up dashboards on unload only when they belong to the same config entry
+  - Waits for entity registry population to ensure replacements resolve correctly
+  - Falls back to retry after Home Assistant startup if Lovelace isn't ready yet
+
+### Added
+- **Dashboard Automation Tests** – Lightweight unit tests verify entity replacements, skip conditions, and safe removal behaviour to guard against future regressions.
+
+## [4.2.2] - 2025-10-28
+
+### Fixed
+- **Dashboard Creation Temporarily Disabled** – Automatic dashboard creation disabled while implementing proper Home Assistant storage API
+  - Previous implementation used non-existent HA Lovelace functions causing crashes
+  - Dashboard YAML template still included for manual import
+  - Proper implementation coming in next release
+
+## [4.2.1] - 2025-10-28 [YANKED - DO NOT USE]
+
+### Issues
+- Crashes on integration unload due to incorrect API usage
+- Please use 4.2.2 instead
+
+## [4.2.0] - 2025-10-28
+
+### Added
+- **Managed Lovelace Dashboard** – Each config entry now provisions a tailored dashboard automatically
+  - Real-time price gauges with dynamic thresholds
+  - Nord Pool price history and forecast charts (38h view)
+  - Manual override controls for battery and car charging
+  - Automatic entity ID mapping per instance
+  - Requires gauge-card-pro, apexcharts-card, and button-card from HACS
+
+### Fixed
+- **Dashboard Code Quality** – Fixed hardcoded entity references, added comprehensive documentation
+
 ## [4.1.0] - 2025-10-21
 
 ### Added
@@ -12,9 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Enables targeting specific integration instances when multiple are configured
   - Maintains backward compatibility with single-instance setups (auto-selects sole entry)
   - Clear error messages when `entry_id` is required but not provided
+- **Managed Lovelace Dashboard** – Each config entry now provisions a tailored dashboard automatically using the entities registered in that installation, eliminating manual YAML copying while keeping per-instance entity IDs intact.
 
 ### Improved
 - **Transport Cost Fallback Logic** – Enhanced reliability when transport cost time windows end
+- **Dashboard Quality Improvements** – Fixed hardcoded entity references, added comprehensive documentation for required HACS cards, expanded test coverage, and added explanatory comments to complex template sections
   - `_resolve_transport_cost()` now returns `None` when lookup unavailable (semantic clarity)
   - Graceful fallback to current sensor value before defaulting to 0.0
   - Prevents incorrect zero costs when valid sensor data available
