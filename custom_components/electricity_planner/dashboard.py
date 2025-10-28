@@ -159,10 +159,18 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
 
     url_path = _dashboard_url_path(entry)
     _LOGGER.debug("Dashboard URL path: %s", url_path)
-    storage = await _ensure_dashboard_record(hass, handles, entry, url_path)
-    if storage is None:
-        _LOGGER.error("Failed to ensure dashboard record")
+
+    try:
+        storage = await _ensure_dashboard_record(hass, handles, entry, url_path)
+    except Exception as err:
+        _LOGGER.error("Exception in _ensure_dashboard_record: %s", err, exc_info=True)
         return
+
+    if storage is None:
+        _LOGGER.error("Failed to ensure dashboard record - storage is None")
+        return
+
+    _LOGGER.info("Dashboard record created successfully, storage: %s", type(storage))
 
     _LOGGER.debug("Saving dashboard configuration...")
     await _save_dashboard(storage, dashboard_config)
@@ -233,7 +241,15 @@ async def _ensure_dashboard_record(
     # Check if dashboard already exists in the collection
     dashboard_item: dict[str, Any] | None = None
     existing_item_id: str | None = None
-    for item in handles.collection.data.values():
+
+    try:
+        collection_data = handles.collection.data
+        _LOGGER.debug("Collection has %d items", len(collection_data))
+    except Exception as err:
+        _LOGGER.error("Failed to access collection.data: %s", err, exc_info=True)
+        return None
+
+    for item in collection_data.values():
         if item.get(ll_const.CONF_URL_PATH) == url_path:
             dashboard_item = item
             existing_item_id = item.get("id")
