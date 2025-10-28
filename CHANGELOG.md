@@ -5,6 +5,28 @@ All notable changes to the Electricity Planner integration will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.1] - 2025-10-28
+
+### Fixed
+- **Dashboard Creation Logging** – Improved visibility of dashboard setup process
+  - Changed DEBUG to WARNING/ERROR for critical failure paths
+  - Added entry point log message to confirm setup starts
+  - Users can now diagnose dashboard issues without enabling debug mode
+  - Helpful context added to all error messages
+
+## [4.2.0] - 2025-10-28
+
+### Added
+- **Managed Lovelace Dashboard** – Each config entry now provisions a tailored dashboard automatically
+  - Real-time price gauges with dynamic thresholds
+  - Nord Pool price history and forecast charts (38h view)
+  - Manual override controls for battery and car charging
+  - Automatic entity ID mapping per instance
+  - Requires gauge-card-pro, apexcharts-card, and button-card from HACS
+
+### Fixed
+- **Dashboard Code Quality** – Fixed hardcoded entity references, added comprehensive documentation
+
 ## [4.1.0] - 2025-10-21
 
 ### Added
