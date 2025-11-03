@@ -105,7 +105,12 @@ class DynamicThresholdAnalyzer:
             elif current_price > dynamic_threshold:
                 reason = f"Price {current_price:.3f}€/kWh above dynamic threshold {dynamic_threshold:.3f}€/kWh"
             else:
-                reason = f"Price {current_price:.3f}€/kWh not optimal (confidence: {confidence:.1%})"
+                # Price is below dynamic threshold but confidence is low
+                # This means conditions aren't quite right yet (e.g., improving trend next hour)
+                if next_price is not None:
+                    reason = f"Price {current_price:.3f}€/kWh acceptable but waiting for more favorable conditions"
+                else:
+                    reason = f"Price {current_price:.3f}€/kWh - waiting for better timing within acceptable range"
 
         return {
             "should_charge": should_charge,

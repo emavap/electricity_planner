@@ -322,14 +322,24 @@ class DynamicPriceStrategy(ChargingStrategy):
 
         # Simple decision: does price analysis meet confidence requirement?
         if analysis["confidence"] >= confidence_threshold:
-            reason = f"{analysis['reason']} (SOC: {average_soc:.0f}%, {solar_context})"
+            # Build user-friendly reason without exposing confidence internals
+            if average_soc < 40:
+                soc_context = f"low battery ({average_soc:.0f}%)"
+            elif average_soc >= 70:
+                soc_context = f"high battery ({average_soc:.0f}%)"
+            else:
+                soc_context = f"battery at {average_soc:.0f}%"
+
+            reason = f"{analysis['reason']} - {soc_context}, {solar_context}"
             return True, reason
 
-        return False, (
-            f"{analysis['reason']} "
-            f"(Need {confidence_threshold:.0%} confidence, have {analysis['confidence']:.0%}; "
-            f"{solar_context})"
-        )
+        # Not charging: provide clear reason without confusing confidence percentages
+        if has_significant_solar and average_soc >= 40:
+            return False, f"{analysis['reason']} - waiting for solar (surplus: {solar_surplus}W)"
+        elif average_soc >= 70:
+            return False, f"{analysis['reason']} - battery already at {average_soc:.0f}%"
+        else:
+            return False, f"{analysis['reason']} - price conditions not optimal yet"
     
     def get_priority(self) -> int:
         return 4  # After emergency, solar, and very low price
