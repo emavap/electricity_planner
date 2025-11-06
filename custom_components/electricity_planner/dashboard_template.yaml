@@ -554,10 +554,14 @@ views:
               {% if overrides %}
               {% for key, value in overrides.items() %}
               {% set target_name = key | replace('_', ' ') | title %}
-              {% set mode = 'charging' if value.value else 'waiting' %}
               {% set until = value.expires_at | default(None) %}
               {% set reason = value.reason | default('') %}
+              {% if key in ['charger_limit', 'grid_setpoint'] %}
+              **{{ target_name }}:** {{ value.value }}W{% if until %} (until {{ as_datetime(until).astimezone().strftime('%H:%M') }}){% endif %}{% if reason %} — {{ reason }}{% endif %}
+              {% else %}
+              {% set mode = 'charging' if value.value else 'waiting' %}
               **{{ target_name }}:** {{ mode }}{% if until %} (until {{ as_datetime(until).astimezone().strftime('%H:%M') }}){% endif %}{% if reason %} — {{ reason }}{% endif %}
+              {% endif %}
 
               {% endfor %}
               {% else %}
@@ -630,8 +634,8 @@ views:
                       };
                     ]]]
               - type: custom:button-card
-                name: Car charge
-                icon: mdi:car-arrow-right
+                name: Force Car Charging
+                icon: mdi:car-electric
                 size: 20%
                 styles:
                   card:
@@ -645,51 +649,57 @@ views:
                   service: electricity_planner.set_manual_override
                   service_data: |
                     [[[
-                      // Prompt user for override duration (default 2 hours)
-                      const input = prompt('Car override duration (minutes)', '120');
-                      if (input === null) {
+                      // Step 1: Choose action
+                      const actionInput = prompt('Choose action: charge or wait', 'charge');
+                      if (actionInput === null) {
                         return;  // User cancelled
                       }
-                      // Parse and clamp duration between 1 minute and 24 hours
-                      const minutes = parseInt(input, 10);
-                      const duration = Number.isFinite(minutes) ? Math.min(Math.max(minutes, 1), 1440) : 120;
-                      return {
-                        target: 'car',
-                        action: 'force_charge',
-                        duration,
-                        reason: 'Dashboard boost'
-                      };
-                    ]]]
-              - type: custom:button-card
-                name: Car wait
-                icon: mdi:car-clock
-                size: 20%
-                styles:
-                  card:
-                    - height: 60px
-                  name:
-                    - font-size: 11px
-                  icon:
-                    - width: 20px
-                tap_action:
-                  action: call-service
-                  service: electricity_planner.set_manual_override
-                  service_data: |
-                    [[[
-                      // Prompt user for override duration (default 2 hours)
-                      const input = prompt('Car override duration (minutes)', '120');
-                      if (input === null) {
+                      const actionChoice = actionInput.trim().toLowerCase();
+                      if (actionChoice !== 'charge' && actionChoice !== 'wait') {
+                        alert('Invalid action. Please enter "charge" or "wait".');
+                        return;
+                      }
+                      const action = actionChoice === 'charge' ? 'force_charge' : 'force_wait';
+
+                      // Step 2: Duration
+                      const durationInput = prompt('Override duration (minutes)', '120');
+                      if (durationInput === null) {
                         return;  // User cancelled
                       }
-                      // Parse and clamp duration between 1 minute and 24 hours
-                      const minutes = parseInt(input, 10);
+                      const minutes = parseInt(durationInput, 10);
                       const duration = Number.isFinite(minutes) ? Math.min(Math.max(minutes, 1), 1440) : 120;
-                      return {
+
+                      // Step 3: Charger limit (optional)
+                      const limitInput = prompt('Car charger limit (W) - leave empty for automatic', '');
+
+                      // Step 4: Grid setpoint (optional)
+                      const setpointInput = prompt('Grid setpoint (W) - leave empty for automatic', '');
+
+                      // Build service data
+                      const data = {
                         target: 'car',
-                        action: 'force_wait',
-                        duration,
-                        reason: 'Dashboard pause'
+                        action: action,
+                        duration: duration,
+                        reason: action === 'force_charge' ? 'Dashboard boost' : 'Dashboard pause'
                       };
+
+                      // Add charger_limit if provided
+                      if (limitInput && limitInput.trim() !== '') {
+                        const limit = parseInt(limitInput, 10);
+                        if (Number.isFinite(limit) && limit >= 0 && limit <= 50000) {
+                          data.charger_limit = limit;
+                        }
+                      }
+
+                      // Add grid_setpoint if provided
+                      if (setpointInput && setpointInput.trim() !== '') {
+                        const setpoint = parseInt(setpointInput, 10);
+                        if (Number.isFinite(setpoint) && setpoint >= 0 && setpoint <= 50000) {
+                          data.grid_setpoint = setpoint;
+                        }
+                      }
+
+                      return data;
                     ]]]
               - type: custom:button-card
                 name: Clear all
@@ -706,3 +716,4 @@ views:
                   action: call-service
                   service: electricity_planner.clear_manual_override
                   data:
+                    target: all

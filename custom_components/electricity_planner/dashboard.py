@@ -129,7 +129,7 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
         _LOGGER.warning("No registered entities for %s; skipping dashboard creation", entry.entry_id)
         return
 
-    template_text = await _load_template_text(hass)
+    template_text = await _async_load_template_text(hass)
     if not template_text:
         _LOGGER.error("Dashboard template %s missing; skipping creation", TEMPLATE_FILENAME)
         return
@@ -472,20 +472,22 @@ def _configs_equal(config_a: dict[str, Any], config_b: dict[str, Any]) -> bool:
     return json.dumps(config_a, sort_keys=True) == json.dumps(config_b, sort_keys=True)
 
 
-async def _load_template_text(hass: HomeAssistant) -> str:
-    """Load the bundled dashboard template (async to avoid blocking)."""
+def _load_template_text() -> str:
+    """Synchronously load the bundled dashboard template."""
     try:
         template_path = resources.files(__package__) / TEMPLATE_FILENAME
     except FileNotFoundError:
         return ""
 
     try:
-        # Use hass.async_add_executor_job to avoid blocking the event loop
-        return await hass.async_add_executor_job(
-            template_path.read_text, "utf-8"
-        )
+        return template_path.read_text("utf-8")
     except (FileNotFoundError, OSError):
         return ""
+
+
+async def _async_load_template_text(hass: HomeAssistant) -> str:
+    """Async wrapper for loading the dashboard template without blocking."""
+    return await hass.async_add_executor_job(_load_template_text)
 
 
 def _apply_replacements(template: str, replacements: dict[str, str]) -> str:

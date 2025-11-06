@@ -243,38 +243,74 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             "battery": ("battery_grid_charging",),
             "car": ("car_grid_charging",),
             "both": ("battery_grid_charging", "car_grid_charging"),
+            "charger_limit": ("charger_limit",),
+            "grid_setpoint": ("grid_setpoint",),
+            "all": ("battery_grid_charging", "car_grid_charging", "charger_limit", "grid_setpoint"),
         }
         return mapping.get(target, ())
 
     async def async_set_manual_override(
         self,
         target: str,
-        value: bool,
+        value: bool | None,
         duration: timedelta | None,
         reason: str | None,
+        charger_limit: int | None = None,
+        grid_setpoint: int | None = None,
     ) -> None:
-        """Apply a manual override for battery or car decisions."""
+        """Apply a manual override for battery or car decisions, charger limit, or grid setpoint."""
         now = dt_util.utcnow()
         expires_at = now + duration if duration is not None else None
-        manual_reason = reason or ("force charge" if value else "force wait")
 
-        for coordinator_key in self._resolve_override_targets(target):
-            self._manual_overrides[coordinator_key] = {
-                "value": value,
-                "reason": manual_reason,
+        # Apply boolean overrides (battery/car charging) only if value is provided
+        if value is not None:
+            manual_reason = reason or ("force charge" if value else "force wait")
+            for coordinator_key in self._resolve_override_targets(target):
+                # Only apply boolean overrides to actual boolean keys
+                if coordinator_key in ("battery_grid_charging", "car_grid_charging"):
+                    self._manual_overrides[coordinator_key] = {
+                        "value": value,
+                        "reason": manual_reason,
+                        "expires_at": expires_at,
+                        "set_at": now,
+                    }
+                    _LOGGER.info(
+                        "Manual override set for %s → %s (expires %s)",
+                        coordinator_key,
+                        value,
+                        expires_at.isoformat() if expires_at else "never",
+                    )
+
+        # Apply numeric overrides (charger_limit and grid_setpoint)
+        if charger_limit is not None:
+            self._manual_overrides["charger_limit"] = {
+                "value": charger_limit,
+                "reason": reason or "Manual charger limit override",
                 "expires_at": expires_at,
                 "set_at": now,
             }
             _LOGGER.info(
-                "Manual override set for %s → %s (expires %s)",
-                coordinator_key,
-                value,
+                "Manual override set for charger_limit → %dW (expires %s)",
+                charger_limit,
+                expires_at.isoformat() if expires_at else "never",
+            )
+
+        if grid_setpoint is not None:
+            self._manual_overrides["grid_setpoint"] = {
+                "value": grid_setpoint,
+                "reason": reason or "Manual grid setpoint override",
+                "expires_at": expires_at,
+                "set_at": now,
+            }
+            _LOGGER.info(
+                "Manual override set for grid_setpoint → %dW (expires %s)",
+                grid_setpoint,
                 expires_at.isoformat() if expires_at else "never",
             )
 
     async def async_clear_manual_override(self, target: str | None = None) -> None:
         """Clear manual overrides for the given target (or all)."""
-        effective_target = target or "both"
+        effective_target = target or "all"
         for coordinator_key in self._resolve_override_targets(effective_target):
             if self._manual_overrides.get(coordinator_key):
                 _LOGGER.info("Manual override cleared for %s", coordinator_key)
@@ -364,37 +400,63 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 self._manual_overrides[coordinator_key] = None
                 continue
 
-            manual_reason: str = override.get("reason") or (
-                "Manual override to charge" if override.get("value") else "Manual override to wait"
-            )
-            previous_value = decision.get(coordinator_key)
-            decision[coordinator_key] = override["value"]
-            if previous_value != override["value"]:
-                changed_targets.add(coordinator_key)
+            override_value = override["value"]
+            manual_reason: str = override.get("reason", "Manual override")
 
-            reason_key = f"{coordinator_key}_reason"
-            existing_reason = decision.get(reason_key)
-            if existing_reason:
-                decision[reason_key] = f"{existing_reason} (override: {manual_reason})"
-            else:
-                decision[reason_key] = f"Manual override: {manual_reason}"
+            # Handle numeric overrides (charger_limit, grid_setpoint)
+            if coordinator_key in ("charger_limit", "grid_setpoint"):
+                previous_value = decision.get(coordinator_key)
+                decision[coordinator_key] = override_value
+                if previous_value != override_value:
+                    changed_targets.add(coordinator_key)
 
-            overrides_info[coordinator_key] = {
-                "value": override["value"],
-                "reason": manual_reason,
-                "set_at": override.get("set_at").isoformat() if override.get("set_at") else None,
-                "expires_at": expires_at.isoformat() if expires_at else None,
-            }
+                reason_key = f"{coordinator_key}_reason"
+                existing_reason = decision.get(reason_key)
+                if existing_reason:
+                    decision[reason_key] = f"{existing_reason} (override: {manual_reason})"
+                else:
+                    decision[reason_key] = f"Manual override: {manual_reason}"
 
-            augmented_trace.append(
-                {
-                    "strategy": "ManualOverride",
-                    "priority": -1,
-                    "should_charge": override["value"],
+                overrides_info[coordinator_key] = {
+                    "value": override_value,
                     "reason": manual_reason,
-                    "target": coordinator_key,
+                    "set_at": override.get("set_at").isoformat() if override.get("set_at") else None,
+                    "expires_at": expires_at.isoformat() if expires_at else None,
                 }
-            )
+
+            # Handle boolean overrides (battery_grid_charging, car_grid_charging)
+            else:
+                if not manual_reason or manual_reason == "Manual override":
+                    manual_reason = "Manual override to charge" if override_value else "Manual override to wait"
+
+                previous_value = decision.get(coordinator_key)
+                decision[coordinator_key] = override_value
+                if previous_value != override_value:
+                    changed_targets.add(coordinator_key)
+
+                reason_key = f"{coordinator_key}_reason"
+                existing_reason = decision.get(reason_key)
+                if existing_reason:
+                    decision[reason_key] = f"{existing_reason} (override: {manual_reason})"
+                else:
+                    decision[reason_key] = f"Manual override: {manual_reason}"
+
+                overrides_info[coordinator_key] = {
+                    "value": override_value,
+                    "reason": manual_reason,
+                    "set_at": override.get("set_at").isoformat() if override.get("set_at") else None,
+                    "expires_at": expires_at.isoformat() if expires_at else None,
+                }
+
+                augmented_trace.append(
+                    {
+                        "strategy": "ManualOverride",
+                        "priority": -1,
+                        "should_charge": override_value,
+                        "reason": manual_reason,
+                        "target": coordinator_key,
+                    }
+                )
 
         if overrides_info:
             decision["manual_overrides"] = overrides_info

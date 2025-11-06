@@ -5,6 +5,18 @@ All notable changes to the Electricity Planner integration will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.0] - 2025-10-30
+
+### Added
+- **Numeric Manual Overrides** – Charger limit and grid setpoint can now be overridden alongside battery/car decisions, including new service schema targets and dashboard controls.
+
+### Changed
+- **Unified Car Override Button** – Dashboard flow gathers action, duration, and optional numeric overrides in a single prompt while keeping the battery controls untouched.
+- **Service & Sensor Alignment** – Service documentation, coordinator logic, and diagnostic sensors expose override metadata so clearing `target: all` removes every override slot consistently.
+
+### Fixed
+- **Config Options Flow** – Restored compatibility with Home Assistant's options flow initialisation while keeping asynchronous dashboard template loading.
+
 ## [4.3.0] - 2025-10-29
 
 ### Fixed

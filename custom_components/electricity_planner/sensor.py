@@ -382,12 +382,25 @@ class ChargerLimitSensor(ElectricityPlannerSensorBase):
         if not self.coordinator.data:
             return {}
 
-        return {
+        attributes = {
             "charger_limit_reason": self.coordinator.data.get("charger_limit_reason", ""),
             "current_car_power": self.coordinator.data.get("power_analysis", {}).get("car_charging_power", 0),
             "solar_surplus": self.coordinator.data.get("power_analysis", {}).get("solar_surplus", 0),
             "car_currently_charging": self.coordinator.data.get("power_analysis", {}).get("car_currently_charging", False),
         }
+
+        # Add override status
+        manual_overrides = self.coordinator.data.get("manual_overrides", {})
+        if "charger_limit" in manual_overrides:
+            override_info = manual_overrides["charger_limit"]
+            attributes["is_overridden"] = True
+            attributes["override_value"] = override_info.get("value")
+            attributes["override_reason"] = override_info.get("reason")
+            attributes["override_expires_at"] = override_info.get("expires_at")
+        else:
+            attributes["is_overridden"] = False
+
+        return attributes
 
 
 class GridSetpointSensor(ElectricityPlannerSensorBase):
@@ -442,6 +455,17 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
                 phase: result.get("grid_components")
                 for phase, result in phase_results.items()
             }
+
+        # Add override status
+        manual_overrides = self.coordinator.data.get("manual_overrides", {})
+        if "grid_setpoint" in manual_overrides:
+            override_info = manual_overrides["grid_setpoint"]
+            attributes["is_overridden"] = True
+            attributes["override_value"] = override_info.get("value")
+            attributes["override_reason"] = override_info.get("reason")
+            attributes["override_expires_at"] = override_info.get("expires_at")
+        else:
+            attributes["is_overridden"] = False
 
         return attributes
 

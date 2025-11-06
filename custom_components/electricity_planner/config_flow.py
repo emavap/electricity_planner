@@ -741,8 +741,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for Electricity Planner."""
 
-    # Don't set config_entry explicitly - it's set by the parent class
-    # See: https://developers.home-assistant.io/blog/2024/07/03/options-flow-config-entry-deprecation
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Store the config entry for the options flow."""
+        super().__init__()
+        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

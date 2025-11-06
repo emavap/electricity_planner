@@ -12,7 +12,7 @@ set_manual_override:
         text:
     target:
       name: Target
-      description: Which device(s) to override (battery, car, or both)
+      description: Which override to set (battery, car, both, charger_limit, or grid_setpoint)
       required: true
       example: "battery"
       selector:
@@ -21,10 +21,12 @@ set_manual_override:
             - "battery"
             - "car"
             - "both"
+            - "charger_limit"
+            - "grid_setpoint"
     action:
       name: Action
-      description: Whether to force charging ON or wait
-      required: true
+      description: Whether to force charging ON or wait (required for battery/car/both targets)
+      required: false
       example: "force_charge"
       selector:
         select:
@@ -48,6 +50,28 @@ set_manual_override:
       example: "Emergency charging needed"
       selector:
         text:
+    charger_limit:
+      name: Charger Limit (Watts)
+      description: Optional override for car charger power limit (leave empty to use automatic calculation)
+      required: false
+      example: 5000
+      selector:
+        number:
+          min: 0
+          max: 50000
+          step: 100
+          unit_of_measurement: "W"
+    grid_setpoint:
+      name: Grid Setpoint (Watts)
+      description: Optional override for grid import power setpoint (leave empty to use automatic calculation)
+      required: false
+      example: 8000
+      selector:
+        number:
+          min: 0
+          max: 50000
+          step: 100
+          unit_of_measurement: "W"
 
 clear_manual_override:
   name: Clear Manual Override
@@ -62,13 +86,16 @@ clear_manual_override:
         text:
     target:
       name: Target
-      description: Which device(s) override to clear (battery, car, or both)
+      description: Which device(s) override to clear (battery, car, both, charger_limit, grid_setpoint, or all)
       required: false
-      example: "both"
-      default: "both"
+      example: "all"
+      default: "all"
       selector:
         select:
           options:
             - "battery"
             - "car"
             - "both"
+            - "charger_limit"
+            - "grid_setpoint"
+            - "all"
