@@ -1213,7 +1213,7 @@ class ChargingDecisionEngine:
             "min_soc": min_soc,
             "max_soc": max_soc,
             "batteries_count": len(soc_values),
-            "batteries_full": min_soc >= max_threshold,
+            "batteries_full": average_soc >= max_threshold,
             "min_soc_threshold": min_threshold,
             "max_soc_threshold": max_threshold,
             "remaining_capacity_percent": max_threshold - average_soc,
@@ -1307,9 +1307,10 @@ class ChargingDecisionEngine:
 
         if battery_analysis.get("batteries_full"):
             max_threshold = battery_analysis.get("max_soc_threshold", 90)
+            average_soc = battery_analysis.get("average_soc", 0)
             return {
                 "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"Batteries above {max_threshold}% SOC",
+                "battery_grid_charging_reason": f"Battery average SOC {average_soc:.0f}% ≥ {max_threshold}% threshold",
                 "strategy_trace": [],
             }
 
