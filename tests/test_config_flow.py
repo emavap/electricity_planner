@@ -68,7 +68,8 @@ from custom_components.electricity_planner.const import (
 @pytest.mark.asyncio
 async def test_options_flow_returns_updated_options():
     entry = MockConfigEntry(domain=DOMAIN, data={})
-    handler = OptionsFlowHandler(entry)
+    handler = OptionsFlowHandler()
+    object.__setattr__(handler, 'config_entry', entry)  # Bypass read-only property for testing
 
     battery_entity = "sensor.main_battery"
 
@@ -131,7 +132,8 @@ async def test_options_flow_defaults_reflect_existing_options():
         },
     )
 
-    handler = OptionsFlowHandler(entry)
+    handler = OptionsFlowHandler()
+    object.__setattr__(handler, 'config_entry', entry)  # Bypass read-only property for testing
     result = await handler.async_step_init()
 
     assert result["type"] == FlowResultType.FORM
@@ -166,7 +168,8 @@ async def test_options_flow_hides_phase_assignment_when_single_phase():
         },
     )
 
-    handler = OptionsFlowHandler(entry)
+    handler = OptionsFlowHandler()
+    object.__setattr__(handler, 'config_entry', entry)  # Bypass read-only property for testing
     result = await handler.async_step_init()
 
     assert result["type"] == FlowResultType.FORM
