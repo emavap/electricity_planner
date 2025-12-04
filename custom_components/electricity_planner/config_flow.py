@@ -1,5 +1,6 @@
 """Config flow for Electricity Planner integration."""
 from __future__ import annotations
+import logging
 from typing import Any
 
 import voluptuous as vol
@@ -83,6 +84,8 @@ from .const import (
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -651,12 +654,20 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the safety limits step - Power and SOC Safety Limits."""
+        errors = {}
         if user_input is not None:
             self.data.update(user_input)
-            return self.async_create_entry(
-                title="Electricity Planner",
-                data=self.data
-            )
+
+            # Validate configuration consistency
+            validation_errors = validate_config_consistency(self.data)
+            if validation_errors:
+                errors["base"] = "Configuration validation failed: " + "; ".join(validation_errors)
+                _LOGGER.warning("Configuration validation errors: %s", validation_errors)
+            else:
+                return self.async_create_entry(
+                    title="Electricity Planner",
+                    data=self.data
+                )
 
         schema = vol.Schema({
             vol.Optional(
@@ -720,6 +731,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="safety_limits",
             data_schema=schema,
+            errors=errors,
             description_placeholders={
                 "max_battery_power": "Maximum power limit for battery charging/discharging",
                 "max_car_power": "Maximum power limit for car charging",
@@ -736,6 +748,51 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Return the options flow."""
         return OptionsFlowHandler()
 
+
+def validate_config_consistency(config: dict[str, Any]) -> list[str]:
+    """Validate configuration for logical consistency.
+
+    Args:
+        config: Configuration dictionary to validate
+
+    Returns:
+        List of error messages (empty if valid)
+    """
+    errors = []
+
+    # SOC threshold validation
+    min_soc = config.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)
+    max_soc = config.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
+    emergency_soc = config.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC)
+
+    if min_soc >= max_soc:
+        errors.append(f"min_soc ({min_soc}%) must be less than max_soc ({max_soc}%)")
+
+    if emergency_soc > min_soc:
+        errors.append(f"emergency_soc ({emergency_soc}%) should be below min_soc ({min_soc}%)")
+
+    # Power limit validation
+    max_battery_power = config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)
+    max_car_power = config.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)
+    max_grid_power = config.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER)
+
+    if max_battery_power > max_grid_power:
+        errors.append(f"max_battery_power ({max_battery_power}W) cannot exceed max_grid_power ({max_grid_power}W)")
+
+    if max_car_power > max_grid_power:
+        errors.append(f"max_car_power ({max_car_power}W) cannot exceed max_grid_power ({max_grid_power}W)")
+
+    # Price threshold validation
+    price_threshold = config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
+    if price_threshold < 0:
+        errors.append(f"price_threshold ({price_threshold}€/kWh) cannot be negative")
+
+    # Very low price threshold validation
+    very_low_price = config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
+    if not 0 <= very_low_price <= 100:
+        errors.append(f"very_low_price_threshold ({very_low_price}%) must be between 0 and 100")
+
+    return errors
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):

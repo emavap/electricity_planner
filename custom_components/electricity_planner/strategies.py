@@ -415,8 +415,17 @@ class StrategyManager:
             config = context.get("config", {}) or {}
             settings = context.get("settings")
             average_soc = battery.get("average_soc")
+
+            # If battery SOC is unavailable, we cannot evaluate emergency override
+            # Use conservative approach: block charging at high prices
             if average_soc is None:
-                average_soc = 100
+                _LOGGER.debug(
+                    "Price threshold guard: cannot evaluate emergency override without battery SOC, "
+                    "blocking charge at high price %.3f€/kWh > %.3f€/kWh",
+                    current_price, threshold
+                )
+                return False, f"Price {current_price:.3f}€/kWh exceeds threshold {threshold:.3f}€/kWh (battery SOC unavailable)"
+
             emergency_threshold = (
                 getattr(settings, "emergency_soc_threshold", None)
                 if settings is not None

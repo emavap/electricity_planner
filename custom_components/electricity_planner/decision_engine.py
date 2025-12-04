@@ -63,6 +63,8 @@ from .const import (
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN,
+    PERMISSIVE_MULTIPLIER_MIN,
+    PERMISSIVE_MULTIPLIER_MAX,
 )
 
 from .defaults import (
@@ -871,19 +873,24 @@ class ChargingDecisionEngine:
 
         # Use cached price position calculation with explicit None handling
         # Note: Use explicit None checks to handle zero and negative prices correctly
-        effective_highest = current_price if highest_price is None else highest_price
-        effective_lowest = current_price if lowest_price is None else lowest_price
-        price_position = self.price_calculator.calculate_price_position(
-            current_price, effective_highest, effective_lowest
-        )
-        
+        # If both highest and lowest are None, we don't have daily range data
+        if highest_price is None and lowest_price is None:
+            price_position = None
+            _LOGGER.debug("Daily price range unavailable - price_position set to None")
+        else:
+            effective_highest = current_price if highest_price is None else highest_price
+            effective_lowest = current_price if lowest_price is None else lowest_price
+            price_position = self.price_calculator.calculate_price_position(
+                current_price, effective_highest, effective_lowest
+            )
+
         # Check price trends
         next_price_higher = next_price is not None and next_price > current_price
         price_trend_improving = next_price is not None and next_price < current_price
         significant_price_drop = self.price_calculator.is_significant_price_drop(
             current_price, next_price, DEFAULT_ALGORITHM_THRESHOLDS.significant_price_drop
         )
-        
+
         return {
             "current_price": current_price,
             "highest_price": highest_price,
@@ -903,7 +910,7 @@ class ChargingDecisionEngine:
             "next_price_higher": next_price_higher,
             "price_trend_improving": price_trend_improving,
             "significant_price_drop": significant_price_drop,
-            "very_low_price": price_position <= very_low_threshold,
+            "very_low_price": price_position is not None and price_position <= very_low_threshold,
             "data_available": True,
         }
 
@@ -1251,8 +1258,13 @@ class ChargingDecisionEngine:
 
     def _calculate_weighted_average_soc(self, batteries: List[Dict[str, Any]]) -> float:
         """Calculate capacity-weighted average SOC."""
+        # Defensive check: ensure batteries list is not empty
+        if not batteries:
+            _LOGGER.warning("Empty batteries list passed to _calculate_weighted_average_soc")
+            return 0.0
+
         capacities = self._settings.battery_capacities
-        
+
         if not capacities:
             # Simple average
             return sum(b["soc"] for b in batteries) / len(batteries)
@@ -1553,14 +1565,26 @@ class ChargingDecisionEngine:
         else:
             threshold = current_threshold
 
-        # Then apply permissive multiplier if active
+        # Then apply permissive multiplier if active (with validation)
         if permissive_mode_active and permissive_multiplier > 1.0:
-            permissive_threshold = threshold * permissive_multiplier
+            # Clamp multiplier to safe range to prevent misconfiguration
+            safe_multiplier = max(
+                PERMISSIVE_MULTIPLIER_MIN,
+                min(permissive_multiplier, PERMISSIVE_MULTIPLIER_MAX)
+            )
+            if safe_multiplier != permissive_multiplier:
+                _LOGGER.warning(
+                    "Permissive multiplier %.2f outside safe range [%.1f, %.1f], clamping to %.2f",
+                    permissive_multiplier, PERMISSIVE_MULTIPLIER_MIN,
+                    PERMISSIVE_MULTIPLIER_MAX, safe_multiplier
+                )
+
+            permissive_threshold = threshold * safe_multiplier
             _LOGGER.debug(
                 "Permissive mode active: threshold %.4f€/kWh → %.4f€/kWh (+%.0f%%)",
                 threshold,
                 permissive_threshold,
-                (permissive_multiplier - 1) * 100,
+                (safe_multiplier - 1) * 100,
             )
             return permissive_threshold
 

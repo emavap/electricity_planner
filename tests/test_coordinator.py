@@ -429,13 +429,18 @@ async def test_handle_entity_change_respects_throttle(fake_hass, monkeypatch):
 
     clock["now"] = base_time + timedelta(seconds=5)
     coordinator._handle_entity_change(event)
-    assert len(tasks) == 1
-
-    clock["now"] = base_time + timedelta(seconds=15)
-    coordinator._handle_entity_change(event)
+    # Task is created but throttled inside _async_handle_throttled_update
     for task in tasks[1:]:
         await task
     assert len(tasks) == 2
+    # Refresh should still be 1 because the second call was throttled
+    assert coordinator.async_request_refresh.await_count == 1
+
+    clock["now"] = base_time + timedelta(seconds=15)
+    coordinator._handle_entity_change(event)
+    for task in tasks[2:]:
+        await task
+    assert len(tasks) == 3
     assert coordinator.async_request_refresh.await_count == 2
 
 
@@ -473,13 +478,18 @@ async def test_handle_entity_change_includes_three_phase_entities(fake_hass, mon
     # Throttle still applies for rapid subsequent updates
     clock["now"] = base_time + timedelta(seconds=5)
     coordinator._handle_entity_change(event)
-    assert len(tasks) == 1
-
-    clock["now"] = base_time + timedelta(seconds=15)
-    coordinator._handle_entity_change(event)
+    # Task is created but throttled inside _async_handle_throttled_update
     for task in tasks[1:]:
         await task
     assert len(tasks) == 2
+    # Refresh should still be 1 because the second call was throttled
+    assert coordinator.async_request_refresh.await_count == 1
+
+    clock["now"] = base_time + timedelta(seconds=15)
+    coordinator._handle_entity_change(event)
+    for task in tasks[2:]:
+        await task
+    assert len(tasks) == 3
     assert coordinator.async_request_refresh.await_count == 2
 
 
@@ -579,7 +589,8 @@ async def test_nordpool_handles_service_failure(fake_hass, monkeypatch):
 
     # Should return None instead of crashing
     assert result is None
-    fake_hass.services.async_call.assert_awaited_once()
+    # With retry logic, it should be called 3 times (initial + 2 retries)
+    assert fake_hass.services.async_call.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -961,7 +972,8 @@ async def test_manual_override_application_and_expiry(fake_hass, monkeypatch):
     )
     assert follow_up["battery_grid_charging"] is False
     assert cleared == set()
-    assert coordinator._manual_overrides["battery_grid_charging"] is None
+    # After expiration, the key should be deleted (not set to None)
+    assert "battery_grid_charging" not in coordinator._manual_overrides
 
 
 @pytest.mark.asyncio

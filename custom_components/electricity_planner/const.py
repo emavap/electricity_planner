@@ -98,6 +98,20 @@ DEFAULT_HIGH_SOC_THRESHOLD = 60  # High SOC threshold for time-based charging
 # Cache and Performance Constants
 NORDPOOL_CACHE_MAX_SIZE = 10  # Maximum number of cached Nord Pool price entries
 NORDPOOL_CACHE_TTL_MINUTES = 5  # Cache time-to-live in minutes
+
+# Time-based Constants (extracted from magic numbers)
+PRICE_INTERVAL_LOOKBACK_HOURS = 1  # How far back to look for price intervals
+PEAK_MONITORING_DURATION_MINUTES = 5  # Duration to monitor before triggering peak limit
+PEAK_LIMIT_DURATION_MINUTES = 15  # Duration of peak limit once triggered
+PRICE_INTERVAL_MINUTES = 15  # Default price interval duration
+PRICE_INTERVAL_GAP_TOLERANCE_SECONDS = 30  # Tolerance for gaps between intervals (increased from 5s)
+
+# Validation Constants
+PRICE_VALUE_MIN_EUR_MWH = -1000  # Minimum reasonable price in €/MWh (negative prices are valid)
+PRICE_VALUE_MAX_EUR_MWH = 10000  # Maximum reasonable price in €/MWh
+PERMISSIVE_MULTIPLIER_MIN = 1.0  # Minimum permissive mode multiplier
+PERMISSIVE_MULTIPLIER_MAX = 2.0  # Maximum permissive mode multiplier (200% of base)
+BATTERY_SOC_DECIMAL_THRESHOLD = 1.0  # If SOC <= this, assume it's decimal (0-1) not percentage
 PRICE_TIMELINE_MAX_AGE_HOURS = 1  # Maximum age of cached price timeline in hours
 TRANSPORT_COST_CACHE_TTL_MINUTES = 30  # Transport cost lookup cache TTL
 
@@ -126,6 +140,10 @@ BATTERY_CAPACITY_FALLBACK_WEIGHT = 1.0  # Fallback weight when capacity not conf
 # Average Threshold Calculation Constants
 AVERAGE_THRESHOLD_MIN_INTERVALS_HOURS = 24  # Minimum 24 hours of data required
 AVERAGE_THRESHOLD_HYSTERESIS_COUNT = 3  # Require N consecutive valid calculations
+AVERAGE_THRESHOLD_DEFAULT_INTERVAL_SECONDS = 900  # 15 minutes default interval
+
+# Update Throttling Constants
+MIN_UPDATE_INTERVAL_SECONDS = 10  # Minimum seconds between entity-triggered updates
 
 # LRU Cache Sizes
 PRICE_POSITION_CACHE_SIZE = 32  # Reduced from 128 - typical daily usage is <10
