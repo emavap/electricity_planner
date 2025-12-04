@@ -41,7 +41,10 @@ class EmergencyChargingStrategy(ChargingStrategy):
         settings = context.get("settings")
         price = context.get("price_analysis", {})
 
-        average_soc = battery.get("average_soc", 100)
+        average_soc = battery.get("average_soc")
+        if average_soc is None:
+            return False, ""  # Cannot evaluate emergency without battery data
+
         emergency_threshold = (
             getattr(settings, "emergency_soc_threshold", None)
             if settings is not None
@@ -50,7 +53,7 @@ class EmergencyChargingStrategy(ChargingStrategy):
         if emergency_threshold is None:
             emergency_threshold = config.get("emergency_soc_threshold", DEFAULT_EMERGENCY_SOC)
         current_price = price.get("current_price", 0)
-        
+
         if average_soc < emergency_threshold:
             return True, (f"Emergency charge - SOC {average_soc:.0f}% < {emergency_threshold}% threshold, "
                          f"charging regardless of price ({current_price:.3f}€/kWh)")
@@ -267,7 +270,10 @@ class DynamicPriceStrategy(ChargingStrategy):
         config_confidence = min(max(config_confidence, 0.3), 0.9)
 
         # Prepare SOC/solar adjustments before running the analyzer so reasons align
-        average_soc = battery.get("average_soc", 50)
+        average_soc = battery.get("average_soc")
+        if average_soc is None:
+            average_soc = 50  # Default to mid-range if battery data unavailable
+
         power = context.get("power_analysis", {})
         has_significant_solar = power.get("significant_solar_surplus", False)
         solar_surplus = power.get("solar_surplus", 0)

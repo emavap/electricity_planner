@@ -639,7 +639,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
 
     def _check_emergency_override(self, battery_analysis: dict, time_context: dict, config: dict) -> bool:
         """Check if any emergency overrides are currently active."""
-        average_soc = battery_analysis.get("average_soc", 100)
+        average_soc = battery_analysis.get("average_soc")
         if average_soc is None:
             return False
 
@@ -656,7 +656,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
         """Check if predictive charging logic is active."""
         significant_price_drop = price_analysis.get("significant_price_drop", False)
         is_low_price = price_analysis.get("is_low_price", False)
-        average_soc = battery_analysis.get("average_soc", 100)
+        average_soc = battery_analysis.get("average_soc")
         predictive_min_soc = config.get("predictive_charging_min_soc", 30)
 
         if average_soc is None:
