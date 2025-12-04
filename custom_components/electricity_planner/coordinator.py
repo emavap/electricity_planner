@@ -66,6 +66,8 @@ from .const import (
     TRANSPORT_COST_CACHE_TTL_MINUTES,
     PRICE_INTERVAL_GAP_TOLERANCE_SECONDS,
     PEAK_THRESHOLD_MULTIPLIER,
+    BATTERY_CAPACITY_FALLBACK_WEIGHT,
+    AVERAGE_THRESHOLD_HYSTERESIS_COUNT,
 )
 from .decision_engine import ChargingDecisionEngine
 
@@ -133,13 +135,17 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._car_peak_limited_until: datetime | None = None
         self._car_peak_limit_started_at: datetime | None = None
 
+        # Average threshold hysteresis tracking
+        self._average_threshold_valid_count: int = 0  # Count of consecutive valid calculations
+        self._average_threshold_enabled: bool = False  # Whether average threshold is active
+
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
             update_interval=timedelta(seconds=30),  # Maximum 30s updates (minimum 10s via entity changes)
         )
-        
+
         self._setup_entity_listeners()
 
     def _is_data_available(self, data: dict[str, Any]) -> bool:
@@ -195,7 +201,16 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         start_time_utc: datetime,
         reference_now: datetime | None = None,
     ) -> float | None:
-        """Resolve transport cost for a specific timestamp."""
+        """Resolve transport cost for a specific timestamp.
+
+        Args:
+            transport_lookup: List of transport cost entries with timestamps
+            start_time_utc: The timestamp to resolve cost for
+            reference_now: Reference time for "now" (defaults to current UTC time)
+
+        Returns:
+            Transport cost in €/kWh, or None if not available
+        """
         if not transport_lookup:
             return None
 
@@ -248,7 +263,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         return cost
 
     def _resolve_override_targets(self, target: str) -> tuple[str, ...]:
-        """Resolve override target string into coordinator keys."""
+        """Resolve override target string into coordinator keys.
+
+        Args:
+            target: Target identifier (battery, car, both, charger_limit, grid_setpoint, all)
+
+        Returns:
+            Tuple of coordinator key strings that match the target
+        """
         mapping = {
             "battery": ("battery_grid_charging",),
             "car": ("car_grid_charging",),
@@ -559,9 +581,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     final_price = adjusted_price + transport_cost
                     future_intervals.append((start_time_utc, end_time, final_price))
 
-                except Exception as err:
+                except (ValueError, TypeError, KeyError) as err:
                     _LOGGER.debug(
-                        "Error processing interval for price timeline: %s", err
+                        "Expected error processing interval for price timeline: %s", err
+                    )
+                    continue
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Unexpected error processing interval for price timeline: %s",
+                        err, exc_info=True
                     )
                     continue
 
@@ -620,6 +648,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         Args:
             event: Home Assistant state change event
         """
+        # Note: This is a callback, so we can't use async lock directly
+        # The throttling is handled by checking _last_entity_update timestamp
         entity_id = event.data.get("entity_id")
         _LOGGER.debug("Entity changed: %s", entity_id)
 
@@ -693,6 +723,22 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         minutes = (now.minute // 15) * 15
         return now.replace(minute=minutes, second=0, microsecond=0)
 
+    def _clean_expired_nordpool_cache(self) -> None:
+        """Remove expired entries from Nord Pool cache based on TTL.
+
+        Evicts cache entries older than NORDPOOL_CACHE_TTL_MINUTES to prevent
+        stale data from persisting when cache doesn't fill up to max size.
+        """
+        now = dt_util.utcnow()
+        ttl = timedelta(minutes=NORDPOOL_CACHE_TTL_MINUTES)
+        expired_keys = [
+            key for key, (_, timestamp) in self._nordpool_cache.items()
+            if now - timestamp > ttl
+        ]
+        for key in expired_keys:
+            del self._nordpool_cache[key]
+            _LOGGER.debug("Evicted expired Nord Pool cache entry: %s", key)
+
     def _update_battery_threshold_snapshot_if_needed(self, price_threshold: float | None) -> None:
         """Update battery threshold snapshot when entering a new price interval."""
         if price_threshold is None:
@@ -713,6 +759,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict[str, Any]:
         """Update data via library."""
         try:
+            # Clean expired cache entries periodically
+            self._clean_expired_nordpool_cache()
+
             data = await self._fetch_all_data()
 
             # Determine the current price threshold (with dynamic/average logic)
@@ -812,7 +861,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
             capacity = battery_capacities_cfg.get(entity_id)
             if capacity is None or capacity <= 0:
-                capacity = 1.0  # fallback weight when capacity not provided
+                _LOGGER.warning(
+                    "Battery capacity not configured or invalid for %s - using fallback weight %.1f kWh. "
+                    "Configure capacity in integration options for accurate weighted SOC calculations.",
+                    entity_id, BATTERY_CAPACITY_FALLBACK_WEIGHT
+                )
+                capacity = BATTERY_CAPACITY_FALLBACK_WEIGHT  # fallback weight when capacity not provided
 
             battery_entry = {
                 "entity_id": entity_id,
@@ -1224,8 +1278,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     final_price = adjusted_price + transport_cost
                     all_intervals.append((start_time_utc, final_price))
 
+                except (ValueError, TypeError, KeyError) as err:
+                    _LOGGER.debug("Expected error processing interval for average threshold: %s", err)
+                    continue
                 except Exception as err:
-                    _LOGGER.debug("Error processing interval for average threshold: %s", err)
+                    _LOGGER.warning(
+                        "Unexpected error processing interval for average threshold: %s",
+                        err, exc_info=True
+                    )
                     continue
 
         def infer_interval_resolution() -> timedelta:
@@ -1418,12 +1478,66 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         if combined_intervals:
             prices = [p for _, p in combined_intervals]
             average = sum(prices) / len(prices)
-            _LOGGER.debug(
-                "Calculated average threshold: %.4f €/kWh from %d intervals",
-                average, len(combined_intervals)
-            )
-            return round(average, 4)
 
+            # Check if we have sufficient data (at least 24h worth)
+            has_sufficient_data = len(combined_intervals) >= intervals_needed
+
+            # Apply hysteresis: require N consecutive valid calculations before FIRST enabling
+            # Once enabled, continue using as long as we have ANY data (graceful degradation)
+            if has_sufficient_data:
+                # We have sufficient data
+                if not self._average_threshold_enabled:
+                    # Not yet enabled - check hysteresis
+                    self._average_threshold_valid_count += 1
+
+                    if self._average_threshold_valid_count >= AVERAGE_THRESHOLD_HYSTERESIS_COUNT:
+                        self._average_threshold_enabled = True
+                        _LOGGER.info(
+                            "Average threshold enabled after %d consecutive valid calculations: %.4f €/kWh",
+                            self._average_threshold_valid_count, average
+                        )
+                    else:
+                        _LOGGER.debug(
+                            "Average threshold calculated (%.4f €/kWh) but not yet enabled "
+                            "(%d/%d consecutive valid calculations)",
+                            average, self._average_threshold_valid_count, AVERAGE_THRESHOLD_HYSTERESIS_COUNT
+                        )
+                else:
+                    # Already enabled - keep using it
+                    pass
+
+                _LOGGER.debug(
+                    "Calculated average threshold: %.4f €/kWh from %d intervals (enabled: %s, count: %d)",
+                    average, len(combined_intervals), self._average_threshold_enabled,
+                    self._average_threshold_valid_count
+                )
+                return round(average, 4)
+            else:
+                # Insufficient data for 24h minimum
+                # If already enabled, allow graceful degradation (keep using with warning)
+                # If not yet enabled, still return value but don't enable
+                if self._average_threshold_enabled:
+                    _LOGGER.warning(
+                        "Average threshold: insufficient data for %dh minimum "
+                        "(have %d intervals, need %d) - continuing with available data",
+                        MIN_HOURS, len(combined_intervals), intervals_needed
+                    )
+                    return round(average, 4)
+                else:
+                    # Not enabled yet and insufficient data - reset counter but still return value
+                    _LOGGER.debug(
+                        "Average threshold: insufficient data for %dh minimum "
+                        "(have %d intervals, need %d) - returning value without enabling",
+                        MIN_HOURS, len(combined_intervals), intervals_needed
+                    )
+                    self._average_threshold_valid_count = 0
+                    return round(average, 4)
+
+        # No intervals available - reset
+        if self._average_threshold_valid_count > 0 or self._average_threshold_enabled:
+            _LOGGER.debug("Average threshold data unavailable - resetting hysteresis state")
+        self._average_threshold_valid_count = 0
+        self._average_threshold_enabled = False
         return None
 
     def _check_minimum_charging_window(

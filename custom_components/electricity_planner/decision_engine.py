@@ -1525,7 +1525,22 @@ class ChargingDecisionEngine:
         permissive_mode_active: bool,
         permissive_multiplier: float,
     ) -> float:
-        """Apply hysteresis threshold floor while the car is charging, then permissive multiplier if enabled."""
+        """Apply hysteresis threshold floor while the car is charging, then permissive multiplier if enabled.
+
+        Implements threshold floor pattern to prevent mid-session stops when
+        threshold decreases (e.g., rolling average drops). Allows increases
+        to take effect immediately.
+
+        Args:
+            current_threshold: Current price threshold from configuration/calculation
+            locked_threshold: Previously locked threshold (if charging active)
+            previous_car_charging: Whether car was charging in previous cycle
+            permissive_mode_active: Whether permissive mode is enabled
+            permissive_multiplier: Multiplier for permissive mode (e.g., 1.2 = 20% higher)
+
+        Returns:
+            Effective threshold in €/kWh to use for this decision cycle
+        """
         # First apply locked threshold floor if charging
         if previous_car_charging and locked_threshold is not None:
             threshold = max(locked_threshold, current_threshold)
@@ -1556,7 +1571,12 @@ class ChargingDecisionEngine:
         context: CarDecisionContext,
         data: Dict[str, Any],
     ) -> None:
-        """Lock the price threshold when starting car charging (OFF→ON transition)."""
+        """Lock the price threshold when starting car charging (OFF→ON transition).
+
+        Args:
+            context: Car decision context containing threshold information
+            data: Mutable data dictionary to store locked threshold
+        """
         data[_CAR_CHARGING_LOCKED_THRESHOLD_KEY] = context.base_threshold
         _LOGGER.debug(
             "Car charging starting: locking threshold at %.4f€/kWh",

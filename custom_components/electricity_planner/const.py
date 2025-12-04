@@ -107,6 +107,29 @@ POWER_ALLOCATION_PRECISION = 1  # Watt precision for allocation mismatch detecti
 PRICE_INTERVAL_GAP_TOLERANCE_SECONDS = 5  # Maximum gap between price intervals
 PEAK_THRESHOLD_MULTIPLIER = 1.05  # 5% over effective peak for peak detection
 
+# Dynamic Threshold Constants (used in dynamic_threshold.py)
+DYNAMIC_THRESHOLD_HIGH_VOLATILITY = 0.5  # >50% price range = high volatility
+DYNAMIC_THRESHOLD_MEDIUM_VOLATILITY = 0.3  # 30-50% price range = medium volatility
+DYNAMIC_THRESHOLD_HIGH_VOL_RANGE = 0.4  # Charge at bottom 40% when high volatility
+DYNAMIC_THRESHOLD_MEDIUM_VOL_RANGE = 0.6  # Charge at bottom 60% when medium volatility
+DYNAMIC_THRESHOLD_LOW_VOL_RANGE = 0.8  # Charge at bottom 80% when low volatility
+DYNAMIC_THRESHOLD_NEXT_HOUR_IMPROVEMENT = 0.9  # 10% better next hour = wait
+DYNAMIC_THRESHOLD_CONFIDENCE_REDUCTION = 0.3  # Reduce confidence to 30% if improving
+DYNAMIC_THRESHOLD_WEIGHT_PRICE_QUALITY = 0.4  # Weight for price quality factor
+DYNAMIC_THRESHOLD_WEIGHT_THRESHOLD = 0.4  # Weight for dynamic threshold factor
+DYNAMIC_THRESHOLD_WEIGHT_NEXT_HOUR = 0.2  # Weight for next hour factor
+DYNAMIC_THRESHOLD_MAX_CONFIDENCE_ABOVE = 0.25  # Max confidence when above threshold
+
+# Battery Capacity Fallback
+BATTERY_CAPACITY_FALLBACK_WEIGHT = 1.0  # Fallback weight when capacity not configured
+
+# Average Threshold Calculation Constants
+AVERAGE_THRESHOLD_MIN_INTERVALS_HOURS = 24  # Minimum 24 hours of data required
+AVERAGE_THRESHOLD_HYSTERESIS_COUNT = 3  # Require N consecutive valid calculations
+
+# LRU Cache Sizes
+PRICE_POSITION_CACHE_SIZE = 32  # Reduced from 128 - typical daily usage is <10
+
 ATTR_BATTERY_GRID_CHARGING = "battery_grid_charging"
 ATTR_CAR_GRID_CHARGING = "car_grid_charging"
 ATTR_BATTERY_REASON = "battery_reason"
@@ -138,4 +161,4 @@ MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT = "charger_limit"
 MANUAL_OVERRIDE_TARGET_GRID_SETPOINT = "grid_setpoint"
 MANUAL_OVERRIDE_TARGET_ALL = "all"
 
-INTEGRATION_VERSION = "4.4.6"
+INTEGRATION_VERSION = "4.5.0"

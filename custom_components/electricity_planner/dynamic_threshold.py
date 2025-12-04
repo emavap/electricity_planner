@@ -3,6 +3,20 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from .const import (
+    DYNAMIC_THRESHOLD_HIGH_VOLATILITY,
+    DYNAMIC_THRESHOLD_MEDIUM_VOLATILITY,
+    DYNAMIC_THRESHOLD_HIGH_VOL_RANGE,
+    DYNAMIC_THRESHOLD_MEDIUM_VOL_RANGE,
+    DYNAMIC_THRESHOLD_LOW_VOL_RANGE,
+    DYNAMIC_THRESHOLD_NEXT_HOUR_IMPROVEMENT,
+    DYNAMIC_THRESHOLD_CONFIDENCE_REDUCTION,
+    DYNAMIC_THRESHOLD_WEIGHT_PRICE_QUALITY,
+    DYNAMIC_THRESHOLD_WEIGHT_THRESHOLD,
+    DYNAMIC_THRESHOLD_WEIGHT_NEXT_HOUR,
+    DYNAMIC_THRESHOLD_MAX_CONFIDENCE_ABOVE,
+)
+
 
 class DynamicThresholdAnalyzer:
     """Analyze price patterns to make smarter charging decisions within threshold."""
@@ -48,15 +62,15 @@ class DynamicThresholdAnalyzer:
         price_volatility = (highest_today - lowest_today) / highest_today if highest_today > 0 else 0
 
         # Calculate dynamic threshold within the acceptable range
-        if price_volatility > 0.5:  # High volatility (>50% range)
+        if price_volatility > DYNAMIC_THRESHOLD_HIGH_VOLATILITY:  # High volatility (>50% range)
             # Be very selective - only charge at bottom 40% of acceptable range
-            dynamic_threshold = lowest_today + (acceptable_range * 0.4)
-        elif price_volatility > 0.3:  # Medium volatility (30-50% range)
+            dynamic_threshold = lowest_today + (acceptable_range * DYNAMIC_THRESHOLD_HIGH_VOL_RANGE)
+        elif price_volatility > DYNAMIC_THRESHOLD_MEDIUM_VOLATILITY:  # Medium volatility (30-50% range)
             # Moderately selective - charge at bottom 60% of acceptable range
-            dynamic_threshold = lowest_today + (acceptable_range * 0.6)
+            dynamic_threshold = lowest_today + (acceptable_range * DYNAMIC_THRESHOLD_MEDIUM_VOL_RANGE)
         else:  # Low volatility (<30% range)
             # Less selective - charge at bottom 80% of acceptable range
-            dynamic_threshold = lowest_today + (acceptable_range * 0.8)
+            dynamic_threshold = lowest_today + (acceptable_range * DYNAMIC_THRESHOLD_LOW_VOL_RANGE)
 
         # Ensure the derived threshold never exceeds the configured maximum
         if dynamic_threshold > self.max_threshold:
@@ -64,7 +78,7 @@ class DynamicThresholdAnalyzer:
 
         # Simple next-hour check (only if we have real data)
         next_hour_better = False
-        if next_price is not None and next_price < current_price * 0.9:  # 10% better next hour
+        if next_price is not None and next_price < current_price * DYNAMIC_THRESHOLD_NEXT_HOUR_IMPROVEMENT:  # 10% better next hour
             next_hour_better = True
 
         # Calculate confidence score (0-1)
@@ -78,15 +92,19 @@ class DynamicThresholdAnalyzer:
         confidence_factors.append(1.0 if below_dynamic_threshold else 0.0)
 
         # Factor 3: Not improving next hour (1 if stable/worse, 0.3 if improving)
-        confidence_factors.append(0.3 if next_hour_better else 1.0)
+        confidence_factors.append(DYNAMIC_THRESHOLD_CONFIDENCE_REDUCTION if next_hour_better else 1.0)
 
         # Calculate weighted confidence
-        weights = [0.4, 0.4, 0.2]  # Price quality and dynamic threshold most important
+        weights = [
+            DYNAMIC_THRESHOLD_WEIGHT_PRICE_QUALITY,
+            DYNAMIC_THRESHOLD_WEIGHT_THRESHOLD,
+            DYNAMIC_THRESHOLD_WEIGHT_NEXT_HOUR
+        ]  # Price quality and dynamic threshold most important
         confidence = sum(f * w for f, w in zip(confidence_factors, weights))
 
         # Enforce dynamic threshold ceiling on confidence
         if not below_dynamic_threshold:
-            confidence = min(confidence, 0.25)
+            confidence = min(confidence, DYNAMIC_THRESHOLD_MAX_CONFIDENCE_ABOVE)
 
         # Decision based on confidence
         should_charge = below_dynamic_threshold and confidence >= self.base_confidence

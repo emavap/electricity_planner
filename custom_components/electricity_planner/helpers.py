@@ -12,6 +12,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     POWER_ALLOCATION_TOLERANCE,
     POWER_ALLOCATION_PRECISION,
+    PRICE_POSITION_CACHE_SIZE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,7 +28,17 @@ class DataValidator:
         max_value: Optional[float] = None,
         name: str = "power"
     ) -> float:
-        """Validate and clamp power values to safe ranges."""
+        """Validate and clamp power values to safe ranges.
+
+        Args:
+            power: Power value in Watts
+            min_value: Minimum allowed value (default: 0)
+            max_value: Maximum allowed value (default: None = no limit)
+            name: Name for logging purposes
+
+        Returns:
+            Clamped power value within [min_value, max_value]
+        """
         if power < min_value:
             _LOGGER.warning("%s value %sW below minimum, clamping to %sW", 
                           name, power, min_value)
@@ -89,7 +100,16 @@ def apply_price_adjustment(
     multiplier: float = 1.0,
     offset: float = 0.0
 ) -> Optional[float]:
-    """Apply a simple affine transformation to a price value."""
+    """Apply a simple affine transformation to a price value.
+
+    Args:
+        price: Price in €/kWh (or None)
+        multiplier: Multiplicative factor (default: 1.0)
+        offset: Additive offset in €/kWh (default: 0.0)
+
+    Returns:
+        Adjusted price = (price * multiplier) + offset, or None if input is None
+    """
     if price is None:
         return None
     try:
@@ -101,15 +121,20 @@ def apply_price_adjustment(
 
 class PriceCalculator:
     """Price-related calculations."""
-    
+
     @staticmethod
-    @lru_cache(maxsize=128)
+    @lru_cache(maxsize=PRICE_POSITION_CACHE_SIZE)
     def calculate_price_position(
         current: float,
         highest: float,
         lowest: float
     ) -> float:
         """Calculate price position relative to daily range (cached).
+
+        Args:
+            current: Current price value
+            highest: Highest price in range
+            lowest: Lowest price in range
 
         Returns:
             Float between 0.0 (at lowest) and 1.0 (at highest), or 0.5 if no valid range.
