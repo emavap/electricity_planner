@@ -95,6 +95,18 @@ DEFAULT_CRITICAL_SOC_THRESHOLD = 30  # Below this is considered critical
 DEFAULT_MEDIUM_SOC_THRESHOLD = 50  # Medium SOC charging threshold
 DEFAULT_HIGH_SOC_THRESHOLD = 60  # High SOC threshold for time-based charging
 
+# Cache and Performance Constants
+NORDPOOL_CACHE_MAX_SIZE = 10  # Maximum number of cached Nord Pool price entries
+NORDPOOL_CACHE_TTL_MINUTES = 5  # Cache time-to-live in minutes
+PRICE_TIMELINE_MAX_AGE_HOURS = 1  # Maximum age of cached price timeline in hours
+TRANSPORT_COST_CACHE_TTL_MINUTES = 30  # Transport cost lookup cache TTL
+
+# Tolerance Constants
+POWER_ALLOCATION_TOLERANCE = 1.1  # 10% tolerance for power allocation validation
+POWER_ALLOCATION_PRECISION = 1  # Watt precision for allocation mismatch detection
+PRICE_INTERVAL_GAP_TOLERANCE_SECONDS = 5  # Maximum gap between price intervals
+PEAK_THRESHOLD_MULTIPLIER = 1.05  # 5% over effective peak for peak detection
+
 ATTR_BATTERY_GRID_CHARGING = "battery_grid_charging"
 ATTR_CAR_GRID_CHARGING = "car_grid_charging"
 ATTR_BATTERY_REASON = "battery_reason"
@@ -126,4 +138,4 @@ MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT = "charger_limit"
 MANUAL_OVERRIDE_TARGET_GRID_SETPOINT = "grid_setpoint"
 MANUAL_OVERRIDE_TARGET_ALL = "all"
 
-INTEGRATION_VERSION = "4.4.0"
+INTEGRATION_VERSION = "4.4.6"

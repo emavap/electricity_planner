@@ -9,6 +9,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.util import dt as dt_util
 
+from .const import (
+    POWER_ALLOCATION_TOLERANCE,
+    POWER_ALLOCATION_PRECISION,
+)
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -104,10 +109,24 @@ class PriceCalculator:
         highest: float,
         lowest: float
     ) -> float:
-        """Calculate price position relative to daily range (cached)."""
+        """Calculate price position relative to daily range (cached).
+
+        Returns:
+            Float between 0.0 (at lowest) and 1.0 (at highest), or 0.5 if no valid range.
+        """
+        # Handle edge cases with zero or negative prices
+        if highest == lowest:
+            return 0.5  # Neutral if no valid range
+
         if highest > lowest:
             return (current - lowest) / (highest - lowest)
-        return 0.5  # Neutral if no valid range
+
+        # Inverted range (shouldn't happen, but handle gracefully)
+        _LOGGER.warning(
+            "Invalid price range: highest=%.4f < lowest=%.4f, returning neutral position",
+            highest, lowest
+        )
+        return 0.5
     
     @staticmethod
     def is_significant_price_drop(
@@ -251,13 +270,13 @@ class PowerAllocationValidator:
         if solar_for_car > max_car_power:
             return False, f"Car allocation {solar_for_car}W exceeds limit {max_car_power}W"
         
-        # Check total doesn't exceed available
+        # Check total doesn't exceed available (with configurable tolerance)
         calculated_total = solar_for_batteries + solar_for_car + car_current_usage
-        if calculated_total > available_solar * 1.1:  # 10% tolerance
+        if calculated_total > available_solar * POWER_ALLOCATION_TOLERANCE:
             return False, f"Total allocation {calculated_total}W exceeds available {available_solar}W"
-        
-        # Check internal consistency
-        if abs(calculated_total - total_allocated) > 1:
+
+        # Check internal consistency (with configurable precision)
+        if abs(calculated_total - total_allocated) > POWER_ALLOCATION_PRECISION:
             return False, f"Allocation mismatch: sum={calculated_total}W, total={total_allocated}W"
         
         return True, None

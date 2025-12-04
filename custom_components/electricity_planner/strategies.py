@@ -271,8 +271,7 @@ class DynamicPriceStrategy(ChargingStrategy):
 
         # Prepare SOC/solar adjustments before running the analyzer so reasons align
         average_soc = battery.get("average_soc")
-        if average_soc is None:
-            average_soc = 50  # Default to mid-range if battery data unavailable
+        soc_available = average_soc is not None
 
         power = context.get("power_analysis", {})
         has_significant_solar = power.get("significant_solar_surplus", False)
@@ -281,10 +280,11 @@ class DynamicPriceStrategy(ChargingStrategy):
         confidence_threshold = config_confidence
 
         # Adjust based on SOC (make it easier to charge when battery is low)
-        if average_soc < 40:
-            confidence_threshold = max(0.3, confidence_threshold - 0.1)
-        elif average_soc >= 70:
-            confidence_threshold = min(0.9, confidence_threshold + 0.1)
+        if soc_available:
+            if average_soc < 40:
+                confidence_threshold = max(0.3, confidence_threshold - 0.1)
+            elif average_soc >= 70:
+                confidence_threshold = min(0.9, confidence_threshold + 0.1)
 
         # Adjust based on actual solar surplus
         # Significant surplus → need +10% more confidence (be picky, wait for solar)
@@ -329,7 +329,9 @@ class DynamicPriceStrategy(ChargingStrategy):
         # Simple decision: does price analysis meet confidence requirement?
         if analysis["confidence"] >= confidence_threshold:
             # Build user-friendly reason without exposing confidence internals
-            if average_soc < 40:
+            if not soc_available:
+                soc_context = "battery SOC unavailable"
+            elif average_soc < 40:
                 soc_context = f"low battery ({average_soc:.0f}%)"
             elif average_soc >= 70:
                 soc_context = f"high battery ({average_soc:.0f}%)"
@@ -340,9 +342,9 @@ class DynamicPriceStrategy(ChargingStrategy):
             return True, reason
 
         # Not charging: provide clear reason without confusing confidence percentages
-        if has_significant_solar and average_soc >= 40:
+        if has_significant_solar and (not soc_available or average_soc >= 40):
             return False, f"{analysis['reason']} - waiting for solar (surplus: {solar_surplus}W)"
-        elif average_soc >= 70:
+        elif soc_available and average_soc >= 70:
             return False, f"{analysis['reason']} - battery already at {average_soc:.0f}%"
         else:
             return False, f"{analysis['reason']} - price conditions not optimal yet"

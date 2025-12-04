@@ -832,6 +832,16 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
                     phases_config[phase_id] = phase_entry
 
+            if phase_mode == PHASE_MODE_SINGLE:
+                # Preserve existing single-phase bindings unless user explicitly provides new ones
+                for key in (
+                    CONF_SOLAR_PRODUCTION_ENTITY,
+                    CONF_HOUSE_CONSUMPTION_ENTITY,
+                    CONF_CAR_CHARGING_POWER_ENTITY,
+                ):
+                    if key not in updated_options and working_data.get(key) is not None:
+                        updated_options[key] = working_data.get(key)
+
             if phase_mode == PHASE_MODE_THREE:
                 # No validation - all per-phase sensors are optional, leave configuration to user
                 updated_options[CONF_PHASE_MODE] = PHASE_MODE_THREE
@@ -903,28 +913,27 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ),
         }
 
-        # Add single-phase or three-phase specific fields
-        if current_phase_mode == PHASE_MODE_SINGLE:
-            schema_dict.update({
-                vol.Optional(
-                    CONF_SOLAR_PRODUCTION_ENTITY,
-                    default=working_data.get(CONF_SOLAR_PRODUCTION_ENTITY),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor")
-                ),
-                vol.Optional(
-                    CONF_HOUSE_CONSUMPTION_ENTITY,
-                    default=working_data.get(CONF_HOUSE_CONSUMPTION_ENTITY),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor")
-                ),
-                vol.Optional(
-                    CONF_CAR_CHARGING_POWER_ENTITY,
-                    default=working_data.get(CONF_CAR_CHARGING_POWER_ENTITY),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor")
-                ),
-            })
+        # Single-phase fields (always shown to allow switching modes in one step)
+        schema_dict.update({
+            vol.Optional(
+                CONF_SOLAR_PRODUCTION_ENTITY,
+                default=working_data.get(CONF_SOLAR_PRODUCTION_ENTITY),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_HOUSE_CONSUMPTION_ENTITY,
+                default=working_data.get(CONF_HOUSE_CONSUMPTION_ENTITY),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_CAR_CHARGING_POWER_ENTITY,
+                default=working_data.get(CONF_CAR_CHARGING_POWER_ENTITY),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+        })
 
         # Common optional fields
         schema_dict.update({
@@ -1142,7 +1151,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 )
             )
 
-        # Per-battery phase assignments (multi-select) - only relevant in three-phase mode
+        # Per-battery phase assignments and per-phase sensors (only when three-phase)
         if current_phase_mode == PHASE_MODE_THREE:
             phase_options = [
                 {"value": phase_id, "label": DEFAULT_PHASE_NAMES[phase_id]} for phase_id in PHASE_IDS
@@ -1160,8 +1169,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     )
                 )
 
-        # Per-phase sensor fields (only in three-phase mode)
-        if current_phase_mode == PHASE_MODE_THREE:
             for phase_id in PHASE_IDS:
                 phase_config = existing_phases.get(phase_id, {})
                 schema_dict[

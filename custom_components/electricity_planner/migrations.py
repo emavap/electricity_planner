@@ -36,6 +36,32 @@ _LOGGER = logging.getLogger(__name__)
 CURRENT_VERSION = 10
 
 
+def _validate_numeric_config(
+    config: Dict[str, Any],
+    key: str,
+    min_val: float,
+    max_val: float,
+    default: float,
+    name: str
+) -> None:
+    """Validate and clamp numeric configuration values."""
+    if key in config:
+        try:
+            value = float(config[key])
+            if not min_val <= value <= max_val:
+                _LOGGER.warning(
+                    "Migration: %s value %.2f out of range [%.2f, %.2f], resetting to default %.2f",
+                    name, value, min_val, max_val, default
+                )
+                config[key] = default
+        except (TypeError, ValueError):
+            _LOGGER.warning(
+                "Migration: %s value %s invalid, resetting to default %.2f",
+                name, config[key], default
+            )
+            config[key] = default
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate configuration entry to latest version."""
     _LOGGER.info("Migrating configuration from version %s", entry.version)
@@ -48,6 +74,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if CONF_BASE_GRID_SETPOINT not in new_data:
             new_data[CONF_BASE_GRID_SETPOINT] = DEFAULT_BASE_GRID_SETPOINT
             _LOGGER.info("Added base grid setpoint: %sW", DEFAULT_BASE_GRID_SETPOINT)
+
+        # Validate the new value
+        _validate_numeric_config(
+            new_data, CONF_BASE_GRID_SETPOINT, 1000, 15000,
+            DEFAULT_BASE_GRID_SETPOINT, "base_grid_setpoint"
+        )
 
         # Update entry with new data
         hass.config_entries.async_update_entry(

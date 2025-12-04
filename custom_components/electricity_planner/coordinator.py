@@ -1,13 +1,14 @@
 """Data coordinator for Electricity Planner."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -59,6 +60,12 @@ from .const import (
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+    NORDPOOL_CACHE_MAX_SIZE,
+    NORDPOOL_CACHE_TTL_MINUTES,
+    PRICE_TIMELINE_MAX_AGE_HOURS,
+    TRANSPORT_COST_CACHE_TTL_MINUTES,
+    PRICE_INTERVAL_GAP_TOLERANCE_SECONDS,
+    PEAK_THRESHOLD_MULTIPLIER,
 )
 from .decision_engine import ChargingDecisionEngine
 
@@ -93,10 +100,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Update throttling
         self._last_entity_update = None
         self._min_update_interval = timedelta(seconds=10)  # Minimum 10s between entity-triggered updates
+        self._update_lock = asyncio.Lock()  # Prevent race conditions in throttling
 
         # Nord Pool price caching (prices only update hourly)
-        self._nordpool_cache = {}
-        self._nordpool_cache_time = {}
+        # Cache structure: {cache_key: (data, timestamp)}
+        self._nordpool_cache: dict[str, tuple[dict[str, Any], datetime]] = {}
+        self._nordpool_cache_max_size = NORDPOOL_CACHE_MAX_SIZE
 
         # Transport cost lookup caching (expensive recorder query)
         self._transport_cost_lookup: list[dict[str, Any]] = []
@@ -118,6 +127,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         }
         self._last_price_timeline: list[tuple[datetime, datetime, float]] | None = None
         self._last_price_timeline_generated_at: datetime | None = None
+        self._price_timeline_max_age = timedelta(hours=PRICE_TIMELINE_MAX_AGE_HOURS)
 
         # Car peak limit tracking (15-minute hold after 5 minutes of sustained peak exceedance)
         self._car_peak_limited_until: datetime | None = None
@@ -325,11 +335,11 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             self._car_peak_limited_until = None
             _LOGGER.debug("Car peak limit hold expired")
 
-        # Calculate threshold (5% over effective peak)
+        # Calculate threshold (configurable % over effective peak)
         monthly_peak = data.get("monthly_grid_peak")
         base_grid_setpoint = self.config.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT)
         effective_peak = max(monthly_peak or 0, base_grid_setpoint)
-        peak_threshold = effective_peak * 1.05 if effective_peak > 0 else None
+        peak_threshold = effective_peak * PEAK_THRESHOLD_MULTIPLIER if effective_peak > 0 else None
 
         # Check current state
         grid_power = data.get("grid_power")
@@ -604,8 +614,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         return timeline
 
     @callback
-    def _handle_entity_change(self, event):
-        """Handle entity state changes with minimum update interval."""
+    def _handle_entity_change(self, event: Event) -> None:
+        """Handle entity state changes with minimum update interval.
+
+        Args:
+            event: Home Assistant state change event
+        """
         entity_id = event.data.get("entity_id")
         _LOGGER.debug("Entity changed: %s", entity_id)
 
@@ -635,13 +649,36 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         if entity_id in critical_entities or entity_id in battery_entities:
             now = dt_util.utcnow()
+            # Quick pre-check to avoid spawning extra tasks while throttled
+            if (
+                self._last_entity_update is not None
+                and now - self._last_entity_update < self._min_update_interval
+            ):
+                time_remaining = (
+                    self._last_entity_update + self._min_update_interval - now
+                ).total_seconds()
+                _LOGGER.debug(
+                    "Entity update skipped for %s (throttled, %.1fs remaining)",
+                    entity_id,
+                    time_remaining,
+                )
+                return
 
-            # Apply minimum interval throttling
+            # Use async task to avoid blocking the callback
+            self.hass.async_create_task(self._async_handle_throttled_update(entity_id))
+
+    async def _async_handle_throttled_update(self, entity_id: str) -> None:
+        """Handle entity update with atomic throttling check."""
+        async with self._update_lock:
+            now = dt_util.utcnow()
+
+            # Apply minimum interval throttling (atomic check-and-set)
             if (self._last_entity_update is None or
                 now - self._last_entity_update >= self._min_update_interval):
 
                 self._last_entity_update = now
-                self.hass.async_create_task(self.async_request_refresh())
+                # Schedule refresh outside the lock to avoid blocking
+                await self.async_request_refresh()
                 _LOGGER.debug("Entity update triggered for %s (throttled to %ds minimum)",
                             entity_id, self._min_update_interval.total_seconds())
             else:
@@ -1021,36 +1058,48 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         now = dt_util.utcnow()
         cache_key = f"{day}_{config_entry_id}"
 
+        # Check cache with safe tuple unpacking
         if cache_key in self._nordpool_cache:
-            cache_age = now - self._nordpool_cache_time.get(cache_key, now)
-            # Cache for 5 minutes (prices change hourly, tomorrow appears at 13:00)
-            if cache_age < timedelta(minutes=5):
+            cached_data, cached_time = self._nordpool_cache[cache_key]
+            cache_age = now - cached_time
+            # Cache for configured TTL (prices change hourly, tomorrow appears at 13:00)
+            if cache_age < timedelta(minutes=NORDPOOL_CACHE_TTL_MINUTES):
                 _LOGGER.debug("Using cached Nord Pool prices for %s (age: %.1f minutes)",
                             day, cache_age.total_seconds() / 60)
-                return self._nordpool_cache[cache_key]
+                return cached_data
 
         try:
             # Calculate the target date
-            now = dt_util.now()
+            now_local = dt_util.now()
             if day == "today":
-                target_date = now.date()
+                target_date = now_local.date()
             elif day == "tomorrow":
-                target_date = (now + timedelta(days=1)).date()
+                target_date = (now_local + timedelta(days=1)).date()
             else:
                 _LOGGER.error("Invalid day parameter: %s (expected 'today' or 'tomorrow')", day)
                 return None
 
-            # Call the Nord Pool service
-            response = await self.hass.services.async_call(
-                "nordpool",
-                "get_prices_for_date",
-                {
-                    "config_entry": config_entry_id,
-                    "date": target_date.isoformat()
-                },
-                blocking=True,
-                return_response=True
-            )
+            # Call the Nord Pool service with comprehensive error handling
+            try:
+                response = await self.hass.services.async_call(
+                    "nordpool",
+                    "get_prices_for_date",
+                    {
+                        "config_entry": config_entry_id,
+                        "date": target_date.isoformat()
+                    },
+                    blocking=True,
+                    return_response=True
+                )
+            except ValueError as err:
+                _LOGGER.warning("Nord Pool service call failed (invalid parameters) for %s: %s", day, err)
+                return None
+            except TimeoutError as err:
+                _LOGGER.warning("Nord Pool service call timed out for %s: %s", day, err)
+                return None
+            except Exception as err:
+                _LOGGER.warning("Nord Pool service call failed for %s: %s", day, err)
+                return None
 
             # The service returns a dict with area-based price data
             if response and isinstance(response, dict):
@@ -1059,9 +1108,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("Fetched Nord Pool prices for %s (%s): %d entries across %d area(s)",
                             day, target_date.isoformat(), total_entries, len(response))
 
-                # Cache the response
-                self._nordpool_cache[cache_key] = response
-                self._nordpool_cache_time[cache_key] = dt_util.utcnow()
+                # Evict oldest cache entry if cache is full
+                if len(self._nordpool_cache) >= self._nordpool_cache_max_size:
+                    oldest_key = min(self._nordpool_cache.keys(),
+                                   key=lambda k: self._nordpool_cache[k][1])
+                    del self._nordpool_cache[oldest_key]
+                    _LOGGER.debug("Evicted oldest Nord Pool cache entry: %s", oldest_key)
+
+                # Cache the response with timestamp
+                self._nordpool_cache[cache_key] = (response, dt_util.utcnow())
 
                 return response
             else:
@@ -1069,7 +1124,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 return None
 
         except Exception as err:
-            _LOGGER.warning("Failed to fetch Nord Pool prices for %s: %s", day, err)
+            _LOGGER.error("Unexpected error fetching Nord Pool prices for %s: %s", day, err, exc_info=True)
             return None
 
     def _calculate_average_threshold(
@@ -1488,7 +1543,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             next_start, next_end, next_price = timeline[next_idx]
 
             # Any gap in coverage breaks the consecutive window requirement
-            if next_start > previous_end + timedelta(seconds=5):
+            if next_start > previous_end + timedelta(seconds=PRICE_INTERVAL_GAP_TOLERANCE_SECONDS):
                 _LOGGER.debug(
                     "Charging window broken by gap between %s and %s",
                     previous_end.isoformat(),
@@ -1549,6 +1604,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         now = dt_util.utcnow()
 
         stale = False
+
+        # Check if cached timeline is too old
+        if (self._last_price_timeline_generated_at is not None and
+            now - self._last_price_timeline_generated_at > self._price_timeline_max_age):
+            _LOGGER.debug("Price timeline cache expired (age: %.1f hours), clearing",
+                        (now - self._last_price_timeline_generated_at).total_seconds() / 3600)
+            self._last_price_timeline = None
+            self._last_price_timeline_generated_at = None
 
         if not prices_today and not prices_tomorrow:
             if self._last_price_timeline:

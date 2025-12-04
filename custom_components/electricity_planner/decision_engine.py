@@ -869,9 +869,12 @@ class ChargingDecisionEngine:
 
         very_low_threshold = self._settings.very_low_price_threshold_ratio
 
-        # Use cached price position calculation
+        # Use cached price position calculation with explicit None handling
+        # Note: Use explicit None checks to handle zero and negative prices correctly
+        effective_highest = current_price if highest_price is None else highest_price
+        effective_lowest = current_price if lowest_price is None else lowest_price
         price_position = self.price_calculator.calculate_price_position(
-            current_price, highest_price or current_price, lowest_price or current_price
+            current_price, effective_highest, effective_lowest
         )
         
         # Check price trends
