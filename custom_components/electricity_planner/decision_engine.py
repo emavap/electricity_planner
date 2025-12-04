@@ -1781,7 +1781,7 @@ class ChargingDecisionEngine:
         data: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Calculate optimal charger power limit."""
-        car_charging_power = data.get("car_charging_power", 0)
+        car_charging_power = _safe_optional_float(data.get("car_charging_power")) or 0.0
         min_threshold = self._settings.min_car_charging_threshold
         car_limit_cap = min(self._settings.max_car_power, DEFAULT_SYSTEM_LIMITS.max_car_charger_power)
         car_grid_charging = data.get("car_grid_charging", False)
@@ -1884,7 +1884,7 @@ class ChargingDecisionEngine:
         charger_limit: int,
     ) -> Dict[str, Any]:
         """Calculate grid setpoint based on energy management scenario."""
-        car_charging_power = data.get("car_charging_power", 0)
+        car_charging_power = _safe_optional_float(data.get("car_charging_power")) or 0.0
         battery_grid_charging = data.get("battery_grid_charging", False)
         car_grid_charging = data.get("car_grid_charging", False)
         average_soc = battery_analysis.get("average_soc")

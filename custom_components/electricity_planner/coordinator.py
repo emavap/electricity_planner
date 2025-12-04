@@ -1682,18 +1682,34 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             return self._transport_cost_lookup, self._transport_cost_status
 
         try:
+            try:
+                from homeassistant.components.recorder import get_instance as get_recorder_instance
+            except ImportError:
+                get_recorder_instance = None  # Older HA or test shims may not expose get_instance
+
             from homeassistant.components.recorder.history import get_significant_states
 
             end_time = dt_util.now()
             start_time = end_time - timedelta(days=7)
 
-            states = await self.hass.async_add_executor_job(
-                get_significant_states,
-                self.hass,
-                start_time,
-                end_time,
-                [transport_entity],
-            )
+            if get_recorder_instance is not None:
+                recorder = get_recorder_instance(self.hass)
+                states = await recorder.async_add_executor_job(
+                    get_significant_states,
+                    self.hass,
+                    start_time,
+                    end_time,
+                    [transport_entity],
+                )
+            else:
+                # Fallback for environments without recorder.get_instance (tests/shims)
+                states = await self.hass.async_add_executor_job(
+                    get_significant_states,
+                    self.hass,
+                    start_time,
+                    end_time,
+                    [transport_entity],
+                )
 
             if not states or transport_entity not in states:
                 fallback_lookup = self._build_fallback_transport_lookup(
