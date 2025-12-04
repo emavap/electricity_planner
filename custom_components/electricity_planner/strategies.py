@@ -412,7 +412,9 @@ class StrategyManager:
             battery = context.get("battery_analysis", {})
             config = context.get("config", {}) or {}
             settings = context.get("settings")
-            average_soc = battery.get("average_soc", 100)
+            average_soc = battery.get("average_soc")
+            if average_soc is None:
+                average_soc = 100
             emergency_threshold = (
                 getattr(settings, "emergency_soc_threshold", None)
                 if settings is not None
