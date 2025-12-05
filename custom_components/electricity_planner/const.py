@@ -118,7 +118,6 @@ TRANSPORT_COST_CACHE_TTL_MINUTES = 30  # Transport cost lookup cache TTL
 # Tolerance Constants
 POWER_ALLOCATION_TOLERANCE = 1.1  # 10% tolerance for power allocation validation
 POWER_ALLOCATION_PRECISION = 1  # Watt precision for allocation mismatch detection
-PRICE_INTERVAL_GAP_TOLERANCE_SECONDS = 5  # Maximum gap between price intervals
 PEAK_THRESHOLD_MULTIPLIER = 1.05  # 5% over effective peak for peak detection
 
 # Dynamic Threshold Constants (used in dynamic_threshold.py)
@@ -179,4 +178,4 @@ MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT = "charger_limit"
 MANUAL_OVERRIDE_TARGET_GRID_SETPOINT = "grid_setpoint"
 MANUAL_OVERRIDE_TARGET_ALL = "all"
 
-INTEGRATION_VERSION = "4.5.1"
+INTEGRATION_VERSION = "4.5.2"

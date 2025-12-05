@@ -1076,16 +1076,18 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
 
         # Trim historical intervals to keep recorder-friendly payload size while
         # preserving the full forward-looking forecast used by dashboards/thresholds.
+        # Include 6 hours of historical prices for dashboard chart context.
         now = dt_util.now()
-        future_prices: list[dict[str, Any]] = []
+        history_cutoff = now - timedelta(hours=6)
+        recent_prices: list[dict[str, Any]] = []
         for price_entry in combined_prices:
             start_raw = price_entry.get("start")
             if not start_raw:
                 continue
             start_dt = dt_util.parse_datetime(start_raw)
-            if start_dt and start_dt >= now:
-                future_prices.append(price_entry)
-        limited_prices = future_prices if future_prices else combined_prices
+            if start_dt and start_dt >= history_cutoff:
+                recent_prices.append(price_entry)
+        limited_prices = recent_prices if recent_prices else combined_prices
 
         return {
             "data": limited_prices,  # Limited price data for ApexCharts (already in €/kWh)
