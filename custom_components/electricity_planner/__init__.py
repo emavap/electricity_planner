@@ -13,16 +13,21 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
     ATTR_ACTION,
+    ATTR_CHARGER_LIMIT_OVERRIDE,
     ATTR_DURATION,
     ATTR_ENTRY_ID,
+    ATTR_GRID_SETPOINT_OVERRIDE,
     ATTR_REASON,
     ATTR_TARGET,
     DOMAIN,
     MANUAL_OVERRIDE_ACTION_FORCE_CHARGE,
     MANUAL_OVERRIDE_ACTION_FORCE_WAIT,
+    MANUAL_OVERRIDE_TARGET_ALL,
     MANUAL_OVERRIDE_TARGET_BATTERY,
     MANUAL_OVERRIDE_TARGET_BOTH,
     MANUAL_OVERRIDE_TARGET_CAR,
+    MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
+    MANUAL_OVERRIDE_TARGET_GRID_SETPOINT,
     SERVICE_CLEAR_MANUAL_OVERRIDE,
     SERVICE_SET_MANUAL_OVERRIDE,
 )
@@ -42,24 +47,31 @@ MANUAL_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
                 MANUAL_OVERRIDE_TARGET_BATTERY,
                 MANUAL_OVERRIDE_TARGET_CAR,
                 MANUAL_OVERRIDE_TARGET_BOTH,
+                MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
+                MANUAL_OVERRIDE_TARGET_GRID_SETPOINT,
             )
         ),
-        vol.Required(ATTR_ACTION): vol.In(
+        vol.Optional(ATTR_ACTION): vol.In(
             (MANUAL_OVERRIDE_ACTION_FORCE_CHARGE, MANUAL_OVERRIDE_ACTION_FORCE_WAIT)
         ),
         vol.Optional(ATTR_DURATION): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
         vol.Optional(ATTR_REASON): vol.Coerce(str),
+        vol.Optional(ATTR_CHARGER_LIMIT_OVERRIDE): vol.All(vol.Coerce(int), vol.Range(min=0, max=50000)),
+        vol.Optional(ATTR_GRID_SETPOINT_OVERRIDE): vol.All(vol.Coerce(int), vol.Range(min=0, max=50000)),
     }
 )
 
 CLEAR_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_ENTRY_ID): str,
-        vol.Optional(ATTR_TARGET, default=MANUAL_OVERRIDE_TARGET_BOTH): vol.In(
+        vol.Optional(ATTR_TARGET, default=MANUAL_OVERRIDE_TARGET_ALL): vol.In(
             (
                 MANUAL_OVERRIDE_TARGET_BATTERY,
                 MANUAL_OVERRIDE_TARGET_CAR,
                 MANUAL_OVERRIDE_TARGET_BOTH,
+                MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
+                MANUAL_OVERRIDE_TARGET_GRID_SETPOINT,
+                MANUAL_OVERRIDE_TARGET_ALL,
             )
         ),
     }
@@ -141,14 +153,29 @@ def _register_services_once(hass: HomeAssistant) -> None:
             raise HomeAssistantError(f"Coordinator for entry {entry_id} is no longer available")
 
         target = call.data[ATTR_TARGET]
-        action = call.data[ATTR_ACTION]
+        action = call.data.get(ATTR_ACTION)
         reason = call.data.get(ATTR_REASON)
         duration_minutes = call.data.get(ATTR_DURATION)
         duration = timedelta(minutes=duration_minutes) if duration_minutes is not None else None
+        charger_limit = call.data.get(ATTR_CHARGER_LIMIT_OVERRIDE)
+        grid_setpoint = call.data.get(ATTR_GRID_SETPOINT_OVERRIDE)
 
-        value = action == MANUAL_OVERRIDE_ACTION_FORCE_CHARGE
+        # For numeric-only targets, action is optional
+        # For boolean targets (battery/car/both), action is required
+        if target in (MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT, MANUAL_OVERRIDE_TARGET_GRID_SETPOINT):
+            # Numeric-only override, no boolean value needed
+            value = None
+        elif action is None:
+            raise HomeAssistantError(
+                f"Action is required when target is {target}. "
+                f"Use 'force_charge' or 'force_wait'."
+            )
+        else:
+            value = action == MANUAL_OVERRIDE_ACTION_FORCE_CHARGE
 
-        await coordinator.async_set_manual_override(target, value, duration, reason)
+        await coordinator.async_set_manual_override(
+            target, value, duration, reason, charger_limit, grid_setpoint
+        )
         await coordinator.async_request_refresh()
 
     async def _async_handle_clear_override(call):
@@ -158,7 +185,7 @@ def _register_services_once(hass: HomeAssistant) -> None:
         if not coordinator:
             raise HomeAssistantError(f"Coordinator for entry {entry_id} is no longer available")
 
-        target = call.data.get(ATTR_TARGET, MANUAL_OVERRIDE_TARGET_BOTH)
+        target = call.data.get(ATTR_TARGET, MANUAL_OVERRIDE_TARGET_ALL)
         await coordinator.async_clear_manual_override(target)
         await coordinator.async_request_refresh()
 

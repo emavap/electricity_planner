@@ -2,19 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final
-
-# Time-related constants
-@dataclass
-class TimeSchedule:
-    """Time schedule configuration."""
-    night_start: int = 22  # 10 PM
-    night_end: int = 6     # 6 AM
-    early_morning_end: int = 9
-    solar_peak_start: int = 10
-    solar_peak_end: int = 16
-    evening_start: int = 17
-    evening_end: int = 21
 
 # Power/Energy estimation constants
 @dataclass
@@ -52,11 +39,7 @@ class SystemLimits:
     evaluation_interval: int = 5  # minutes - Decision re-evaluation interval
     data_unavailable_notification_delay: int = 60  # seconds - Delay before notification
 
-# Winter months for seasonal logic
-WINTER_MONTHS: Final[list[int]] = [11, 12, 1, 2]
-
 # Create default instances
-DEFAULT_TIME_SCHEDULE = TimeSchedule()
 DEFAULT_POWER_ESTIMATES = PowerEstimates()
 DEFAULT_ALGORITHM_THRESHOLDS = AlgorithmThresholds()
 DEFAULT_SYSTEM_LIMITS = SystemLimits()

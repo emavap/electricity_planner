@@ -1,13 +1,14 @@
 """Data coordinator for Electricity Planner."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -59,6 +60,22 @@ from .const import (
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+    NORDPOOL_CACHE_MAX_SIZE,
+    NORDPOOL_CACHE_TTL_MINUTES,
+    PRICE_TIMELINE_MAX_AGE_HOURS,
+    PRICE_INTERVAL_GAP_TOLERANCE_SECONDS,
+    PEAK_THRESHOLD_MULTIPLIER,
+    BATTERY_CAPACITY_FALLBACK_WEIGHT,
+    AVERAGE_THRESHOLD_HYSTERESIS_COUNT,
+    AVERAGE_THRESHOLD_DEFAULT_INTERVAL_SECONDS,
+    MIN_UPDATE_INTERVAL_SECONDS,
+    PRICE_INTERVAL_LOOKBACK_HOURS,
+    PEAK_MONITORING_DURATION_MINUTES,
+    PEAK_LIMIT_DURATION_MINUTES,
+    PRICE_INTERVAL_MINUTES,
+    PRICE_VALUE_MIN_EUR_MWH,
+    PRICE_VALUE_MAX_EUR_MWH,
+    BATTERY_SOC_DECIMAL_THRESHOLD,
 )
 from .decision_engine import ChargingDecisionEngine
 
@@ -92,11 +109,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         # Update throttling
         self._last_entity_update = None
-        self._min_update_interval = timedelta(seconds=10)  # Minimum 10s between entity-triggered updates
+        self._min_update_interval = timedelta(seconds=MIN_UPDATE_INTERVAL_SECONDS)
+        self._update_lock = asyncio.Lock()  # Prevent race conditions in throttling
 
         # Nord Pool price caching (prices only update hourly)
-        self._nordpool_cache = {}
-        self._nordpool_cache_time = {}
+        # Cache structure: {cache_key: (data, timestamp)}
+        self._nordpool_cache: dict[str, tuple[dict[str, Any], datetime]] = {}
+        self._nordpool_cache_max_size = NORDPOOL_CACHE_MAX_SIZE
 
         # Transport cost lookup caching (expensive recorder query)
         self._transport_cost_lookup: list[dict[str, Any]] = []
@@ -110,6 +129,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Price interval tracking for threshold stability
         self._current_price_interval_start: datetime | None = None
         self._battery_threshold_snapshot: float | None = None
+        self._last_config_hash: int | None = None  # Track config changes for threshold updates
 
         # Manual override tracking
         self._manual_overrides: dict[str, dict[str, Any] | None] = {
@@ -118,10 +138,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         }
         self._last_price_timeline: list[tuple[datetime, datetime, float]] | None = None
         self._last_price_timeline_generated_at: datetime | None = None
+        self._price_timeline_max_age = timedelta(hours=PRICE_TIMELINE_MAX_AGE_HOURS)
 
         # Car peak limit tracking (15-minute hold after 5 minutes of sustained peak exceedance)
         self._car_peak_limited_until: datetime | None = None
         self._car_peak_limit_started_at: datetime | None = None
+
+        # Average threshold hysteresis tracking
+        self._average_threshold_valid_count: int = 0  # Count of consecutive valid calculations
+        self._average_threshold_enabled: bool = False  # Whether average threshold is active
 
         super().__init__(
             hass,
@@ -129,7 +154,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             name=DOMAIN,
             update_interval=timedelta(seconds=30),  # Maximum 30s updates (minimum 10s via entity changes)
         )
-        
+
         self._setup_entity_listeners()
 
     def _is_data_available(self, data: dict[str, Any]) -> bool:
@@ -185,7 +210,16 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         start_time_utc: datetime,
         reference_now: datetime | None = None,
     ) -> float | None:
-        """Resolve transport cost for a specific timestamp."""
+        """Resolve transport cost for a specific timestamp.
+
+        Args:
+            transport_lookup: List of transport cost entries with timestamps
+            start_time_utc: The timestamp to resolve cost for
+            reference_now: Reference time for "now" (defaults to current UTC time)
+
+        Returns:
+            Transport cost in €/kWh, or None if not available
+        """
         if not transport_lookup:
             return None
 
@@ -238,43 +272,86 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         return cost
 
     def _resolve_override_targets(self, target: str) -> tuple[str, ...]:
-        """Resolve override target string into coordinator keys."""
+        """Resolve override target string into coordinator keys.
+
+        Args:
+            target: Target identifier (battery, car, both, charger_limit, grid_setpoint, all)
+
+        Returns:
+            Tuple of coordinator key strings that match the target
+        """
         mapping = {
             "battery": ("battery_grid_charging",),
             "car": ("car_grid_charging",),
             "both": ("battery_grid_charging", "car_grid_charging"),
+            "charger_limit": ("charger_limit",),
+            "grid_setpoint": ("grid_setpoint",),
+            "all": ("battery_grid_charging", "car_grid_charging", "charger_limit", "grid_setpoint"),
         }
         return mapping.get(target, ())
 
     async def async_set_manual_override(
         self,
         target: str,
-        value: bool,
+        value: bool | None,
         duration: timedelta | None,
         reason: str | None,
+        charger_limit: int | None = None,
+        grid_setpoint: int | None = None,
     ) -> None:
-        """Apply a manual override for battery or car decisions."""
+        """Apply a manual override for battery or car decisions, charger limit, or grid setpoint."""
         now = dt_util.utcnow()
         expires_at = now + duration if duration is not None else None
-        manual_reason = reason or ("force charge" if value else "force wait")
 
-        for coordinator_key in self._resolve_override_targets(target):
-            self._manual_overrides[coordinator_key] = {
-                "value": value,
-                "reason": manual_reason,
+        # Apply boolean overrides (battery/car charging) only if value is provided
+        if value is not None:
+            manual_reason = reason or ("force charge" if value else "force wait")
+            for coordinator_key in self._resolve_override_targets(target):
+                # Only apply boolean overrides to actual boolean keys
+                if coordinator_key in ("battery_grid_charging", "car_grid_charging"):
+                    self._manual_overrides[coordinator_key] = {
+                        "value": value,
+                        "reason": manual_reason,
+                        "expires_at": expires_at,
+                        "set_at": now,
+                    }
+                    _LOGGER.info(
+                        "Manual override set for %s → %s (expires %s)",
+                        coordinator_key,
+                        value,
+                        expires_at.isoformat() if expires_at else "never",
+                    )
+
+        # Apply numeric overrides (charger_limit and grid_setpoint)
+        if charger_limit is not None:
+            self._manual_overrides["charger_limit"] = {
+                "value": charger_limit,
+                "reason": reason or "Manual charger limit override",
                 "expires_at": expires_at,
                 "set_at": now,
             }
             _LOGGER.info(
-                "Manual override set for %s → %s (expires %s)",
-                coordinator_key,
-                value,
+                "Manual override set for charger_limit → %dW (expires %s)",
+                charger_limit,
+                expires_at.isoformat() if expires_at else "never",
+            )
+
+        if grid_setpoint is not None:
+            self._manual_overrides["grid_setpoint"] = {
+                "value": grid_setpoint,
+                "reason": reason or "Manual grid setpoint override",
+                "expires_at": expires_at,
+                "set_at": now,
+            }
+            _LOGGER.info(
+                "Manual override set for grid_setpoint → %dW (expires %s)",
+                grid_setpoint,
                 expires_at.isoformat() if expires_at else "never",
             )
 
     async def async_clear_manual_override(self, target: str | None = None) -> None:
         """Clear manual overrides for the given target (or all)."""
-        effective_target = target or "both"
+        effective_target = target or "all"
         for coordinator_key in self._resolve_override_targets(effective_target):
             if self._manual_overrides.get(coordinator_key):
                 _LOGGER.info("Manual override cleared for %s", coordinator_key)
@@ -289,11 +366,11 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             self._car_peak_limited_until = None
             _LOGGER.debug("Car peak limit hold expired")
 
-        # Calculate threshold (5% over effective peak)
+        # Calculate threshold (configurable % over effective peak)
         monthly_peak = data.get("monthly_grid_peak")
         base_grid_setpoint = self.config.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT)
         effective_peak = max(monthly_peak or 0, base_grid_setpoint)
-        peak_threshold = effective_peak * 1.05 if effective_peak > 0 else None
+        peak_threshold = effective_peak * PEAK_THRESHOLD_MULTIPLIER if effective_peak > 0 else None
 
         # Check current state
         grid_power = data.get("grid_power")
@@ -314,19 +391,20 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 if self._car_peak_limit_started_at is None:
                     self._car_peak_limit_started_at = now
                     _LOGGER.debug(
-                        "Grid import %.0fW > %.0fW: starting 5-minute monitoring",
-                        grid_import, peak_threshold
+                        "Grid import %.0fW > %.0fW: starting %d-minute monitoring",
+                        grid_import, peak_threshold, PEAK_MONITORING_DURATION_MINUTES
                     )
                 else:
-                    # Check if sustained for 5 minutes
+                    # Check if sustained for configured duration
                     exceed_duration = now - self._car_peak_limit_started_at
-                    if exceed_duration >= timedelta(minutes=5):
-                        self._car_peak_limited_until = now + timedelta(minutes=15)
+                    if exceed_duration >= timedelta(minutes=PEAK_MONITORING_DURATION_MINUTES):
+                        self._car_peak_limited_until = now + timedelta(minutes=PEAK_LIMIT_DURATION_MINUTES)
                         self._car_peak_limit_started_at = None  # Reset monitoring
                         _LOGGER.info(
-                            "Grid import %.0fW exceeded %.0fW for 5 minutes. "
-                            "Halving car charger limit for 15 minutes.",
-                            grid_import, peak_threshold
+                            "Grid import %.0fW exceeded %.0fW for %d minutes. "
+                            "Halving car charger limit for %d minutes.",
+                            grid_import, peak_threshold,
+                            PEAK_MONITORING_DURATION_MINUTES, PEAK_LIMIT_DURATION_MINUTES
                         )
                         currently_limited = True
             else:
@@ -355,46 +433,80 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         augmented_trace = list(base_trace)
         changed_targets: set[str] = set()
 
+        # Collect expired keys to delete after iteration
+        expired_keys: list[str] = []
+
         for coordinator_key, override in self._manual_overrides.items():
             if not override:
                 continue
 
             expires_at: datetime | None = override.get("expires_at")
             if expires_at and expires_at <= now:
-                self._manual_overrides[coordinator_key] = None
+                expired_keys.append(coordinator_key)
                 continue
 
-            manual_reason: str = override.get("reason") or (
-                "Manual override to charge" if override.get("value") else "Manual override to wait"
-            )
-            previous_value = decision.get(coordinator_key)
-            decision[coordinator_key] = override["value"]
-            if previous_value != override["value"]:
-                changed_targets.add(coordinator_key)
+            override_value = override["value"]
+            manual_reason: str = override.get("reason", "Manual override")
 
-            reason_key = f"{coordinator_key}_reason"
-            existing_reason = decision.get(reason_key)
-            if existing_reason:
-                decision[reason_key] = f"{existing_reason} (override: {manual_reason})"
-            else:
-                decision[reason_key] = f"Manual override: {manual_reason}"
+            # Handle numeric overrides (charger_limit, grid_setpoint)
+            if coordinator_key in ("charger_limit", "grid_setpoint"):
+                previous_value = decision.get(coordinator_key)
+                decision[coordinator_key] = override_value
+                if previous_value != override_value:
+                    changed_targets.add(coordinator_key)
 
-            overrides_info[coordinator_key] = {
-                "value": override["value"],
-                "reason": manual_reason,
-                "set_at": override.get("set_at").isoformat() if override.get("set_at") else None,
-                "expires_at": expires_at.isoformat() if expires_at else None,
-            }
+                reason_key = f"{coordinator_key}_reason"
+                existing_reason = decision.get(reason_key)
+                if existing_reason:
+                    decision[reason_key] = f"{existing_reason} (override: {manual_reason})"
+                else:
+                    decision[reason_key] = f"Manual override: {manual_reason}"
 
-            augmented_trace.append(
-                {
-                    "strategy": "ManualOverride",
-                    "priority": -1,
-                    "should_charge": override["value"],
+                overrides_info[coordinator_key] = {
+                    "value": override_value,
                     "reason": manual_reason,
-                    "target": coordinator_key,
+                    "set_at": override.get("set_at").isoformat() if override.get("set_at") else None,
+                    "expires_at": expires_at.isoformat() if expires_at else None,
                 }
-            )
+
+            # Handle boolean overrides (battery_grid_charging, car_grid_charging)
+            else:
+                if not manual_reason or manual_reason == "Manual override":
+                    manual_reason = "Manual override to charge" if override_value else "Manual override to wait"
+
+                previous_value = decision.get(coordinator_key)
+                decision[coordinator_key] = override_value
+                if previous_value != override_value:
+                    changed_targets.add(coordinator_key)
+
+                reason_key = f"{coordinator_key}_reason"
+                existing_reason = decision.get(reason_key)
+                if existing_reason:
+                    decision[reason_key] = f"{existing_reason} (override: {manual_reason})"
+                else:
+                    decision[reason_key] = f"Manual override: {manual_reason}"
+
+                overrides_info[coordinator_key] = {
+                    "value": override_value,
+                    "reason": manual_reason,
+                    "set_at": override.get("set_at").isoformat() if override.get("set_at") else None,
+                    "expires_at": expires_at.isoformat() if expires_at else None,
+                }
+
+                augmented_trace.append(
+                    {
+                        "strategy": "ManualOverride",
+                        "priority": -1,
+                        "should_charge": override_value,
+                        "reason": manual_reason,
+                        "target": coordinator_key,
+                    }
+                )
+
+        # Clean up expired overrides after iteration
+        for key in expired_keys:
+            del self._manual_overrides[key]
+            _LOGGER.debug("Removed expired manual override: %s", key)
 
         if overrides_info:
             decision["manual_overrides"] = overrides_info
@@ -452,7 +564,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                             continue
                     else:
                         # Assume hourly interval if no end provided
-                        if start_time_utc < now - timedelta(hours=1):
+                        if start_time_utc < now - timedelta(hours=PRICE_INTERVAL_LOOKBACK_HOURS):
                             continue
 
                     price_value = None
@@ -471,6 +583,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     if price_value is None:
                         continue
 
+                    # Validate price is in reasonable range (assuming €/MWh from Nord Pool)
+                    if not PRICE_VALUE_MIN_EUR_MWH <= price_value <= PRICE_VALUE_MAX_EUR_MWH:
+                        _LOGGER.warning(
+                            "Suspicious price value %.2f €/MWh outside expected range [%d, %d], skipping interval",
+                            price_value, PRICE_VALUE_MIN_EUR_MWH, PRICE_VALUE_MAX_EUR_MWH
+                        )
+                        continue
+
                     price_kwh = price_value / 1000
                     adjusted_price = (price_kwh * multiplier) + offset
 
@@ -487,9 +607,18 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     final_price = adjusted_price + transport_cost
                     future_intervals.append((start_time_utc, end_time, final_price))
 
-                except Exception as err:
+                except (ValueError, TypeError, KeyError, AttributeError) as err:
                     _LOGGER.debug(
-                        "Error processing interval for price timeline: %s", err
+                        "Expected error processing interval for price timeline: %s", err
+                    )
+                    continue
+                except Exception as err:
+                    # Don't catch system exceptions
+                    if isinstance(err, (KeyboardInterrupt, SystemExit)):
+                        raise
+                    _LOGGER.warning(
+                        "Unexpected error processing interval for price timeline: %s",
+                        err, exc_info=True
                     )
                     continue
 
@@ -519,7 +648,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 estimated_resolution = delta
 
         if estimated_resolution is None or estimated_resolution <= timedelta(0):
-            estimated_resolution = timedelta(minutes=15)
+            estimated_resolution = timedelta(minutes=PRICE_INTERVAL_MINUTES)
 
         timeline: list[tuple[datetime, datetime, float]] = []
         for idx, (start_time, end_time, price) in enumerate(future_intervals):
@@ -542,8 +671,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         return timeline
 
     @callback
-    def _handle_entity_change(self, event):
-        """Handle entity state changes with minimum update interval."""
+    def _handle_entity_change(self, event: Event) -> None:
+        """Handle entity state changes with minimum update interval.
+
+        Args:
+            event: Home Assistant state change event
+        """
+        # Note: This is a callback, so we can't use async lock directly
+        # The throttling is handled by checking _last_entity_update timestamp
         entity_id = event.data.get("entity_id")
         _LOGGER.debug("Entity changed: %s", entity_id)
 
@@ -572,14 +707,23 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         battery_entities = self.config.get(CONF_BATTERY_SOC_ENTITIES, [])
 
         if entity_id in critical_entities or entity_id in battery_entities:
+            # Use async task to avoid blocking the callback
+            # Note: Throttling is handled atomically in _async_handle_throttled_update
+            # to prevent race conditions from multiple rapid events
+            self.hass.async_create_task(self._async_handle_throttled_update(entity_id))
+
+    async def _async_handle_throttled_update(self, entity_id: str) -> None:
+        """Handle entity update with atomic throttling check."""
+        async with self._update_lock:
             now = dt_util.utcnow()
 
-            # Apply minimum interval throttling
+            # Apply minimum interval throttling (atomic check-and-set)
             if (self._last_entity_update is None or
                 now - self._last_entity_update >= self._min_update_interval):
 
                 self._last_entity_update = now
-                self.hass.async_create_task(self.async_request_refresh())
+                # Schedule refresh outside the lock to avoid blocking
+                await self.async_request_refresh()
                 _LOGGER.debug("Entity update triggered for %s (throttled to %ds minimum)",
                             entity_id, self._min_update_interval.total_seconds())
             else:
@@ -594,19 +738,69 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         minutes = (now.minute // 15) * 15
         return now.replace(minute=minutes, second=0, microsecond=0)
 
+    def _clean_expired_nordpool_cache(self) -> None:
+        """Remove expired entries from Nord Pool cache based on TTL and size limit.
+
+        Evicts cache entries older than NORDPOOL_CACHE_TTL_MINUTES to prevent
+        stale data from persisting when cache doesn't fill up to max size.
+        Also enforces max size limit using LRU eviction.
+        """
+        now = dt_util.utcnow()
+        ttl = timedelta(minutes=NORDPOOL_CACHE_TTL_MINUTES)
+
+        # First, remove expired entries
+        expired_keys = [
+            key for key, (_, timestamp) in self._nordpool_cache.items()
+            if now - timestamp > ttl
+        ]
+        for key in expired_keys:
+            del self._nordpool_cache[key]
+            _LOGGER.debug("Evicted expired Nord Pool cache entry: %s", key)
+
+        # Then, enforce size limit using LRU (oldest timestamp first)
+        if len(self._nordpool_cache) > NORDPOOL_CACHE_MAX_SIZE:
+            sorted_items = sorted(
+                self._nordpool_cache.items(),
+                key=lambda x: x[1][1]  # Sort by timestamp
+            )
+            entries_to_remove = len(self._nordpool_cache) - NORDPOOL_CACHE_MAX_SIZE
+            for key, _ in sorted_items[:entries_to_remove]:
+                del self._nordpool_cache[key]
+                _LOGGER.debug("Evicted old Nord Pool cache entry (size limit): %s", key)
+
     def _update_battery_threshold_snapshot_if_needed(self, price_threshold: float | None) -> None:
-        """Update battery threshold snapshot when entering a new price interval."""
+        """Update battery threshold snapshot when entering a new price interval or config changes."""
         if price_threshold is None:
             return
 
         current_interval = self._get_current_price_interval_start()
 
-        # Update if this is the first interval or if we've entered a new interval
-        if self._current_price_interval_start is None or current_interval != self._current_price_interval_start:
+        # Calculate config hash to detect changes
+        config_hash = hash((
+            self.config.get(CONF_PRICE_THRESHOLD),
+            self.config.get(CONF_USE_AVERAGE_THRESHOLD),
+            self.config.get(CONF_PRICE_ADJUSTMENT_MULTIPLIER),
+            self.config.get(CONF_PRICE_ADJUSTMENT_OFFSET),
+        ))
+
+        # Update if:
+        # 1. First interval
+        # 2. New interval started
+        # 3. Configuration changed (force update even mid-interval)
+        config_changed = self._last_config_hash is not None and config_hash != self._last_config_hash
+
+        if (self._current_price_interval_start is None or
+            current_interval != self._current_price_interval_start or
+            config_changed):
+
             self._current_price_interval_start = current_interval
             self._battery_threshold_snapshot = price_threshold
+            self._last_config_hash = config_hash
+
+            reason = "config changed" if config_changed else "new interval"
             _LOGGER.debug(
-                "New price interval starting at %s: snapshotting battery threshold at %.4f€/kWh",
+                "Battery threshold snapshot updated (%s) at %s: %.4f€/kWh",
+                reason,
                 current_interval.strftime("%H:%M"),
                 price_threshold
             )
@@ -614,6 +808,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict[str, Any]:
         """Update data via library."""
         try:
+            # Clean expired cache entries periodically
+            self._clean_expired_nordpool_cache()
+
             data = await self._fetch_all_data()
 
             # Determine the current price threshold (with dynamic/average logic)
@@ -688,6 +885,22 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Battery entity %s: state=%s, parsed_value=%s",
                          entity_id, state.state if state else "missing", soc)
             if soc is not None:
+                # Validate and normalize battery SOC
+                if 0 <= soc <= BATTERY_SOC_DECIMAL_THRESHOLD:
+                    # SOC appears to be in decimal format (0-1), convert to percentage
+                    _LOGGER.info(
+                        "Battery SOC for %s appears to be decimal (%.3f), converting to percentage (%.1f%%)",
+                        entity_id, soc, soc * 100
+                    )
+                    soc = soc * 100
+                elif not 0 <= soc <= 100:
+                    # SOC is outside valid range
+                    _LOGGER.error(
+                        "Invalid battery SOC value for %s: %.2f (expected 0-100%%), excluding from calculations",
+                        entity_id, soc
+                    )
+                    continue
+
                 battery_soc_values.append({"entity_id": entity_id, "soc": soc})
             else:
                 _LOGGER.warning("Battery entity %s is unavailable - excluding from calculations", entity_id)
@@ -713,7 +926,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
             capacity = battery_capacities_cfg.get(entity_id)
             if capacity is None or capacity <= 0:
-                capacity = 1.0  # fallback weight when capacity not provided
+                _LOGGER.warning(
+                    "Battery capacity not configured or invalid for %s - using fallback weight %.1f kWh. "
+                    "Configure capacity in integration options for accurate weighted SOC calculations.",
+                    entity_id, BATTERY_CAPACITY_FALLBACK_WEIGHT
+                )
+                capacity = BATTERY_CAPACITY_FALLBACK_WEIGHT  # fallback weight when capacity not provided
 
             battery_entry = {
                 "entity_id": entity_id,
@@ -780,8 +998,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 battery_power_entity = phase_config.get(CONF_PHASE_BATTERY_POWER_ENTITY)
                 battery_power_val = await self._get_state_value(battery_power_entity)
 
+                # Calculate phase surplus - consistent with single-phase mode
+                # Allow solar_val to be 0 (not just > 0)
                 phase_surplus = None
-                if solar_val is not None and solar_val > 0 and consumption_val is not None:
+                if solar_val is not None and consumption_val is not None:
                     phase_surplus = max(0, solar_val - consumption_val)
 
                 phase_details[phase_id] = {
@@ -934,7 +1154,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         try:
             return float(state.state)
         except (ValueError, TypeError):
-            _LOGGER.warning("Could not convert state to float: %s = %s", entity_id, state.state)
+            # Use debug level for expected conversion failures to reduce log noise
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("Could not convert state to float: %s = %s", entity_id, state.state)
             return None
 
     async def _fetch_nordpool_prices(self, config_entry_id: str, day: str) -> dict[str, Any] | None:
@@ -959,36 +1181,70 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         now = dt_util.utcnow()
         cache_key = f"{day}_{config_entry_id}"
 
+        # Check cache with safe tuple unpacking
         if cache_key in self._nordpool_cache:
-            cache_age = now - self._nordpool_cache_time.get(cache_key, now)
-            # Cache for 5 minutes (prices change hourly, tomorrow appears at 13:00)
-            if cache_age < timedelta(minutes=5):
+            cached_data, cached_time = self._nordpool_cache[cache_key]
+            cache_age = now - cached_time
+            # Cache for configured TTL (prices change hourly, tomorrow appears at 13:00)
+            if cache_age < timedelta(minutes=NORDPOOL_CACHE_TTL_MINUTES):
                 _LOGGER.debug("Using cached Nord Pool prices for %s (age: %.1f minutes)",
                             day, cache_age.total_seconds() / 60)
-                return self._nordpool_cache[cache_key]
+                return cached_data
 
         try:
             # Calculate the target date
-            now = dt_util.now()
+            now_local = dt_util.now()
             if day == "today":
-                target_date = now.date()
+                target_date = now_local.date()
             elif day == "tomorrow":
-                target_date = (now + timedelta(days=1)).date()
+                target_date = (now_local + timedelta(days=1)).date()
             else:
                 _LOGGER.error("Invalid day parameter: %s (expected 'today' or 'tomorrow')", day)
                 return None
 
-            # Call the Nord Pool service
-            response = await self.hass.services.async_call(
-                "nordpool",
-                "get_prices_for_date",
-                {
-                    "config_entry": config_entry_id,
-                    "date": target_date.isoformat()
-                },
-                blocking=True,
-                return_response=True
-            )
+            # Call the Nord Pool service with exponential backoff retry
+            max_retries = 3
+            response = None
+            for attempt in range(max_retries):
+                try:
+                    response = await self.hass.services.async_call(
+                        "nordpool",
+                        "get_prices_for_date",
+                        {
+                            "config_entry": config_entry_id,
+                            "date": target_date.isoformat()
+                        },
+                        blocking=True,
+                        return_response=True
+                    )
+                    # Success - break out of retry loop
+                    break
+                except ValueError as err:
+                    # Invalid parameters - don't retry
+                    _LOGGER.warning("Nord Pool service call failed (invalid parameters) for %s: %s", day, err)
+                    return None
+                except TimeoutError as err:
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** attempt  # 1s, 2s, 4s
+                        _LOGGER.warning(
+                            "Nord Pool service timed out for %s, retrying in %ds (attempt %d/%d): %s",
+                            day, wait_time, attempt + 1, max_retries, err
+                        )
+                        await asyncio.sleep(wait_time)
+                    else:
+                        _LOGGER.error("Nord Pool service timed out for %s after %d attempts: %s", day, max_retries, err)
+                        return None
+                except Exception as err:
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** attempt  # 1s, 2s, 4s
+                        _LOGGER.warning(
+                            "Nord Pool service call failed for %s, retrying in %ds (attempt %d/%d): %s",
+                            day, wait_time, attempt + 1, max_retries, err
+                        )
+                        await asyncio.sleep(wait_time)
+                    else:
+                        _LOGGER.error("Nord Pool service call failed for %s after %d attempts: %s", day, max_retries, err)
+                        return None
 
             # The service returns a dict with area-based price data
             if response and isinstance(response, dict):
@@ -997,9 +1253,17 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("Fetched Nord Pool prices for %s (%s): %d entries across %d area(s)",
                             day, target_date.isoformat(), total_entries, len(response))
 
-                # Cache the response
-                self._nordpool_cache[cache_key] = response
-                self._nordpool_cache_time[cache_key] = dt_util.utcnow()
+                # Evict oldest cache entry if cache is full
+                if len(self._nordpool_cache) >= self._nordpool_cache_max_size:
+                    # Defensive check: ensure cache is not empty before finding min
+                    if self._nordpool_cache:
+                        oldest_key = min(self._nordpool_cache.keys(),
+                                       key=lambda k: self._nordpool_cache[k][1])
+                        del self._nordpool_cache[oldest_key]
+                        _LOGGER.debug("Evicted oldest Nord Pool cache entry: %s", oldest_key)
+
+                # Cache the response with timestamp
+                self._nordpool_cache[cache_key] = (response, dt_util.utcnow())
 
                 return response
             else:
@@ -1007,7 +1271,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 return None
 
         except Exception as err:
-            _LOGGER.warning("Failed to fetch Nord Pool prices for %s: %s", day, err)
+            _LOGGER.error("Unexpected error fetching Nord Pool prices for %s: %s", day, err, exc_info=True)
             return None
 
     def _calculate_average_threshold(
@@ -1107,8 +1371,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     final_price = adjusted_price + transport_cost
                     all_intervals.append((start_time_utc, final_price))
 
+                except (ValueError, TypeError, KeyError) as err:
+                    _LOGGER.debug("Expected error processing interval for average threshold: %s", err)
+                    continue
                 except Exception as err:
-                    _LOGGER.debug("Error processing interval for average threshold: %s", err)
+                    _LOGGER.warning(
+                        "Unexpected error processing interval for average threshold: %s",
+                        err, exc_info=True
+                    )
                     continue
 
         def infer_interval_resolution() -> timedelta:
@@ -1256,7 +1526,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             interval_duration = timedelta(minutes=15)
 
         # Calculate how many intervals we need for MIN_HOURS
-        intervals_needed = max(1, int(MIN_HOURS * 3600 / interval_duration.total_seconds()))
+        # Defensive check: ensure interval_duration is positive to prevent division by zero
+        interval_seconds = interval_duration.total_seconds()
+        if interval_seconds <= 0:
+            _LOGGER.warning("Invalid interval duration detected, using 15-minute default")
+            interval_seconds = AVERAGE_THRESHOLD_DEFAULT_INTERVAL_SECONDS
+        intervals_needed = max(1, int(MIN_HOURS * 3600 / interval_seconds))
 
         # Pass 2: If we don't have enough future data, backfill with past
         if len(future_intervals) < intervals_needed:
@@ -1301,12 +1576,66 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         if combined_intervals:
             prices = [p for _, p in combined_intervals]
             average = sum(prices) / len(prices)
-            _LOGGER.debug(
-                "Calculated average threshold: %.4f €/kWh from %d intervals",
-                average, len(combined_intervals)
-            )
-            return round(average, 4)
 
+            # Check if we have sufficient data (at least 24h worth)
+            has_sufficient_data = len(combined_intervals) >= intervals_needed
+
+            # Apply hysteresis: require N consecutive valid calculations before FIRST enabling
+            # Once enabled, continue using as long as we have ANY data (graceful degradation)
+            if has_sufficient_data:
+                # We have sufficient data
+                if not self._average_threshold_enabled:
+                    # Not yet enabled - check hysteresis
+                    self._average_threshold_valid_count += 1
+
+                    if self._average_threshold_valid_count >= AVERAGE_THRESHOLD_HYSTERESIS_COUNT:
+                        self._average_threshold_enabled = True
+                        _LOGGER.info(
+                            "Average threshold enabled after %d consecutive valid calculations: %.4f €/kWh",
+                            self._average_threshold_valid_count, average
+                        )
+                    else:
+                        _LOGGER.debug(
+                            "Average threshold calculated (%.4f €/kWh) but not yet enabled "
+                            "(%d/%d consecutive valid calculations)",
+                            average, self._average_threshold_valid_count, AVERAGE_THRESHOLD_HYSTERESIS_COUNT
+                        )
+                else:
+                    # Already enabled - keep using it
+                    pass
+
+                _LOGGER.debug(
+                    "Calculated average threshold: %.4f €/kWh from %d intervals (enabled: %s, count: %d)",
+                    average, len(combined_intervals), self._average_threshold_enabled,
+                    self._average_threshold_valid_count
+                )
+                return round(average, 4)
+            else:
+                # Insufficient data for 24h minimum
+                # If already enabled, allow graceful degradation (keep using with warning)
+                # If not yet enabled, still return value but don't enable
+                if self._average_threshold_enabled:
+                    _LOGGER.warning(
+                        "Average threshold: insufficient data for %dh minimum "
+                        "(have %d intervals, need %d) - continuing with available data",
+                        MIN_HOURS, len(combined_intervals), intervals_needed
+                    )
+                    return round(average, 4)
+                else:
+                    # Not enabled yet and insufficient data - reset counter but still return value
+                    _LOGGER.debug(
+                        "Average threshold: insufficient data for %dh minimum "
+                        "(have %d intervals, need %d) - returning value without enabling",
+                        MIN_HOURS, len(combined_intervals), intervals_needed
+                    )
+                    self._average_threshold_valid_count = 0
+                    return round(average, 4)
+
+        # No intervals available - reset
+        if self._average_threshold_valid_count > 0 or self._average_threshold_enabled:
+            _LOGGER.debug("Average threshold data unavailable - resetting hysteresis state")
+        self._average_threshold_valid_count = 0
+        self._average_threshold_enabled = False
         return None
 
     def _check_minimum_charging_window(
@@ -1426,7 +1755,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             next_start, next_end, next_price = timeline[next_idx]
 
             # Any gap in coverage breaks the consecutive window requirement
-            if next_start > previous_end + timedelta(seconds=5):
+            if next_start > previous_end + timedelta(seconds=PRICE_INTERVAL_GAP_TOLERANCE_SECONDS):
                 _LOGGER.debug(
                     "Charging window broken by gap between %s and %s",
                     previous_end.isoformat(),
@@ -1487,6 +1816,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         now = dt_util.utcnow()
 
         stale = False
+
+        # Check if cached timeline is too old
+        if (self._last_price_timeline_generated_at is not None and
+            now - self._last_price_timeline_generated_at > self._price_timeline_max_age):
+            _LOGGER.debug("Price timeline cache expired (age: %.1f hours), clearing",
+                        (now - self._last_price_timeline_generated_at).total_seconds() / 3600)
+            self._last_price_timeline = None
+            self._last_price_timeline_generated_at = None
 
         if not prices_today and not prices_tomorrow:
             if self._last_price_timeline:
@@ -1620,18 +1957,34 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             return self._transport_cost_lookup, self._transport_cost_status
 
         try:
+            try:
+                from homeassistant.components.recorder import get_instance as get_recorder_instance
+            except ImportError:
+                get_recorder_instance = None  # Older HA or test shims may not expose get_instance
+
             from homeassistant.components.recorder.history import get_significant_states
 
             end_time = dt_util.now()
             start_time = end_time - timedelta(days=7)
 
-            states = await self.hass.async_add_executor_job(
-                get_significant_states,
-                self.hass,
-                start_time,
-                end_time,
-                [transport_entity],
-            )
+            if get_recorder_instance is not None:
+                recorder = get_recorder_instance(self.hass)
+                states = await recorder.async_add_executor_job(
+                    get_significant_states,
+                    self.hass,
+                    start_time,
+                    end_time,
+                    [transport_entity],
+                )
+            else:
+                # Fallback for environments without recorder.get_instance (tests/shims)
+                states = await self.hass.async_add_executor_job(
+                    get_significant_states,
+                    self.hass,
+                    start_time,
+                    end_time,
+                    [transport_entity],
+                )
 
             if not states or transport_entity not in states:
                 fallback_lookup = self._build_fallback_transport_lookup(

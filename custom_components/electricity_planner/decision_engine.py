@@ -4,8 +4,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
@@ -27,7 +26,6 @@ from .const import (
     CONF_MAX_CAR_POWER,
     CONF_MAX_GRID_POWER,
     CONF_MIN_CAR_CHARGING_THRESHOLD,
-    CONF_SOLAR_PEAK_EMERGENCY_SOC,
     CONF_PREDICTIVE_CHARGING_MIN_SOC,
     CONF_BASE_GRID_SETPOINT,
     CONF_USE_DYNAMIC_THRESHOLD,
@@ -50,7 +48,6 @@ from .const import (
     DEFAULT_MAX_CAR_POWER,
     DEFAULT_MAX_GRID_POWER,
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
-    DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
@@ -63,10 +60,11 @@ from .const import (
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN,
+    PERMISSIVE_MULTIPLIER_MIN,
+    PERMISSIVE_MULTIPLIER_MAX,
 )
 
 from .defaults import (
-    DEFAULT_TIME_SCHEDULE,
     DEFAULT_POWER_ESTIMATES,
     DEFAULT_ALGORITHM_THRESHOLDS,
     DEFAULT_SYSTEM_LIMITS,
@@ -91,32 +89,11 @@ _PREVIOUS_CAR_CHARGING_KEY = "previous_car_charging"
 _HAS_MIN_CHARGING_WINDOW_KEY = "has_min_charging_window"
 
 
-class PriceCategory(Enum):
-    """Price category classification for car charging decisions."""
-    VERY_LOW = "very_low"
-    LOW = "low"
-    HIGH = "high"
-
-
 class CarChargingDecision(TypedDict, total=False):
     """Type definition for car charging decision results."""
     car_grid_charging: bool
     car_grid_charging_reason: str
     car_solar_only: bool
-
-
-class BatteryChargingDecision(TypedDict, total=False):
-    """Type definition for battery charging decision results."""
-    battery_grid_charging: bool
-    battery_grid_charging_reason: str
-    strategy_trace: List[str]
-
-
-class FeedinDecision(TypedDict, total=False):
-    """Type definition for solar feed-in decision results."""
-    feedin_solar: bool
-    feedin_solar_reason: str
-    feedin_effective_price: Optional[float]
 
 
 def _safe_optional_float(value: Any) -> Optional[float]:
@@ -222,7 +199,6 @@ class EngineSettings:
     max_soc_threshold: float
     emergency_soc_threshold: float
     predictive_min_soc: float
-    solar_peak_emergency_soc: float
     use_dynamic_threshold: bool
     dynamic_threshold_confidence: float
     use_average_threshold: bool
@@ -329,10 +305,6 @@ class EngineSettings:
             CONF_PREDICTIVE_CHARGING_MIN_SOC, DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
             "predictive_charging_min_soc"
         )
-        solar_peak_emergency_soc = extractor.get_float(
-            CONF_SOLAR_PEAK_EMERGENCY_SOC, DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
-            "solar_peak_emergency_soc"
-        )
 
         # Extract boolean flags
         use_dynamic_threshold = extractor.get_bool(
@@ -367,7 +339,6 @@ class EngineSettings:
             max_soc_threshold=max_soc_threshold,
             emergency_soc_threshold=emergency_soc_threshold,
             predictive_min_soc=predictive_min_soc,
-            solar_peak_emergency_soc=solar_peak_emergency_soc,
             use_dynamic_threshold=use_dynamic_threshold,
             dynamic_threshold_confidence=dynamic_threshold_confidence,
             use_average_threshold=use_average_threshold,
@@ -402,15 +373,6 @@ class CarDecisionContext:
     def has_allocated_solar(self) -> bool:
         """Whether any solar power is earmarked for the car."""
         return self.allocated_solar > 0
-
-    @property
-    def price_category(self) -> PriceCategory:
-        """Categorize the current price level for decision routing."""
-        if self.very_low_price:
-            return PriceCategory.VERY_LOW
-        elif self.is_low_price_flag or (self.previous_charging and self.effective_low_price):
-            return PriceCategory.LOW
-        return PriceCategory.HIGH
 
     def format_price_comparison(self, operator: str = "≤") -> str:
         """Format price vs threshold comparison for logging."""
@@ -480,19 +442,12 @@ class ChargingDecisionEngine:
         solar_analysis = self._analyze_solar_production(data)
         decision_data["solar_analysis"] = solar_analysis
 
-        time_context = TimeContext.get_current_context(
-            night_start=DEFAULT_TIME_SCHEDULE.night_start,
-            night_end=DEFAULT_TIME_SCHEDULE.night_end,
-            solar_peak_start=DEFAULT_TIME_SCHEDULE.solar_peak_start,
-            solar_peak_end=DEFAULT_TIME_SCHEDULE.solar_peak_end,
-            evening_start=DEFAULT_TIME_SCHEDULE.evening_start,
-            evening_end=DEFAULT_TIME_SCHEDULE.evening_end,
-        )
+        time_context = TimeContext.get_current_context()
         decision_data["time_context"] = time_context
-        
+
         # Allocate solar power
         power_allocation = self._allocate_solar_power(
-            power_analysis, battery_analysis, price_analysis, time_context
+            power_analysis, battery_analysis
         )
         decision_data["power_allocation"] = power_allocation
         
@@ -869,18 +824,26 @@ class ChargingDecisionEngine:
 
         very_low_threshold = self._settings.very_low_price_threshold_ratio
 
-        # Use cached price position calculation
-        price_position = self.price_calculator.calculate_price_position(
-            current_price, highest_price or current_price, lowest_price or current_price
-        )
-        
+        # Use cached price position calculation with explicit None handling
+        # Note: Use explicit None checks to handle zero and negative prices correctly
+        # If both highest and lowest are None, we don't have daily range data
+        if highest_price is None and lowest_price is None:
+            price_position = None
+            _LOGGER.debug("Daily price range unavailable - price_position set to None")
+        else:
+            effective_highest = current_price if highest_price is None else highest_price
+            effective_lowest = current_price if lowest_price is None else lowest_price
+            price_position = self.price_calculator.calculate_price_position(
+                current_price, effective_highest, effective_lowest
+            )
+
         # Check price trends
         next_price_higher = next_price is not None and next_price > current_price
         price_trend_improving = next_price is not None and next_price < current_price
         significant_price_drop = self.price_calculator.is_significant_price_drop(
             current_price, next_price, DEFAULT_ALGORITHM_THRESHOLDS.significant_price_drop
         )
-        
+
         return {
             "current_price": current_price,
             "highest_price": highest_price,
@@ -900,7 +863,7 @@ class ChargingDecisionEngine:
             "next_price_higher": next_price_higher,
             "price_trend_improving": price_trend_improving,
             "significant_price_drop": significant_price_drop,
-            "very_low_price": price_position <= very_low_threshold,
+            "very_low_price": price_position is not None and price_position <= very_low_threshold,
             "data_available": True,
         }
 
@@ -1012,8 +975,6 @@ class ChargingDecisionEngine:
         self,
         power_analysis: Dict[str, Any],
         battery_analysis: Dict[str, Any],
-        price_analysis: Dict[str, Any],
-        time_context: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Hierarchically allocate solar surplus."""
         solar_surplus = power_analysis.get("solar_surplus", 0)
@@ -1213,7 +1174,7 @@ class ChargingDecisionEngine:
             "min_soc": min_soc,
             "max_soc": max_soc,
             "batteries_count": len(soc_values),
-            "batteries_full": min_soc >= max_threshold,
+            "batteries_full": average_soc >= max_threshold,
             "min_soc_threshold": min_threshold,
             "max_soc_threshold": max_threshold,
             "remaining_capacity_percent": max_threshold - average_soc,
@@ -1248,8 +1209,13 @@ class ChargingDecisionEngine:
 
     def _calculate_weighted_average_soc(self, batteries: List[Dict[str, Any]]) -> float:
         """Calculate capacity-weighted average SOC."""
+        # Defensive check: ensure batteries list is not empty
+        if not batteries:
+            _LOGGER.warning("Empty batteries list passed to _calculate_weighted_average_soc")
+            return 0.0
+
         capacities = self._settings.battery_capacities
-        
+
         if not capacities:
             # Simple average
             return sum(b["soc"] for b in batteries) / len(batteries)
@@ -1307,9 +1273,10 @@ class ChargingDecisionEngine:
 
         if battery_analysis.get("batteries_full"):
             max_threshold = battery_analysis.get("max_soc_threshold", 90)
+            average_soc = battery_analysis.get("average_soc", 0)
             return {
                 "battery_grid_charging": False,
-                "battery_grid_charging_reason": f"Batteries above {max_threshold}% SOC",
+                "battery_grid_charging_reason": f"Battery average SOC {average_soc:.0f}% ≥ {max_threshold}% threshold",
                 "strategy_trace": [],
             }
 
@@ -1521,7 +1488,22 @@ class ChargingDecisionEngine:
         permissive_mode_active: bool,
         permissive_multiplier: float,
     ) -> float:
-        """Apply hysteresis threshold floor while the car is charging, then permissive multiplier if enabled."""
+        """Apply hysteresis threshold floor while the car is charging, then permissive multiplier if enabled.
+
+        Implements threshold floor pattern to prevent mid-session stops when
+        threshold decreases (e.g., rolling average drops). Allows increases
+        to take effect immediately.
+
+        Args:
+            current_threshold: Current price threshold from configuration/calculation
+            locked_threshold: Previously locked threshold (if charging active)
+            previous_car_charging: Whether car was charging in previous cycle
+            permissive_mode_active: Whether permissive mode is enabled
+            permissive_multiplier: Multiplier for permissive mode (e.g., 1.2 = 20% higher)
+
+        Returns:
+            Effective threshold in €/kWh to use for this decision cycle
+        """
         # First apply locked threshold floor if charging
         if previous_car_charging and locked_threshold is not None:
             threshold = max(locked_threshold, current_threshold)
@@ -1534,14 +1516,26 @@ class ChargingDecisionEngine:
         else:
             threshold = current_threshold
 
-        # Then apply permissive multiplier if active
+        # Then apply permissive multiplier if active (with validation)
         if permissive_mode_active and permissive_multiplier > 1.0:
-            permissive_threshold = threshold * permissive_multiplier
+            # Clamp multiplier to safe range to prevent misconfiguration
+            safe_multiplier = max(
+                PERMISSIVE_MULTIPLIER_MIN,
+                min(permissive_multiplier, PERMISSIVE_MULTIPLIER_MAX)
+            )
+            if safe_multiplier != permissive_multiplier:
+                _LOGGER.warning(
+                    "Permissive multiplier %.2f outside safe range [%.1f, %.1f], clamping to %.2f",
+                    permissive_multiplier, PERMISSIVE_MULTIPLIER_MIN,
+                    PERMISSIVE_MULTIPLIER_MAX, safe_multiplier
+                )
+
+            permissive_threshold = threshold * safe_multiplier
             _LOGGER.debug(
                 "Permissive mode active: threshold %.4f€/kWh → %.4f€/kWh (+%.0f%%)",
                 threshold,
                 permissive_threshold,
-                (permissive_multiplier - 1) * 100,
+                (safe_multiplier - 1) * 100,
             )
             return permissive_threshold
 
@@ -1552,7 +1546,12 @@ class ChargingDecisionEngine:
         context: CarDecisionContext,
         data: Dict[str, Any],
     ) -> None:
-        """Lock the price threshold when starting car charging (OFF→ON transition)."""
+        """Lock the price threshold when starting car charging (OFF→ON transition).
+
+        Args:
+            context: Car decision context containing threshold information
+            data: Mutable data dictionary to store locked threshold
+        """
         data[_CAR_CHARGING_LOCKED_THRESHOLD_KEY] = context.base_threshold
         _LOGGER.debug(
             "Car charging starting: locking threshold at %.4f€/kWh",
@@ -1780,7 +1779,7 @@ class ChargingDecisionEngine:
         data: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Calculate optimal charger power limit."""
-        car_charging_power = data.get("car_charging_power", 0)
+        car_charging_power = _safe_optional_float(data.get("car_charging_power")) or 0.0
         min_threshold = self._settings.min_car_charging_threshold
         car_limit_cap = min(self._settings.max_car_power, DEFAULT_SYSTEM_LIMITS.max_car_charger_power)
         car_grid_charging = data.get("car_grid_charging", False)
@@ -1883,7 +1882,7 @@ class ChargingDecisionEngine:
         charger_limit: int,
     ) -> Dict[str, Any]:
         """Calculate grid setpoint based on energy management scenario."""
-        car_charging_power = data.get("car_charging_power", 0)
+        car_charging_power = _safe_optional_float(data.get("car_charging_power")) or 0.0
         battery_grid_charging = data.get("battery_grid_charging", False)
         car_grid_charging = data.get("car_grid_charging", False)
         average_soc = battery_analysis.get("average_soc")

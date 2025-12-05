@@ -36,21 +36,21 @@ views:
                   {% endif %}
                   {% set price_analysis = state_attr(decision_sensor, 'price_analysis') %}
                   {% set average_threshold = price_analysis.average_threshold if price_analysis else None %}
-                  {% set fixed_threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float %}
+                  {% set fixed_threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float(0) %}
                   {% set price_threshold = state_attr(price_sensor, 'price_threshold') %}
 
                   {# Prefer the actively used threshold from price analysis, fallback to average (if available) or configured fixed #}
                   {% if price_threshold not in [None, 'unknown', 'unavailable'] %}
-                    {% set max_threshold = price_threshold | float %}
+                    {% set max_threshold = price_threshold | float(0) %}
                   {% elif average_threshold not in [None, 'unknown', 'unavailable'] %}
-                    {% set max_threshold = average_threshold | float %}
+                    {% set max_threshold = average_threshold | float(0) %}
                   {% else %}
                     {% set max_threshold = fixed_threshold %}
                   {% endif %}
 
                   {# Determine the dynamic threshold if present and clamp it to the maximum threshold so segments stay ordered #}
                   {% if dynamic_threshold not in [None, 'unknown', 'unavailable'] %}
-                    {% set threshold = (dynamic_threshold | float) %}
+                    {% set threshold = (dynamic_threshold | float(0)) %}
                   {% else %}
                     {% set threshold = max_threshold %}
                   {% endif %}
@@ -74,7 +74,7 @@ views:
                 needle: true
                 scale: "50px"
                 segments: |-
-                  {% set threshold = states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float %}
+                  {% set threshold = states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float(0) %}
                   {{
                     [
                       { "from": -0.9, "color": "red" },
@@ -325,38 +325,38 @@ views:
               - type: markdown
                 title: Price adjustments
                 content: |
-                  **Highest price today:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'highest_price') | float | round(4) }} €/kWh
+                  **Highest price today:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'highest_price') | float(0) | round(4) }} €/kWh
 
-                  **Lowest price today:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'lowest_price') | float | round(4) }} €/kWh
+                  **Lowest price today:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'lowest_price') | float(0) | round(4) }} €/kWh
 
-                  **Raw Nord Pool price:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'raw_current_price') | float | round(4) }} €/kWh
+                  **Raw Nord Pool price:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'raw_current_price') | float(0) | round(4) }} €/kWh
 
-                  **Transport cost:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'transport_cost') | float | round(4) }} €/kWh
+                  **Transport cost:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'transport_cost') | float(0) | round(4) }} €/kWh
 
-                  **Consumption multiplier:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'price_adjustment_multiplier') | float | round(4) }}
+                  **Consumption multiplier:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'price_adjustment_multiplier') | float(0) | round(4) }}
 
-                  **Consumption offset:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'price_adjustment_offset') | float | round(4) }} €/kWh
+                  **Consumption offset:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'price_adjustment_offset') | float(0) | round(4) }} €/kWh
 
-                  **Feed-in multiplier:** {{ state_attr('sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price', 'feedin_multiplier') | float | round(4) }}
+                  **Feed-in multiplier:** {{ state_attr('sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price', 'feedin_multiplier') | float(0) | round(4) }}
 
-                  **Feed-in offset:** {{ state_attr('sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price', 'feedin_offset') | float | round(4) }} €/kWh
+                  **Feed-in offset:** {{ state_attr('sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price', 'feedin_offset') | float(0) | round(4) }} €/kWh
 
-                  **Feed-in threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float | round(4) }} €/kWh
+                  **Feed-in threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float(0) | round(4) }} €/kWh
 
               - type: markdown
                 title: Thresholds
                 content: |
-                  **Max price threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float | round(4) }} €/kWh
+                  **Max price threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float(0) | round(4) }} €/kWh
 
-                  **Dynamic threshold:** {% set dyn_threshold = state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') %}{{ (dyn_threshold | float | round(4) ~ ' €/kWh') if dyn_threshold != None else 'Not active' }}
+                  **Dynamic threshold:** {% set dyn_threshold = state_attr('sensor.electricity_planner_current_electricity_price', 'dynamic_threshold') %}{{ (dyn_threshold | float(0) | round(4) ~ ' €/kWh') if dyn_threshold != None else 'Not active' }}
 
                   {% set decision_sensor = 'sensor.electricity_planner_decision_diagnostics' %}
                   {% if states(decision_sensor) in ['unknown', 'unavailable', None] %}
                     {% set decision_sensor = 'sensor.electricity_planner_decision_diagnostics_diagnostic' %}
                   {% endif %}
-                  **Average threshold:** {% set price_analysis = state_attr(decision_sensor, 'price_analysis') %}{{ (price_analysis['average_threshold'] | float | round(4) ~ ' €/kWh') if price_analysis and price_analysis.get('average_threshold') != None else 'Not available' }}
+                  **Average threshold:** {% set price_analysis = state_attr(decision_sensor, 'price_analysis') %}{{ (price_analysis['average_threshold'] | float(0) | round(4) ~ ' €/kWh') if price_analysis and price_analysis.get('average_threshold') != None else 'Not available' }}
 
-                  **Feed-in threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float | round(4) }} €/kWh
+                  **Feed-in threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float(0) | round(4) }} €/kWh
 
                   _Note: To toggle average threshold mode, go to Settings → Devices & Services → Electricity Planner → Configure_
 
@@ -505,13 +505,13 @@ views:
               **Cheapest upcoming interval:**
 
               - **Time:** {{ cheapest_start | as_datetime | default(cheapest_start) | string if cheapest_start else 'unknown' }} - {{ cheapest_end | as_datetime | default(cheapest_end) | string if cheapest_end else 'unknown' }}
-              - **Price:** {{ cheapest_price | float | round(4) }} €/kWh
+              - **Price:** {{ cheapest_price | float(0) | round(4) }} €/kWh
 
               {% if best_window_start %}
               **Best charging window ({{ best_window_hours }}h):**
 
               - **Time:** {{ best_window_start | as_datetime | default(best_window_start) | string }} - {{ best_window_end | as_datetime | default(best_window_end) | string }}
-              - **Average price:** {{ best_window_price | float | round(4) }} €/kWh
+              - **Average price:** {{ best_window_price | float(0) | round(4) }} €/kWh
               {% else %}
               **Best charging window:** Not enough consecutive low-price hours available
               {% endif %}

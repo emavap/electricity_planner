@@ -41,7 +41,10 @@ class EmergencyChargingStrategy(ChargingStrategy):
         settings = context.get("settings")
         price = context.get("price_analysis", {})
 
-        average_soc = battery.get("average_soc", 100)
+        average_soc = battery.get("average_soc")
+        if average_soc is None:
+            return False, ""  # Cannot evaluate emergency without battery data
+
         emergency_threshold = (
             getattr(settings, "emergency_soc_threshold", None)
             if settings is not None
@@ -50,7 +53,7 @@ class EmergencyChargingStrategy(ChargingStrategy):
         if emergency_threshold is None:
             emergency_threshold = config.get("emergency_soc_threshold", DEFAULT_EMERGENCY_SOC)
         current_price = price.get("current_price", 0)
-        
+
         if average_soc < emergency_threshold:
             return True, (f"Emergency charge - SOC {average_soc:.0f}% < {emergency_threshold}% threshold, "
                          f"charging regardless of price ({current_price:.3f}€/kWh)")
@@ -267,7 +270,9 @@ class DynamicPriceStrategy(ChargingStrategy):
         config_confidence = min(max(config_confidence, 0.3), 0.9)
 
         # Prepare SOC/solar adjustments before running the analyzer so reasons align
-        average_soc = battery.get("average_soc", 50)
+        average_soc = battery.get("average_soc")
+        soc_available = average_soc is not None
+
         power = context.get("power_analysis", {})
         has_significant_solar = power.get("significant_solar_surplus", False)
         solar_surplus = power.get("solar_surplus", 0)
@@ -275,10 +280,11 @@ class DynamicPriceStrategy(ChargingStrategy):
         confidence_threshold = config_confidence
 
         # Adjust based on SOC (make it easier to charge when battery is low)
-        if average_soc < 40:
-            confidence_threshold = max(0.3, confidence_threshold - 0.1)
-        elif average_soc >= 70:
-            confidence_threshold = min(0.9, confidence_threshold + 0.1)
+        if soc_available:
+            if average_soc < 40:
+                confidence_threshold = max(0.3, confidence_threshold - 0.1)
+            elif average_soc >= 70:
+                confidence_threshold = min(0.9, confidence_threshold + 0.1)
 
         # Adjust based on actual solar surplus
         # Significant surplus → need +10% more confidence (be picky, wait for solar)
@@ -322,14 +328,26 @@ class DynamicPriceStrategy(ChargingStrategy):
 
         # Simple decision: does price analysis meet confidence requirement?
         if analysis["confidence"] >= confidence_threshold:
-            reason = f"{analysis['reason']} (SOC: {average_soc:.0f}%, {solar_context})"
+            # Build user-friendly reason without exposing confidence internals
+            if not soc_available:
+                soc_context = "battery SOC unavailable"
+            elif average_soc < 40:
+                soc_context = f"low battery ({average_soc:.0f}%)"
+            elif average_soc >= 70:
+                soc_context = f"high battery ({average_soc:.0f}%)"
+            else:
+                soc_context = f"battery at {average_soc:.0f}%"
+
+            reason = f"{analysis['reason']} - {soc_context}, {solar_context}"
             return True, reason
 
-        return False, (
-            f"{analysis['reason']} "
-            f"(Need {confidence_threshold:.0%} confidence, have {analysis['confidence']:.0%}; "
-            f"{solar_context})"
-        )
+        # Not charging: provide clear reason without confusing confidence percentages
+        if has_significant_solar and (not soc_available or average_soc >= 40):
+            return False, f"{analysis['reason']} - waiting for solar (surplus: {solar_surplus}W)"
+        elif soc_available and average_soc >= 70:
+            return False, f"{analysis['reason']} - battery already at {average_soc:.0f}%"
+        else:
+            return False, f"{analysis['reason']} - price conditions not optimal yet"
     
     def get_priority(self) -> int:
         return 4  # After emergency, solar, and very low price
@@ -396,7 +414,18 @@ class StrategyManager:
             battery = context.get("battery_analysis", {})
             config = context.get("config", {}) or {}
             settings = context.get("settings")
-            average_soc = battery.get("average_soc", 100)
+            average_soc = battery.get("average_soc")
+
+            # If battery SOC is unavailable, we cannot evaluate emergency override
+            # Use conservative approach: block charging at high prices
+            if average_soc is None:
+                _LOGGER.debug(
+                    "Price threshold guard: cannot evaluate emergency override without battery SOC, "
+                    "blocking charge at high price %.3f€/kWh > %.3f€/kWh",
+                    current_price, threshold
+                )
+                return False, f"Price {current_price:.3f}€/kWh exceeds threshold {threshold:.3f}€/kWh (battery SOC unavailable)"
+
             emergency_threshold = (
                 getattr(settings, "emergency_soc_threshold", None)
                 if settings is not None

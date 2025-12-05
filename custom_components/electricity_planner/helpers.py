@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.util import dt as dt_util
+
+from .const import (
+    POWER_ALLOCATION_TOLERANCE,
+    POWER_ALLOCATION_PRECISION,
+    PRICE_POSITION_CACHE_SIZE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,7 +27,17 @@ class DataValidator:
         max_value: Optional[float] = None,
         name: str = "power"
     ) -> float:
-        """Validate and clamp power values to safe ranges."""
+        """Validate and clamp power values to safe ranges.
+
+        Args:
+            power: Power value in Watts
+            min_value: Minimum allowed value (default: 0)
+            max_value: Maximum allowed value (default: None = no limit)
+            name: Name for logging purposes
+
+        Returns:
+            Clamped power value within [min_value, max_value]
+        """
         if power < min_value:
             _LOGGER.warning("%s value %sW below minimum, clamping to %sW", 
                           name, power, min_value)
@@ -84,7 +99,16 @@ def apply_price_adjustment(
     multiplier: float = 1.0,
     offset: float = 0.0
 ) -> Optional[float]:
-    """Apply a simple affine transformation to a price value."""
+    """Apply a simple affine transformation to a price value.
+
+    Args:
+        price: Price in €/kWh (or None)
+        multiplier: Multiplicative factor (default: 1.0)
+        offset: Additive offset in €/kWh (default: 0.0)
+
+    Returns:
+        Adjusted price = (price * multiplier) + offset, or None if input is None
+    """
     if price is None:
         return None
     try:
@@ -96,18 +120,37 @@ def apply_price_adjustment(
 
 class PriceCalculator:
     """Price-related calculations."""
-    
+
     @staticmethod
-    @lru_cache(maxsize=128)
+    @lru_cache(maxsize=PRICE_POSITION_CACHE_SIZE)
     def calculate_price_position(
         current: float,
         highest: float,
         lowest: float
     ) -> float:
-        """Calculate price position relative to daily range (cached)."""
+        """Calculate price position relative to daily range (cached).
+
+        Args:
+            current: Current price value
+            highest: Highest price in range
+            lowest: Lowest price in range
+
+        Returns:
+            Float between 0.0 (at lowest) and 1.0 (at highest), or 0.5 if no valid range.
+        """
+        # Handle edge cases with zero or negative prices
+        if highest == lowest:
+            return 0.5  # Neutral if no valid range
+
         if highest > lowest:
             return (current - lowest) / (highest - lowest)
-        return 0.5  # Neutral if no valid range
+
+        # Inverted range (shouldn't happen, but handle gracefully)
+        _LOGGER.warning(
+            "Invalid price range: highest=%.4f < lowest=%.4f, returning neutral position",
+            highest, lowest
+        )
+        return 0.5
     
     @staticmethod
     def is_significant_price_drop(
@@ -123,109 +166,15 @@ class PriceCalculator:
 
 class TimeContext:
     """Time-based context utilities."""
-    
+
     @staticmethod
-    def get_current_context(
-        night_start: int = 22,
-        night_end: int = 6,
-        solar_peak_start: int = 10,
-        solar_peak_end: int = 16,
-        evening_start: int = 17,
-        evening_end: int = 21
-    ) -> Dict[str, Any]:
+    def get_current_context() -> Dict[str, Any]:
         """Get time-of-day context for charging decisions."""
         now = dt_util.now()
-        hour = now.hour
-
         return {
-            "current_hour": hour,
-            "is_night": hour >= night_start or hour <= night_end,
-            "is_early_morning": night_end < hour <= 9,
-            "is_solar_peak": solar_peak_start <= hour <= solar_peak_end,
-            "is_evening": evening_start <= hour <= evening_end,
-            "hours_until_sunrise": max(0, (night_end - hour) % 24),
-            "winter_season": now.month in [11, 12, 1, 2],
+            "current_hour": now.hour,
             "timestamp": now.isoformat(),
         }
-    
-    @staticmethod
-    def is_within_time_window(
-        start_hour: int,
-        end_hour: int,
-        current_hour: Optional[int] = None
-    ) -> bool:
-        """Check if current time is within specified window."""
-        if current_hour is None:
-            current_hour = dt_util.now().hour
-        
-        if start_hour <= end_hour:
-            return start_hour <= current_hour <= end_hour
-        else:  # Spans midnight
-            return current_hour >= start_hour or current_hour <= end_hour
-
-
-class CircuitBreaker:
-    """Circuit breaker to prevent cascading failures."""
-    
-    def __init__(
-        self,
-        failure_threshold: int = 5,
-        recovery_timeout: int = 60,
-        name: str = "default"
-    ):
-        """Initialize circuit breaker."""
-        self.name = name
-        self.failure_count = 0
-        self.failure_threshold = failure_threshold
-        self.recovery_timeout = recovery_timeout
-        self.last_failure_time: Optional[datetime] = None
-        self.state = "closed"  # closed, open, half-open
-    
-    def call(self, func, *args, **kwargs) -> Any:
-        """Execute function with circuit breaker protection."""
-        if self.state == "open":
-            if self._should_attempt_reset():
-                self.state = "half-open"
-                _LOGGER.info("Circuit breaker %s entering half-open state", self.name)
-            else:
-                raise Exception(f"Circuit breaker {self.name} is open")
-        
-        try:
-            result = func(*args, **kwargs)
-            self._on_success()
-            return result
-        except Exception as e:
-            self._on_failure()
-            raise e
-    
-    def _should_attempt_reset(self) -> bool:
-        """Check if enough time has passed to attempt reset."""
-        if self.last_failure_time is None:
-            return False
-        elapsed = dt_util.utcnow() - self.last_failure_time
-        return elapsed.total_seconds() >= self.recovery_timeout
-    
-    def _on_success(self):
-        """Handle successful call."""
-        if self.state == "half-open":
-            _LOGGER.info("Circuit breaker %s recovered, closing", self.name)
-        self.failure_count = 0
-        self.state = "closed"
-    
-    def _on_failure(self):
-        """Handle failed call."""
-        self.failure_count += 1
-        self.last_failure_time = dt_util.utcnow()
-        
-        if self.failure_count >= self.failure_threshold:
-            self.state = "open"
-            _LOGGER.warning(
-                "Circuit breaker %s opened after %d failures",
-                self.name, self.failure_count
-            )
-        elif self.state == "half-open":
-            self.state = "open"
-            _LOGGER.warning("Circuit breaker %s reopened on failure", self.name)
 
 
 class PowerAllocationValidator:
@@ -251,13 +200,13 @@ class PowerAllocationValidator:
         if solar_for_car > max_car_power:
             return False, f"Car allocation {solar_for_car}W exceeds limit {max_car_power}W"
         
-        # Check total doesn't exceed available
+        # Check total doesn't exceed available (with configurable tolerance)
         calculated_total = solar_for_batteries + solar_for_car + car_current_usage
-        if calculated_total > available_solar * 1.1:  # 10% tolerance
+        if calculated_total > available_solar * POWER_ALLOCATION_TOLERANCE:
             return False, f"Total allocation {calculated_total}W exceeds available {available_solar}W"
-        
-        # Check internal consistency
-        if abs(calculated_total - total_allocated) > 1:
+
+        # Check internal consistency (with configurable precision)
+        if abs(calculated_total - total_allocated) > POWER_ALLOCATION_PRECISION:
             return False, f"Allocation mismatch: sum={calculated_total}W, total={total_allocated}W"
         
         return True, None

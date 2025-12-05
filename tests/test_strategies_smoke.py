@@ -177,8 +177,9 @@ def test_dynamic_price_with_excellent_solar_is_selective():
     should_charge_poor, reason_poor = strategy.should_charge(poor_context)
 
     # With significant solar, it should be harder to charge (more selective)
-    assert "significant solar surplus" in reason_excellent.lower()
-    assert "no solar surplus" in reason_poor.lower()
+    # Updated to match new user-friendly messages
+    assert "waiting for solar" in reason_excellent.lower() or "surplus:" in reason_excellent.lower()
+    assert "accepting okay prices" in reason_poor.lower() or "price conditions not optimal" in reason_poor.lower()
     assert should_charge_poor in (True, False)  # Sanity check returned bool
 
 

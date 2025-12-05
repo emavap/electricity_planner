@@ -21,7 +21,6 @@ from .const import (
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
-    CONF_TRANSPORT_COST_ENTITY,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
     CONF_EMERGENCY_SOC_THRESHOLD,
@@ -382,12 +381,25 @@ class ChargerLimitSensor(ElectricityPlannerSensorBase):
         if not self.coordinator.data:
             return {}
 
-        return {
+        attributes = {
             "charger_limit_reason": self.coordinator.data.get("charger_limit_reason", ""),
             "current_car_power": self.coordinator.data.get("power_analysis", {}).get("car_charging_power", 0),
             "solar_surplus": self.coordinator.data.get("power_analysis", {}).get("solar_surplus", 0),
             "car_currently_charging": self.coordinator.data.get("power_analysis", {}).get("car_currently_charging", False),
         }
+
+        # Add override status
+        manual_overrides = self.coordinator.data.get("manual_overrides", {})
+        if "charger_limit" in manual_overrides:
+            override_info = manual_overrides["charger_limit"]
+            attributes["is_overridden"] = True
+            attributes["override_value"] = override_info.get("value")
+            attributes["override_reason"] = override_info.get("reason")
+            attributes["override_expires_at"] = override_info.get("expires_at")
+        else:
+            attributes["is_overridden"] = False
+
+        return attributes
 
 
 class GridSetpointSensor(ElectricityPlannerSensorBase):
@@ -442,6 +454,17 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
                 phase: result.get("grid_components")
                 for phase, result in phase_results.items()
             }
+
+        # Add override status
+        manual_overrides = self.coordinator.data.get("manual_overrides", {})
+        if "grid_setpoint" in manual_overrides:
+            override_info = manual_overrides["grid_setpoint"]
+            attributes["is_overridden"] = True
+            attributes["override_value"] = override_info.get("value")
+            attributes["override_reason"] = override_info.get("reason")
+            attributes["override_expires_at"] = override_info.get("expires_at")
+        else:
+            attributes["is_overridden"] = False
 
         return attributes
 
@@ -577,11 +600,6 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
             # Time context (for validation)
             "time_context": {
                 "current_hour": time_context.get("current_hour"),
-                "is_night": time_context.get("is_night", False),
-                "is_early_morning": time_context.get("is_early_morning", False),
-                "is_solar_peak": time_context.get("is_solar_peak", False),
-                "is_evening": time_context.get("is_evening", False),
-                "winter_season": time_context.get("winter_season", False),
             },
 
             # Configuration values (for validation)
@@ -592,7 +610,6 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "max_grid_power": config.get("max_grid_power", 15000),
                 "min_car_charging_threshold": config.get("min_car_charging_threshold", 100),
                 "min_car_charging_duration": config.get("min_car_charging_duration", 2),
-                "solar_peak_emergency_soc": config.get("solar_peak_emergency_soc", 25),
                 "predictive_charging_min_soc": config.get("predictive_charging_min_soc", 30),
                 "significant_solar_threshold": config.get("significant_solar_threshold", 1000),
                 "very_low_price_threshold": config.get("very_low_price_threshold", 30),
@@ -605,7 +622,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "price_data_valid": price_analysis.get("data_available", False),
                 "battery_data_valid": battery_analysis.get("batteries_available", True),
                 "power_allocation_valid": power_allocation.get("total_allocated", 0) <= power_analysis.get("solar_surplus", 0),
-                "emergency_override_active": self._check_emergency_override(battery_analysis, time_context, config),
+                "emergency_override_active": self._check_emergency_override(battery_analysis, config),
                 "predictive_logic_active": self._check_predictive_logic(price_analysis, battery_analysis, config),
             },
 
@@ -613,26 +630,20 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
             "last_evaluation": self.coordinator.data.get("next_evaluation", "unknown"),
         }
 
-    def _check_emergency_override(self, battery_analysis: dict, time_context: dict, config: dict) -> bool:
+    def _check_emergency_override(self, battery_analysis: dict, config: dict) -> bool:
         """Check if any emergency overrides are currently active."""
-        average_soc = battery_analysis.get("average_soc", 100)
+        average_soc = battery_analysis.get("average_soc")
         if average_soc is None:
             return False
 
         emergency_soc = config.get("emergency_soc_threshold", 15)
-        solar_peak_emergency_soc = config.get("solar_peak_emergency_soc", 25)
-        is_solar_peak = time_context.get("is_solar_peak", False)
-
-        return (
-            average_soc < emergency_soc or
-            (is_solar_peak and average_soc < solar_peak_emergency_soc)
-        )
+        return average_soc < emergency_soc
 
     def _check_predictive_logic(self, price_analysis: dict, battery_analysis: dict, config: dict) -> bool:
         """Check if predictive charging logic is active."""
         significant_price_drop = price_analysis.get("significant_price_drop", False)
         is_low_price = price_analysis.get("is_low_price", False)
-        average_soc = battery_analysis.get("average_soc", 100)
+        average_soc = battery_analysis.get("average_soc")
         predictive_min_soc = config.get("predictive_charging_min_soc", 30)
 
         if average_soc is None:
@@ -1052,16 +1063,18 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
 
         # Trim historical intervals to keep recorder-friendly payload size while
         # preserving the full forward-looking forecast used by dashboards/thresholds.
+        # Include 6 hours of historical prices for dashboard chart context.
         now = dt_util.now()
-        future_prices: list[dict[str, Any]] = []
+        history_cutoff = now - timedelta(hours=6)
+        recent_prices: list[dict[str, Any]] = []
         for price_entry in combined_prices:
             start_raw = price_entry.get("start")
             if not start_raw:
                 continue
             start_dt = dt_util.parse_datetime(start_raw)
-            if start_dt and start_dt >= now:
-                future_prices.append(price_entry)
-        limited_prices = future_prices if future_prices else combined_prices
+            if start_dt and start_dt >= history_cutoff:
+                recent_prices.append(price_entry)
+        limited_prices = recent_prices if recent_prices else combined_prices
 
         return {
             "data": limited_prices,  # Limited price data for ApexCharts (already in €/kWh)

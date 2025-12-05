@@ -76,7 +76,7 @@ async def test_dashboard_creation_uses_registered_entities():
     ) as ensure_mock, patch.object(
         dashboard, "_async_wait_for_entity_map", new=AsyncMock(return_value=entity_map)
     ), patch.object(
-        dashboard, "_load_template_text", return_value=template
+        dashboard, "_async_load_template_text", new=AsyncMock(return_value=template)
     ):
         await dashboard.async_setup_or_update_dashboard(hass, entry)
 

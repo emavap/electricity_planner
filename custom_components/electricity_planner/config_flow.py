@@ -1,10 +1,10 @@
 """Config flow for Electricity Planner integration."""
 from __future__ import annotations
+import logging
 from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
@@ -47,7 +47,6 @@ from .const import (
     CONF_MAX_CAR_POWER,
     CONF_MAX_GRID_POWER,
     CONF_MIN_CAR_CHARGING_THRESHOLD,
-    CONF_SOLAR_PEAK_EMERGENCY_SOC,
     CONF_PREDICTIVE_CHARGING_MIN_SOC,
     CONF_BASE_GRID_SETPOINT,
     CONF_USE_DYNAMIC_THRESHOLD,
@@ -70,7 +69,6 @@ from .const import (
     DEFAULT_MAX_CAR_POWER,
     DEFAULT_MAX_GRID_POWER,
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
-    DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
@@ -83,6 +81,8 @@ from .const import (
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -651,12 +651,20 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the safety limits step - Power and SOC Safety Limits."""
+        errors = {}
         if user_input is not None:
             self.data.update(user_input)
-            return self.async_create_entry(
-                title="Electricity Planner",
-                data=self.data
-            )
+
+            # Validate configuration consistency
+            validation_errors = validate_config_consistency(self.data)
+            if validation_errors:
+                errors["base"] = "Configuration validation failed: " + "; ".join(validation_errors)
+                _LOGGER.warning("Configuration validation errors: %s", validation_errors)
+            else:
+                return self.async_create_entry(
+                    title="Electricity Planner",
+                    data=self.data
+                )
 
         schema = vol.Schema({
             vol.Optional(
@@ -692,14 +700,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             ),
             vol.Optional(
-                CONF_SOLAR_PEAK_EMERGENCY_SOC,
-                default=DEFAULT_SOLAR_PEAK_EMERGENCY_SOC
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=15, max=40, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
                 CONF_PREDICTIVE_CHARGING_MIN_SOC,
                 default=DEFAULT_PREDICTIVE_CHARGING_MIN_SOC
             ): selector.NumberSelector(
@@ -720,12 +720,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="safety_limits",
             data_schema=schema,
+            errors=errors,
             description_placeholders={
                 "max_battery_power": "Maximum power limit for battery charging/discharging",
                 "max_car_power": "Maximum power limit for car charging",
                 "max_grid_power": "Maximum power limit from grid (safety limit)",
                 "min_car_charging_threshold": "Minimum power to consider car 'charging'",
-                "solar_peak_emergency_soc": "SOC below which to charge even during solar peak",
                 "predictive_charging_min_soc": "Minimum SOC for predictive charging logic",
                 "base_grid_setpoint": "Base minimum grid setpoint when no monthly peak data available",
             },
@@ -734,15 +734,57 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     def async_get_options_flow(config_entry):
         """Return the options flow."""
-        return OptionsFlowHandler(config_entry)
+        return OptionsFlowHandler()
 
+
+def validate_config_consistency(config: dict[str, Any]) -> list[str]:
+    """Validate configuration for logical consistency.
+
+    Args:
+        config: Configuration dictionary to validate
+
+    Returns:
+        List of error messages (empty if valid)
+    """
+    errors = []
+
+    # SOC threshold validation
+    min_soc = config.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)
+    max_soc = config.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
+    emergency_soc = config.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC)
+
+    if min_soc >= max_soc:
+        errors.append(f"min_soc ({min_soc}%) must be less than max_soc ({max_soc}%)")
+
+    if emergency_soc > min_soc:
+        errors.append(f"emergency_soc ({emergency_soc}%) should be below min_soc ({min_soc}%)")
+
+    # Power limit validation
+    max_battery_power = config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)
+    max_car_power = config.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)
+    max_grid_power = config.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER)
+
+    if max_battery_power > max_grid_power:
+        errors.append(f"max_battery_power ({max_battery_power}W) cannot exceed max_grid_power ({max_grid_power}W)")
+
+    if max_car_power > max_grid_power:
+        errors.append(f"max_car_power ({max_car_power}W) cannot exceed max_grid_power ({max_grid_power}W)")
+
+    # Price threshold validation
+    price_threshold = config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
+    if price_threshold < 0:
+        errors.append(f"price_threshold ({price_threshold}€/kWh) cannot be negative")
+
+    # Very low price threshold validation
+    very_low_price = config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
+    if not 0 <= very_low_price <= 100:
+        errors.append(f"very_low_price_threshold ({very_low_price}%) must be between 0 and 100")
+
+    return errors
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for Electricity Planner."""
-
-    # Don't set config_entry explicitly - it's set by the parent class
-    # See: https://developers.home-assistant.io/blog/2024/07/03/options-flow-config-entry-deprecation
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -835,6 +877,16 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
                     phases_config[phase_id] = phase_entry
 
+            if phase_mode == PHASE_MODE_SINGLE:
+                # Preserve existing single-phase bindings unless user explicitly provides new ones
+                for key in (
+                    CONF_SOLAR_PRODUCTION_ENTITY,
+                    CONF_HOUSE_CONSUMPTION_ENTITY,
+                    CONF_CAR_CHARGING_POWER_ENTITY,
+                ):
+                    if key not in updated_options and working_data.get(key) is not None:
+                        updated_options[key] = working_data.get(key)
+
             if phase_mode == PHASE_MODE_THREE:
                 # No validation - all per-phase sensors are optional, leave configuration to user
                 updated_options[CONF_PHASE_MODE] = PHASE_MODE_THREE
@@ -906,28 +958,27 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ),
         }
 
-        # Add single-phase or three-phase specific fields
-        if current_phase_mode == PHASE_MODE_SINGLE:
-            schema_dict.update({
-                vol.Optional(
-                    CONF_SOLAR_PRODUCTION_ENTITY,
-                    default=working_data.get(CONF_SOLAR_PRODUCTION_ENTITY),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor")
-                ),
-                vol.Optional(
-                    CONF_HOUSE_CONSUMPTION_ENTITY,
-                    default=working_data.get(CONF_HOUSE_CONSUMPTION_ENTITY),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor")
-                ),
-                vol.Optional(
-                    CONF_CAR_CHARGING_POWER_ENTITY,
-                    default=working_data.get(CONF_CAR_CHARGING_POWER_ENTITY),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor")
-                ),
-            })
+        # Single-phase fields (always shown to allow switching modes in one step)
+        schema_dict.update({
+            vol.Optional(
+                CONF_SOLAR_PRODUCTION_ENTITY,
+                default=working_data.get(CONF_SOLAR_PRODUCTION_ENTITY),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_HOUSE_CONSUMPTION_ENTITY,
+                default=working_data.get(CONF_HOUSE_CONSUMPTION_ENTITY),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_CAR_CHARGING_POWER_ENTITY,
+                default=working_data.get(CONF_CAR_CHARGING_POWER_ENTITY),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+        })
 
         # Common optional fields
         schema_dict.update({
@@ -1104,14 +1155,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 )
             ),
             vol.Optional(
-                CONF_SOLAR_PEAK_EMERGENCY_SOC,
-                default=working_data.get(
-                    CONF_SOLAR_PEAK_EMERGENCY_SOC, DEFAULT_SOLAR_PEAK_EMERGENCY_SOC
-                ),
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(min=15, max=40, unit_of_measurement="%")
-            ),
-            vol.Optional(
                 CONF_PREDICTIVE_CHARGING_MIN_SOC,
                 default=working_data.get(
                     CONF_PREDICTIVE_CHARGING_MIN_SOC, DEFAULT_PREDICTIVE_CHARGING_MIN_SOC
@@ -1145,7 +1188,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 )
             )
 
-        # Per-battery phase assignments (multi-select) - only relevant in three-phase mode
+        # Per-battery phase assignments and per-phase sensors (only when three-phase)
         if current_phase_mode == PHASE_MODE_THREE:
             phase_options = [
                 {"value": phase_id, "label": DEFAULT_PHASE_NAMES[phase_id]} for phase_id in PHASE_IDS
@@ -1163,8 +1206,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     )
                 )
 
-        # Per-phase sensor fields (only in three-phase mode)
-        if current_phase_mode == PHASE_MODE_THREE:
             for phase_id in PHASE_IDS:
                 phase_config = existing_phases.get(phase_id, {})
                 schema_dict[

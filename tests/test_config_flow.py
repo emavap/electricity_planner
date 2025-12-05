@@ -33,7 +33,6 @@ from custom_components.electricity_planner.const import (
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
-    CONF_SOLAR_PEAK_EMERGENCY_SOC,
     CONF_USE_AVERAGE_THRESHOLD,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_VERY_LOW_PRICE_THRESHOLD,
@@ -55,7 +54,6 @@ from custom_components.electricity_planner.const import (
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
-    DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
     DEFAULT_USE_AVERAGE_THRESHOLD,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
@@ -68,7 +66,8 @@ from custom_components.electricity_planner.const import (
 @pytest.mark.asyncio
 async def test_options_flow_returns_updated_options():
     entry = MockConfigEntry(domain=DOMAIN, data={})
-    handler = OptionsFlowHandler(entry)
+    handler = OptionsFlowHandler()
+    object.__setattr__(handler, 'config_entry', entry)  # Bypass read-only property for testing
 
     battery_entity = "sensor.main_battery"
 
@@ -92,7 +91,6 @@ async def test_options_flow_returns_updated_options():
         CONF_MAX_CAR_POWER: DEFAULT_MAX_CAR_POWER,
         CONF_MAX_GRID_POWER: DEFAULT_MAX_GRID_POWER,
         CONF_MIN_CAR_CHARGING_THRESHOLD: DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
-        CONF_SOLAR_PEAK_EMERGENCY_SOC: DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
         CONF_PREDICTIVE_CHARGING_MIN_SOC: DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
         CONF_BASE_GRID_SETPOINT: DEFAULT_BASE_GRID_SETPOINT,
         CONF_BATTERY_SOC_ENTITIES: [battery_entity],
@@ -131,7 +129,8 @@ async def test_options_flow_defaults_reflect_existing_options():
         },
     )
 
-    handler = OptionsFlowHandler(entry)
+    handler = OptionsFlowHandler()
+    object.__setattr__(handler, 'config_entry', entry)  # Bypass read-only property for testing
     result = await handler.async_step_init()
 
     assert result["type"] == FlowResultType.FORM
@@ -166,7 +165,8 @@ async def test_options_flow_hides_phase_assignment_when_single_phase():
         },
     )
 
-    handler = OptionsFlowHandler(entry)
+    handler = OptionsFlowHandler()
+    object.__setattr__(handler, 'config_entry', entry)  # Bypass read-only property for testing
     result = await handler.async_step_init()
 
     assert result["type"] == FlowResultType.FORM

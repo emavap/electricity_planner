@@ -43,19 +43,19 @@ views:
                   {% endif %}
                   {% set price_analysis = state_attr(decision_sensor, 'price_analysis') %}
                   {% set average_threshold = price_analysis.average_threshold if price_analysis else None %}
-                  {% set fixed_threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float %}
+                  {% set fixed_threshold = states('sensor.electricity_planner_diagnostics_monitoring_price_threshold') | float(0) %}
                   {% set price_threshold = state_attr(price_sensor, 'price_threshold') %}
 
                   {% if price_threshold not in [None, 'unknown', 'unavailable'] %}
-                    {% set max_threshold = price_threshold | float %}
+                    {% set max_threshold = price_threshold | float(0) %}
                   {% elif average_threshold not in [None, 'unknown', 'unavailable'] %}
-                    {% set max_threshold = average_threshold | float %}
+                    {% set max_threshold = average_threshold | float(0) %}
                   {% else %}
                     {% set max_threshold = fixed_threshold %}
                   {% endif %}
 
                   {% if dynamic_threshold not in [None, 'unknown', 'unavailable'] %}
-                    {% set threshold = dynamic_threshold | float %}
+                    {% set threshold = dynamic_threshold | float(0) %}
                   {% else %}
                     {% set threshold = max_threshold %}
                   {% endif %}

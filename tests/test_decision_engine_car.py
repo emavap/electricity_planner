@@ -236,8 +236,6 @@ def test_solar_not_allocated_to_car_until_batteries_high_soc():
     allocation = engine._allocate_solar_power(
         power_analysis=power_analysis,
         battery_analysis=battery_analysis,
-        price_analysis={},
-        time_context={},
     )
 
     assert allocation["solar_for_car"] == 0
@@ -258,8 +256,6 @@ def test_solar_allocated_to_car_when_batteries_full():
     allocation = engine._allocate_solar_power(
         power_analysis=power_analysis,
         battery_analysis=battery_analysis,
-        price_analysis={},
-        time_context={},
     )
 
     assert allocation["solar_for_car"] > 0
@@ -280,8 +276,6 @@ def test_solar_allocation_requires_all_batteries_high():
     allocation = engine._allocate_solar_power(
         power_analysis=power_analysis,
         battery_analysis=battery_analysis,
-        price_analysis={},
-        time_context={},
     )
 
     assert allocation["solar_for_car"] == 0
@@ -302,8 +296,6 @@ def test_solar_allocation_without_battery_data_skips_car():
     allocation = engine._allocate_solar_power(
         power_analysis=power_analysis,
         battery_analysis=battery_analysis,
-        price_analysis={},
-        time_context={},
     )
 
     assert allocation["solar_for_car"] == 0
