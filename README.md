@@ -148,7 +148,6 @@ Enable `use_dynamic_threshold` to turn the static ceiling into a hard cap and le
 | **Significant surplus, SOC low** | Grid used only if strategies approve (e.g. emergency) | Same as above |
 | **No surplus** | Normal price/SOC strategies apply | Hysteresis + price logic |
 | **Emergency SOC (< `emergency_soc_threshold`)** | Always charge, price ignored | N/A – car still obeys its own logic |
-| **Solar peak (10–16 by default)** | If SOC > `solar_peak_emergency_soc`, grid charging pauses in favour of live solar | Car follows global logic; can remain in solar-only mode when flagged |
 
 All surplus allocation comes straight from the coordinator’s measured data—no forecasts are required or considered.
 

@@ -4,8 +4,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
@@ -27,7 +26,6 @@ from .const import (
     CONF_MAX_CAR_POWER,
     CONF_MAX_GRID_POWER,
     CONF_MIN_CAR_CHARGING_THRESHOLD,
-    CONF_SOLAR_PEAK_EMERGENCY_SOC,
     CONF_PREDICTIVE_CHARGING_MIN_SOC,
     CONF_BASE_GRID_SETPOINT,
     CONF_USE_DYNAMIC_THRESHOLD,
@@ -50,7 +48,6 @@ from .const import (
     DEFAULT_MAX_CAR_POWER,
     DEFAULT_MAX_GRID_POWER,
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
-    DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
@@ -68,7 +65,6 @@ from .const import (
 )
 
 from .defaults import (
-    DEFAULT_TIME_SCHEDULE,
     DEFAULT_POWER_ESTIMATES,
     DEFAULT_ALGORITHM_THRESHOLDS,
     DEFAULT_SYSTEM_LIMITS,
@@ -93,32 +89,11 @@ _PREVIOUS_CAR_CHARGING_KEY = "previous_car_charging"
 _HAS_MIN_CHARGING_WINDOW_KEY = "has_min_charging_window"
 
 
-class PriceCategory(Enum):
-    """Price category classification for car charging decisions."""
-    VERY_LOW = "very_low"
-    LOW = "low"
-    HIGH = "high"
-
-
 class CarChargingDecision(TypedDict, total=False):
     """Type definition for car charging decision results."""
     car_grid_charging: bool
     car_grid_charging_reason: str
     car_solar_only: bool
-
-
-class BatteryChargingDecision(TypedDict, total=False):
-    """Type definition for battery charging decision results."""
-    battery_grid_charging: bool
-    battery_grid_charging_reason: str
-    strategy_trace: List[str]
-
-
-class FeedinDecision(TypedDict, total=False):
-    """Type definition for solar feed-in decision results."""
-    feedin_solar: bool
-    feedin_solar_reason: str
-    feedin_effective_price: Optional[float]
 
 
 def _safe_optional_float(value: Any) -> Optional[float]:
@@ -224,7 +199,6 @@ class EngineSettings:
     max_soc_threshold: float
     emergency_soc_threshold: float
     predictive_min_soc: float
-    solar_peak_emergency_soc: float
     use_dynamic_threshold: bool
     dynamic_threshold_confidence: float
     use_average_threshold: bool
@@ -331,10 +305,6 @@ class EngineSettings:
             CONF_PREDICTIVE_CHARGING_MIN_SOC, DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
             "predictive_charging_min_soc"
         )
-        solar_peak_emergency_soc = extractor.get_float(
-            CONF_SOLAR_PEAK_EMERGENCY_SOC, DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
-            "solar_peak_emergency_soc"
-        )
 
         # Extract boolean flags
         use_dynamic_threshold = extractor.get_bool(
@@ -369,7 +339,6 @@ class EngineSettings:
             max_soc_threshold=max_soc_threshold,
             emergency_soc_threshold=emergency_soc_threshold,
             predictive_min_soc=predictive_min_soc,
-            solar_peak_emergency_soc=solar_peak_emergency_soc,
             use_dynamic_threshold=use_dynamic_threshold,
             dynamic_threshold_confidence=dynamic_threshold_confidence,
             use_average_threshold=use_average_threshold,
@@ -404,15 +373,6 @@ class CarDecisionContext:
     def has_allocated_solar(self) -> bool:
         """Whether any solar power is earmarked for the car."""
         return self.allocated_solar > 0
-
-    @property
-    def price_category(self) -> PriceCategory:
-        """Categorize the current price level for decision routing."""
-        if self.very_low_price:
-            return PriceCategory.VERY_LOW
-        elif self.is_low_price_flag or (self.previous_charging and self.effective_low_price):
-            return PriceCategory.LOW
-        return PriceCategory.HIGH
 
     def format_price_comparison(self, operator: str = "≤") -> str:
         """Format price vs threshold comparison for logging."""
@@ -482,19 +442,12 @@ class ChargingDecisionEngine:
         solar_analysis = self._analyze_solar_production(data)
         decision_data["solar_analysis"] = solar_analysis
 
-        time_context = TimeContext.get_current_context(
-            night_start=DEFAULT_TIME_SCHEDULE.night_start,
-            night_end=DEFAULT_TIME_SCHEDULE.night_end,
-            solar_peak_start=DEFAULT_TIME_SCHEDULE.solar_peak_start,
-            solar_peak_end=DEFAULT_TIME_SCHEDULE.solar_peak_end,
-            evening_start=DEFAULT_TIME_SCHEDULE.evening_start,
-            evening_end=DEFAULT_TIME_SCHEDULE.evening_end,
-        )
+        time_context = TimeContext.get_current_context()
         decision_data["time_context"] = time_context
-        
+
         # Allocate solar power
         power_allocation = self._allocate_solar_power(
-            power_analysis, battery_analysis, price_analysis, time_context
+            power_analysis, battery_analysis
         )
         decision_data["power_allocation"] = power_allocation
         
@@ -1022,8 +975,6 @@ class ChargingDecisionEngine:
         self,
         power_analysis: Dict[str, Any],
         battery_analysis: Dict[str, Any],
-        price_analysis: Dict[str, Any],
-        time_context: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Hierarchically allocate solar surplus."""
         solar_surplus = power_analysis.get("solar_surplus", 0)

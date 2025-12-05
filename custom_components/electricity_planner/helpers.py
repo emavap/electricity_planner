@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -167,109 +166,15 @@ class PriceCalculator:
 
 class TimeContext:
     """Time-based context utilities."""
-    
+
     @staticmethod
-    def get_current_context(
-        night_start: int = 22,
-        night_end: int = 6,
-        solar_peak_start: int = 10,
-        solar_peak_end: int = 16,
-        evening_start: int = 17,
-        evening_end: int = 21
-    ) -> Dict[str, Any]:
+    def get_current_context() -> Dict[str, Any]:
         """Get time-of-day context for charging decisions."""
         now = dt_util.now()
-        hour = now.hour
-
         return {
-            "current_hour": hour,
-            "is_night": hour >= night_start or hour <= night_end,
-            "is_early_morning": night_end < hour <= 9,
-            "is_solar_peak": solar_peak_start <= hour <= solar_peak_end,
-            "is_evening": evening_start <= hour <= evening_end,
-            "hours_until_sunrise": max(0, (night_end - hour) % 24),
-            "winter_season": now.month in [11, 12, 1, 2],
+            "current_hour": now.hour,
             "timestamp": now.isoformat(),
         }
-    
-    @staticmethod
-    def is_within_time_window(
-        start_hour: int,
-        end_hour: int,
-        current_hour: Optional[int] = None
-    ) -> bool:
-        """Check if current time is within specified window."""
-        if current_hour is None:
-            current_hour = dt_util.now().hour
-        
-        if start_hour <= end_hour:
-            return start_hour <= current_hour <= end_hour
-        else:  # Spans midnight
-            return current_hour >= start_hour or current_hour <= end_hour
-
-
-class CircuitBreaker:
-    """Circuit breaker to prevent cascading failures."""
-    
-    def __init__(
-        self,
-        failure_threshold: int = 5,
-        recovery_timeout: int = 60,
-        name: str = "default"
-    ):
-        """Initialize circuit breaker."""
-        self.name = name
-        self.failure_count = 0
-        self.failure_threshold = failure_threshold
-        self.recovery_timeout = recovery_timeout
-        self.last_failure_time: Optional[datetime] = None
-        self.state = "closed"  # closed, open, half-open
-    
-    def call(self, func, *args, **kwargs) -> Any:
-        """Execute function with circuit breaker protection."""
-        if self.state == "open":
-            if self._should_attempt_reset():
-                self.state = "half-open"
-                _LOGGER.info("Circuit breaker %s entering half-open state", self.name)
-            else:
-                raise Exception(f"Circuit breaker {self.name} is open")
-        
-        try:
-            result = func(*args, **kwargs)
-            self._on_success()
-            return result
-        except Exception as e:
-            self._on_failure()
-            raise e
-    
-    def _should_attempt_reset(self) -> bool:
-        """Check if enough time has passed to attempt reset."""
-        if self.last_failure_time is None:
-            return False
-        elapsed = dt_util.utcnow() - self.last_failure_time
-        return elapsed.total_seconds() >= self.recovery_timeout
-    
-    def _on_success(self):
-        """Handle successful call."""
-        if self.state == "half-open":
-            _LOGGER.info("Circuit breaker %s recovered, closing", self.name)
-        self.failure_count = 0
-        self.state = "closed"
-    
-    def _on_failure(self):
-        """Handle failed call."""
-        self.failure_count += 1
-        self.last_failure_time = dt_util.utcnow()
-        
-        if self.failure_count >= self.failure_threshold:
-            self.state = "open"
-            _LOGGER.warning(
-                "Circuit breaker %s opened after %d failures",
-                self.name, self.failure_count
-            )
-        elif self.state == "half-open":
-            self.state = "open"
-            _LOGGER.warning("Circuit breaker %s reopened on failure", self.name)
 
 
 class PowerAllocationValidator:

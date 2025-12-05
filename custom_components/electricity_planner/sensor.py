@@ -21,7 +21,6 @@ from .const import (
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
-    CONF_TRANSPORT_COST_ENTITY,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
     CONF_EMERGENCY_SOC_THRESHOLD,
@@ -601,11 +600,6 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
             # Time context (for validation)
             "time_context": {
                 "current_hour": time_context.get("current_hour"),
-                "is_night": time_context.get("is_night", False),
-                "is_early_morning": time_context.get("is_early_morning", False),
-                "is_solar_peak": time_context.get("is_solar_peak", False),
-                "is_evening": time_context.get("is_evening", False),
-                "winter_season": time_context.get("winter_season", False),
             },
 
             # Configuration values (for validation)
@@ -616,7 +610,6 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "max_grid_power": config.get("max_grid_power", 15000),
                 "min_car_charging_threshold": config.get("min_car_charging_threshold", 100),
                 "min_car_charging_duration": config.get("min_car_charging_duration", 2),
-                "solar_peak_emergency_soc": config.get("solar_peak_emergency_soc", 25),
                 "predictive_charging_min_soc": config.get("predictive_charging_min_soc", 30),
                 "significant_solar_threshold": config.get("significant_solar_threshold", 1000),
                 "very_low_price_threshold": config.get("very_low_price_threshold", 30),
@@ -629,7 +622,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "price_data_valid": price_analysis.get("data_available", False),
                 "battery_data_valid": battery_analysis.get("batteries_available", True),
                 "power_allocation_valid": power_allocation.get("total_allocated", 0) <= power_analysis.get("solar_surplus", 0),
-                "emergency_override_active": self._check_emergency_override(battery_analysis, time_context, config),
+                "emergency_override_active": self._check_emergency_override(battery_analysis, config),
                 "predictive_logic_active": self._check_predictive_logic(price_analysis, battery_analysis, config),
             },
 
@@ -637,20 +630,14 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
             "last_evaluation": self.coordinator.data.get("next_evaluation", "unknown"),
         }
 
-    def _check_emergency_override(self, battery_analysis: dict, time_context: dict, config: dict) -> bool:
+    def _check_emergency_override(self, battery_analysis: dict, config: dict) -> bool:
         """Check if any emergency overrides are currently active."""
         average_soc = battery_analysis.get("average_soc")
         if average_soc is None:
             return False
 
         emergency_soc = config.get("emergency_soc_threshold", 15)
-        solar_peak_emergency_soc = config.get("solar_peak_emergency_soc", 25)
-        is_solar_peak = time_context.get("is_solar_peak", False)
-
-        return (
-            average_soc < emergency_soc or
-            (is_solar_peak and average_soc < solar_peak_emergency_soc)
-        )
+        return average_soc < emergency_soc
 
     def _check_predictive_logic(self, price_analysis: dict, battery_analysis: dict, config: dict) -> bool:
         """Check if predictive charging logic is active."""

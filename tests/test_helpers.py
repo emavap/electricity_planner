@@ -1,5 +1,5 @@
 """Unit tests for helper utilities used by Electricity Planner."""
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 
@@ -83,89 +83,10 @@ class TestTimeHelpers:
         fake_now = datetime(2024, 1, 1, 11, 30, tzinfo=timezone.utc)
         monkeypatch.setattr(helpers.dt_util, "now", lambda: fake_now)
 
-        context = helpers.TimeContext.get_current_context(
-            night_start=22,
-            night_end=6,
-            solar_peak_start=10,
-            solar_peak_end=16,
-            evening_start=18,
-            evening_end=21,
-        )
+        context = helpers.TimeContext.get_current_context()
 
         assert context["current_hour"] == 11
-        assert context["is_solar_peak"] is True
-        assert context["is_night"] is False
-        assert context["winter_season"] is True
-
-    @pytest.mark.parametrize(
-        ("start", "end", "hour", "expected"),
-        [
-            (8, 12, 10, True),
-            (22, 6, 23, True),
-            (22, 6, 5, True),
-            (22, 6, 12, False),
-        ],
-    )
-    def test_is_within_time_window(self, start, end, hour, expected):
-        assert helpers.TimeContext.is_within_time_window(start, end, current_hour=hour) is expected
-
-
-class TestCircuitBreaker:
-    """Tests for circuit breaker behaviour."""
-
-    def test_circuit_breaker_transitions(self, monkeypatch):
-        breaker = helpers.CircuitBreaker(failure_threshold=2, recovery_timeout=30, name="cb")
-        base_time = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
-        current = {"value": base_time}
-
-        monkeypatch.setattr(helpers.dt_util, "utcnow", lambda: current["value"])
-
-        def fail():
-            raise ValueError("boom")
-
-        with pytest.raises(ValueError):
-            breaker.call(fail)
-        assert breaker.state == "closed"
-
-        with pytest.raises(ValueError):
-            breaker.call(fail)
-        assert breaker.state == "open"
-
-        # Still open before timeout
-        with pytest.raises(Exception, match="open"):
-            breaker.call(lambda: None)
-
-        # Advance time, transition to half-open and succeed
-        current["value"] = base_time + timedelta(seconds=31)
-
-        result = breaker.call(lambda: "ok")
-        assert result == "ok"
-        assert breaker.state == "closed"
-        assert breaker.failure_count == 0
-
-    def test_circuit_breaker_recovers_after_long_downtime(self, monkeypatch):
-        breaker = helpers.CircuitBreaker(failure_threshold=1, recovery_timeout=10, name="cb")
-        base_time = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
-        current = {"value": base_time}
-
-        monkeypatch.setattr(helpers.dt_util, "utcnow", lambda: current["value"])
-
-        def blow_up():
-            raise ValueError("boom")
-
-        with pytest.raises(ValueError):
-            breaker.call(blow_up)
-
-        assert breaker.state == "open"
-
-        # Advance time by multiple days to ensure total_seconds() is used
-        current["value"] = base_time + timedelta(days=2)
-
-        # Should transition to half-open and succeed
-        result = breaker.call(lambda: "ok")
-        assert result == "ok"
-        assert breaker.state == "closed"
-        assert breaker.failure_count == 0
+        assert "timestamp" in context
 
 
 class TestPowerAllocationValidator:

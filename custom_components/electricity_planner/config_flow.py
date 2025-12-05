@@ -5,7 +5,6 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
@@ -48,7 +47,6 @@ from .const import (
     CONF_MAX_CAR_POWER,
     CONF_MAX_GRID_POWER,
     CONF_MIN_CAR_CHARGING_THRESHOLD,
-    CONF_SOLAR_PEAK_EMERGENCY_SOC,
     CONF_PREDICTIVE_CHARGING_MIN_SOC,
     CONF_BASE_GRID_SETPOINT,
     CONF_USE_DYNAMIC_THRESHOLD,
@@ -71,7 +69,6 @@ from .const import (
     DEFAULT_MAX_CAR_POWER,
     DEFAULT_MAX_GRID_POWER,
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
-    DEFAULT_SOLAR_PEAK_EMERGENCY_SOC,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
@@ -703,14 +700,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             ),
             vol.Optional(
-                CONF_SOLAR_PEAK_EMERGENCY_SOC,
-                default=DEFAULT_SOLAR_PEAK_EMERGENCY_SOC
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=15, max=40, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
                 CONF_PREDICTIVE_CHARGING_MIN_SOC,
                 default=DEFAULT_PREDICTIVE_CHARGING_MIN_SOC
             ): selector.NumberSelector(
@@ -737,7 +726,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "max_car_power": "Maximum power limit for car charging",
                 "max_grid_power": "Maximum power limit from grid (safety limit)",
                 "min_car_charging_threshold": "Minimum power to consider car 'charging'",
-                "solar_peak_emergency_soc": "SOC below which to charge even during solar peak",
                 "predictive_charging_min_soc": "Minimum SOC for predictive charging logic",
                 "base_grid_setpoint": "Base minimum grid setpoint when no monthly peak data available",
             },
@@ -1165,14 +1153,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 selector.NumberSelectorConfig(
                     min=50, max=500, step=50, unit_of_measurement="W"
                 )
-            ),
-            vol.Optional(
-                CONF_SOLAR_PEAK_EMERGENCY_SOC,
-                default=working_data.get(
-                    CONF_SOLAR_PEAK_EMERGENCY_SOC, DEFAULT_SOLAR_PEAK_EMERGENCY_SOC
-                ),
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(min=15, max=40, unit_of_measurement="%")
             ),
             vol.Optional(
                 CONF_PREDICTIVE_CHARGING_MIN_SOC,
