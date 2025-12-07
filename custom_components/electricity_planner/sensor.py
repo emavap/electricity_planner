@@ -61,6 +61,7 @@ async def async_setup_entry(
         PriceAnalysisSensor(coordinator, entry, "_diagnostic"),
         PowerAnalysisSensor(coordinator, entry, "_diagnostic"),
         DataAvailabilitySensor(coordinator, entry, "_diagnostic"),
+        EntityStatusSensor(coordinator, entry, "_diagnostic"),
         DecisionDiagnosticsSensor(coordinator, entry, "_diagnostic"),
         ForecastInsightsSensor(coordinator, entry, "_diagnostic"),
         PriceThresholdSensor(coordinator, entry, "_diagnostic"),
@@ -351,6 +352,106 @@ class DataAvailabilitySensor(ElectricityPlannerSensorBase):
             "notification_sent": self.coordinator.notification_sent,
             "data_currently_available": self.coordinator.is_data_available(),
         })
+
+        return attributes
+
+
+class EntityStatusSensor(ElectricityPlannerSensorBase):
+    """Sensor showing availability status of all configured entities.
+
+    Shows at a glance which entities are available/unavailable,
+    helping users understand which data the planner is considering.
+    """
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        """Initialize the entity status sensor."""
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Entity Status"
+        self._attr_unique_id = f"{entry.entry_id}_entity_status"
+        self._attr_icon = "mdi:check-network"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def native_value(self) -> str | None:
+        """Return summary status of configured entities."""
+        if not self.coordinator.data:
+            return "unknown"
+
+        entity_status = self.coordinator.data.get("entity_status", {})
+        summary = entity_status.get("summary", {})
+
+        available = summary.get("available", 0)
+        unavailable = summary.get("unavailable", 0)
+        total = summary.get("total_configured", 0)
+
+        if total == 0:
+            return "no_entities"
+        if unavailable == 0:
+            return "all_available"
+        if available == 0:
+            return "all_unavailable"
+        return f"{unavailable}_unavailable"
+
+    @property
+    def icon(self) -> str:
+        """Return icon based on status."""
+        if not self.coordinator.data:
+            return "mdi:help-network-outline"
+
+        entity_status = self.coordinator.data.get("entity_status", {})
+        summary = entity_status.get("summary", {})
+        unavailable = summary.get("unavailable", 0)
+        required_unavailable = summary.get("required_unavailable", [])
+
+        if required_unavailable:
+            return "mdi:alert-circle"  # Red alert - required entities missing
+        if unavailable > 0:
+            return "mdi:alert"  # Warning - optional entities missing
+        return "mdi:check-network"  # All good
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return detailed entity status as attributes."""
+        if not self.coordinator.data:
+            return {}
+
+        entity_status = self.coordinator.data.get("entity_status", {})
+
+        # Flatten the entity status for easy reading
+        attributes = {
+            "summary": entity_status.get("summary", {}),
+        }
+
+        # Add flat lists of unavailable entities for quick visibility
+        unavailable_entities = []
+        available_entities = []
+
+        for category_name in ["price_entities", "battery_entities", "power_entities", "optional_entities"]:
+            category = entity_status.get(category_name, {})
+            for name, status in category.items():
+                if not status.get("configured"):
+                    continue
+                entity_id = status.get("entity_id", name)
+                entity_state = status.get("status", "unknown")
+
+                if entity_state == "available":
+                    available_entities.append(entity_id)
+                else:
+                    unavailable_entities.append({
+                        "entity_id": entity_id,
+                        "status": entity_state,
+                        "reason": status.get("reason", "Unknown"),
+                        "is_required": status.get("is_required", False),
+                    })
+
+        attributes["available_entities"] = available_entities
+        attributes["unavailable_entities"] = unavailable_entities
+
+        # Add detailed breakdown by category for diagnostics
+        attributes["price_entities"] = entity_status.get("price_entities", {})
+        attributes["battery_entities"] = entity_status.get("battery_entities", {})
+        attributes["power_entities"] = entity_status.get("power_entities", {})
+        attributes["optional_entities"] = entity_status.get("optional_entities", {})
 
         return attributes
 

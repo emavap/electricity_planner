@@ -174,3 +174,23 @@ def test_format_reason_with_numeric_details():
     assert "battery_soc=46%" in reason
     assert "surplus=1234W" in reason
     assert "note=ok" in reason
+
+
+def test_version_consistency():
+    """Verify that version in manifest.json matches INTEGRATION_VERSION in const.py."""
+    import json
+    from pathlib import Path
+
+    from custom_components.electricity_planner.const import INTEGRATION_VERSION
+
+    # Load manifest.json
+    manifest_path = Path(__file__).parent.parent / "custom_components" / "electricity_planner" / "manifest.json"
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+
+    manifest_version = manifest.get("version")
+
+    assert manifest_version == INTEGRATION_VERSION, (
+        f"Version mismatch! manifest.json has '{manifest_version}' but const.py has '{INTEGRATION_VERSION}'. "
+        "Please update both files to the same version."
+    )
