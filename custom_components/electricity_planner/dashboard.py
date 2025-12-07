@@ -77,6 +77,7 @@ ENTITY_REFERENCES: tuple[EntityReference, ...] = (
     EntityReference("sensor.electricity_planner_diagnostics_monitoring_significant_solar_threshold", "significant_solar_threshold"),
     EntityReference("sensor.electricity_planner_diagnostics_monitoring_very_low_price_threshold", "very_low_price_threshold"),
     EntityReference("sensor.electricity_planner_diagnostics_monitoring_emergency_soc_threshold", "emergency_soc_threshold"),
+    EntityReference("sensor.electricity_planner_diagnostics_monitoring_entity_status", "entity_status"),
     EntityReference("switch.electricity_planner_car_permissive_mode", "car_permissive_mode"),
 )
 

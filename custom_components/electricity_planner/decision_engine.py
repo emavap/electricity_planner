@@ -37,6 +37,8 @@ from .const import (
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
+    CONF_SOC_PRICE_MULTIPLIER_MAX,
+    CONF_SOC_BUFFER_TARGET,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
@@ -59,6 +61,8 @@ from .const import (
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
+    DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
+    DEFAULT_SOC_BUFFER_TARGET,
     DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN,
     PERMISSIVE_MULTIPLIER_MIN,
     PERMISSIVE_MULTIPLIER_MAX,
@@ -68,6 +72,7 @@ from .defaults import (
     DEFAULT_POWER_ESTIMATES,
     DEFAULT_ALGORITHM_THRESHOLDS,
     DEFAULT_SYSTEM_LIMITS,
+    calculate_soc_price_multiplier,
 )
 
 from .helpers import (
@@ -202,6 +207,8 @@ class EngineSettings:
     use_dynamic_threshold: bool
     dynamic_threshold_confidence: float
     use_average_threshold: bool
+    soc_price_multiplier_max: float
+    soc_buffer_target: float
     battery_capacities: Dict[str, float]
 
     @classmethod
@@ -318,6 +325,21 @@ class EngineSettings:
             "dynamic_threshold_confidence"
         )
 
+        # Extract SOC-based price multiplier settings
+        soc_price_multiplier_max = extractor.get_float(
+            CONF_SOC_PRICE_MULTIPLIER_MAX, DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
+            "soc_price_multiplier_max"
+        )
+        # Clamp multiplier to sensible range (1.0 to 2.0)
+        soc_price_multiplier_max = max(1.0, min(soc_price_multiplier_max, 2.0))
+
+        soc_buffer_target = extractor.get_float(
+            CONF_SOC_BUFFER_TARGET, DEFAULT_SOC_BUFFER_TARGET,
+            "soc_buffer_target"
+        )
+        # Clamp buffer target to sensible range (must be > emergency threshold)
+        soc_buffer_target = max(emergency_soc_threshold + 10, min(soc_buffer_target, 80))
+
         return cls(
             max_grid_power=max_grid_power,
             base_grid_setpoint=base_grid_setpoint,
@@ -342,6 +364,8 @@ class EngineSettings:
             use_dynamic_threshold=use_dynamic_threshold,
             dynamic_threshold_confidence=dynamic_threshold_confidence,
             use_average_threshold=use_average_threshold,
+            soc_price_multiplier_max=soc_price_multiplier_max,
+            soc_buffer_target=soc_buffer_target,
             battery_capacities=sanitized_capacities,
         )
 

@@ -1140,6 +1140,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             average_threshold,
         )
 
+        # Entity status tracking for diagnostic visibility
+        data["entity_status"] = self.get_all_entity_statuses()
+
         return data
 
     async def _get_state_value(self, entity_id: str | None) -> float | None:
@@ -1158,6 +1161,167 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             if _LOGGER.isEnabledFor(logging.DEBUG):
                 _LOGGER.debug("Could not convert state to float: %s = %s", entity_id, state.state)
             return None
+
+    def _get_entity_status(self, entity_id: str | None, is_required: bool = False) -> dict[str, Any]:
+        """Get detailed status for a configured entity.
+
+        Args:
+            entity_id: The entity ID to check
+            is_required: Whether this entity is required for the integration to function
+
+        Returns:
+            Dict with entity status details
+        """
+        if not entity_id:
+            return {"configured": False, "status": "not_configured", "is_required": is_required}
+
+        state = self.hass.states.get(entity_id)
+        if not state:
+            return {
+                "configured": True,
+                "entity_id": entity_id,
+                "status": "missing",
+                "is_required": is_required,
+                "reason": "Entity not found in Home Assistant",
+            }
+
+        if state.state == STATE_UNAVAILABLE:
+            return {
+                "configured": True,
+                "entity_id": entity_id,
+                "status": "unavailable",
+                "is_required": is_required,
+                "reason": "Entity is unavailable",
+            }
+
+        if state.state == STATE_UNKNOWN:
+            return {
+                "configured": True,
+                "entity_id": entity_id,
+                "status": "unknown",
+                "is_required": is_required,
+                "reason": "Entity state is unknown",
+            }
+
+        # Try to parse as float for numeric entities
+        try:
+            float(state.state)
+            return {
+                "configured": True,
+                "entity_id": entity_id,
+                "status": "available",
+                "is_required": is_required,
+                "current_value": state.state,
+            }
+        except (ValueError, TypeError):
+            # Non-numeric but valid state
+            return {
+                "configured": True,
+                "entity_id": entity_id,
+                "status": "available",
+                "is_required": is_required,
+                "current_value": state.state,
+            }
+
+    def get_all_entity_statuses(self) -> dict[str, Any]:
+        """Get status of all configured entities, organized by category.
+
+        Returns:
+            Dict with entity statuses organized by category
+        """
+        phase_mode = self.config.get(CONF_PHASE_MODE, PHASE_MODE_SINGLE)
+
+        # Price entities (required)
+        price_entities = {
+            "current_price": self._get_entity_status(
+                self.config.get(CONF_CURRENT_PRICE_ENTITY), is_required=True
+            ),
+            "highest_price": self._get_entity_status(
+                self.config.get(CONF_HIGHEST_PRICE_ENTITY), is_required=True
+            ),
+            "lowest_price": self._get_entity_status(
+                self.config.get(CONF_LOWEST_PRICE_ENTITY), is_required=True
+            ),
+            "next_price": self._get_entity_status(
+                self.config.get(CONF_NEXT_PRICE_ENTITY), is_required=False
+            ),
+        }
+
+        # Battery entities (optional but tracked individually)
+        battery_entities = {}
+        for entity_id in self.config.get(CONF_BATTERY_SOC_ENTITIES, []):
+            battery_entities[entity_id] = self._get_entity_status(entity_id, is_required=False)
+
+        # Power entities - depends on phase mode
+        power_entities = {}
+        if phase_mode == PHASE_MODE_THREE:
+            # Three-phase mode - check phase entities
+            phases_config = self.config.get(CONF_PHASES, {})
+            for phase_id in PHASE_IDS:
+                phase_config = phases_config.get(phase_id, {})
+                power_entities[f"{phase_id}_solar"] = self._get_entity_status(
+                    phase_config.get(CONF_PHASE_SOLAR_ENTITY), is_required=False
+                )
+                power_entities[f"{phase_id}_consumption"] = self._get_entity_status(
+                    phase_config.get(CONF_PHASE_CONSUMPTION_ENTITY), is_required=False
+                )
+                power_entities[f"{phase_id}_car"] = self._get_entity_status(
+                    phase_config.get(CONF_PHASE_CAR_ENTITY), is_required=False
+                )
+                power_entities[f"{phase_id}_battery_power"] = self._get_entity_status(
+                    phase_config.get(CONF_PHASE_BATTERY_POWER_ENTITY), is_required=False
+                )
+        else:
+            # Single-phase mode
+            power_entities["solar_production"] = self._get_entity_status(
+                self.config.get(CONF_SOLAR_PRODUCTION_ENTITY), is_required=False
+            )
+            power_entities["house_consumption"] = self._get_entity_status(
+                self.config.get(CONF_HOUSE_CONSUMPTION_ENTITY), is_required=False
+            )
+            power_entities["car_charging_power"] = self._get_entity_status(
+                self.config.get(CONF_CAR_CHARGING_POWER_ENTITY), is_required=False
+            )
+
+        # Optional entities
+        optional_entities = {
+            "monthly_grid_peak": self._get_entity_status(
+                self.config.get(CONF_MONTHLY_GRID_PEAK_ENTITY), is_required=False
+            ),
+            "transport_cost": self._get_entity_status(
+                self.config.get(CONF_TRANSPORT_COST_ENTITY), is_required=False
+            ),
+            "grid_power": self._get_entity_status(
+                self.config.get(CONF_GRID_POWER_ENTITY), is_required=False
+            ),
+        }
+
+        # Calculate summary
+        all_entities = []
+        for category in [price_entities, battery_entities, power_entities, optional_entities]:
+            all_entities.extend(category.values())
+
+        configured_entities = [e for e in all_entities if e.get("configured")]
+        available_count = sum(1 for e in configured_entities if e.get("status") == "available")
+        unavailable_count = sum(1 for e in configured_entities if e.get("status") in ("unavailable", "unknown", "missing"))
+        required_unavailable = [
+            e.get("entity_id") for e in configured_entities
+            if e.get("is_required") and e.get("status") in ("unavailable", "unknown", "missing")
+        ]
+
+        return {
+            "price_entities": price_entities,
+            "battery_entities": battery_entities,
+            "power_entities": power_entities,
+            "optional_entities": optional_entities,
+            "summary": {
+                "total_configured": len(configured_entities),
+                "available": available_count,
+                "unavailable": unavailable_count,
+                "required_unavailable": required_unavailable,
+                "all_required_available": len(required_unavailable) == 0,
+            },
+        }
 
     async def _fetch_nordpool_prices(self, config_entry_id: str, day: str) -> dict[str, Any] | None:
         """Fetch Nord Pool prices for a specific date using the service call.

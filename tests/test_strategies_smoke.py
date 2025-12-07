@@ -1,41 +1,55 @@
 """Smoke tests for charging strategies - basic sanity checks."""
+import pytest
 from custom_components.electricity_planner.strategies import (
-    EmergencyChargingStrategy,
     SolarPriorityStrategy,
     VeryLowPriceStrategy,
     DynamicPriceStrategy,
     PredictiveChargingStrategy,
     SOCBasedChargingStrategy,
+    SOCBufferChargingStrategy,
     StrategyManager,
 )
+from custom_components.electricity_planner.defaults import calculate_soc_price_multiplier
 
 
-def test_emergency_charging_triggers_when_soc_low():
-    """Test emergency charging activates when SOC is critically low."""
-    strategy = EmergencyChargingStrategy()
+# NOTE: EmergencyChargingStrategy was removed - emergency logic is now handled
+# by the PriceThresholdGuard in StrategyManager.evaluate(). The tests below
+# verify the guard's emergency override behavior.
+
+
+def test_emergency_guard_triggers_when_soc_low():
+    """Test emergency guard activates when SOC is critically low, even at high price."""
+    manager = StrategyManager(use_dynamic_threshold=True)
     context = {
         "battery_analysis": {"average_soc": 10},
         "config": {"emergency_soc_threshold": 15},
-        "price_analysis": {"current_price": 0.5},  # Even at high price
+        "price_analysis": {
+            "current_price": 0.5,  # Very high price - normally blocked
+            "price_threshold": 0.15,
+        },
     }
 
-    should_charge, reason = strategy.should_charge(context)
+    should_charge, reason = manager.evaluate(context)
     assert should_charge is True
     assert "Emergency charge" in reason
     assert "10%" in reason
 
 
-def test_emergency_charging_skips_when_soc_ok():
-    """Test emergency charging doesn't activate when SOC is sufficient."""
-    strategy = EmergencyChargingStrategy()
+def test_emergency_guard_skips_when_soc_ok():
+    """Test emergency guard doesn't activate when SOC is sufficient (price check applies)."""
+    manager = StrategyManager(use_dynamic_threshold=True)
     context = {
         "battery_analysis": {"average_soc": 50},
         "config": {"emergency_soc_threshold": 15},
-        "price_analysis": {"current_price": 0.1},
+        "price_analysis": {
+            "current_price": 0.5,  # Very high price - should be blocked
+            "price_threshold": 0.15,
+        },
     }
 
-    should_charge, reason = strategy.should_charge(context)
+    should_charge, reason = manager.evaluate(context)
     assert should_charge is False
+    assert "exceeds" in reason
 
 
 def test_solar_priority_prevents_grid_when_solar_allocated():
@@ -266,10 +280,251 @@ def test_strategy_manager_uses_stable_threshold_snapshot():
     assert "exceeds maximum threshold" in reason
 
 
+# --- SOC Price Multiplier Tests ---
+
+
+@pytest.mark.parametrize("soc,expected_multiplier", [
+    (15.0, 1.3),   # At emergency threshold → max multiplier
+    (10.0, 1.3),   # Below emergency → max multiplier (capped)
+    (50.0, 1.0),   # At buffer target → no relaxation
+    (70.0, 1.0),   # Above buffer target → no relaxation
+    (32.5, 1.15),  # Midpoint → 50% of extra multiplier
+])
+def test_soc_price_multiplier_calculation(soc, expected_multiplier):
+    """Test SOC price multiplier calculation with various SOC levels."""
+    multiplier = calculate_soc_price_multiplier(
+        current_soc=soc,
+        emergency_soc=15.0,
+        buffer_target_soc=50.0,
+        max_multiplier=1.3,
+    )
+    assert abs(multiplier - expected_multiplier) < 0.01, (
+        f"At SOC {soc}%, expected multiplier {expected_multiplier}, got {multiplier}"
+    )
+
+
+def test_soc_price_multiplier_invalid_max():
+    """Test SOC multiplier clamps invalid max_multiplier."""
+    # max_multiplier < 1.0 should be clamped to 1.0
+    multiplier = calculate_soc_price_multiplier(
+        current_soc=20.0,
+        emergency_soc=15.0,
+        buffer_target_soc=50.0,
+        max_multiplier=0.8,  # Invalid - less than 1.0
+    )
+    assert multiplier == 1.0
+
+
+def test_soc_price_multiplier_invalid_range():
+    """Test SOC multiplier handles invalid buffer/emergency range."""
+    # When buffer_target <= emergency, the soc_range check returns 1.0
+    # But only if we get past the emergency check first
+    # If current_soc is above the (invalid) buffer_target, it returns 1.0
+    multiplier = calculate_soc_price_multiplier(
+        current_soc=60.0,  # Above buffer_target
+        emergency_soc=50.0,
+        buffer_target_soc=30.0,  # Invalid - less than emergency
+        max_multiplier=1.3,
+    )
+    # current_soc >= buffer_target_soc (60 >= 30), so returns 1.0
+    assert multiplier == 1.0
+
+    # When current_soc is between buffer and emergency (in invalid config)
+    # The soc_range <= 0 check catches this
+    multiplier2 = calculate_soc_price_multiplier(
+        current_soc=40.0,  # Between buffer (30) and emergency (50)
+        emergency_soc=50.0,
+        buffer_target_soc=30.0,  # Invalid - less than emergency
+        max_multiplier=1.3,
+    )
+    # 40 >= 30 (buffer_target), so returns 1.0
+    assert multiplier2 == 1.0
+
+
+def test_soc_buffer_strategy_triggers_when_threshold_relaxed():
+    """Test SOC buffer strategy triggers when threshold is relaxed."""
+    strategy = SOCBufferChargingStrategy()
+    context = {
+        "threshold_relaxed": True,
+        "effective_threshold": 0.195,
+        "soc_price_multiplier": 1.3,
+        "price_analysis": {
+            "current_price": 0.18,
+            "price_threshold": 0.15,
+        },
+        "battery_analysis": {
+            "average_soc": 20,
+            "max_soc_threshold": 90,
+        },
+    }
+
+    should_charge, reason = strategy.should_charge(context)
+    assert should_charge is True
+    assert "Buffer charging" in reason
+    assert "SOC 20%" in reason
+    assert "×1.30 multiplier" in reason
+
+
+def test_soc_buffer_strategy_skips_when_price_below_base():
+    """Test SOC buffer strategy skips when price is below base threshold."""
+    strategy = SOCBufferChargingStrategy()
+    context = {
+        "threshold_relaxed": True,  # Relaxation active
+        "effective_threshold": 0.195,
+        "soc_price_multiplier": 1.3,
+        "price_analysis": {
+            "current_price": 0.10,  # Below base threshold - normal strategies should handle
+            "price_threshold": 0.15,
+        },
+        "battery_analysis": {
+            "average_soc": 20,
+            "max_soc_threshold": 90,
+        },
+    }
+
+    should_charge, reason = strategy.should_charge(context)
+    # Should skip because price is below base threshold
+    assert should_charge is False
+
+
+def test_soc_buffer_strategy_skips_when_not_relaxed():
+    """Test SOC buffer strategy skips when threshold is not relaxed."""
+    strategy = SOCBufferChargingStrategy()
+    context = {
+        "threshold_relaxed": False,  # No relaxation
+        "price_analysis": {
+            "current_price": 0.10,
+            "price_threshold": 0.15,
+        },
+        "battery_analysis": {
+            "average_soc": 50,
+            "max_soc_threshold": 90,
+        },
+    }
+
+    should_charge, reason = strategy.should_charge(context)
+    assert should_charge is False
+
+
+def test_soc_buffer_strategy_skips_when_battery_full():
+    """Test SOC buffer strategy skips when battery is already full."""
+    strategy = SOCBufferChargingStrategy()
+    context = {
+        "threshold_relaxed": True,
+        "effective_threshold": 0.195,
+        "soc_price_multiplier": 1.3,
+        "price_analysis": {
+            "current_price": 0.18,
+            "price_threshold": 0.15,
+        },
+        "battery_analysis": {
+            "average_soc": 90,  # At max
+            "max_soc_threshold": 90,
+        },
+    }
+
+    should_charge, reason = strategy.should_charge(context)
+    assert should_charge is False
+
+
+def test_strategy_manager_applies_soc_price_multiplier():
+    """Test strategy manager applies SOC-based price relaxation."""
+    manager = StrategyManager(use_dynamic_threshold=True)
+
+    # Price that would normally be blocked (0.18 > 0.15 threshold)
+    # But with low SOC (20%), multiplier = 1.3, effective threshold = 0.195
+    context = {
+        "price_analysis": {
+            "current_price": 0.18,
+            "price_threshold": 0.15,
+        },
+        "battery_analysis": {
+            "average_soc": 20,  # Low SOC
+            "max_soc_threshold": 90,
+        },
+        "power_analysis": {
+            "solar_surplus": 0,
+            "significant_solar_surplus": False,
+        },
+        "config": {
+            "emergency_soc_threshold": 15,
+            "soc_price_multiplier_max": 1.3,
+            "soc_buffer_target": 50,
+        },
+    }
+
+    should_charge, reason = manager.evaluate(context)
+    # Should charge because 0.18 < 0.195 (effective threshold with multiplier)
+    assert should_charge is True, f"Expected charging due to SOC relaxation, got: {reason}"
+    assert "Buffer charging" in reason or "multiplier" in reason.lower()
+
+
+def test_strategy_manager_blocks_when_above_relaxed_threshold():
+    """Test strategy manager blocks when price exceeds even the relaxed threshold."""
+    manager = StrategyManager(use_dynamic_threshold=True)
+
+    # Price too high even with relaxation (0.25 > 0.195 effective threshold)
+    context = {
+        "price_analysis": {
+            "current_price": 0.25,
+            "price_threshold": 0.15,
+        },
+        "battery_analysis": {
+            "average_soc": 20,  # Low SOC, but price still too high
+            "max_soc_threshold": 90,
+        },
+        "power_analysis": {
+            "solar_surplus": 0,
+            "significant_solar_surplus": False,
+        },
+        "config": {
+            "emergency_soc_threshold": 15,
+            "soc_price_multiplier_max": 1.3,
+            "soc_buffer_target": 50,
+        },
+    }
+
+    should_charge, reason = manager.evaluate(context)
+    assert should_charge is False
+    assert "exceeds maximum threshold" in reason
+    # Should show the relaxed threshold in the reason
+    assert "SOC multiplier" in reason or "×1." in reason
+
+
+def test_strategy_manager_no_relaxation_at_high_soc():
+    """Test strategy manager doesn't apply relaxation when SOC is high."""
+    manager = StrategyManager(use_dynamic_threshold=True)
+
+    # Same price that was OK at 20% SOC, but now at 60% SOC
+    context = {
+        "price_analysis": {
+            "current_price": 0.18,
+            "price_threshold": 0.15,
+        },
+        "battery_analysis": {
+            "average_soc": 60,  # High enough SOC - no relaxation
+            "max_soc_threshold": 90,
+        },
+        "power_analysis": {
+            "solar_surplus": 0,
+            "significant_solar_surplus": False,
+        },
+        "config": {
+            "emergency_soc_threshold": 15,
+            "soc_price_multiplier_max": 1.3,
+            "soc_buffer_target": 50,
+        },
+    }
+
+    should_charge, reason = manager.evaluate(context)
+    assert should_charge is False
+    assert "exceeds maximum threshold" in reason
+
+
 if __name__ == "__main__":
     # Run smoke tests
-    test_emergency_charging_triggers_when_soc_low()
-    test_emergency_charging_skips_when_soc_ok()
+    test_emergency_guard_triggers_when_soc_low()
+    test_emergency_guard_skips_when_soc_ok()
     test_solar_priority_prevents_grid_when_solar_allocated()
     test_very_low_price_charges_at_bottom_prices()
     test_dynamic_price_handles_none_prices_gracefully()

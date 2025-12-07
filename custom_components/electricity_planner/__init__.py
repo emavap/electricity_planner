@@ -33,7 +33,7 @@ from .const import (
 )
 from .coordinator import ElectricityPlannerCoordinator
 from .dashboard import async_remove_dashboard, async_setup_or_update_dashboard
-from .migrations import async_migrate_entry
+from .migrations import CURRENT_VERSION, async_migrate_entry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -81,9 +81,9 @@ CLEAR_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Electricity Planner from a config entry."""
     # Perform migration if needed
-    if entry.version < 10:
+    if entry.version < CURRENT_VERSION:
         await async_migrate_entry(hass, entry)
-    
+
     coordinator = ElectricityPlannerCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
 
@@ -94,6 +94,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     hass.async_create_task(async_setup_or_update_dashboard(hass, entry))
+
+    # Register listener for options updates to trigger reload
+    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     return True
 

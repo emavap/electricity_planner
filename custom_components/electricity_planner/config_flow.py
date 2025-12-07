@@ -58,6 +58,8 @@ from .const import (
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
+    CONF_SOC_PRICE_MULTIPLIER_MAX,
+    CONF_SOC_BUFFER_TARGET,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
@@ -80,7 +82,10 @@ from .const import (
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
+    DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
+    DEFAULT_SOC_BUFFER_TARGET,
 )
+from .migrations import CURRENT_VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -88,7 +93,7 @@ _LOGGER = logging.getLogger(__name__)
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Electricity Planner."""
 
-    VERSION = 10
+    VERSION = CURRENT_VERSION
 
     def __init__(self):
         """Initialize the config flow."""
@@ -507,7 +512,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema({
             vol.Optional(
                 CONF_MIN_SOC_THRESHOLD,
-                default=DEFAULT_MIN_SOC
+                default=self.data.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0, max=100, unit_of_measurement="%"
@@ -515,7 +520,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_MAX_SOC_THRESHOLD,
-                default=DEFAULT_MAX_SOC
+                default=self.data.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0, max=100, unit_of_measurement="%"
@@ -523,7 +528,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_PRICE_THRESHOLD,
-                default=DEFAULT_PRICE_THRESHOLD
+                default=self.data.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0, max=1, step=0.01, unit_of_measurement="€/kWh"
@@ -531,7 +536,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_PRICE_ADJUSTMENT_MULTIPLIER,
-                default=DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+                default=self.data.get(CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0, max=5, step=0.01
@@ -539,7 +544,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_PRICE_ADJUSTMENT_OFFSET,
-                default=DEFAULT_PRICE_ADJUSTMENT_OFFSET
+                default=self.data.get(CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
@@ -547,15 +552,31 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_EMERGENCY_SOC_THRESHOLD,
-                default=DEFAULT_EMERGENCY_SOC
+                default=self.data.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=5, max=50, unit_of_measurement="%"
                 )
             ),
             vol.Optional(
+                CONF_SOC_BUFFER_TARGET,
+                default=self.data.get(CONF_SOC_BUFFER_TARGET, DEFAULT_SOC_BUFFER_TARGET)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=30, max=80, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_SOC_PRICE_MULTIPLIER_MAX,
+                default=self.data.get(CONF_SOC_PRICE_MULTIPLIER_MAX, DEFAULT_SOC_PRICE_MULTIPLIER_MAX)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1.0, max=2.0, step=0.05
+                )
+            ),
+            vol.Optional(
                 CONF_VERY_LOW_PRICE_THRESHOLD,
-                default=DEFAULT_VERY_LOW_PRICE_THRESHOLD
+                default=self.data.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=10, max=50, unit_of_measurement="%"
@@ -563,7 +584,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_SIGNIFICANT_SOLAR_THRESHOLD,
-                default=DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD
+                default=self.data.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=500, max=5000, step=100, unit_of_measurement="W"
@@ -571,7 +592,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_FEEDIN_PRICE_THRESHOLD,
-                default=DEFAULT_FEEDIN_PRICE_THRESHOLD
+                default=self.data.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0.0, max=1.0, step=0.01, unit_of_measurement="€/kWh"
@@ -579,7 +600,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
-                default=DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER
+                default=self.data.get(CONF_FEEDIN_ADJUSTMENT_MULTIPLIER, DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=-1, max=5, step=0.01
@@ -587,7 +608,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_FEEDIN_ADJUSTMENT_OFFSET,
-                default=DEFAULT_FEEDIN_ADJUSTMENT_OFFSET
+                default=self.data.get(CONF_FEEDIN_ADJUSTMENT_OFFSET, DEFAULT_FEEDIN_ADJUSTMENT_OFFSET)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
@@ -595,11 +616,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_USE_DYNAMIC_THRESHOLD,
-                default=DEFAULT_USE_DYNAMIC_THRESHOLD
+                default=self.data.get(CONF_USE_DYNAMIC_THRESHOLD, DEFAULT_USE_DYNAMIC_THRESHOLD)
             ): selector.BooleanSelector(),
             vol.Optional(
                 CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
-                default=DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE
+                default=self.data.get(CONF_DYNAMIC_THRESHOLD_CONFIDENCE, DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=30, max=90, step=5, unit_of_measurement="%"
@@ -607,11 +628,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_USE_AVERAGE_THRESHOLD,
-                default=DEFAULT_USE_AVERAGE_THRESHOLD
+                default=self.data.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)
             ): selector.BooleanSelector(),
             vol.Optional(
                 CONF_MIN_CAR_CHARGING_DURATION,
-                default=DEFAULT_MIN_CAR_CHARGING_DURATION
+                default=self.data.get(CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1, max=6, step=1, unit_of_measurement="hours"
@@ -619,7 +640,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
-                default=DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER
+                default=self.data.get(CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER, DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1.1, max=1.5, step=0.1, mode="slider"
@@ -669,7 +690,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema({
             vol.Optional(
                 CONF_MAX_BATTERY_POWER,
-                default=DEFAULT_MAX_BATTERY_POWER
+                default=self.data.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1000, max=10000, step=500, unit_of_measurement="W"
@@ -677,7 +698,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_MAX_CAR_POWER,
-                default=DEFAULT_MAX_CAR_POWER
+                default=self.data.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1000, max=22000, step=1000, unit_of_measurement="W"
@@ -685,7 +706,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_MAX_GRID_POWER,
-                default=DEFAULT_MAX_GRID_POWER
+                default=self.data.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=3000, max=30000, step=1000, unit_of_measurement="W"
@@ -693,7 +714,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_MIN_CAR_CHARGING_THRESHOLD,
-                default=DEFAULT_MIN_CAR_CHARGING_THRESHOLD
+                default=self.data.get(CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=50, max=500, step=50, unit_of_measurement="W"
@@ -701,7 +722,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_PREDICTIVE_CHARGING_MIN_SOC,
-                default=DEFAULT_PREDICTIVE_CHARGING_MIN_SOC
+                default=self.data.get(CONF_PREDICTIVE_CHARGING_MIN_SOC, DEFAULT_PREDICTIVE_CHARGING_MIN_SOC)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=20, max=60, unit_of_measurement="%"
@@ -709,7 +730,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(
                 CONF_BASE_GRID_SETPOINT,
-                default=DEFAULT_BASE_GRID_SETPOINT
+                default=self.data.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1000, max=10000, step=100, unit_of_measurement="W"
@@ -1043,6 +1064,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 default=working_data.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC),
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=5, max=50, unit_of_measurement="%")
+            ),
+            vol.Optional(
+                CONF_SOC_BUFFER_TARGET,
+                default=working_data.get(CONF_SOC_BUFFER_TARGET, DEFAULT_SOC_BUFFER_TARGET),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=30, max=80, unit_of_measurement="%")
+            ),
+            vol.Optional(
+                CONF_SOC_PRICE_MULTIPLIER_MAX,
+                default=working_data.get(CONF_SOC_PRICE_MULTIPLIER_MAX, DEFAULT_SOC_PRICE_MULTIPLIER_MAX),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=1.0, max=2.0, step=0.05)
             ),
             vol.Optional(
                 CONF_VERY_LOW_PRICE_THRESHOLD,
