@@ -19,6 +19,8 @@ from .const import (
     CONF_PHASE_MODE,
     CONF_PHASES,
     CONF_BATTERY_PHASE_ASSIGNMENTS,
+    CONF_SOC_PRICE_MULTIPLIER_MAX,
+    CONF_SOC_BUFFER_TARGET,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
@@ -27,13 +29,15 @@ from .const import (
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+    DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
+    DEFAULT_SOC_BUFFER_TARGET,
     PHASE_MODE_SINGLE,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 # Current config version
-CURRENT_VERSION = 10
+CURRENT_VERSION = 11
 
 
 def _validate_numeric_config(
@@ -236,5 +240,26 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             version=10
         )
         _LOGGER.info("Migration to version 10 complete")
+
+    if entry.version == 10:
+        # Migrate from version 10 to version 11
+        new_data = {**entry.data}
+
+        # Add SOC-based price multiplier settings
+        if CONF_SOC_PRICE_MULTIPLIER_MAX not in new_data:
+            new_data[CONF_SOC_PRICE_MULTIPLIER_MAX] = DEFAULT_SOC_PRICE_MULTIPLIER_MAX
+            _LOGGER.info("Added soc_price_multiplier_max: %.2f", DEFAULT_SOC_PRICE_MULTIPLIER_MAX)
+
+        if CONF_SOC_BUFFER_TARGET not in new_data:
+            new_data[CONF_SOC_BUFFER_TARGET] = DEFAULT_SOC_BUFFER_TARGET
+            _LOGGER.info("Added soc_buffer_target: %d%%", DEFAULT_SOC_BUFFER_TARGET)
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=11
+        )
+
+        _LOGGER.info("Migration to version 11 complete")
 
     return True

@@ -57,6 +57,8 @@ CONF_PRICE_ADJUSTMENT_MULTIPLIER = "price_adjustment_multiplier"
 CONF_PRICE_ADJUSTMENT_OFFSET = "price_adjustment_offset"
 CONF_FEEDIN_ADJUSTMENT_MULTIPLIER = "feedin_adjustment_multiplier"
 CONF_FEEDIN_ADJUSTMENT_OFFSET = "feedin_adjustment_offset"
+CONF_SOC_PRICE_MULTIPLIER_MAX = "soc_price_multiplier_max"
+CONF_SOC_BUFFER_TARGET = "soc_buffer_target"
 
 # Default Threshold Values
 DEFAULT_MIN_SOC = 20
@@ -82,6 +84,8 @@ DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER = 1.0  # No adjustment by default
 DEFAULT_PRICE_ADJUSTMENT_OFFSET = 0.0  # €/kWh offset
 DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER = 1.0  # No adjustment by default
 DEFAULT_FEEDIN_ADJUSTMENT_OFFSET = 0.0  # €/kWh offset
+DEFAULT_SOC_PRICE_MULTIPLIER_MAX = 1.3  # Accept prices up to 130% of threshold when battery is critically low
+DEFAULT_SOC_BUFFER_TARGET = 50  # Target SOC % above which no price relaxation is applied
 
 # Algorithm Constants
 DEFAULT_BASE_GRID_SETPOINT = 2500  # Conservative base grid limit (W)
@@ -157,4 +161,4 @@ MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT = "charger_limit"
 MANUAL_OVERRIDE_TARGET_GRID_SETPOINT = "grid_setpoint"
 MANUAL_OVERRIDE_TARGET_ALL = "all"
 
-INTEGRATION_VERSION = "4.5.2"
+INTEGRATION_VERSION = "4.6.1"
