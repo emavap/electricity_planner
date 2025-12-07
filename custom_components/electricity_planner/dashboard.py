@@ -36,7 +36,7 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 MANAGED_KEY = "electricity_planner_managed"
-MANAGED_VERSION = 1
+MANAGED_VERSION = 2  # Bumped: Added Entity Status card
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 
 ENTITY_WAIT_TIMEOUT = 30
