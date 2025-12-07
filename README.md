@@ -1,6 +1,28 @@
 # Electricity Planner
 
-Electricity Planner is a Home Assistant custom integration that turns Nord Pool market data and your home telemetry into actionable, plain‑language automation signals. It never drives hardware directly. Instead, it delivers boolean decisions, grid power limits and diagnostics you can wire into your own battery, inverter and EV workflows.
+**Version 4.7.1** | **Config Schema Version 11** | **Home Assistant 2024.4+**
+
+Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
+
+---
+
+## Table of Contents
+
+1. [Quick Start](#1-quick-start)
+2. [Decision Pipeline](#2-decision-pipeline)
+3. [Pricing Models](#3-pricing-models)
+4. [Solar & Battery Behaviour](#4-solar--battery-behaviour)
+5. [Three-Phase Support](#5-three-phase-support)
+6. [Car Charging Logic](#6-car-charging-logic)
+7. [Manual Overrides & Services](#7-manual-overrides--services)
+8. [Entities Reference](#8-entities-reference)
+9. [Configuration Options](#9-configuration-options)
+10. [Automation Examples](#10-automation-examples)
+11. [Dashboard Setup](#11-dashboard-setup)
+12. [Troubleshooting](#12-troubleshooting)
+13. [Testing & Development](#13-testing--development)
+14. [FAQ](#14-faq)
+15. [Contributing](#15-contributing)
 
 ---
 
@@ -8,17 +30,19 @@ Electricity Planner is a Home Assistant custom integration that turns Nord Pool 
 
 ### Requirements
 
-- Home Assistant 2024.4+
-- Nord Pool integration providing:
+- **Home Assistant 2024.4+**
+- **Nord Pool integration** providing:
   - `current_price`
   - `highest_price_today`
   - `lowest_price_today`
   - `next_hour_price`
-- At least one battery SOC sensor (percentage, optional capacity)
-- Solar production (W) and house consumption (W) sensors
-- Optional but recommended:
+- **At least one battery SOC sensor** (percentage, optional capacity in kWh)
+- **Solar production** (W) and **house consumption** (W) sensors
+- **Optional but recommended:**
   - EV charging power sensor (W)
   - Monthly grid peak entity (W)
+  - Transport cost sensor (€/kWh)
+  - Grid power sensor (W, for real-time import/export tracking)
 
 ### Installation
 
@@ -27,93 +51,79 @@ Electricity Planner is a Home Assistant custom integration that turns Nord Pool 
 | **HACS** | 1. HACS → Integrations → `+` → Custom repository `https://github.com/emavap/electricity_planner` (Integration)<br>2. Install the integration<br>3. Restart Home Assistant |
 | **Manual** | 1. Download the latest release archive<br>2. Copy `custom_components/electricity_planner/` into `<config>/custom_components/`<br>3. Restart Home Assistant |
 
-### Optional Dashboard Setup
-
-The integration includes a pre-built Lovelace dashboard template. To use it:
-
-**Prerequisites - Install these HACS frontend cards:**
-
-| Card | Purpose | Installation |
-|------|---------|--------------|
-| [**Gauge Card Pro**](https://github.com/benjamin-dcs/gauge-card-pro) | Dynamic price threshold gauges | HACS → Frontend → `+` → Search "Gauge Card Pro" |
-| [**ApexCharts Card**](https://github.com/RomRider/apexcharts-card) | Historical price charts and forecasts | HACS → Frontend → `+` → Search "ApexCharts Card" |
-| [**Button Card**](https://github.com/custom-cards/button-card) | Manual override controls | HACS → Frontend → `+` → Search "Button Card" |
-
-**To add the dashboard:**
-1. Download `dashboard_template.yaml` from the [latest release](https://github.com/emavap/electricity_planner/releases/latest)
-2. Settings → Dashboards → Add Dashboard
-3. Type: "Panel (1 card)"
-4. Paste the template YAML
-5. Replace placeholder entity IDs with your actual sensor names
-
-> **Note:** Automatic dashboard provisioning is coming in a future release. For now, manual import is required.
-
 ### First-Time Configuration
 
-1. Settings → Devices & Services → `+ Add Integration` → search for **Electricity Planner**.
-2. Wizard steps:
-   - **Topology** – choose between single-phase and three-phase operation.
-   - **Entities** – select Nord Pool, battery, solar, consumption, EV sensors (per-phase when three-phase is selected).
-   - **SOC Thresholds** – min/max SOC, emergency threshold, predictive threshold.
-   - **Price Thresholds** – static ceiling, very-low-price %, feed‑in limits.
-   - **Power Limits** – max battery/car/grid power, minimum EV detection threshold.
-   - **Solar Parameters** – significant surplus threshold, solar-peak SOC override.
-3. Save and allow the coordinator to populate sensors (10–30 seconds).
+1. **Settings → Devices & Services → `+ Add Integration`** → search for **Electricity Planner**
+2. Complete the multi-step wizard:
+   - **Topology** – Single-phase or three-phase (L1/L2/L3) operation
+   - **Entities** – Nord Pool, battery SOC sensors, solar/consumption, EV sensors
+   - **Battery Capacities** – Per-battery kWh values and phase assignments (three-phase only)
+   - **SOC Thresholds** – min/max SOC, emergency threshold, predictive charging SOC
+   - **Price Thresholds** – static ceiling, very-low-price %, feed-in threshold
+   - **Power Limits** – max battery/car/grid power, base grid setpoint
+   - **Solar Parameters** – significant surplus threshold
+   - **Advanced** – Dynamic threshold, average threshold, SOC price multiplier settings
+3. Save and wait for the coordinator to populate sensors (~10–30 seconds)
 
-### Updating Configuration Later
+### Updating Configuration
 
-- Settings → Devices & Services → Electricity Planner → **Configure** to reopen the options flow.
-- All forms now merge your saved `options` with the original data, so defaults reflect the latest thresholds, multipliers, and per-battery capacities.
-- Submit only the pages you need to modify; unchanged values remain intact in Home Assistant’s options store.
-
-### Entities Exposed
-
-| Entity | Purpose |
-|--------|---------|
-| `binary_sensor.electricity_planner_battery_grid_charging` | “Can batteries charge from grid now?” (reason attribute) |
-| `binary_sensor.electricity_planner_car_grid_charging`     | “Can the EV draw grid energy now?” (reason attribute) |
-| `sensor.electricity_planner_decision_diagnostics`         | Full analysis context in attributes |
-| `sensor.electricity_planner_battery_soc_average`          | Optional automation helper |
-| `sensor.electricity_planner_grid_setpoint` | Suggested grid power limit (if enabled) |
-| `sensor.electricity_planner_car_charger_limit` | Recommended EVSE limit |
-| Diagnostic sensors (current price, feed-in price, thresholds, solar surplus, etc.) | Visualisation and troubleshooting |
-
-> **Three-phase note:** both `*_grid_charging` binary sensors expose a `phase_results` attribute containing per-phase grid setpoints, component breakdowns, reasons, and capacity shares. `sensor.electricity_planner_decision_diagnostics` mirrors this data alongside `phase_details`, `phase_capacity_map`, and `phase_batteries` for dashboard cards or advanced automations.
-> Under the hood the decision engine always evaluates a single aggregated “virtual phase”; three-phase mode simply aggregates telemetry before the run and then distributes the resulting power limits back across phases. Tests now assert that three-phase decisions match single-phase logic, so you can move between topologies without behavioural drift.
+- **Settings → Devices & Services → Electricity Planner → Configure** reopens the options flow
+- Forms merge your saved `options` with original data—defaults always reflect current values
+- Submit only the steps you need to modify; unchanged values persist automatically
 
 ---
 
-## 2. How It Thinks – Decision Pipeline
+## 2. Decision Pipeline
 
-1. **Data validation** – ensure every configured entity is available and convertible to numbers; fall back to safe defaults where possible.
-2. **Price analysis** – compute position inside the daily range, volatility, next-hour trend, “very low” percentage band, and optionally the dynamic confidence score.
-3. **Battery analysis** – capacity-weighted SOC stats, remaining headroom, minimum/maximum thresholds, emergency detection.
-4. **Power analysis** – real-time solar production, house consumption, solar surplus and EV draw; flag “significant” surplus once it exceeds the configured watt threshold.
-5. **Solar allocation** – reserve surplus for the EV’s current draw, then batteries, then bonus EV power once every battery is near its target SOC. Allocation never exceeds the measured surplus.
-6. **Strategy evaluation** – ordered strategy set (Emergency, Solar priority, Very low price, Dynamic pricing, Predictive wait, Solar-aware, SOC safety nets) returns “charge” or “wait” with a human-readable reason.
-7. **Car decision logic** – applies hysteresis for OFF→ON transitions with threshold floor protection:
-   - **OFF → ON**: Requires current price below threshold AND next N hours (configurable, default 2h) all below threshold
-   - **ON → OFF**: Immediately when current price exceeds threshold
-   - **Threshold floor**: Locks threshold when starting, uses `max(locked, current)` during session to prevent mid-session interruptions from threshold drift
-   - Uses exact interval resolution detection (15-min or hourly) with gap detection
-   - Very-low prices still require the minimum window before starting
-8. **Feed-in & safety outputs** – compute charger limit, grid setpoint, and whether to export surplus via the configured feed-in pricing model.
-9. **Diagnostics** – publish every step and reason through `sensor.electricity_planner_decision_diagnostics`.
+The integration processes data through a multi-stage pipeline every 30 seconds (or on entity state changes):
 
-### Three-Phase Power Distribution (Topology = three_phase)
+1. **Data Validation** – Ensures every configured entity is available and convertible to numbers; falls back to safe defaults where possible
 
-When three-phase mode is enabled, the planner keeps the decision logic identical to the single-phase algorithm while layering a per-phase aggregation/distribution pass:
+2. **Price Analysis** – Computes:
+   - Price position within daily range (0–100%)
+   - Volatility detection (high/medium/low)
+   - Next-hour price trend
+   - "Very low" percentage band check
+   - Dynamic confidence score (optional)
 
-1. **Per-phase inputs** – each configured leg (L1/L2/L3) supplies its own solar production and consumption sensors (both required), plus an optional EV/car power sensor.
-2. **Battery-to-phase mapping** – every battery can be assigned to one or more phases. Capacity values (kWh) are used as weights; if you omit a capacity, the coordinator falls back to a neutral `1.0` so the battery still receives allocations.
-3. **Aggregate decision** – the decision engine sums the per-phase inputs into a single “virtual phase” and runs the standard strategy stack. This keeps all price, SOC, and safety behaviour identical between topologies.
-4. **Phase distribution** – the aggregated decision is broken back down:
-   - Battery grid power is split proportionally to the capacity share of each phase.
-   - Car grid power and EV charger limits are split evenly across the phases that have a car sensor configured.
-   - Phases without relevant hardware (no batteries, no EV sensor) automatically receive a 0W allocation and explanatory reason (“No batteries assigned to this phase”).
-5. **Diagnostics & dashboards** – `phase_results`, `phase_details`, `phase_capacity_map`, and `phase_batteries` attributes expose the per-phase breakdown for automation templates and dashboards. `capacity_share` shows the fractional weight (0–1), while `capacity_share_kwh` reports the raw weighted kWh.
+3. **Battery Analysis** – Calculates:
+   - Capacity-weighted average SOC across multiple batteries
+   - Min/max SOC thresholds
+   - Remaining headroom
+   - Emergency SOC detection
 
-Because the aggregated decision is made before the distribution step, cross-phase energy shifts are supported: for example, solar production on L1 can charge a battery assigned to all three phases and, after distribution, provide grid import headroom for L2/L3 loads.
+4. **Power Analysis** – Measures:
+   - Real-time solar production
+   - House consumption (with and without EV)
+   - Solar surplus available for batteries/EV/export
+   - "Significant surplus" flag when exceeding configured threshold
+
+5. **Solar Allocation** – Distributes surplus:
+   - Reserve for current EV draw
+   - Then batteries
+   - Bonus EV power once batteries near target SOC
+   - Never exceeds measured surplus
+
+6. **Strategy Evaluation** – Ordered strategy stack returns "charge" or "wait" with human-readable reason:
+   - **SolarPriorityStrategy** (Priority 1) – Prefer solar over grid
+   - **PredictiveChargingStrategy** (Priority 2) – Delay for better prices (advisory)
+   - **VeryLowPriceStrategy** (Priority 3) – Charge at excellent prices
+   - **SOCBufferChargingStrategy** (Priority 4) – Buffer charging at acceptable prices when SOC low
+   - **DynamicPriceStrategy** (Priority 5) – Dynamic price analysis with confidence scoring
+   - **SOCBasedChargingStrategy** (Priority 6) – Safety net for low SOC situations
+
+7. **Car Decision Logic** – Applies hysteresis for OFF→ON transitions (see [Car Charging Logic](#6-car-charging-logic))
+
+8. **Feed-in & Safety Outputs** – Computes charger limit, grid setpoint, and feed-in solar decision
+
+9. **Diagnostics** – Publishes every step and reason through `sensor.electricity_planner_decision_diagnostics`
+
+### PriceThresholdGuard
+
+Before strategies run, the **PriceThresholdGuard** enforces:
+- **Price ceiling**: Blocks charging when price exceeds threshold (with SOC-based relaxation)
+- **Emergency override**: Forces charging when SOC ≤ emergency threshold regardless of price
+- **SOC price multiplier**: Relaxes threshold when battery is low (configurable 1.0–1.3×)
 
 ---
 
@@ -121,167 +131,545 @@ Because the aggregated decision is made before the distribution step, cross-phas
 
 ### Static Threshold
 
-Set `price_threshold` to your “never exceed” value (e.g. €0.15). Batteries and cars only consider grid charging beneath that ceiling.
+Set `price_threshold` to your maximum acceptable price (e.g., €0.15/kWh). Batteries and EVs only consider grid charging beneath this ceiling.
 
-### Dynamic Threshold (optional)
+### Dynamic Threshold (Optional)
 
-Enable `use_dynamic_threshold` to turn the static ceiling into a hard cap and let the dynamic confidence engine pick the best times inside it.
+Enable `use_dynamic_threshold` to use intelligent confidence-based pricing within your static ceiling:
 
-- **Inputs:** current/high/low price, next-hour price, volatility, configured confidence baseline, SOC, solar surplus.
-- **Adjustments:** Low SOC relaxes confidence; high SOC tightens it. Significant solar surplus tightens confidence; no surplus relaxes it.
-- **Decision:** Charge when calculated confidence ≥ adjusted requirement. Reasons include the computed confidence and SOC/solar context for transparency.
+- **Inputs:** Current/high/low price, next-hour price, volatility, SOC, solar surplus
+- **Volatility adaptation:**
+  - High volatility (>50% range): Charge only at bottom 40% of acceptable range
+  - Medium volatility (30–50%): Charge at bottom 60%
+  - Low volatility (<30%): Charge at bottom 80%
+- **Confidence scoring:** Weighted combination of price quality, dynamic threshold position, and next-hour trend
+- **SOC/Solar adjustments:** Low SOC relaxes requirements; significant solar tightens them
 
-### Very-Low Price Band
+### Average Threshold (Optional)
 
-`very_low_price_threshold` (default 30 %) marks the bottom slice of each day’s range. Whenever price slips into that band:
+Enable `use_average_threshold` to calculate a 24-hour rolling average price as your threshold:
 
-- **Batteries** always prioritize free solar over grid. If SOC ≥ 50 % and significant solar surplus exists, grid charging is blocked (even at very low prices) to preserve space for free solar.
-- **EVs** charge immediately (subject to hysteresis window) regardless of surplus. Very low prices override solar preference for cars since they need more energy.
+- Uses future Nord Pool prices when available (preferred)
+- Backfills with recent past prices when future data < 24 hours
+- Requires minimum 24-hour window for stable threshold
+- Hysteresis protection (3 consecutive valid calculations)
+- Graceful fallback to static threshold when insufficient data
+
+### Price Adjustments
+
+Configure price adjustments to account for taxes, fees, or currency conversion:
+
+- **`price_adjustment_multiplier`** (default: 1.0) – Multiplies raw Nord Pool prices
+- **`price_adjustment_offset`** (default: 0.0) – Adds fixed amount after multiplication
+- **`feedin_adjustment_multiplier`** (default: 1.0) – Multiplies feed-in prices
+- **`feedin_adjustment_offset`** (default: 0.0) – Adds fixed amount to feed-in prices
+- **`transport_cost_entity`** – Optional sensor for dynamic transport costs
+
+**Formula:** `adjusted_price = (raw_price × multiplier) + offset + transport_cost`
 
 ---
 
 ## 4. Solar & Battery Behaviour
 
-| Situation | Battery decision | Car decision |
-|-----------|------------------|--------------|
-| **Significant surplus, SOC ≥ 50 %** | Grid charging always blocked to preserve space for free solar (even at very low prices). | Very-low prices always permitted for cars regardless of solar. |
-| **Significant surplus, SOC low** | Grid used only if strategies approve (e.g. emergency) | Same as above |
-| **No surplus** | Normal price/SOC strategies apply | Hysteresis + price logic |
-| **Emergency SOC (< `emergency_soc_threshold`)** | Always charge, price ignored | N/A – car still obeys its own logic |
+### Solar Priority
 
-All surplus allocation comes straight from the coordinator’s measured data—no forecasts are required or considered.
+When solar surplus exceeds house consumption:
+1. **Batteries first** – Solar charges batteries before considering grid
+2. **EV bonus** – Once batteries approach target SOC, excess solar goes to EV
+3. **Grid charging blocked** – No grid charging while significant solar available
 
----
+### SOC-Based Price Relaxation
 
-## 5. Outputs & Monitoring
+When battery SOC is low, the integration relaxes price requirements to prevent peak demand issues:
 
-### Decision Diagnostics (`sensor.electricity_planner_decision_diagnostics`)
+| SOC Level | Price Multiplier | Effect |
+|-----------|------------------|--------|
+| ≥ Buffer Target (default 50%) | 1.0× | No relaxation |
+| At Emergency SOC (default 15%) | Up to 1.3× | Accept 30% higher prices |
+| Between | Linear interpolation | Gradual relaxation |
 
-Key attribute groups:
+Configure via:
+- **`soc_price_multiplier_max`** (default: 1.3) – Maximum multiplier at emergency SOC
+- **`soc_buffer_target`** (default: 50%) – SOC above which no relaxation applies
 
-- `decisions` – boolean outcomes (`battery_grid_charging`, `car_grid_charging`, `feedin_solar`) with reasons.
-- `price_analysis` – current price, highest/lowest, position, volatility, dynamic confidence, hysteresis flags.
-- `battery_analysis` – average/min/max SOC, thresholds, remaining capacity, availability status.
-- `power_analysis` – solar production, house consumption, surplus, EV draw, significant-surplus flag.
-- `power_allocation` – where surplus is assigned (battery, EV, export).
-- `time_context` – night/peak/evening flags, winter detection.
-- `configured_limits` – the effective power and SOC limits currently applied.
-- Feed-in attributes (`feedin_solar`, `feedin_effective_price`, `feedin_threshold`) always reflect the merged configuration (entry data + options), so dashboard values stay aligned with any tweaks made in the options flow.
+### Multi-Battery Support
 
-### Example Reason Strings
-
-- `battery_grid_charging_reason`: "Significant solar surplus (2800W) available – SOC 62% ≥ 50% so waiting for free solar (even at very low prices)"
-- `car_grid_charging_reason`: “Very low price (0.062€/kWh) – bottom 30% of daily range (2h+ window available)”
-- `feedin_solar_reason`: “Net feed-in price 0.125€/kWh ≥ 0.050€/kWh – enable solar export (surplus: 1800W)”
-
-### Forecast Insights (`sensor.electricity_planner_price_forecast_insights`)
-
-- Publishes the **cheapest upcoming interval** and the **best continuous charging window** that satisfies your minimum duration.
-- Attributes include `cheapest_interval_*`, `best_window_*`, the evaluated timestamp, and the average price threshold used in the analysis.
-- Exposes the cheapest price as the sensor value, so you can build threshold-based automations or alerting directly in Lovelace.
-
-### Manual Override Services
-
-Two services let you temporarily force the planner to charge or wait:
-
-- `electricity_planner.set_manual_override`
-- `electricity_planner.clear_manual_override`
-
-Usage highlights:
-
-- `target` accepts `battery`, `car`, or `both`.
-- `action` is `force_charge` or `force_wait`.
-- `duration` (minutes) is optional; omit it for an indefinite override and clear it later.
-- `entry_id` is optional when you have **one** Electricity Planner instance. If you run multiple instances, pass the desired config entry ID explicitly.
-- Overrides are reflected in `sensor.electricity_planner_decision_diagnostics` under `manual_overrides`, including the reason, start time, and expiry.
-- The bundled dashboard prompts you for the duration each time you trigger a manual override; enter the number of minutes (1–1440) when the dialog appears.
-
-### Quick Troubleshooting Checklist
-
-| Symptom | What to inspect |
-|---------|-----------------|
-| Planner never charges | `price_analysis` attributes – is `data_available` false, or is `current_price > price_threshold`? |
-| Batteries refuse grid charging | `battery_analysis.average_soc` and `power_analysis.significant_solar_surplus` – you may be within solar-only territory. |
-| EV stops unexpectedly | `car_grid_charging_reason` – look for “less than X hours of low prices ahead” or high price threshold messages. |
-| No updates | Ensure source sensors publish numeric values; check HA logs for warnings emitted by the coordinator. |
+The integration supports multiple batteries with:
+- **Capacity-weighted average SOC** – Larger batteries have more influence
+- **Per-battery capacity configuration** – Set kWh for each battery sensor
+- **Phase assignments** (three-phase mode) – Assign batteries to L1/L2/L3
 
 ---
 
-## 6. Automation & Dashboard Ideas
+## 5. Three-Phase Support
 
-### Example Library
+Enable three-phase mode for installations with phase-specific batteries or inverters:
 
-Looking for ready-made blueprints? The `examples/` folder ships with:
-- **PDF walkthrough** – `examples/Electricity Planner – Home Assistant.pdf` shows a complete dashboard and automation wiring.
-- **Automation collection** – `examples/automations/` contains drop-in YAML snippets:
-  - `car_charger_dynamic_control.yaml` – EV charging orchestration with power limits and price guardrails
-  - `solar_feedin_control.yaml` – inverter throttling to respect feed-in profitability
-  - `victron_grid_setpoint.yaml` – sync grid targets into Victron ESS
-  - `Control Luna Battery Forcible Charge.yaml` – force-charge Huawei Luna batteries on planner triggers
-  - `Recover Nord Pool when price sensor is unavailable.yaml` – automatic fallback when Nord Pool sensors glitch
+### Configuration
 
-Copy any of the files into your Home Assistant config and adjust entity IDs as described in `examples/automations/README.md`.
+1. Select **"Three-phase"** in the Topology step
+2. Configure per-phase entities:
+   - Solar production per phase
+   - House consumption per phase
+   - Battery SOC sensors per phase
+   - Battery power sensors per phase (optional)
+3. Assign batteries to phases in the Battery Capacities step
 
-### Automation Hooks
+### How It Works
 
-- Use the `battery_grid_charging` and `car_grid_charging` binary sensors to trigger inverter or EVSE service calls.
-- Drive power limits from `number.electricity_planner_charger_limit` / `number.electricity_planner_grid_setpoint`.
-- Use `sensor.electricity_planner_decision_diagnostics` attributes in templates for advanced logic (e.g., avoid washing-machine start above a price threshold).
+1. **Aggregation** – Telemetry from all phases is aggregated into a single "virtual phase"
+2. **Decision** – The decision engine evaluates the aggregated data
+3. **Distribution** – Results are distributed back to phases based on capacity shares
 
-### Dashboard Snippets
+### Phase Attributes
+
+Binary sensors expose `phase_results` attribute containing:
+- Per-phase grid setpoints
+- Component breakdowns
+- Reasons per phase
+- Capacity shares
+
+---
+
+## 6. Car Charging Logic
+
+### Hysteresis Protection
+
+Car charging implements strict hysteresis to prevent short charging cycles:
+
+**OFF → ON Transition:**
+1. Current price must be below threshold
+2. Minimum charging window validation:
+   - Checks next N hours (configurable via `min_car_charging_duration`, default 2h)
+   - Detects interval resolution automatically (15-min or 1-hour)
+   - Builds timeline with explicit start/end times
+   - Accumulates continuous low-price duration from NOW
+   - Any gap >5 seconds breaks the window
+   - Returns true only if accumulated duration ≥ configured minimum
+
+**ON → OFF Transition:**
+- Immediately when current price exceeds threshold
+- No window check needed
+
+### Threshold Floor Pattern
+
+When car charging starts (OFF→ON):
+1. **Lock** – Current price threshold is locked
+2. **During charging** – Uses `max(locked_threshold, current_threshold)` as effective threshold
+3. **Effect** – Prevents threshold decreases from stopping mid-session
+4. **Allows increases** – Threshold increases take effect immediately
+5. **Clear** – Lock clears when charging stops (ON→OFF)
+
+This is critical for charging continuity when using dynamic or average thresholds.
+
+### Permissive Mode
+
+Enable the **Car Permissive Mode** switch to temporarily relax car charging requirements:
+
+- Increases effective threshold by configurable multiplier (default: 1.2 = 20% higher)
+- Useful when you need to charge regardless of optimal pricing
+- Configure via `car_permissive_threshold_multiplier`
+
+### Peak Import Limiting
+
+When configured with a grid power sensor and monthly peak entity:
+- Monitors real-time grid import
+- Reduces car charging power to stay below peak threshold
+- Exposes `car_peak_limited` and `car_peak_limit_threshold_w` in power analysis
+
+---
+
+## 7. Manual Overrides & Services
+
+### Available Services
+
+#### `electricity_planner.set_manual_override`
+
+Force a specific charging decision for a duration:
 
 ```yaml
-# Example conditional card snippet
-- type: conditional
-  conditions:
-    - entity: binary_sensor.electricity_planner_battery_grid_charging
-      state: "on"
-  card:
-    type: markdown
-    content: >
-      ### 🟢 Battery Charging Allowed
-      {{ state_attr('binary_sensor.electricity_planner_battery_grid_charging', 'reason') }}
+service: electricity_planner.set_manual_override
+data:
+  target: battery  # or "car"
+  action: charge   # or "block"
+  duration: 60     # minutes (optional, default: 60)
 ```
 
-For a ready-made Lovelace layout, mount the Nord Pool prices and diagnostic sensors on ApexCharts stacked columns (energy price + transport cost) and highlight the decision reasons alongside.
+| Parameter | Values | Description |
+|-----------|--------|-------------|
+| `target` | `battery`, `car` | Which system to override |
+| `action` | `charge`, `block` | Force charging on or block it |
+| `duration` | 1–1440 | Override duration in minutes |
+
+#### `electricity_planner.clear_manual_override`
+
+Remove an active override:
+
+```yaml
+service: electricity_planner.clear_manual_override
+data:
+  target: battery  # or "car"
+```
+
+### Override Behaviour
+
+- Overrides take precedence over all strategy decisions
+- Automatically expire after configured duration
+- Visible in `decision_diagnostics` sensor attributes
+- Can be cleared manually at any time
 
 ---
 
-## 7. Troubleshooting Reference
+## 8. Entities Reference
 
-- **Price unavailable** – ensure Nord Pool entities update at least hourly; during brief refresh periods, dynamic pricing tolerates `None` values.
-- **Transport cost jumps** – the coordinator builds a 7-day history. Until enough minutes are captured, the fallback is the live transport cost sensor.
-- **Car ignores very-low prices** – check `has_min_charging_window` in diagnostics. The car will only start (OFF→ON) if the next N hours (default 2h, configurable via `min_car_charging_duration`) are all below threshold. Once charging (ON state), it continues until price exceeds threshold. Adjust `min_car_charging_duration` to require shorter/longer guaranteed windows.
-- **Car stops mid-session unexpectedly** – check debug logs for threshold floor messages. The threshold floor pattern locks the price threshold when charging starts and uses `max(locked, current)` during the session. This prevents threshold drift (e.g., from 24h rolling average updates) from interrupting active charging. Threshold increases are still honored immediately.
-- **Feed-in never triggers** – verify `remaining_solar` in `power_allocation`, and ensure your feed-in multiplier/offset produce a net value above the threshold.
-- **Batteries never reach 100 %** – adjust `max_soc_threshold` upward, or reduce `significant_solar_threshold` if surplus is frequently just below the default 1 kW.
+### Binary Sensors (Automation)
+
+| Entity | Purpose | Key Attributes |
+|--------|---------|----------------|
+| `binary_sensor.electricity_planner_battery_grid_charging` | Should batteries charge from grid? | `reason`, `strategy`, `phase_results` |
+| `binary_sensor.electricity_planner_car_grid_charging` | Should EV charge from grid? | `reason`, `strategy`, `phase_results` |
+| `binary_sensor.electricity_planner_feedin_solar` | Should solar be exported to grid? | `feedin_threshold`, `current_price` |
+
+### Binary Sensors (Diagnostic)
+
+| Entity | Purpose | Key Attributes |
+|--------|---------|----------------|
+| `binary_sensor.electricity_planner_low_price` | Is current price below threshold? | `price_threshold`, `current_price` |
+| `binary_sensor.electricity_planner_solar_production` | Is solar currently producing? | `solar_production_w` |
+| `binary_sensor.electricity_planner_data_availability` | Is all required data available? | `missing_entities`, `last_update` |
+
+### Sensors (Automation)
+
+| Entity | Purpose | Unit |
+|--------|---------|------|
+| `sensor.electricity_planner_car_charger_limit` | Recommended EVSE power limit | W |
+| `sensor.electricity_planner_grid_setpoint` | Suggested grid power setpoint | W |
+
+### Sensors (Diagnostic)
+
+| Entity | Purpose | Unit |
+|--------|---------|------|
+| `sensor.electricity_planner_decision_diagnostics` | Full decision context | - |
+| `sensor.electricity_planner_current_electricity_price` | Current adjusted price | €/kWh |
+| `sensor.electricity_planner_solar_surplus_power` | Available solar surplus | W |
+| `sensor.electricity_planner_battery_soc_average` | Capacity-weighted average SOC | % |
+| `sensor.electricity_planner_data_unavailable_duration` | Time since data became unavailable | s |
+| `sensor.electricity_planner_entity_status` | Entity availability summary | - |
+| `sensor.electricity_planner_nord_pool_prices` | All Nord Pool price data | €/kWh |
+| `sensor.electricity_planner_price_threshold` | Current effective price threshold | €/kWh |
+| `sensor.electricity_planner_feedin_threshold` | Current feed-in threshold | €/kWh |
+| `sensor.electricity_planner_dynamic_threshold` | Dynamic threshold value | €/kWh |
+| `sensor.electricity_planner_average_threshold` | 24h rolling average threshold | €/kWh |
+| `sensor.electricity_planner_very_low_price_threshold` | Very low price cutoff | €/kWh |
+| `sensor.electricity_planner_soc_price_multiplier` | Current SOC-based multiplier | × |
+| `sensor.electricity_planner_effective_threshold` | Final threshold after all adjustments | €/kWh |
+| `sensor.electricity_planner_car_charging_window` | Remaining low-price window | min |
+| `sensor.electricity_planner_next_low_price_window` | Time until next charging window | min |
+
+### Switch
+
+| Entity | Purpose |
+|--------|---------|
+| `switch.electricity_planner_car_permissive_mode` | Toggle permissive car charging mode |
+
+### Decision Diagnostics Attributes
+
+The `decision_diagnostics` sensor exposes comprehensive data:
+
+```yaml
+# Price Analysis
+current_price: 0.12
+highest_price: 0.35
+lowest_price: 0.08
+price_position: 0.25
+price_threshold: 0.15
+dynamic_threshold: 0.11
+is_low_price: true
+
+# Battery Analysis
+average_soc: 45.5
+batteries_count: 2
+min_soc_threshold: 15
+max_soc_threshold: 95
+remaining_capacity_percent: 49.5
+
+# Power Analysis
+solar_production: 3500
+house_consumption: 1200
+solar_surplus: 2300
+has_solar_surplus: true
+significant_solar_surplus: true
+
+# Decision Results
+battery_should_charge: true
+battery_reason: "Very low price - charge recommended"
+battery_strategy: "VeryLowPriceStrategy"
+car_should_charge: true
+car_reason: "Price below threshold with valid charging window"
+
+# Three-Phase (when enabled)
+phase_results:
+  L1: { grid_setpoint: 2000, reason: "..." }
+  L2: { grid_setpoint: 1500, reason: "..." }
+  L3: { grid_setpoint: 1000, reason: "..." }
+```
 
 ---
 
-## 8. Testing & Development
+## 9. Configuration Options
 
-### Running the Suite (Docker)
+### Entity Selection
 
-```bash
-docker build -f Dockerfile.tests -t electricity-planner-tests .
-docker run --rm -v "$PWD":/app -w /app -e PYTHONPATH=/app electricity-planner-tests pytest
+| Option | Description | Required |
+|--------|-------------|----------|
+| `nordpool_current_price` | Current electricity price sensor | Yes |
+| `nordpool_highest_price` | Today's highest price sensor | Yes |
+| `nordpool_lowest_price` | Today's lowest price sensor | Yes |
+| `nordpool_next_hour_price` | Next hour price sensor | Yes |
+| `nordpool_config_entry` | Nord Pool integration entry (for forecast data) | No |
+| `battery_soc_entities` | List of battery SOC sensors | Yes |
+| `solar_production_entity` | Solar production power sensor | Yes |
+| `house_consumption_entity` | House consumption power sensor | Yes |
+| `car_charging_power_entity` | EV charging power sensor | No |
+| `grid_power_entity` | Grid import/export power sensor | No |
+| `monthly_peak_entity` | Monthly peak demand sensor | No |
+| `transport_cost_entity` | Dynamic transport cost sensor | No |
+
+### SOC Thresholds
+
+| Option | Default | Range | Description |
+|--------|---------|-------|-------------|
+| `min_soc_threshold` | 15% | 5–50% | Minimum battery SOC |
+| `max_soc_threshold` | 95% | 50–100% | Maximum battery SOC |
+| `emergency_soc_threshold` | 15% | 5–30% | Force charging below this |
+| `predictive_charging_soc` | 30% | 10–50% | SOC for predictive logic |
+| `soc_buffer_target` | 50% | 20–80% | SOC above which no price relaxation |
+| `soc_price_multiplier_max` | 1.3 | 1.0–2.0 | Max price multiplier at emergency SOC |
+
+### Price Thresholds
+
+| Option | Default | Range | Description |
+|--------|---------|-------|-------------|
+| `price_threshold` | 0.15 €/kWh | 0.01–1.0 | Maximum acceptable price |
+| `very_low_price_percent` | 30% | 5–50% | Bottom % of range = "very low" |
+| `feedin_threshold` | 0.10 €/kWh | 0.01–1.0 | Minimum price for solar export |
+| `use_dynamic_threshold` | false | - | Enable dynamic threshold |
+| `dynamic_threshold_confidence` | 70% | 50–95% | Confidence level for dynamic |
+| `use_average_threshold` | false | - | Enable 24h average threshold |
+| `price_adjustment_multiplier` | 1.0 | 0.5–2.0 | Price multiplier |
+| `price_adjustment_offset` | 0.0 | -0.5–0.5 | Price offset (€/kWh) |
+| `feedin_adjustment_multiplier` | 1.0 | 0.5–2.0 | Feed-in price multiplier |
+| `feedin_adjustment_offset` | 0.0 | -0.5–0.5 | Feed-in price offset |
+
+### Power Limits
+
+| Option | Default | Range | Description |
+|--------|---------|-------|-------------|
+| `max_battery_power` | 5000 W | 500–50000 | Max battery charging power |
+| `max_car_power` | 11000 W | 1000–22000 | Max EV charging power |
+| `max_grid_power` | 10000 W | 1000–50000 | Max grid import power |
+| `base_grid_setpoint` | 5000 W | 1000–15000 | Base grid setpoint |
+| `min_car_charging_power` | 1400 W | 500–3000 | Min power to detect EV charging |
+| `min_car_charging_duration` | 2 h | 0.5–8 | Min charging window for hysteresis |
+| `car_permissive_threshold_multiplier` | 1.2 | 1.0–2.0 | Permissive mode multiplier |
+
+### Solar Parameters
+
+| Option | Default | Range | Description |
+|--------|---------|-------|-------------|
+| `significant_solar_surplus` | 500 W | 100–5000 | Threshold for "significant" surplus |
+
+### Three-Phase Configuration
+
+| Option | Description |
+|--------|-------------|
+| `phase_mode` | `single` or `three_phase` |
+| `phases` | Per-phase entity configuration (L1/L2/L3) |
+| `battery_phase_assignments` | Map of battery entity → phase |
+| `battery_capacities` | Map of battery entity → kWh capacity |
+
+---
+
+## 10. Automation Examples
+
+### Basic Battery Charging Automation
+
+```yaml
+automation:
+  - alias: "Battery Grid Charging Control"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.electricity_planner_battery_grid_charging
+    action:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.electricity_planner_battery_grid_charging
+                state: "on"
+            sequence:
+              - service: number.set_value
+                target:
+                  entity_id: number.inverter_grid_charging_power
+                data:
+                  value: "{{ states('sensor.electricity_planner_grid_setpoint') | int }}"
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.electricity_planner_battery_grid_charging
+                state: "off"
+            sequence:
+              - service: number.set_value
+                target:
+                  entity_id: number.inverter_grid_charging_power
+                data:
+                  value: 0
 ```
 
-### Running Locally (optional)
+### EV Charger Control
 
-```bash
-pip install -r requirements-dev.txt
-export PYTHONPATH=.
-pytest
-# Run just the phase parity and distribution checks:
-pytest -k "three_phase_preserves_single_phase_logic or distribute_phase_decisions_spreads_car_without_phase_sensors or three_phase_falls_back_to_global_car_sensor"
+```yaml
+automation:
+  - alias: "EV Charging Control"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.electricity_planner_car_grid_charging
+    action:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.electricity_planner_car_grid_charging
+                state: "on"
+            sequence:
+              - service: switch.turn_on
+                target:
+                  entity_id: switch.ev_charger
+              - service: number.set_value
+                target:
+                  entity_id: number.ev_charger_current_limit
+                data:
+                  value: "{{ (states('sensor.electricity_planner_car_charger_limit') | int / 230) | round(0) }}"
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.electricity_planner_car_grid_charging
+                state: "off"
+            sequence:
+              - service: switch.turn_off
+                target:
+                  entity_id: switch.ev_charger
 ```
 
-Use a virtual environment (e.g., `python3 -m venv .venv && source .venv/bin/activate`) to keep dependencies isolated. All tests are written to run without spinning up Home Assistant itself—the project stubs the coordinator and entity layers where necessary.
+### Manual Override Button
 
-### Logging
+```yaml
+script:
+  force_battery_charge:
+    alias: "Force Battery Charge 1 Hour"
+    sequence:
+      - service: electricity_planner.set_manual_override
+        data:
+          target: battery
+          action: charge
+          duration: 60
 
-Add the following to `configuration.yaml` for verbose logs:
+  cancel_override:
+    alias: "Cancel Override"
+    sequence:
+      - service: electricity_planner.clear_manual_override
+        data:
+          target: battery
+```
+
+### Permissive Mode Toggle
+
+```yaml
+automation:
+  - alias: "Enable Permissive Mode When Car Plugged In"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.ev_cable_connected
+        to: "on"
+    condition:
+      - condition: numeric_state
+        entity_id: sensor.ev_battery_soc
+        below: 30
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.electricity_planner_car_permissive_mode
+```
+
+---
+
+## 11. Dashboard Setup
+
+### Prerequisites
+
+Install these HACS frontend cards:
+
+| Card | Purpose | Installation |
+|------|---------|--------------|
+| [**Gauge Card Pro**](https://github.com/benjamin-dcs/gauge-card-pro) | Dynamic price threshold gauges | HACS → Frontend → Search "Gauge Card Pro" |
+| [**ApexCharts Card**](https://github.com/RomRider/apexcharts-card) | Historical price charts | HACS → Frontend → Search "ApexCharts Card" |
+| [**Button Card**](https://github.com/custom-cards/button-card) | Manual override controls | HACS → Frontend → Search "Button Card" |
+
+### Dashboard Template
+
+1. Download `dashboard_template.yaml` from the [latest release](https://github.com/emavap/electricity_planner/releases/latest)
+2. Settings → Dashboards → Add Dashboard
+3. Type: "Panel (1 card)"
+4. Paste the template YAML
+5. Replace placeholder entity IDs with your actual sensor names
+
+See [DASHBOARD.md](DASHBOARD.md) for detailed dashboard configuration.
+
+---
+
+## 12. Troubleshooting
+
+### Common Issues
+
+#### "Data unavailable" warnings
+
+**Symptoms:** `binary_sensor.electricity_planner_data_availability` is `off`
+
+**Solutions:**
+1. Check `sensor.electricity_planner_entity_status` for missing entities
+2. Verify Nord Pool integration is working
+3. Ensure all configured sensors are available
+4. Check Home Assistant logs for entity errors
+
+#### Charging not starting despite low prices
+
+**Check:**
+1. Is `binary_sensor.electricity_planner_battery_grid_charging` actually `on`?
+2. Check the `reason` attribute for explanation
+3. Verify SOC is below `max_soc_threshold`
+4. Check if solar surplus is blocking grid charging
+5. Review `sensor.electricity_planner_decision_diagnostics` attributes
+
+#### Car charging stops unexpectedly
+
+**Possible causes:**
+1. Price exceeded threshold (check `reason` attribute)
+2. Minimum charging window not met (hysteresis protection)
+3. Peak import limiting activated (check `car_peak_limited` attribute)
+
+**Solutions:**
+1. Enable permissive mode for less strict thresholds
+2. Increase `min_car_charging_duration` for longer windows
+3. Adjust `price_threshold` or enable dynamic threshold
+
+#### Three-phase imbalance
+
+**Symptoms:** Uneven power distribution across phases
+
+**Solutions:**
+1. Verify battery phase assignments are correct
+2. Check per-phase entity configuration
+3. Review `phase_results` attribute for per-phase decisions
+
+### Debug Logging
+
+Enable debug logging in `configuration.yaml`:
 
 ```yaml
 logger:
@@ -291,31 +679,117 @@ logger:
 
 ---
 
-## 9. FAQ
+## 13. Testing & Development
 
-**Do I need solar forecasts?**  
-No. The planner uses only live production/consumption values. Forecast logic has been removed to reflect real-time conditions.
+### Running Tests
 
-**How do I change energy contract adjustments?**  
-In the options flow, set `price_adjustment_multiplier` / `price_adjustment_offset` (for consumption) and `feedin_adjustment_multiplier` / `feedin_adjustment_offset` (for export). The defaults model a “no adjustment” contract.
+Tests run via Docker (no local Python dependencies required):
 
-**Why does the car ignore a solar surplus yet the batteries pause?**  
-EV logic is intentionally independent—very-low market prices are an opportunity to buy energy even if solar is available. Batteries, however, avoid grid consumption when surplus and SOC ≥ 50 % to keep capacity free for solar.
+```bash
+# Build test image
+docker build -f Dockerfile.tests -t electricity-planner-tests .
 
-**Can I disable dynamic pricing entirely?**  
-Yes. Leave `use_dynamic_threshold` set to false. The integration will rely on the simple static threshold plus strategy safeguards.
+# Run all tests
+docker run --rm -v "$PWD":/app -w /app -e PYTHONPATH=/app electricity-planner-tests pytest
+
+# Run specific test file
+docker run --rm -v "$PWD":/app -w /app -e PYTHONPATH=/app electricity-planner-tests pytest tests/test_decision_engine.py
+
+# Run with coverage
+docker run --rm -v "$PWD":/app -w /app -e PYTHONPATH=/app electricity-planner-tests pytest --cov=custom_components/electricity_planner
+```
+
+### Development Workflow
+
+1. Make code changes
+2. Run tests to verify
+3. Copy `custom_components/electricity_planner/` to Home Assistant config
+4. Restart Home Assistant
+5. Check logs for errors
+
+### Code Structure
+
+```
+custom_components/electricity_planner/
+├── __init__.py           # Integration setup, service registration
+├── const.py              # Constants, configuration keys (65+ CONF_ constants)
+├── coordinator.py        # Data coordination, state management
+├── decision_engine.py    # Core charging algorithms (4500+ lines)
+├── strategies.py         # 6 strategy classes + StrategyManager
+├── dynamic_threshold.py  # DynamicThresholdAnalyzer class
+├── defaults.py           # Default values, SOC price multiplier calculation
+├── config_flow.py        # Multi-step configuration wizard
+├── sensor.py             # 19 sensor entities
+├── binary_sensor.py      # 6 binary sensor entities
+├── switch.py             # Car permissive mode switch
+├── migrations.py         # Config version migrations (v1→v11)
+├── manifest.json         # Integration metadata
+└── strings.json          # UI translations
+```
 
 ---
 
-## 10. Contributing
+## 14. FAQ
 
-Pull requests and discussions are welcome. Please:
+### Q: Does this integration control my inverter/charger directly?
 
-1. Fork and branch from `main`.
-2. Run `pytest`.
-3. Include a short description of behaviour changes or new logic in your PR summary.
-4. For significant UI or API changes, update this README accordingly—this file is the single source of documentation.
+**A:** No. Electricity Planner only provides boolean decisions and recommended power values. You must create automations to act on these signals.
+
+### Q: Can I use this without solar panels?
+
+**A:** Yes. Configure `solar_production_entity` to a helper that always returns 0, or leave solar-related decisions to default behaviour.
+
+### Q: How does the integration handle negative prices?
+
+**A:** Negative prices are treated as "very low" and will trigger charging recommendations. The price position calculation handles negative values correctly.
+
+### Q: What happens if Nord Pool data is unavailable?
+
+**A:** The integration falls back to safe defaults (no charging) and sets `binary_sensor.electricity_planner_data_availability` to `off`. Check `sensor.electricity_planner_data_unavailable_duration` for how long data has been missing.
+
+### Q: Can I use multiple instances for different systems?
+
+**A:** Currently, only one instance per Home Assistant installation is supported. Multi-instance support may be added in future versions.
+
+### Q: How do I migrate from an older version?
+
+**A:** Migrations are automatic. The integration detects your config version and upgrades through each version (v1→v2→...→v11). Check logs for migration messages.
+
+### Q: Why does car charging have hysteresis but battery charging doesn't?
+
+**A:** EV chargers often have minimum session requirements and frequent on/off cycling can damage equipment or confuse the vehicle. Batteries typically handle rapid state changes better.
 
 ---
 
-Happy planning! Put the planner’s boolean outputs and limits into your automations, let the diagnostics beat the guesswork, and enjoy cheaper, better-aligned charging. For questions or ideas, open an issue in the repository.***
+## 15. Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Write tests for new functionality
+4. Ensure all tests pass
+5. Submit a pull request
+
+### Reporting Issues
+
+When reporting issues, please include:
+- Home Assistant version
+- Integration version (check `manifest.json`)
+- Relevant log entries (with debug logging enabled)
+- Configuration (anonymized)
+- Steps to reproduce
+
+---
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+## Acknowledgements
+
+- [Nord Pool](https://www.nordpoolgroup.com/) for electricity market data
+- [Home Assistant](https://www.home-assistant.io/) community
+- All contributors and testers
