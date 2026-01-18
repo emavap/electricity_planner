@@ -157,6 +157,17 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         self._setup_entity_listeners()
 
+    def get_manual_override(self, key: str) -> dict[str, Any] | None:
+        """Get the manual override for a specific key.
+
+        Args:
+            key: The override key (e.g., "battery_grid_charging", "car_grid_charging")
+
+        Returns:
+            The override dict if active, None otherwise.
+        """
+        return self._manual_overrides.get(key)
+
     def _is_data_available(self, data: dict[str, Any]) -> bool:
         """Check if critical price data is available for decisions."""
         price_available = data.get("current_price") is not None

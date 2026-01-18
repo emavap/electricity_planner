@@ -19,6 +19,7 @@ from .const import (
     ATTR_GRID_SETPOINT_OVERRIDE,
     ATTR_REASON,
     ATTR_TARGET,
+    CONF_MAX_SOC_THRESHOLD,
     DOMAIN,
     MANUAL_OVERRIDE_ACTION_FORCE_CHARGE,
     MANUAL_OVERRIDE_ACTION_FORCE_WAIT,
@@ -37,7 +38,7 @@ from .migrations import CURRENT_VERSION, async_migrate_entry
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH, Platform.NUMBER]
 
 MANUAL_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
     {
@@ -110,8 +111,44 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
+# Options that can be updated without requiring a full reload
+# These are applied immediately via coordinator.config and decision_engine.refresh_settings()
+LIVE_UPDATE_OPTIONS = {
+    CONF_MAX_SOC_THRESHOLD,
+}
+
+
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Handle an options update."""
+    """Handle an options update.
+
+    For options in LIVE_UPDATE_OPTIONS, skip reload as they're updated in-place.
+    For other options (entity selections, etc.), perform a full reload.
+    """
+    coordinator: ElectricityPlannerCoordinator = hass.data[DOMAIN].get(entry.entry_id)
+    if coordinator is None:
+        await hass.config_entries.async_reload(entry.entry_id)
+        return
+
+    # Check if only live-updatable options changed
+    old_config = coordinator.config
+    new_options = dict(entry.data)
+    if entry.options:
+        new_options.update(entry.options)
+
+    # Find what changed
+    changed_keys = set()
+    for key in set(old_config.keys()) | set(new_options.keys()):
+        if old_config.get(key) != new_options.get(key):
+            changed_keys.add(key)
+
+    # If only live-update options changed, skip reload
+    if changed_keys and changed_keys.issubset(LIVE_UPDATE_OPTIONS):
+        _LOGGER.debug(
+            "Skipping reload - only live-update options changed: %s", changed_keys
+        )
+        return
+
+    # Full reload for other changes
     await hass.config_entries.async_reload(entry.entry_id)
 
 
