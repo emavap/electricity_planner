@@ -417,13 +417,26 @@ class ChargingDecisionEngine:
         self.validator = DataValidator()
         self.price_calculator = PriceCalculator()
         self._settings = EngineSettings.from_config(config, self.validator)
-        
+
         # Initialize strategy manager with dynamic threshold configuration
         self.strategy_manager = StrategyManager(
             use_dynamic_threshold=self._settings.use_dynamic_threshold
         )
-        
+
         self.power_validator = PowerAllocationValidator()
+
+    def refresh_settings(self, config: Dict[str, Any]) -> None:
+        """Refresh engine settings from updated config.
+
+        Call this after config changes to apply new thresholds immediately
+        without recreating the entire decision engine.
+
+        Args:
+            config: The updated configuration dictionary.
+        """
+        self.config = config
+        self._settings = EngineSettings.from_config(config, self.validator)
+        _LOGGER.debug("Decision engine settings refreshed")
 
     async def evaluate_charging_decision(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Evaluate whether to charge batteries and car from grid."""

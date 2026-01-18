@@ -89,6 +89,41 @@ from .migrations import CURRENT_VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
+# Entity keys that should be normalized (empty string -> None)
+OPTIONAL_ENTITY_KEYS = {
+    CONF_NORDPOOL_CONFIG_ENTRY,
+    CONF_SOLAR_PRODUCTION_ENTITY,
+    CONF_HOUSE_CONSUMPTION_ENTITY,
+    CONF_CAR_CHARGING_POWER_ENTITY,
+    CONF_MONTHLY_GRID_PEAK_ENTITY,
+    CONF_TRANSPORT_COST_ENTITY,
+    CONF_GRID_POWER_ENTITY,
+}
+
+
+def normalize_entity_values(data: dict[str, Any]) -> dict[str, Any]:
+    """Normalize empty strings to None for optional entity fields.
+
+    Home Assistant entity selectors may return empty strings when left blank.
+    This ensures we store None instead, which is properly handled downstream.
+    """
+    result = dict(data)
+    for key in OPTIONAL_ENTITY_KEYS:
+        if key in result and not result[key]:
+            result[key] = None
+    return result
+
+
+def _optional_entity_schema(key: str, default_value: Any) -> vol.Optional:
+    """Create vol.Optional schema, avoiding None defaults for entity selectors.
+
+    Entity selectors in Home Assistant don't handle None defaults well,
+    so we only set default if there's an actual value.
+    """
+    if default_value:
+        return vol.Optional(key, default=default_value)
+    return vol.Optional(key)
+
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Electricity Planner."""
@@ -156,10 +191,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     car_key = f"{phase_id}_{CONF_PHASE_CAR_ENTITY}"
                     battery_power_key = f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}"
 
-                    solar_entity = processed_input.pop(solar_key, None)
-                    consumption_entity = processed_input.pop(consumption_key, None)
-                    car_entity = processed_input.pop(car_key, None)
-                    battery_power_entity = processed_input.pop(battery_power_key, None)
+                    # Normalize empty strings to None for optional entity selectors
+                    solar_entity = processed_input.pop(solar_key, None) or None
+                    consumption_entity = processed_input.pop(consumption_key, None) or None
+                    car_entity = processed_input.pop(car_key, None) or None
+                    battery_power_entity = processed_input.pop(battery_power_key, None) or None
 
                     existing_phase = existing_phases.get(phase_id, {})
 
@@ -176,23 +212,24 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_PHASE_NAME: existing_phase.get(
                                 CONF_PHASE_NAME, DEFAULT_PHASE_NAMES[phase_id]
                             ),
-                            CONF_PHASE_SOLAR_ENTITY: solar_entity
-                            if solar_entity is not None
-                            else existing_phase.get(CONF_PHASE_SOLAR_ENTITY),
-                            CONF_PHASE_CONSUMPTION_ENTITY: consumption_entity
-                            if consumption_entity is not None
-                            else existing_phase.get(CONF_PHASE_CONSUMPTION_ENTITY),
                         }
-                        if car_entity or existing_phase.get(CONF_PHASE_CAR_ENTITY):
-                            phase_entry[CONF_PHASE_CAR_ENTITY] = (
-                                car_entity if car_entity is not None
-                                else existing_phase.get(CONF_PHASE_CAR_ENTITY)
-                            )
-                        if battery_power_entity or existing_phase.get(CONF_PHASE_BATTERY_POWER_ENTITY):
-                            phase_entry[CONF_PHASE_BATTERY_POWER_ENTITY] = (
-                                battery_power_entity if battery_power_entity is not None
-                                else existing_phase.get(CONF_PHASE_BATTERY_POWER_ENTITY)
-                            )
+                        # Only include entity keys if they have actual values
+                        resolved_solar = solar_entity or existing_phase.get(CONF_PHASE_SOLAR_ENTITY)
+                        if resolved_solar:
+                            phase_entry[CONF_PHASE_SOLAR_ENTITY] = resolved_solar
+
+                        resolved_consumption = consumption_entity or existing_phase.get(CONF_PHASE_CONSUMPTION_ENTITY)
+                        if resolved_consumption:
+                            phase_entry[CONF_PHASE_CONSUMPTION_ENTITY] = resolved_consumption
+
+                        resolved_car = car_entity or existing_phase.get(CONF_PHASE_CAR_ENTITY)
+                        if resolved_car:
+                            phase_entry[CONF_PHASE_CAR_ENTITY] = resolved_car
+
+                        resolved_battery_power = battery_power_entity or existing_phase.get(CONF_PHASE_BATTERY_POWER_ENTITY)
+                        if resolved_battery_power:
+                            phase_entry[CONF_PHASE_BATTERY_POWER_ENTITY] = resolved_battery_power
+
                         phases_config[phase_id] = phase_entry
 
                 self.data[CONF_PHASES] = phases_config
@@ -208,13 +245,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.data.pop(CONF_PHASES, None)
                 self.data.pop(CONF_BATTERY_PHASE_ASSIGNMENTS, None)
 
-            self.data.update(processed_input)
+            self.data.update(normalize_entity_values(processed_input))
             return await self.async_step_battery_capacities()
 
         schema_dict: dict[Any, Any] = {
-            vol.Optional(
+            _optional_entity_schema(
                 CONF_NORDPOOL_CONFIG_ENTRY,
-                default=self.data.get(CONF_NORDPOOL_CONFIG_ENTRY),
+                self.data.get(CONF_NORDPOOL_CONFIG_ENTRY),
             ): selector.ConfigEntrySelector(
                 selector.ConfigEntrySelectorConfig(integration="nordpool")
             ),
@@ -253,21 +290,21 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if phase_mode == PHASE_MODE_SINGLE:
             schema_dict.update(
                 {
-                    vol.Required(
+                    _optional_entity_schema(
                         CONF_SOLAR_PRODUCTION_ENTITY,
-                        default=self.data.get(CONF_SOLAR_PRODUCTION_ENTITY),
+                        self.data.get(CONF_SOLAR_PRODUCTION_ENTITY),
                     ): selector.EntitySelector(
                         selector.EntitySelectorConfig(domain="sensor")
                     ),
-                    vol.Required(
+                    _optional_entity_schema(
                         CONF_HOUSE_CONSUMPTION_ENTITY,
-                        default=self.data.get(CONF_HOUSE_CONSUMPTION_ENTITY),
+                        self.data.get(CONF_HOUSE_CONSUMPTION_ENTITY),
                     ): selector.EntitySelector(
                         selector.EntitySelectorConfig(domain="sensor")
                     ),
-                    vol.Optional(
+                    _optional_entity_schema(
                         CONF_CAR_CHARGING_POWER_ENTITY,
-                        default=self.data.get(CONF_CAR_CHARGING_POWER_ENTITY),
+                        self.data.get(CONF_CAR_CHARGING_POWER_ENTITY),
                     ): selector.EntitySelector(
                         selector.EntitySelectorConfig(domain="sensor")
                     ),
@@ -283,55 +320,43 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 battery_power_key = f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}"
 
                 schema_dict[
-                    vol.Optional(
-                        solar_key,
-                        default=existing.get(CONF_PHASE_SOLAR_ENTITY),
-                    )
+                    _optional_entity_schema(solar_key, existing.get(CONF_PHASE_SOLAR_ENTITY))
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 )
                 schema_dict[
-                    vol.Optional(
-                        consumption_key,
-                        default=existing.get(CONF_PHASE_CONSUMPTION_ENTITY),
-                    )
+                    _optional_entity_schema(consumption_key, existing.get(CONF_PHASE_CONSUMPTION_ENTITY))
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 )
                 schema_dict[
-                    vol.Optional(
-                        car_key,
-                        default=existing.get(CONF_PHASE_CAR_ENTITY),
-                    )
+                    _optional_entity_schema(car_key, existing.get(CONF_PHASE_CAR_ENTITY))
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 )
                 schema_dict[
-                    vol.Optional(
-                        battery_power_key,
-                        default=existing.get(CONF_PHASE_BATTERY_POWER_ENTITY),
-                    )
+                    _optional_entity_schema(battery_power_key, existing.get(CONF_PHASE_BATTERY_POWER_ENTITY))
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 )
 
         schema_dict.update(
             {
-                vol.Optional(
+                _optional_entity_schema(
                     CONF_MONTHLY_GRID_PEAK_ENTITY,
-                    default=self.data.get(CONF_MONTHLY_GRID_PEAK_ENTITY),
+                    self.data.get(CONF_MONTHLY_GRID_PEAK_ENTITY),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
-                vol.Optional(
+                _optional_entity_schema(
                     CONF_TRANSPORT_COST_ENTITY,
-                    default=self.data.get(CONF_TRANSPORT_COST_ENTITY),
+                    self.data.get(CONF_TRANSPORT_COST_ENTITY),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
-                vol.Optional(
+                _optional_entity_schema(
                     CONF_GRID_POWER_ENTITY,
-                    default=self.data.get(CONF_GRID_POWER_ENTITY),
+                    self.data.get(CONF_GRID_POWER_ENTITY),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -348,13 +373,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "next_price": "Next hour price from Nord Pool",
             "battery_soc": "Battery State of Charge entities",
             "monthly_grid_peak": "Current month grid peak in W (optional)",
-            "transport_cost": "Optional transport cost sensor (€/kWh) added to buy price",
+            "transport_cost": "Optional transport cost sensor (€/kWh) added to buy price, defaults to 0 if not configured",
+            "grid_power": "Optional total grid power sensor (W, positive=import). Used for peak shaving in 3-phase setups",
         }
         if phase_mode == PHASE_MODE_SINGLE:
             description_placeholders.update(
                 {
-                    "solar_production": "Current solar production in W",
-                    "house_consumption": "Current house power consumption in W",
+                    "solar_production": "Current solar production in W (optional)",
+                    "house_consumption": "Current house power consumption in W (optional)",
                     "car_charging": "Car charging power in W (optional)",
                 }
             )
@@ -676,6 +702,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self.data.update(user_input)
 
+            # Normalize empty strings to None for optional entity fields
+            self.data = normalize_entity_values(self.data)
+
             # Validate configuration consistency
             validation_errors = validate_config_consistency(self.data)
             if validation_errors:
@@ -856,10 +885,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 car_key = f"{phase_id}_{CONF_PHASE_CAR_ENTITY}"
                 battery_power_key = f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}"
 
-                solar_entity = updated_options.pop(solar_key, None)
-                consumption_entity = updated_options.pop(consumption_key, None)
-                car_entity = updated_options.pop(car_key, None)
-                battery_power_entity = updated_options.pop(battery_power_key, None)
+                # Normalize empty strings to None for optional entity selectors
+                solar_entity = updated_options.pop(solar_key, None) or None
+                consumption_entity = updated_options.pop(consumption_key, None) or None
+                car_entity = updated_options.pop(car_key, None) or None
+                battery_power_entity = updated_options.pop(battery_power_key, None) or None
 
                 existing_phase = existing_phases.get(phase_id, {})
                 if (
@@ -873,28 +903,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         CONF_PHASE_NAME: existing_phase.get(
                             CONF_PHASE_NAME, DEFAULT_PHASE_NAMES[phase_id]
                         ),
-                        CONF_PHASE_SOLAR_ENTITY: solar_entity
-                        if solar_entity is not None
-                        else existing_phase.get(CONF_PHASE_SOLAR_ENTITY),
-                        CONF_PHASE_CONSUMPTION_ENTITY: consumption_entity
-                        if consumption_entity is not None
-                        else existing_phase.get(CONF_PHASE_CONSUMPTION_ENTITY),
                     }
-                    car_value = (
-                        car_entity
-                        if car_entity is not None
-                        else existing_phase.get(CONF_PHASE_CAR_ENTITY)
-                    )
-                    if car_value:
-                        phase_entry[CONF_PHASE_CAR_ENTITY] = car_value
+                    # Only include entity keys if they have actual values
+                    resolved_solar = solar_entity or existing_phase.get(CONF_PHASE_SOLAR_ENTITY)
+                    if resolved_solar:
+                        phase_entry[CONF_PHASE_SOLAR_ENTITY] = resolved_solar
 
-                    battery_power_value = (
-                        battery_power_entity
-                        if battery_power_entity is not None
-                        else existing_phase.get(CONF_PHASE_BATTERY_POWER_ENTITY)
-                    )
-                    if battery_power_value:
-                        phase_entry[CONF_PHASE_BATTERY_POWER_ENTITY] = battery_power_value
+                    resolved_consumption = consumption_entity or existing_phase.get(CONF_PHASE_CONSUMPTION_ENTITY)
+                    if resolved_consumption:
+                        phase_entry[CONF_PHASE_CONSUMPTION_ENTITY] = resolved_consumption
+
+                    resolved_car = car_entity or existing_phase.get(CONF_PHASE_CAR_ENTITY)
+                    if resolved_car:
+                        phase_entry[CONF_PHASE_CAR_ENTITY] = resolved_car
+
+                    resolved_battery_power = battery_power_entity or existing_phase.get(CONF_PHASE_BATTERY_POWER_ENTITY)
+                    if resolved_battery_power:
+                        phase_entry[CONF_PHASE_BATTERY_POWER_ENTITY] = resolved_battery_power
 
                     phases_config[phase_id] = phase_entry
 
@@ -926,7 +951,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             updated_options[CONF_BATTERY_SOC_ENTITIES] = battery_entities
             updated_options[CONF_BATTERY_CAPACITIES] = battery_capacities
 
-            return self.async_create_entry(title="", data=updated_options)
+            # Normalize empty strings to None for optional entity fields
+            return self.async_create_entry(title="", data=normalize_entity_values(updated_options))
 
         schema_dict: dict[Any, Any] = {
             vol.Required(
@@ -941,9 +967,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
-            vol.Optional(
+            _optional_entity_schema(
                 CONF_NORDPOOL_CONFIG_ENTRY,
-                default=working_data.get(CONF_NORDPOOL_CONFIG_ENTRY),
+                working_data.get(CONF_NORDPOOL_CONFIG_ENTRY),
             ): selector.ConfigEntrySelector(
                 selector.ConfigEntrySelectorConfig(integration="nordpool")
             ),
@@ -981,21 +1007,21 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         # Single-phase fields (always shown to allow switching modes in one step)
         schema_dict.update({
-            vol.Optional(
+            _optional_entity_schema(
                 CONF_SOLAR_PRODUCTION_ENTITY,
-                default=working_data.get(CONF_SOLAR_PRODUCTION_ENTITY),
+                working_data.get(CONF_SOLAR_PRODUCTION_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
-            vol.Optional(
+            _optional_entity_schema(
                 CONF_HOUSE_CONSUMPTION_ENTITY,
-                default=working_data.get(CONF_HOUSE_CONSUMPTION_ENTITY),
+                working_data.get(CONF_HOUSE_CONSUMPTION_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
-            vol.Optional(
+            _optional_entity_schema(
                 CONF_CAR_CHARGING_POWER_ENTITY,
-                default=working_data.get(CONF_CAR_CHARGING_POWER_ENTITY),
+                working_data.get(CONF_CAR_CHARGING_POWER_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
@@ -1003,21 +1029,21 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         # Common optional fields
         schema_dict.update({
-            vol.Optional(
+            _optional_entity_schema(
                 CONF_MONTHLY_GRID_PEAK_ENTITY,
-                default=working_data.get(CONF_MONTHLY_GRID_PEAK_ENTITY),
+                working_data.get(CONF_MONTHLY_GRID_PEAK_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
-            vol.Optional(
+            _optional_entity_schema(
                 CONF_TRANSPORT_COST_ENTITY,
-                default=working_data.get(CONF_TRANSPORT_COST_ENTITY),
+                working_data.get(CONF_TRANSPORT_COST_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
-            vol.Optional(
+            _optional_entity_schema(
                 CONF_GRID_POWER_ENTITY,
-                default=working_data.get(CONF_GRID_POWER_ENTITY),
+                working_data.get(CONF_GRID_POWER_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
@@ -1242,33 +1268,33 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             for phase_id in PHASE_IDS:
                 phase_config = existing_phases.get(phase_id, {})
                 schema_dict[
-                    vol.Optional(
+                    _optional_entity_schema(
                         f"{phase_id}_{CONF_PHASE_SOLAR_ENTITY}",
-                        default=phase_config.get(CONF_PHASE_SOLAR_ENTITY),
+                        phase_config.get(CONF_PHASE_SOLAR_ENTITY),
                     )
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 )
                 schema_dict[
-                    vol.Optional(
+                    _optional_entity_schema(
                         f"{phase_id}_{CONF_PHASE_CONSUMPTION_ENTITY}",
-                        default=phase_config.get(CONF_PHASE_CONSUMPTION_ENTITY),
+                        phase_config.get(CONF_PHASE_CONSUMPTION_ENTITY),
                     )
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 )
                 schema_dict[
-                    vol.Optional(
+                    _optional_entity_schema(
                         f"{phase_id}_{CONF_PHASE_CAR_ENTITY}",
-                        default=phase_config.get(CONF_PHASE_CAR_ENTITY),
+                        phase_config.get(CONF_PHASE_CAR_ENTITY),
                     )
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 )
                 schema_dict[
-                    vol.Optional(
+                    _optional_entity_schema(
                         f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}",
-                        default=phase_config.get(CONF_PHASE_BATTERY_POWER_ENTITY),
+                        phase_config.get(CONF_PHASE_BATTERY_POWER_ENTITY),
                     )
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
