@@ -83,7 +83,7 @@ views:
                   green: 70
 
           - type: entities
-            title: Battery Controls
+            title: Controls
             show_header_toggle: false
             entities:
               - entity: number.electricity_planner_max_soc_threshold
@@ -92,6 +92,9 @@ views:
               - entity: switch.electricity_planner_disable_battery_charging
                 name: Disable Battery Charging
                 icon: mdi:battery-off
+              - entity: switch.electricity_planner_car_permissive_mode
+                name: Car Permissive Mode
+                icon: mdi:car-electric-outline
 
           # Overall decisions (aggregated)
           - type: entities
