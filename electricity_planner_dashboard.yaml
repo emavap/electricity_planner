@@ -141,6 +141,17 @@ views:
                   action: more-info
 
           - type: entities
+            title: Battery Controls
+            show_header_toggle: false
+            entities:
+              - entity: number.electricity_planner_max_soc_threshold
+                name: Max SOC Threshold
+                icon: mdi:battery-charging-high
+              - entity: switch.electricity_planner_disable_battery_charging
+                name: Disable Battery Charging
+                icon: mdi:battery-off
+
+          - type: entities
             title: Decisions
             show_header_toggle: false
             entities:

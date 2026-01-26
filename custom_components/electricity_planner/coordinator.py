@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -138,6 +140,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         }
         self._last_price_timeline: list[tuple[datetime, datetime, float]] | None = None
         self._last_price_timeline_generated_at: datetime | None = None
+        self._last_price_timeline_data_hash: str | None = None  # Hash of price data used to build timeline
         self._price_timeline_max_age = timedelta(hours=PRICE_TIMELINE_MAX_AGE_HOURS)
 
         # Car peak limit tracking (15-minute hold after 5 minutes of sustained peak exceedance)
@@ -1876,6 +1879,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         self._last_price_timeline = timeline
         self._last_price_timeline_generated_at = now
+        self._last_price_timeline_data_hash = self._compute_price_data_hash(prices_today, prices_tomorrow)
 
         # Identify the interval that covers the current time
         current_idx: int | None = None
@@ -1979,6 +1983,24 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         )
         return False
 
+    @staticmethod
+    def _compute_price_data_hash(
+        prices_today: dict[str, Any] | None,
+        prices_tomorrow: dict[str, Any] | None,
+    ) -> str:
+        """Compute a hash of the price data for cache invalidation.
+
+        This ensures the price timeline cache is invalidated when the underlying
+        price data changes, not just when it expires by age.
+        """
+        # Create a deterministic representation of the price data
+        data_repr = json.dumps(
+            {"today": prices_today, "tomorrow": prices_tomorrow},
+            sort_keys=True,
+            default=str,  # Handle datetime objects
+        )
+        return hashlib.md5(data_repr.encode()).hexdigest()
+
     def _calculate_forecast_summary(
         self,
         prices_today: dict[str, Any] | None,
@@ -1999,6 +2021,18 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                         (now - self._last_price_timeline_generated_at).total_seconds() / 3600)
             self._last_price_timeline = None
             self._last_price_timeline_generated_at = None
+            self._last_price_timeline_data_hash = None
+
+        # Compute hash of current price data to detect changes
+        current_price_hash = self._compute_price_data_hash(prices_today, prices_tomorrow)
+
+        # Invalidate cache if price data has changed
+        if (self._last_price_timeline is not None and
+            self._last_price_timeline_data_hash != current_price_hash):
+            _LOGGER.debug("Price data changed (hash mismatch), invalidating timeline cache")
+            self._last_price_timeline = None
+            self._last_price_timeline_generated_at = None
+            self._last_price_timeline_data_hash = None
 
         if not prices_today and not prices_tomorrow:
             if self._last_price_timeline:
@@ -2007,6 +2041,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             else:
                 self._last_price_timeline = None
                 self._last_price_timeline_generated_at = None
+                self._last_price_timeline_data_hash = None
                 return {"available": False}
         else:
             timeline = self._last_price_timeline or self._build_price_timeline(
@@ -2019,10 +2054,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             if timeline and self._last_price_timeline is None:
                 self._last_price_timeline = timeline
                 self._last_price_timeline_generated_at = now
+                self._last_price_timeline_data_hash = current_price_hash
 
         if not timeline:
             self._last_price_timeline = None
             self._last_price_timeline_generated_at = None
+            self._last_price_timeline_data_hash = None
             return {"available": False}
 
         # Consider only intervals that are in the future
@@ -2030,6 +2067,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         if not future_segments:
             self._last_price_timeline = None
             self._last_price_timeline_generated_at = None
+            self._last_price_timeline_data_hash = None
             return {"available": False}
 
         cheapest_segment = min(future_segments, key=lambda segment: segment[2])

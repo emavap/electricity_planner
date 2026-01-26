@@ -307,8 +307,7 @@ class DynamicPriceStrategy(ChargingStrategy):
             config_confidence = 0.6
         config_confidence = min(max(config_confidence, 0.3), 0.9)
 
-        # Get battery and solar info for context messages
-        average_soc = battery.get("average_soc")
+        # Get solar info for context messages (average_soc already fetched above)
         soc_available = average_soc is not None
 
         power = context.get("power_analysis", {})
