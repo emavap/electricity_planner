@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 import logging
 
 from .const import (
@@ -23,7 +23,7 @@ class ChargingStrategy(ABC):
     """Abstract base class for charging strategies."""
 
     @abstractmethod
-    def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
+    def should_charge(self, context: dict[str, Any]) -> tuple[bool, str]:
         """Determine if charging should occur."""
         pass
 
@@ -41,7 +41,7 @@ class ChargingStrategy(ABC):
 class SolarPriorityStrategy(ChargingStrategy):
     """Prefer solar charging over grid."""
     
-    def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
+    def should_charge(self, context: dict[str, Any]) -> tuple[bool, str]:
         """Check if solar should be used instead of grid."""
         allocation = context.get("power_allocation", {})
         battery = context.get("battery_analysis", {})
@@ -77,7 +77,7 @@ class PredictiveChargingStrategy(ChargingStrategy):
     signals - it never forces charging.
     """
 
-    def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
+    def should_charge(self, context: dict[str, Any]) -> tuple[bool, str]:
         """Check if we should wait for better prices."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
@@ -121,7 +121,7 @@ class PredictiveChargingStrategy(ChargingStrategy):
 class VeryLowPriceStrategy(ChargingStrategy):
     """Charge when price is in bottom percentage of daily range."""
 
-    def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
+    def should_charge(self, context: dict[str, Any]) -> tuple[bool, str]:
         """Check if price is very low."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
@@ -165,7 +165,7 @@ class SOCBufferChargingStrategy(ChargingStrategy):
     It recommends charging to build a buffer and prevent peak demand spikes.
     """
 
-    def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
+    def should_charge(self, context: dict[str, Any]) -> tuple[bool, str]:
         """Check if buffer charging should occur due to low SOC."""
         # Only triggers if threshold was relaxed (SOC multiplier > 1.0)
         if not context.get("threshold_relaxed", False):
@@ -212,7 +212,7 @@ class SOCBufferChargingStrategy(ChargingStrategy):
 class SOCBasedChargingStrategy(ChargingStrategy):
     """Charging based on SOC levels and live solar availability."""
 
-    def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
+    def should_charge(self, context: dict[str, Any]) -> tuple[bool, str]:
         """Check SOC-based charging conditions."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
@@ -260,7 +260,7 @@ class DynamicPriceStrategy(ChargingStrategy):
         """Initialize dynamic price strategy."""
         self.dynamic_analyzer = None
     
-    def should_charge(self, context: Dict[str, Any]) -> Tuple[bool, str]:
+    def should_charge(self, context: dict[str, Any]) -> tuple[bool, str]:
         """Check if charging should occur based on dynamic price analysis."""
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
@@ -391,7 +391,7 @@ class StrategyManager:
     
     def __init__(self, use_dynamic_threshold: bool = True):
         """Initialize strategy manager."""
-        self._last_trace: List[Dict[str, Any]] = []
+        self._last_trace: list[dict[str, Any]] = []
         # Core strategies in priority order
         # NOTE: EmergencyChargingStrategy was removed - emergency logic is handled
         # by the PriceThresholdGuard in evaluate() which overrides price threshold
@@ -416,7 +416,7 @@ class StrategyManager:
         # Sort by priority
         self.strategies.sort(key=lambda s: s.get_priority())
     
-    def evaluate(self, context: Dict[str, Any]) -> Tuple[bool, str]:
+    def evaluate(self, context: dict[str, Any]) -> tuple[bool, str]:
         """Evaluate all strategies and return decision.
 
         Strategy priority order:
@@ -437,7 +437,7 @@ class StrategyManager:
         - Force emergency charging when SOC is critically low (overrides price)
         """
         # Hard stop: Price too high (unless emergency or SOC-based relaxation applies)
-        trace: List[Dict[str, Any]] = []
+        trace: list[dict[str, Any]] = []
         price = context.get("price_analysis", {})
         current_price = price.get("current_price")
         stable_threshold = context.get("battery_stable_threshold")
@@ -610,7 +610,7 @@ class StrategyManager:
         self._last_trace = trace
         return False, default_reason
 
-    def get_dynamic_threshold(self, context: Dict[str, Any]) -> Optional[float]:
+    def get_dynamic_threshold(self, context: dict[str, Any]) -> float | None:
         """Get the current dynamic threshold if dynamic pricing is enabled.
 
         Returns None if dynamic threshold is not active or cannot be calculated.
@@ -642,6 +642,6 @@ class StrategyManager:
 
         return analysis.get("dynamic_threshold")
 
-    def get_last_trace(self) -> List[Dict[str, Any]]:
+    def get_last_trace(self) -> list[dict[str, Any]]:
         """Return a copy of the most recent strategy evaluation trace."""
         return list(self._last_trace)

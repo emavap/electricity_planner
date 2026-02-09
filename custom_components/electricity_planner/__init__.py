@@ -105,7 +105,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id)
+        coordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        # Unsubscribe from entity state change tracking
+        if hasattr(coordinator, "_entity_unsub") and coordinator._entity_unsub:
+            coordinator._entity_unsub()
         await async_remove_dashboard(hass, entry)
 
     return unload_ok

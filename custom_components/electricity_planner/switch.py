@@ -59,9 +59,7 @@ class CarPermissiveModeSwitch(CoordinatorEntity, SwitchEntity):
     @property
     def is_on(self) -> bool:
         """Return true if permissive mode is enabled."""
-        if self.coordinator.data is None:
-            return False
-        return self.coordinator.data.get("car_permissive_mode_active", False)
+        return self.coordinator._car_permissive_mode_active
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -88,12 +86,7 @@ class CarPermissiveModeSwitch(CoordinatorEntity, SwitchEntity):
             **kwargs: Additional keyword arguments (unused)
         """
         _LOGGER.info("Enabling car permissive charging mode")
-        # Safely update coordinator data with null check
-        if self.coordinator.data is not None:
-            self.coordinator.data["car_permissive_mode_active"] = True
-        else:
-            _LOGGER.warning("Cannot enable permissive mode - coordinator data not available")
-            return
+        self.coordinator._car_permissive_mode_active = True
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -103,12 +96,7 @@ class CarPermissiveModeSwitch(CoordinatorEntity, SwitchEntity):
             **kwargs: Additional keyword arguments (unused)
         """
         _LOGGER.info("Disabling car permissive charging mode")
-        # Safely update coordinator data with null check
-        if self.coordinator.data is not None:
-            self.coordinator.data["car_permissive_mode_active"] = False
-        else:
-            _LOGGER.warning("Cannot disable permissive mode - coordinator data not available")
-            return
+        self.coordinator._car_permissive_mode_active = False
         await self.coordinator.async_request_refresh()
 
 

@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, NamedTuple
 
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.util import dt as dt_util
@@ -17,6 +18,43 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def extract_price_from_interval(interval: dict[str, Any]) -> float | None:
+    """Extract price value from a Nord Pool interval dict.
+
+    Tries multiple keys used by different Nord Pool sensor versions:
+    'value', 'value_exc_vat', and 'price'.
+
+    Args:
+        interval: Dictionary representing a single Nord Pool price interval.
+
+    Returns:
+        The price as a float, or None if no valid price key is found.
+    """
+    for key in ("value", "value_exc_vat", "price"):
+        value = interval.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                continue
+    return None
+
+
+class PriceInterval(NamedTuple):
+    """A single price interval with start time, end time, and price.
+
+    Implemented as a NamedTuple so it can be used as a drop-in replacement
+    for the ``(start, end, price)`` tuples used throughout the codebase while
+    also providing named attribute access for clarity.
+    """
+
+    start: datetime
+    end: datetime
+    price: float
+
+
 class DataValidator:
     """Validate and sanitize data."""
     
@@ -24,7 +62,7 @@ class DataValidator:
     def validate_power_value(
         power: float,
         min_value: float = 0,
-        max_value: Optional[float] = None,
+        max_value: float | None = None,
         name: str = "power"
     ) -> float:
         """Validate and clamp power values to safe ranges.
@@ -49,7 +87,7 @@ class DataValidator:
         return power
     
     @staticmethod
-    def validate_battery_data(battery_soc_data: List[Dict]) -> Tuple[bool, str]:
+    def validate_battery_data(battery_soc_data: list[dict]) -> tuple[bool, str]:
         """Validate battery data integrity."""
         if not battery_soc_data:
             return False, "No battery entities configured"
@@ -95,10 +133,10 @@ class DataValidator:
 
 
 def apply_price_adjustment(
-    price: Optional[float],
+    price: float | None,
     multiplier: float = 1.0,
     offset: float = 0.0
-) -> Optional[float]:
+) -> float | None:
     """Apply a simple affine transformation to a price value.
 
     Args:
@@ -155,7 +193,7 @@ class PriceCalculator:
     @staticmethod
     def is_significant_price_drop(
         current_price: float,
-        next_price: Optional[float],
+        next_price: float | None,
         threshold: float = 0.15
     ) -> bool:
         """Check if there's a significant price drop coming."""
@@ -168,7 +206,7 @@ class TimeContext:
     """Time-based context utilities."""
 
     @staticmethod
-    def get_current_context() -> Dict[str, Any]:
+    def get_current_context() -> dict[str, Any]:
         """Get time-of-day context for charging decisions."""
         now = dt_util.now()
         return {
@@ -182,11 +220,11 @@ class PowerAllocationValidator:
     
     @staticmethod
     def validate_allocation(
-        allocation: Dict[str, Any],
+        allocation: dict[str, Any],
         available_solar: float,
         max_battery_power: float,
         max_car_power: float
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """Validate power allocation doesn't exceed limits."""
         solar_for_batteries = allocation.get("solar_for_batteries", 0)
         solar_for_car = allocation.get("solar_for_car", 0)
@@ -215,7 +253,7 @@ class PowerAllocationValidator:
 def format_reason(
     action: str,
     primary_reason: str,
-    details: Optional[Dict[str, Any]] = None
+    details: dict[str, Any] | None = None
 ) -> str:
     """Format a decision reason with optional details."""
     reason = f"{action}: {primary_reason}"

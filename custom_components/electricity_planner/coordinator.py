@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
@@ -80,6 +80,7 @@ from .const import (
     BATTERY_SOC_DECIMAL_THRESHOLD,
 )
 from .decision_engine import ChargingDecisionEngine
+from .helpers import PriceInterval, extract_price_from_interval
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -108,6 +109,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._last_successful_update = dt_util.utcnow()
         self._data_unavailable_since = None
         self._notification_sent = False
+
+        # Entity listener unsubscribe callback (set in _setup_entity_tracking)
+        self._entity_unsub: callback | None = None
+
+        # Permissive mode state (controlled via switch entity, persisted across updates)
+        self._car_permissive_mode_active: bool = False
 
         # Update throttling
         self._last_entity_update = None
@@ -138,7 +145,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             "battery_grid_charging": None,
             "car_grid_charging": None,
         }
-        self._last_price_timeline: list[tuple[datetime, datetime, float]] | None = None
+        self._last_price_timeline: list[PriceInterval] | None = None
         self._last_price_timeline_generated_at: datetime | None = None
         self._last_price_timeline_data_hash: str | None = None  # Hash of price data used to build timeline
         self._price_timeline_max_age = timedelta(hours=PRICE_TIMELINE_MAX_AGE_HOURS)
@@ -214,7 +221,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                         entities_to_track.append(phase_entity)
 
         if entities_to_track:
-            async_track_state_change_event(
+            self._entity_unsub = async_track_state_change_event(
                 self.hass, entities_to_track, self._handle_entity_change
             )
 
@@ -519,7 +526,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         # Clean up expired overrides after iteration
         for key in expired_keys:
-            del self._manual_overrides[key]
+            self._manual_overrides[key] = None
             _LOGGER.debug("Removed expired manual override: %s", key)
 
         if overrides_info:
@@ -537,7 +544,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         transport_lookup: list[dict[str, Any]] | None,
         current_transport_cost: float | None,
         now: datetime,
-    ) -> list[tuple[datetime, datetime, float]]:
+    ) -> list[PriceInterval]:
         """Build a chronological price timeline with fully resolved intervals."""
         multiplier = self.config.get(
             CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
@@ -569,7 +576,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                                 end_time_utc = dt_util.as_utc(parsed_end)
                                 if end_time_utc > start_time_utc:
                                     end_time = end_time_utc
-                        except Exception:
+                        except Exception as exc:
+                            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                                raise
                             end_time = None
 
                     # Skip intervals that have completely ended
@@ -581,19 +590,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                         if start_time_utc < now - timedelta(hours=PRICE_INTERVAL_LOOKBACK_HOURS):
                             continue
 
-                    price_value = None
-                    for key in ("value", "value_exc_vat", "price"):
-                        value = interval.get(key)
-                        if isinstance(value, (int, float)):
-                            price_value = float(value)
-                            break
-                        if isinstance(value, str):
-                            try:
-                                price_value = float(value)
-                                break
-                            except (ValueError, TypeError):
-                                continue
-
+                    price_value = extract_price_from_interval(interval)
                     if price_value is None:
                         continue
 
@@ -664,7 +661,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         if estimated_resolution is None or estimated_resolution <= timedelta(0):
             estimated_resolution = timedelta(minutes=PRICE_INTERVAL_MINUTES)
 
-        timeline: list[tuple[datetime, datetime, float]] = []
+        timeline: list[PriceInterval] = []
         for idx, (start_time, end_time, price) in enumerate(future_intervals):
             if end_time and end_time > start_time:
                 interval_end = end_time
@@ -680,7 +677,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             if interval_end <= start_time:
                 continue
 
-            timeline.append((start_time, interval_end, price))
+            timeline.append(PriceInterval(start_time, interval_end, price))
 
         return timeline
 
@@ -1093,11 +1090,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Preserve car charging locked threshold across updates (for threshold continuity)
         data["car_charging_locked_threshold"] = self.data.get("car_charging_locked_threshold") if self.data else None
 
-        # Preserve car permissive mode state across updates (controlled via switch entity)
-        if self.data:
-            data["car_permissive_mode_active"] = bool(self.data.get("car_permissive_mode_active", False))
-        else:
-            data["car_permissive_mode_active"] = False
+        # Expose car permissive mode state in data dict (source of truth is self._car_permissive_mode_active)
+        data["car_permissive_mode_active"] = self._car_permissive_mode_active
 
 
 
@@ -1449,6 +1443,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 return None
 
         except Exception as err:
+            if isinstance(err, (KeyboardInterrupt, SystemExit)):
+                raise
             _LOGGER.error("Unexpected error fetching Nord Pool prices for %s: %s", day, err, exc_info=True)
             return None
 
@@ -1516,20 +1512,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     if not is_past and not include_future:
                         continue
 
-                    # Extract price (try different keys like Nord Pool sensor does)
-                    price_value = None
-                    for key in ("value", "value_exc_vat", "price"):
-                        value = interval.get(key)
-                        if isinstance(value, (int, float)):
-                            price_value = float(value)
-                            break
-                        if isinstance(value, str):
-                            try:
-                                price_value = float(value)
-                                break
-                            except (ValueError, TypeError):
-                                continue
-
+                    price_value = extract_price_from_interval(interval)
                     if price_value is None:
                         continue
 
@@ -1553,6 +1536,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("Expected error processing interval for average threshold: %s", err)
                     continue
                 except Exception as err:
+                    if isinstance(err, (KeyboardInterrupt, SystemExit)):
+                        raise
                     _LOGGER.warning(
                         "Unexpected error processing interval for average threshold: %s",
                         err, exc_info=True
@@ -1634,20 +1619,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     if start_time_utc >= now:
                         continue
 
-                    # Extract and process price
-                    price_value = None
-                    for key in ("value", "value_exc_vat", "price"):
-                        value = interval.get(key)
-                        if isinstance(value, (int, float)):
-                            price_value = float(value)
-                            break
-                        if isinstance(value, str):
-                            try:
-                                price_value = float(value)
-                                break
-                            except (ValueError, TypeError):
-                                continue
-
+                    price_value = extract_price_from_interval(interval)
                     if price_value is None:
                         continue
 
@@ -1662,7 +1634,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     final_price = adjusted_price + transport_cost
 
                     past_intervals.append((start_time_utc, final_price))
-                except Exception:
+                except Exception as exc:
+                    if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                        raise
                     continue
 
             # Sort by time (most recent first) and take what we need
@@ -2026,9 +2000,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Compute hash of current price data to detect changes
         current_price_hash = self._compute_price_data_hash(prices_today, prices_tomorrow)
 
-        # Invalidate cache if price data has changed
-        if (self._last_price_timeline is not None and
-            self._last_price_timeline_data_hash != current_price_hash):
+        # Invalidate cache if price data has changed — but only when we
+        # actually *have* new price data.  When both are None the caller has
+        # no data at all and we should fall through to the stale-cache path
+        # below instead of wiping the cache.
+        if (prices_today or prices_tomorrow) and (
+            self._last_price_timeline is not None
+            and self._last_price_timeline_data_hash != current_price_hash
+        ):
             _LOGGER.debug("Price data changed (hash mismatch), invalidating timeline cache")
             self._last_price_timeline = None
             self._last_price_timeline_generated_at = None
@@ -2269,6 +2248,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             return self._transport_cost_lookup, self._transport_cost_status
 
         except Exception as err:
+            if isinstance(err, (KeyboardInterrupt, SystemExit)):
+                raise
             fallback_lookup = self._build_fallback_transport_lookup(
                 current_transport_cost
             )
@@ -2371,6 +2352,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             )
             _LOGGER.info("Sent notification: %s", title)
         except Exception as err:
+            if isinstance(err, (KeyboardInterrupt, SystemExit)):
+                raise
             _LOGGER.error("Failed to send notification: %s", err)
 
     def is_data_available(self) -> bool:
@@ -2380,12 +2363,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         return self._is_data_available(self.data)
 
     @property
-    def last_successful_update(self) -> Optional[datetime]:
+    def last_successful_update(self) -> datetime | None:
         """Expose last successful update timestamp."""
         return self._last_successful_update
 
     @property
-    def data_unavailable_since(self) -> Optional[datetime]:
+    def data_unavailable_since(self) -> datetime | None:
         """Expose when data became unavailable."""
         return self._data_unavailable_since
 

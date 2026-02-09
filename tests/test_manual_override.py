@@ -136,8 +136,8 @@ def test_expired_manual_override_is_cleared(fake_hass, monkeypatch):
     assert updated_decision["car_grid_charging"] is True
     assert updated_decision["car_grid_charging_reason"] == "Existing reason"
     assert changed_targets == set()
-    # After expiration, the key should be deleted (not set to None)
-    assert "car_grid_charging" not in coordinator._manual_overrides
+    # After expiration, the key should be set to None (cleared)
+    assert coordinator._manual_overrides["car_grid_charging"] is None
 
     # Manual overrides block should still be present but empty
     assert updated_decision.get("manual_overrides") == {}
@@ -237,8 +237,8 @@ def test_numeric_override_expires_correctly(fake_hass, monkeypatch):
     assert updated_decision["charger_limit"] == 11000
     assert updated_decision["charger_limit_reason"] == "Automatic"
     assert changed_targets == set()
-    # After expiration, the key should be deleted (not set to None)
-    assert "charger_limit" not in coordinator._manual_overrides
+    # After expiration, the key should be set to None (cleared)
+    assert coordinator._manual_overrides["charger_limit"] is None
 
 
 def test_mixed_boolean_and_numeric_overrides(fake_hass, monkeypatch):

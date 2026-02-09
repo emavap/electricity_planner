@@ -1,8 +1,24 @@
-"""Migration utilities for Electricity Planner configuration."""
+"""Migration utilities for Electricity Planner configuration.
+
+Schema Version History
+----------------------
+v1  → v2:  Added ``base_grid_setpoint`` option.
+v2  → v3:  Added ``use_dynamic_threshold`` and ``dynamic_threshold_confidence``.
+v3  → v4:  Removed deprecated ``emergency_soc_override`` / ``winter_night_soc_override``.
+v4  → v5:  Removed unused ``grid_battery_charging_limit_soc``.
+v5  → v6:  Added price/feed-in adjustment multipliers and offsets.
+v6  → v7:  Added optional ``nordpool_config_entry`` field (no data migration needed).
+v7  → v8:  Added ``car_permissive_threshold_multiplier``.
+v8  → v9:  Added ``phase_mode``, ``phases``, and ``battery_phase_assignments`` for
+           three-phase support.
+v9  → v10: Added optional ``battery_power_entity`` per phase (no data migration needed).
+v10 → v11: Added ``soc_price_multiplier_max`` and ``soc_buffer_target`` for
+           SOC-based dynamic price threshold adjustments.
+"""
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -41,7 +57,7 @@ CURRENT_VERSION = 11
 
 
 def _validate_numeric_config(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     key: str,
     min_val: float,
     max_val: float,

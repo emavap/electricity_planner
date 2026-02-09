@@ -972,8 +972,8 @@ async def test_manual_override_application_and_expiry(fake_hass, monkeypatch):
     )
     assert follow_up["battery_grid_charging"] is False
     assert cleared == set()
-    # After expiration, the key should be deleted (not set to None)
-    assert "battery_grid_charging" not in coordinator._manual_overrides
+    # After expiration, the key should be set to None (cleared)
+    assert coordinator._manual_overrides["battery_grid_charging"] is None
 
 
 @pytest.mark.asyncio
