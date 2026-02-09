@@ -865,6 +865,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             return data
 
         except Exception as err:
+            if isinstance(err, (KeyboardInterrupt, SystemExit)):
+                raise
             raise UpdateFailed(f"Error communicating with entities: {err}") from err
 
     async def _fetch_all_data(self) -> dict[str, Any]:
@@ -1407,6 +1409,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                         _LOGGER.error("Nord Pool service timed out for %s after %d attempts: %s", day, max_retries, err)
                         return None
                 except Exception as err:
+                    if isinstance(err, (KeyboardInterrupt, SystemExit)):
+                        raise
                     if attempt < max_retries - 1:
                         wait_time = 2 ** attempt  # 1s, 2s, 4s
                         _LOGGER.warning(

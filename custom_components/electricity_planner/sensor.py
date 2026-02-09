@@ -37,6 +37,7 @@ from .const import (
     INTEGRATION_VERSION,
 )
 from .coordinator import ElectricityPlannerCoordinator
+from .helpers import extract_price_from_interval
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1211,22 +1212,6 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             "last_update": dt_util.now().isoformat(),
         }
 
-    @staticmethod
-    def _extract_price_value(data: dict[str, Any]) -> float | None:
-        """Return a numeric price from the Nord Pool entry dict."""
-        for key in ("value", "value_exc_vat", "price"):
-            value = data.get(key)
-            if isinstance(value, (int, float)):
-                return float(value)
-
-            if isinstance(value, str):
-                try:
-                    return float(value)
-                except (TypeError, ValueError):
-                    continue
-
-        return None
-
     def _normalize_price_interval(self, interval: Any, transport_cost_lookup: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
         """Return a normalized interval dict with a guaranteed price key.
 
@@ -1236,7 +1221,7 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         if not isinstance(interval, dict):
             return None
 
-        price_value = self._extract_price_value(interval)
+        price_value = extract_price_from_interval(interval)
         if price_value is None:
             return None
 
