@@ -36,13 +36,17 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 MANAGED_KEY = "electricity_planner_managed"
-MANAGED_VERSION = 6  # Bumped: Always show dual-threshold controls for existing installs
+MANAGED_VERSION = 7  # Bumped: Add sunny forecast trigger slider (kWh)
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 
 ENTITY_WAIT_TIMEOUT = 30
 ENTITY_WAIT_INTERVAL = 1.0
+ENTITY_MAP_RETRY_DELAY_SECONDS = 10
+ENTITY_MAP_MAX_RETRIES = 6
 
 PENDING_SET_KEY = "dashboard_pending"
+ENTITY_MAP_RETRY_COUNTS_KEY = "dashboard_entity_map_retry_counts"
+ENTITY_MAP_RETRY_HANDLES_KEY = "dashboard_entity_map_retry_handles"
 
 
 @dataclass(slots=True)
@@ -82,6 +86,7 @@ ENTITY_REFERENCES: tuple[EntityReference, ...] = (
     EntityReference("switch.electricity_planner_disable_battery_charging", "disable_battery_charging"),
     EntityReference("number.electricity_planner_max_soc_threshold", "max_soc_threshold"),
     EntityReference("number.electricity_planner_max_soc_threshold_sunny", "max_soc_threshold_sunny"),
+    EntityReference("number.electricity_planner_sunny_forecast_threshold_kwh", "sunny_forecast_threshold_kwh"),
 )
 
 CORE_ENTITY_SUFFIXES: tuple[str, ...] = (
@@ -90,6 +95,7 @@ CORE_ENTITY_SUFFIXES: tuple[str, ...] = (
     "price_analysis",
     "max_soc_threshold",
     "max_soc_threshold_sunny",
+    "sunny_forecast_threshold_kwh",
 )
 
 
@@ -134,7 +140,23 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
 
     if not entity_map:
         _LOGGER.warning("No registered entities for %s; skipping dashboard creation", entry.entry_id)
+        _schedule_entity_map_retry(hass, entry, "no entities registered")
         return
+
+    missing_core = [
+        suffix for suffix in CORE_ENTITY_SUFFIXES
+        if f"{entry.entry_id}_{suffix}" not in entity_map
+    ]
+    if missing_core:
+        _LOGGER.warning(
+            "Deferring dashboard creation for %s: missing core entities %s",
+            entry.entry_id,
+            ", ".join(missing_core),
+        )
+        _schedule_entity_map_retry(hass, entry, f"missing core entities: {', '.join(missing_core)}")
+        return
+
+    _clear_entity_map_retry_state(hass, entry.entry_id)
 
     template_text = await _async_load_template_text(hass)
     if not template_text:
@@ -193,6 +215,9 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
 
 async def async_remove_dashboard(hass: HomeAssistant, entry) -> None:
     """Remove the managed dashboard when the config entry is unloaded."""
+    # Ensure delayed dashboard retries don't resurrect dashboards after unload.
+    _clear_entity_map_retry_state(hass, entry.entry_id)
+
     handles = _get_lovelace_handles(hass)
     if handles is None:
         return
@@ -442,6 +467,80 @@ def _maybe_schedule_retry(hass: HomeAssistant, entry) -> None:
         hass.async_create_task(async_setup_or_update_dashboard(hass, entry))
 
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _retry_later)
+
+
+def _clear_entity_map_retry_state(hass: HomeAssistant, entry_id: str) -> None:
+    """Clear delayed retry tracking (and cancel any scheduled retry handle)."""
+    data = hass.data.get(DOMAIN)
+    if not isinstance(data, dict):
+        return
+
+    retry_counts = data.get(ENTITY_MAP_RETRY_COUNTS_KEY)
+    if isinstance(retry_counts, dict):
+        retry_counts.pop(entry_id, None)
+
+    retry_handles = data.get(ENTITY_MAP_RETRY_HANDLES_KEY)
+    if isinstance(retry_handles, dict):
+        handle = retry_handles.pop(entry_id, None)
+        if handle is not None and not handle.cancelled():
+            handle.cancel()
+
+
+def _schedule_entity_map_retry(hass: HomeAssistant, entry, reason: str) -> None:
+    """Schedule a delayed dashboard setup retry when core entities are missing."""
+    data = hass.data.setdefault(DOMAIN, {})
+    retry_counts: dict[str, int] = data.setdefault(ENTITY_MAP_RETRY_COUNTS_KEY, {})
+    retry_handles: dict[str, Any] = data.setdefault(ENTITY_MAP_RETRY_HANDLES_KEY, {})
+
+    existing_handle = retry_handles.get(entry.entry_id)
+    if existing_handle is not None and not existing_handle.cancelled():
+        _LOGGER.debug(
+            "Dashboard retry already scheduled for %s; skipping duplicate (%s)",
+            entry.entry_id,
+            reason,
+        )
+        return
+
+    current = retry_counts.get(entry.entry_id, 0)
+
+    if current >= ENTITY_MAP_MAX_RETRIES:
+        _LOGGER.error(
+            "Dashboard setup for %s still incomplete after %d retries (%s). "
+            "Please reload the integration after entities are available.",
+            entry.entry_id,
+            ENTITY_MAP_MAX_RETRIES,
+            reason,
+        )
+        return
+
+    retry_counts[entry.entry_id] = current + 1
+    attempt = retry_counts[entry.entry_id]
+
+    _LOGGER.debug(
+        "Scheduling dashboard retry %d/%d for %s in %ds (%s)",
+        attempt,
+        ENTITY_MAP_MAX_RETRIES,
+        entry.entry_id,
+        ENTITY_MAP_RETRY_DELAY_SECONDS,
+        reason,
+    )
+
+    @callback
+    def _retry_later() -> None:
+        retry_handles.pop(entry.entry_id, None)
+        domain_data = hass.data.get(DOMAIN, {})
+        if entry.entry_id not in domain_data:
+            _LOGGER.debug(
+                "Skipping dashboard retry for %s: entry not loaded anymore",
+                entry.entry_id,
+            )
+            _clear_entity_map_retry_state(hass, entry.entry_id)
+            return
+        hass.async_create_task(async_setup_or_update_dashboard(hass, entry))
+
+    retry_handles[entry.entry_id] = hass.loop.call_later(
+        ENTITY_MAP_RETRY_DELAY_SECONDS, _retry_later
+    )
 
 
 async def _async_wait_for_entity_map(hass: HomeAssistant, entry) -> dict[str, str]:

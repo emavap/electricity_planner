@@ -14,13 +14,14 @@ from custom_components.electricity_planner.const import (
     CONF_HIGHEST_PRICE_ENTITY,
     CONF_LOWEST_PRICE_ENTITY,
     CONF_NEXT_PRICE_ENTITY,
-    CONF_SOLAR_FORECAST_ENTITY,
+    CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
     DOMAIN,
 )
 from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
 from custom_components.electricity_planner.number import (
     MaxSocThresholdNumber,
     MaxSocThresholdSunnyNumber,
+    SunnyForecastThresholdNumber,
     async_setup_entry,
 )
 
@@ -86,7 +87,7 @@ def _base_config() -> dict[str, object]:
 
 @pytest.mark.asyncio
 async def test_number_setup_always_adds_standard_and_sunny_entities(fake_hass, monkeypatch):
-    """Sunny threshold number should always be exposed in UI."""
+    """Sunny SOC and sunny forecast threshold numbers should always be exposed."""
     config = _base_config()
     entry = MockConfigEntry(domain=DOMAIN, data=config, options={})
 
@@ -102,16 +103,17 @@ async def test_number_setup_always_adds_standard_and_sunny_entities(fake_hass, m
     entities = []
     await async_setup_entry(fake_hass, entry, entities.extend)
 
-    assert len(entities) == 2
+    assert len(entities) == 3
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
+    assert isinstance(entities[2], SunnyForecastThresholdNumber)
 
 
 @pytest.mark.asyncio
-async def test_number_setup_with_forecast_entity_keeps_same_two_entities(fake_hass, monkeypatch):
+async def test_number_setup_with_forecast_entity_keeps_same_three_entities(fake_hass, monkeypatch):
     """Providing forecast entity should not change number entity count."""
     config = _base_config()
-    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
     entry = MockConfigEntry(domain=DOMAIN, data=config, options={})
 
     monkeypatch.setattr(
@@ -126,6 +128,7 @@ async def test_number_setup_with_forecast_entity_keeps_same_two_entities(fake_ha
     entities = []
     await async_setup_entry(fake_hass, entry, entities.extend)
 
-    assert len(entities) == 2
+    assert len(entities) == 3
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
+    assert isinstance(entities[2], SunnyForecastThresholdNumber)

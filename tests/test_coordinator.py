@@ -38,7 +38,7 @@ from custom_components.electricity_planner.const import (
     CONF_NEXT_PRICE_ENTITY,
     CONF_PRICE_THRESHOLD,
     CONF_SOLAR_PRODUCTION_ENTITY,
-    CONF_SOLAR_FORECAST_ENTITY,
+    CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
     CONF_SOLAR_FORECAST_TODAY_ENTITY,
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_TRANSPORT_COST_ENTITY,
@@ -1322,7 +1322,7 @@ async def test_transport_cost_lookup_uses_local_hour(fake_hass, monkeypatch):
 async def test_solar_forecast_after_start_hour_caches_value(fake_hass, monkeypatch):
     """After start hour, the forecast entity value should be cached."""
     config = _base_config()
-    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
     config[CONF_SOLAR_FORECAST_START_HOUR] = 20
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
@@ -1344,7 +1344,7 @@ async def test_solar_forecast_after_start_hour_caches_value(fake_hass, monkeypat
 async def test_solar_forecast_cache_refreshes_hourly(fake_hass, monkeypatch):
     """Cache should refresh when the hour changes."""
     config = _base_config()
-    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
     config[CONF_SOLAR_FORECAST_START_HOUR] = 20
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
@@ -1373,7 +1373,7 @@ async def test_solar_forecast_cache_refreshes_hourly(fake_hass, monkeypatch):
 async def test_solar_forecast_before_start_hour_uses_today_entity(fake_hass, monkeypatch):
     """Before start hour with 'today' entity configured, should use today's value."""
     config = _base_config()
-    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
     config[CONF_SOLAR_FORECAST_TODAY_ENTITY] = "sensor.energy_production_today"
     config[CONF_SOLAR_FORECAST_START_HOUR] = 20
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
@@ -1389,10 +1389,25 @@ async def test_solar_forecast_before_start_hour_uses_today_entity(fake_hass, mon
 
 
 @pytest.mark.asyncio
+async def test_get_state_value_parses_localized_or_unit_appended_numbers(fake_hass, monkeypatch):
+    """Numeric parsing should tolerate decimal comma and unit suffixes."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    fake_hass.states.set("sensor.localized_value", "13,239")
+    fake_hass.states.set("sensor.unit_appended_value", "11.7 kWh")
+
+    localized = await coordinator._get_state_value("sensor.localized_value")
+    with_unit = await coordinator._get_state_value("sensor.unit_appended_value")
+
+    assert localized == pytest.approx(13.239)
+    assert with_unit == pytest.approx(11.7)
+
+
+@pytest.mark.asyncio
 async def test_solar_forecast_before_start_hour_uses_cache_when_no_today(fake_hass, monkeypatch):
     """Before start hour without today entity, should use cached value from previous evening."""
     config = _base_config()
-    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
     config[CONF_SOLAR_FORECAST_START_HOUR] = 20
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
@@ -1415,7 +1430,7 @@ async def test_solar_forecast_before_start_hour_uses_cache_when_no_today(fake_ha
 async def test_solar_forecast_before_start_hour_no_cache_no_today_returns_none(fake_hass, monkeypatch):
     """Before start hour with no cache and no today entity should return None."""
     config = _base_config()
-    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
     config[CONF_SOLAR_FORECAST_START_HOUR] = 20
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
@@ -1432,7 +1447,7 @@ async def test_solar_forecast_before_start_hour_no_cache_no_today_returns_none(f
 async def test_solar_forecast_before_start_hour_today_unavailable_falls_to_cache(fake_hass, monkeypatch):
     """Today entity configured but unavailable → fall back to cache."""
     config = _base_config()
-    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
     config[CONF_SOLAR_FORECAST_TODAY_ENTITY] = "sensor.energy_production_today"
     config[CONF_SOLAR_FORECAST_START_HOUR] = 20
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
@@ -1454,7 +1469,7 @@ async def test_solar_forecast_before_start_hour_today_unavailable_falls_to_cache
 async def test_solar_forecast_entity_unavailable_after_start_hour(fake_hass, monkeypatch):
     """After start hour with entity unavailable and no cache → returns None."""
     config = _base_config()
-    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
     config[CONF_SOLAR_FORECAST_START_HOUR] = 20
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
@@ -1472,7 +1487,7 @@ async def test_solar_forecast_after_start_hour_ignores_previous_day_cache_if_una
 ):
     """After start hour, don't reuse previous-day cache when live forecast is unavailable."""
     config = _base_config()
-    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
     config[CONF_SOLAR_FORECAST_START_HOUR] = 20
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
@@ -1505,7 +1520,7 @@ async def test_solar_forecast_after_start_hour_ignores_previous_day_cache_if_una
 async def test_solar_forecast_cache_persists_through_midnight(fake_hass, monkeypatch):
     """Cache populated at 22:00 should persist past midnight to next day."""
     config = _base_config()
-    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
     config[CONF_SOLAR_FORECAST_START_HOUR] = 20
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 

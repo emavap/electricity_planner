@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -42,7 +43,7 @@ from .const import (
     CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_TRANSPORT_COST_ENTITY,
     CONF_GRID_POWER_ENTITY,
-    CONF_SOLAR_FORECAST_ENTITY,
+    CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
     CONF_SOLAR_FORECAST_TODAY_ENTITY,
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_BASE_GRID_SETPOINT,
@@ -87,6 +88,7 @@ from .decision_engine import ChargingDecisionEngine
 from .helpers import PriceInterval, extract_price_from_interval
 
 _LOGGER = logging.getLogger(__name__)
+_NUMERIC_PREFIX_RE = re.compile(r"^\s*([-+]?\d+(?:[.,]\d+)?)")
 
 
 class ElectricityPlannerCoordinator(DataUpdateCoordinator):
@@ -1204,7 +1206,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # until the next day's start hour, so midnight entity flips don't affect
         # overnight charging.  Before the start hour on the first day (no cache
         # yet), use the live value.
-        solar_forecast_entity = self.config.get(CONF_SOLAR_FORECAST_ENTITY)
+        solar_forecast_entity = self.config.get(CONF_SOLAR_FORECAST_ENTITY_TOMORROW)
         if solar_forecast_entity:
             data["solar_forecast_production"] = await self._resolve_solar_forecast(
                 solar_forecast_entity
@@ -1287,9 +1289,19 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         if not state or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
             return None
 
+        raw_value = str(state.state).strip()
         try:
-            return float(state.state)
+            return float(raw_value)
         except (ValueError, TypeError):
+            # Accept common localized/unit-appended variants like "13,2" or "13.2 kWh".
+            match = _NUMERIC_PREFIX_RE.match(raw_value)
+            if match:
+                candidate = match.group(1).replace(",", ".")
+                try:
+                    return float(candidate)
+                except (ValueError, TypeError):
+                    pass
+
             # Use debug level for expected conversion failures to reduce log noise
             if _LOGGER.isEnabledFor(logging.DEBUG):
                 _LOGGER.debug("Could not convert state to float: %s = %s", entity_id, state.state)

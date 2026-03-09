@@ -1,6 +1,6 @@
 # Electricity Planner – Project Summary
 
-**Version 4.7.1** | **Config Schema Version 11** | **Home Assistant 2024.4+**
+**Version 4.9.2** | **Config Schema Version 14** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
@@ -14,6 +14,7 @@ A Home Assistant custom integration that analyses live Nord Pool prices, battery
 - **24-hour average threshold** using rolling Nord Pool price data
 - **SOC-based price relaxation** that accepts higher prices when battery is critically low
 - **Car charging hysteresis** with minimum window validation and threshold floor pattern
+- **Sunny-day dual SOC limits** with forecast-based kWh trigger and today/tomorrow forecast handling
 - **Permissive mode switch** for temporarily relaxed car charging thresholds
 - **Manual override services** to force or block charging for configurable durations
 - **Contract-specific pricing** with multiplier/offset adjustments for consumption and feed-in

@@ -13,6 +13,7 @@ from custom_components.electricity_planner.const import (
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_SOLAR_FORECAST_START_HOUR,
+    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     DOMAIN,
 )
 
@@ -27,10 +28,12 @@ async def test_async_reload_entry_applies_live_options_without_full_reload():
             CONF_MAX_SOC_THRESHOLD: 90,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
             CONF_SOLAR_FORECAST_START_HOUR: 20,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 5.0,
         },
         options={
             CONF_SOLAR_FORECAST_START_HOUR: 18,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 45,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 6.5,
         },
     )
 
@@ -41,6 +44,7 @@ async def test_async_reload_entry_applies_live_options_without_full_reload():
             CONF_MAX_SOC_THRESHOLD: 90,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
             CONF_SOLAR_FORECAST_START_HOUR: 20,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 5.0,
         },
         decision_engine=SimpleNamespace(refresh_settings=refresh_settings),
         async_request_refresh=AsyncMock(),
@@ -55,6 +59,7 @@ async def test_async_reload_entry_applies_live_options_without_full_reload():
 
     assert coordinator.config[CONF_SOLAR_FORECAST_START_HOUR] == 18
     assert coordinator.config[CONF_MAX_SOC_THRESHOLD_SUNNY] == 45
+    assert coordinator.config[CONF_SUNNY_FORECAST_THRESHOLD_KWH] == 6.5
     refresh_settings.assert_called_once_with(coordinator.config)
     coordinator.async_request_refresh.assert_awaited_once()
     hass.config_entries.async_reload.assert_not_called()
@@ -70,6 +75,7 @@ async def test_async_reload_entry_performs_full_reload_for_non_live_changes():
             CONF_MAX_SOC_THRESHOLD: 90,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
             CONF_SOLAR_FORECAST_START_HOUR: 20,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 5.0,
         },
         options={},
     )
@@ -80,6 +86,7 @@ async def test_async_reload_entry_performs_full_reload_for_non_live_changes():
             CONF_MAX_SOC_THRESHOLD: 90,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
             CONF_SOLAR_FORECAST_START_HOUR: 20,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 5.0,
         },
     )
 

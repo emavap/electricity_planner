@@ -148,6 +148,7 @@ views:
             content: |
               {% set sunny_entity = 'number.electricity_planner_max_soc_threshold_sunny' %}
               {% set normal_entity = 'number.electricity_planner_max_soc_threshold' %}
+              {% set sunny_forecast_threshold_entity = 'number.electricity_planner_sunny_forecast_threshold_kwh' %}
               {% set sunny_active = state_attr(sunny_entity, 'sunny_day_active') %}
               {% if sunny_active %}
               🌞 **High Solar forecast** — grid charges battery to **{{ states(sunny_entity) }}%** max
@@ -156,6 +157,7 @@ views:
               {% endif %}
 
               _Solar forecast: {{ state_attr(sunny_entity, 'solar_forecast_kwh') or 'not available' }}_
+              _Sunny mode trigger: ≥ {{ states(sunny_forecast_threshold_entity) }} kWh_
 
           - type: entities
             title: Battery Controls
@@ -167,6 +169,9 @@ views:
               - entity: number.electricity_planner_max_soc_threshold_sunny
                 name: "Grid Max SOC (high solar)"
                 icon: mdi:weather-sunny
+              - entity: number.electricity_planner_sunny_forecast_threshold_kwh
+                name: "Sunny Forecast Trigger"
+                icon: mdi:weather-partly-cloudy
               - entity: switch.electricity_planner_disable_battery_charging
                 name: Disable Battery Charging
                 icon: mdi:battery-off

@@ -13,8 +13,29 @@ from custom_components.electricity_planner.const import DOMAIN
 
 
 class FakeLoop:
+    def __init__(self):
+        self.calls: list[tuple[float, object]] = []
+
     def time(self) -> float:
         return 0.0
+
+    def call_later(self, delay: float, callback):
+        handle = FakeTimerHandle(delay, callback)
+        self.calls.append((delay, callback))
+        return handle
+
+
+class FakeTimerHandle:
+    def __init__(self, delay: float, callback):
+        self.delay = delay
+        self.callback = callback
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def cancelled(self) -> bool:
+        return self._cancelled
 
 
 class FakeStorage:
@@ -49,9 +70,10 @@ class FakeCollection:
 
 
 def test_dashboard_core_entity_suffixes_include_dual_threshold_controls():
-    """Managed dashboard should wait for both threshold entities to be registered."""
+    """Managed dashboard should wait for all threshold entities to be registered."""
     assert "max_soc_threshold" in dashboard.CORE_ENTITY_SUFFIXES
     assert "max_soc_threshold_sunny" in dashboard.CORE_ENTITY_SUFFIXES
+    assert "sunny_forecast_threshold_kwh" in dashboard.CORE_ENTITY_SUFFIXES
 
 
 @pytest.mark.asyncio
@@ -66,6 +88,7 @@ async def test_dashboard_creation_uses_registered_entities():
         f"{entry.entry_id}_car_grid_charging": "binary_sensor.car_grid_allowed",
         f"{entry.entry_id}_max_soc_threshold": "number.custom_max_soc",
         f"{entry.entry_id}_max_soc_threshold_sunny": "number.custom_max_soc_sunny",
+        f"{entry.entry_id}_sunny_forecast_threshold_kwh": "number.custom_sunny_forecast_threshold",
     }
     template = (
         "views:\n"
@@ -75,6 +98,7 @@ async def test_dashboard_creation_uses_registered_entities():
         "      - entity: binary_sensor.electricity_planner_car_charge_from_grid\n"
         "      - entity: number.electricity_planner_max_soc_threshold\n"
         "      - entity: number.electricity_planner_max_soc_threshold_sunny\n"
+        "      - entity: number.electricity_planner_sunny_forecast_threshold_kwh\n"
     )
 
     storage = FakeStorage()
@@ -97,6 +121,7 @@ async def test_dashboard_creation_uses_registered_entities():
     assert "binary_sensor.car_grid_allowed" in config_str
     assert "number.custom_max_soc" in config_str
     assert "number.custom_max_soc_sunny" in config_str
+    assert "number.custom_sunny_forecast_threshold" in config_str
     assert storage.saved[dashboard.MANAGED_KEY]["entry_id"] == entry.entry_id
 
 
@@ -112,10 +137,43 @@ async def test_dashboard_setup_skips_when_no_entities():
         dashboard, "_async_wait_for_entity_map", new=AsyncMock(return_value={})
     ), patch.object(
         dashboard, "_ensure_dashboard_record", new=AsyncMock()
-    ) as ensure_mock:
+    ) as ensure_mock, patch.object(
+        dashboard, "_schedule_entity_map_retry"
+    ) as retry_mock:
         await dashboard.async_setup_or_update_dashboard(hass, entry)
 
     ensure_mock.assert_not_called()
+    retry_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_setup_retries_when_core_entities_missing():
+    """Dashboard creation should be deferred if core entities are incomplete."""
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner Instance", data={})
+    hass = SimpleNamespace(loop=FakeLoop(), data={})
+
+    entity_map = {
+        f"{entry.entry_id}_price_analysis": "sensor.custom_price_sensor",
+        f"{entry.entry_id}_battery_grid_charging": "binary_sensor.battery_grid_allowed",
+        f"{entry.entry_id}_car_grid_charging": "binary_sensor.car_grid_allowed",
+        f"{entry.entry_id}_max_soc_threshold": "number.custom_max_soc",
+        f"{entry.entry_id}_max_soc_threshold_sunny": "number.custom_max_soc_sunny",
+        # Missing sunny_forecast_threshold_kwh on purpose
+    }
+
+    with patch.object(
+        dashboard, "_get_lovelace_handles", return_value=dashboard.DashboardHandles(collection=None, dashboards={})
+    ), patch.object(
+        dashboard, "_async_wait_for_entity_map", new=AsyncMock(return_value=entity_map)
+    ), patch.object(
+        dashboard, "_ensure_dashboard_record", new=AsyncMock()
+    ) as ensure_mock, patch.object(
+        dashboard, "_schedule_entity_map_retry"
+    ) as retry_mock:
+        await dashboard.async_setup_or_update_dashboard(hass, entry)
+
+    ensure_mock.assert_not_called()
+    retry_mock.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -161,3 +219,45 @@ async def test_dashboard_removal_only_deletes_managed_dashboard():
     ):
         await dashboard.async_remove_dashboard(hass, entry)
     assert collection.deleted == []
+
+
+def test_schedule_entity_map_retry_deduplicates_pending_retry():
+    """Scheduling should not queue multiple timers for the same entry."""
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner Instance", data={})
+    hass = SimpleNamespace(loop=FakeLoop(), data={DOMAIN: {entry.entry_id: object()}})
+
+    dashboard._schedule_entity_map_retry(hass, entry, "first")
+    dashboard._schedule_entity_map_retry(hass, entry, "duplicate")
+
+    retry_counts = hass.data[DOMAIN][dashboard.ENTITY_MAP_RETRY_COUNTS_KEY]
+    retry_handles = hass.data[DOMAIN][dashboard.ENTITY_MAP_RETRY_HANDLES_KEY]
+
+    assert retry_counts[entry.entry_id] == 1
+    assert entry.entry_id in retry_handles
+    assert len(hass.loop.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_remove_dashboard_cancels_pending_entity_map_retry():
+    """Unloading should cancel any delayed retry to avoid ghost dashboard creation."""
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner Instance", data={})
+    loop = FakeLoop()
+    handle = FakeTimerHandle(10, lambda: None)
+    hass = SimpleNamespace(
+        loop=loop,
+        data={
+            DOMAIN: {
+                dashboard.ENTITY_MAP_RETRY_COUNTS_KEY: {entry.entry_id: 2},
+                dashboard.ENTITY_MAP_RETRY_HANDLES_KEY: {entry.entry_id: handle},
+            }
+        },
+    )
+
+    with patch.object(dashboard, "_get_lovelace_handles", return_value=None):
+        await dashboard.async_remove_dashboard(hass, entry)
+
+    assert handle.cancelled()
+    retry_counts = hass.data[DOMAIN].get(dashboard.ENTITY_MAP_RETRY_COUNTS_KEY, {})
+    retry_handles = hass.data[DOMAIN].get(dashboard.ENTITY_MAP_RETRY_HANDLES_KEY, {})
+    assert entry.entry_id not in retry_counts
+    assert entry.entry_id not in retry_handles

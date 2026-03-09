@@ -33,6 +33,7 @@ from custom_components.electricity_planner.const import (
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
+    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     CONF_USE_AVERAGE_THRESHOLD,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_VERY_LOW_PRICE_THRESHOLD,
@@ -80,6 +81,7 @@ async def test_options_flow_returns_updated_options():
         CONF_EMERGENCY_SOC_THRESHOLD: DEFAULT_EMERGENCY_SOC,
         CONF_VERY_LOW_PRICE_THRESHOLD: DEFAULT_VERY_LOW_PRICE_THRESHOLD,
         CONF_SIGNIFICANT_SOLAR_THRESHOLD: DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
+        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 7.5,
         CONF_FEEDIN_PRICE_THRESHOLD: DEFAULT_FEEDIN_PRICE_THRESHOLD,
         CONF_FEEDIN_ADJUSTMENT_MULTIPLIER: DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
         CONF_FEEDIN_ADJUSTMENT_OFFSET: DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
@@ -102,6 +104,7 @@ async def test_options_flow_returns_updated_options():
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_PRICE_THRESHOLD] == 0.123
     assert result["data"][CONF_USE_DYNAMIC_THRESHOLD] is (not DEFAULT_USE_DYNAMIC_THRESHOLD)
+    assert result["data"][CONF_SUNNY_FORECAST_THRESHOLD_KWH] == pytest.approx(7.5)
     assert result["data"][CONF_BATTERY_CAPACITIES] == {battery_entity: 12.5}
     assert "capacity_sensor_main_battery" not in result["data"]
     # Options flow should not have mutated the original entry data
@@ -144,9 +147,42 @@ async def test_options_flow_defaults_reflect_existing_options():
         return default() if callable(default) else default
 
     assert default_for(CONF_PRICE_THRESHOLD) == pytest.approx(0.321)
+    assert default_for(CONF_SUNNY_FORECAST_THRESHOLD_KWH) == pytest.approx(5.8)
 
     capacity_field = f"capacity_{battery_entity.replace('.', '_')}"
     assert default_for(capacity_field) == pytest.approx(11.5)
+
+
+@pytest.mark.asyncio
+async def test_options_flow_derives_sunny_forecast_threshold_from_capacity():
+    battery_entity = "sensor.main_battery"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_CURRENT_PRICE_ENTITY: "sensor.current_price",
+            CONF_HIGHEST_PRICE_ENTITY: "sensor.highest_price",
+            CONF_LOWEST_PRICE_ENTITY: "sensor.lowest_price",
+            CONF_NEXT_PRICE_ENTITY: "sensor.next_price",
+            CONF_BATTERY_SOC_ENTITIES: [battery_entity],
+        },
+        options={
+            CONF_BATTERY_SOC_ENTITIES: [battery_entity],
+            CONF_BATTERY_CAPACITIES: {battery_entity: 14.0},
+        },
+    )
+
+    handler = OptionsFlowHandler()
+    object.__setattr__(handler, "config_entry", entry)
+    result = await handler.async_step_init()
+
+    schema = result["data_schema"]
+    key = next(
+        key
+        for key in schema.schema
+        if getattr(key, "schema", None) == CONF_SUNNY_FORECAST_THRESHOLD_KWH
+    )
+    default = key.default() if callable(key.default) else key.default
+    assert default == pytest.approx(7.0)
 
 
 @pytest.mark.asyncio

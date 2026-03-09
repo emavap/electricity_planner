@@ -1,6 +1,6 @@
 # Electricity Planner
 
-**Version 4.7.1** | **Config Schema Version 11** | **Home Assistant 2024.4+**
+**Version 4.9.2** | **Config Schema Version 14** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
@@ -199,6 +199,18 @@ The integration supports multiple batteries with:
 - **Per-battery capacity configuration** – Set kWh for each battery sensor
 - **Phase assignments** (three-phase mode) – Assign batteries to L1/L2/L3
 
+### Sunny-Day Grid SOC Limit
+
+You can configure a second grid SOC limit for high-solar days:
+
+- **`max_soc_threshold_sunny`** – lower grid charging SOC target used in sunny mode
+- **`sunny_forecast_threshold_kwh`** – forecast threshold that activates sunny mode
+- **`solar_forecast_entity` (tomorrow)** – used from `solar_forecast_start_hour` onward
+- **`solar_forecast_today_entity` (today)** – used after midnight until `solar_forecast_start_hour`
+
+This allows overnight charging to stop earlier on days with strong expected production,
+leaving battery headroom for free solar.
+
 ---
 
 ## 5. Three-Phase Support
@@ -244,7 +256,7 @@ Car charging implements strict hysteresis to prevent short charging cycles:
    - Detects interval resolution automatically (15-min or 1-hour)
    - Builds timeline with explicit start/end times
    - Accumulates continuous low-price duration from NOW
-   - Any gap >5 seconds breaks the window
+   - Any gap >30 seconds breaks the window
    - Returns true only if accumulated duration ≥ configured minimum
 
 **ON → OFF Transition:**
