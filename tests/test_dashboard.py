@@ -48,6 +48,12 @@ class FakeCollection:
         self.deleted.append(item_id)
 
 
+def test_dashboard_core_entity_suffixes_include_dual_threshold_controls():
+    """Managed dashboard should wait for both threshold entities to be registered."""
+    assert "max_soc_threshold" in dashboard.CORE_ENTITY_SUFFIXES
+    assert "max_soc_threshold_sunny" in dashboard.CORE_ENTITY_SUFFIXES
+
+
 @pytest.mark.asyncio
 async def test_dashboard_creation_uses_registered_entities():
     """Ensure the generated dashboard references actual entity IDs."""

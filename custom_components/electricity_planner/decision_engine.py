@@ -16,6 +16,7 @@ from .const import (
     PHASE_IDS,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
+    CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_PRICE_THRESHOLD,
     CONF_BATTERY_CAPACITIES,
     CONF_EMERGENCY_SOC_THRESHOLD,
@@ -41,6 +42,7 @@ from .const import (
     CONF_SOC_BUFFER_TARGET,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
+    DEFAULT_MAX_SOC_SUNNY,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_EMERGENCY_SOC,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
@@ -204,6 +206,7 @@ class EngineSettings:
     significant_solar_threshold: int
     min_soc_threshold: float
     max_soc_threshold: float
+    max_soc_threshold_sunny: float
     emergency_soc_threshold: float
     predictive_min_soc: float
     use_dynamic_threshold: bool
@@ -306,6 +309,10 @@ class EngineSettings:
         max_soc_threshold = extractor.get_float(
             CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC, "max_soc_threshold"
         )
+        max_soc_threshold_sunny = extractor.get_float(
+            CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY,
+            "max_soc_threshold_sunny"
+        )
         emergency_soc_threshold = extractor.get_float(
             CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC,
             "emergency_soc_threshold"
@@ -361,6 +368,7 @@ class EngineSettings:
             significant_solar_threshold=significant_solar_threshold,
             min_soc_threshold=min_soc_threshold,
             max_soc_threshold=max_soc_threshold,
+            max_soc_threshold_sunny=max_soc_threshold_sunny,
             emergency_soc_threshold=emergency_soc_threshold,
             predictive_min_soc=predictive_min_soc,
             use_dynamic_threshold=use_dynamic_threshold,
@@ -500,16 +508,25 @@ class ChargingDecisionEngine:
         if not is_valid:
             _LOGGER.warning("Power allocation validation failed: %s", error)
         
-        # Make charging decisions
+        # Resolve effective max SOC for grid charging (sunny day logic)
+        grid_battery_analysis = self._apply_sunny_day_grid_limit(
+            battery_analysis, data
+        )
+        decision_data["sunny_day_active"] = (
+            grid_battery_analysis.get("max_soc_threshold")
+            != battery_analysis.get("max_soc_threshold")
+        )
+
+        # Make charging decisions (use grid-specific battery analysis)
         battery_decision = self._decide_battery_grid_charging(
-            price_analysis, battery_analysis, power_allocation, power_analysis, time_context, data
+            price_analysis, grid_battery_analysis, power_allocation, power_analysis, time_context, data
         )
         decision_data.update(battery_decision)
 
         # Get dynamic threshold from strategy manager (if dynamic pricing enabled)
         context = {
             "price_analysis": price_analysis,
-            "battery_analysis": battery_analysis,
+            "battery_analysis": grid_battery_analysis,
             "power_allocation": power_allocation,
             "power_analysis": power_analysis,
             "time_context": time_context,
@@ -521,21 +538,21 @@ class ChargingDecisionEngine:
             price_analysis["dynamic_threshold"] = dynamic_threshold
 
         car_decision = self._decide_car_grid_charging(
-            price_analysis, battery_analysis, power_allocation, data
+            price_analysis, grid_battery_analysis, power_allocation, data
         )
         decision_data.update(car_decision)
-        
+
         # Calculate power limits
         decision_data_for_downstream = {**data, **decision_data}
-        
+
         charger_limit_decision = self._calculate_charger_limit(
-            price_analysis, battery_analysis, power_allocation, decision_data_for_downstream
+            price_analysis, grid_battery_analysis, power_allocation, decision_data_for_downstream
         )
         decision_data.update(charger_limit_decision)
         decision_data_for_downstream.update(charger_limit_decision)
-        
+
         grid_setpoint_decision = self._calculate_grid_setpoint(
-            price_analysis, battery_analysis, power_allocation, decision_data_for_downstream,
+            price_analysis, grid_battery_analysis, power_allocation, decision_data_for_downstream,
             decision_data.get("charger_limit", 0)
         )
         decision_data.update(grid_setpoint_decision)
@@ -1245,6 +1262,74 @@ class ChargingDecisionEngine:
             "batteries_available": False,
             "validation_status": "All battery SOC sensors unavailable",
         }
+
+    def _apply_sunny_day_grid_limit(
+        self,
+        battery_analysis: dict[str, Any],
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Apply sunny day max SOC limit for grid charging decisions.
+
+        When the solar forecast for the upcoming period exceeds half the total
+        battery capacity, reduce the grid charging max SOC to the sunny-day
+        threshold so that grid charging stops earlier and leaves room for free
+        solar charging.
+
+        Returns a (possibly modified) copy of battery_analysis.
+        """
+        solar_forecast = data.get("solar_forecast_production")
+        if solar_forecast is None:
+            return battery_analysis
+
+        sunny_threshold = self._settings.max_soc_threshold_sunny
+        normal_threshold = self._settings.max_soc_threshold
+
+        # If sunny threshold >= normal, feature effectively disabled
+        if sunny_threshold >= normal_threshold:
+            return battery_analysis
+
+        # Calculate total battery capacity from config
+        capacities = self._settings.battery_capacities
+        if capacities:
+            total_capacity_kwh = sum(capacities.values())
+        else:
+            total_capacity_kwh = 0.0
+
+        if total_capacity_kwh <= 0:
+            _LOGGER.debug(
+                "Sunny day check skipped: no battery capacity configured"
+            )
+            return battery_analysis
+
+        # Sunny if forecast >= half total battery capacity
+        sunny_production_threshold = total_capacity_kwh / 2.0
+
+        if solar_forecast >= sunny_production_threshold:
+            _LOGGER.debug(
+                "Sunny day detected: forecast %.1f kWh >= %.1f kWh "
+                "(half of %.1f kWh battery capacity) - "
+                "grid max SOC reduced from %.0f%% to %.0f%%",
+                solar_forecast,
+                sunny_production_threshold,
+                total_capacity_kwh,
+                normal_threshold,
+                sunny_threshold,
+            )
+            # Create modified copy for grid charging decisions only
+            grid_analysis = dict(battery_analysis)
+            grid_analysis["max_soc_threshold"] = sunny_threshold
+            average_soc = grid_analysis.get("average_soc")
+            if average_soc is not None:
+                grid_analysis["batteries_full"] = average_soc >= sunny_threshold
+                grid_analysis["remaining_capacity_percent"] = sunny_threshold - average_soc
+            return grid_analysis
+
+        _LOGGER.debug(
+            "Not a sunny day: forecast %.1f kWh < %.1f kWh threshold",
+            solar_forecast,
+            sunny_production_threshold,
+        )
+        return battery_analysis
 
     def _calculate_weighted_average_soc(self, batteries: list[dict[str, Any]]) -> float:
         """Calculate capacity-weighted average SOC."""

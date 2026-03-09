@@ -40,6 +40,10 @@ CONF_EMERGENCY_SOC_THRESHOLD = "emergency_soc_threshold"
 CONF_VERY_LOW_PRICE_THRESHOLD = "very_low_price_threshold"
 CONF_SIGNIFICANT_SOLAR_THRESHOLD = "significant_solar_threshold"
 CONF_FEEDIN_PRICE_THRESHOLD = "feedin_price_threshold"
+CONF_SOLAR_FORECAST_ENTITY = "solar_forecast_entity"
+CONF_SOLAR_FORECAST_TODAY_ENTITY = "solar_forecast_today_entity"
+CONF_SOLAR_FORECAST_START_HOUR = "solar_forecast_start_hour"
+CONF_MAX_SOC_THRESHOLD_SUNNY = "max_soc_threshold_sunny"
 
 # Safety Limits Configuration Keys
 CONF_MAX_BATTERY_POWER = "max_battery_power"
@@ -68,6 +72,8 @@ DEFAULT_EMERGENCY_SOC = 15
 DEFAULT_VERY_LOW_PRICE_THRESHOLD = 30  # Bottom 30% of daily range
 DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD = 1000  # 1kW
 DEFAULT_FEEDIN_PRICE_THRESHOLD = 0.05  # €0.05/kWh - export only above this price
+DEFAULT_MAX_SOC_SUNNY = 50  # Lower grid charge target when sunny day expected
+DEFAULT_SOLAR_FORECAST_START_HOUR = 20  # Start reading tomorrow's forecast at 8 PM
 
 # Default Safety Limits (W)
 DEFAULT_MAX_BATTERY_POWER = 3000  # 3kW typical home battery inverter limit
@@ -165,4 +171,4 @@ MANUAL_OVERRIDE_TARGET_ALL = "all"
 MAX_POWER_VALIDATION_W = 50000  # Maximum reasonable power for solar/consumption/grid validation
 MAX_CAR_POWER_VALIDATION_W = 22000  # Maximum reasonable car charging power
 
-INTEGRATION_VERSION = "4.8.2"
+INTEGRATION_VERSION = "4.9.0"

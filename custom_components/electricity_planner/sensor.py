@@ -718,6 +718,16 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "very_low_price_threshold": config.get("very_low_price_threshold", 30),
                 "price_threshold": config.get("price_threshold", 0.15),
                 "feedin_price_threshold": config.get("feedin_price_threshold", 0.05),
+                "max_soc_threshold": config.get("max_soc_threshold", 90),
+                "max_soc_threshold_sunny": config.get("max_soc_threshold_sunny", 50),
+            },
+
+            # Solar forecast / sunny day status
+            "solar_forecast": {
+                "sunny_day_active": self.coordinator.data.get("sunny_day_active", False),
+                "solar_forecast_kwh": self.coordinator.data.get("solar_forecast_production"),
+                "solar_forecast_entity": config.get("solar_forecast_entity"),
+                "solar_forecast_today_entity": config.get("solar_forecast_today_entity"),
             },
 
             # Validation flags (for quick problem identification)

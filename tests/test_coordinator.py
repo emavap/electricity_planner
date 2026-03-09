@@ -38,9 +38,13 @@ from custom_components.electricity_planner.const import (
     CONF_NEXT_PRICE_ENTITY,
     CONF_PRICE_THRESHOLD,
     CONF_SOLAR_PRODUCTION_ENTITY,
+    CONF_SOLAR_FORECAST_ENTITY,
+    CONF_SOLAR_FORECAST_TODAY_ENTITY,
+    CONF_SOLAR_FORECAST_START_HOUR,
     CONF_TRANSPORT_COST_ENTITY,
     CONF_USE_AVERAGE_THRESHOLD,
     DEFAULT_MIN_CAR_CHARGING_DURATION,
+    DEFAULT_SOLAR_FORECAST_START_HOUR,
     DOMAIN,
     MANUAL_OVERRIDE_ACTION_FORCE_CHARGE,
     MANUAL_OVERRIDE_ACTION_FORCE_WAIT,
@@ -1306,3 +1310,224 @@ async def test_transport_cost_lookup_uses_local_hour(fake_hass, monkeypatch):
         assert change_start.hour == 1
     finally:
         dt_util.set_default_time_zone(original_tz)
+
+
+
+# ---------------------------------------------------------------------------
+# Solar Forecast Caching (_resolve_solar_forecast) Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_solar_forecast_after_start_hour_caches_value(fake_hass, monkeypatch):
+    """After start hour, the forecast entity value should be cached."""
+    config = _base_config()
+    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_START_HOUR] = 20
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Set time to 21:00
+    tz = pytz.timezone("Europe/Brussels")
+    fake_now = datetime(2025, 6, 15, 21, 0, tzinfo=tz)
+    monkeypatch.setattr(dt_util, "now", lambda: fake_now)
+
+    fake_hass.states.set("sensor.energy_production_tomorrow", "15.5")
+
+    result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert result == pytest.approx(15.5)
+    assert coordinator._cached_solar_forecast == pytest.approx(15.5)
+    assert coordinator._solar_forecast_cache_date == fake_now.date()
+    assert coordinator._solar_forecast_cache_hour == 21
+
+
+@pytest.mark.asyncio
+async def test_solar_forecast_cache_refreshes_hourly(fake_hass, monkeypatch):
+    """Cache should refresh when the hour changes."""
+    config = _base_config()
+    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_START_HOUR] = 20
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    tz = pytz.timezone("Europe/Brussels")
+
+    # First call at 20:00 → caches 10.0
+    fake_hass.states.set("sensor.energy_production_tomorrow", "10.0")
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 15, 20, 0, tzinfo=tz))
+    result1 = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert result1 == pytest.approx(10.0)
+
+    # Same hour, entity updated → still returns cached value
+    fake_hass.states.set("sensor.energy_production_tomorrow", "12.0")
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 15, 20, 30, tzinfo=tz))
+    result2 = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert result2 == pytest.approx(10.0)
+
+    # Next hour → cache refreshes
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 15, 21, 0, tzinfo=tz))
+    result3 = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert result3 == pytest.approx(12.0)
+    assert coordinator._solar_forecast_cache_hour == 21
+
+
+@pytest.mark.asyncio
+async def test_solar_forecast_before_start_hour_uses_today_entity(fake_hass, monkeypatch):
+    """Before start hour with 'today' entity configured, should use today's value."""
+    config = _base_config()
+    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_TODAY_ENTITY] = "sensor.energy_production_today"
+    config[CONF_SOLAR_FORECAST_START_HOUR] = 20
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    tz = pytz.timezone("Europe/Brussels")
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 3, 0, tzinfo=tz))
+
+    fake_hass.states.set("sensor.energy_production_tomorrow", "8.0")  # wrong day!
+    fake_hass.states.set("sensor.energy_production_today", "15.0")  # correct day
+
+    result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert result == pytest.approx(15.0)
+
+
+@pytest.mark.asyncio
+async def test_solar_forecast_before_start_hour_uses_cache_when_no_today(fake_hass, monkeypatch):
+    """Before start hour without today entity, should use cached value from previous evening."""
+    config = _base_config()
+    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_START_HOUR] = 20
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    tz = pytz.timezone("Europe/Brussels")
+
+    # Populate cache at 21:00 on June 15
+    fake_hass.states.set("sensor.energy_production_tomorrow", "14.0")
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 15, 21, 0, tzinfo=tz))
+    await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert coordinator._cached_solar_forecast == pytest.approx(14.0)
+
+    # Now it's 3 AM on June 16 — before start hour, no today entity
+    fake_hass.states.set("sensor.energy_production_tomorrow", "9.0")  # wrong day value
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 3, 0, tzinfo=tz))
+    result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert result == pytest.approx(14.0)  # uses cached, not live
+
+
+@pytest.mark.asyncio
+async def test_solar_forecast_before_start_hour_no_cache_no_today_returns_none(fake_hass, monkeypatch):
+    """Before start hour with no cache and no today entity should return None."""
+    config = _base_config()
+    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_START_HOUR] = 20
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    tz = pytz.timezone("Europe/Brussels")
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 3, 0, tzinfo=tz))
+
+    fake_hass.states.set("sensor.energy_production_tomorrow", "9.0")  # wrong day
+
+    result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_solar_forecast_before_start_hour_today_unavailable_falls_to_cache(fake_hass, monkeypatch):
+    """Today entity configured but unavailable → fall back to cache."""
+    config = _base_config()
+    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_TODAY_ENTITY] = "sensor.energy_production_today"
+    config[CONF_SOLAR_FORECAST_START_HOUR] = 20
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    tz = pytz.timezone("Europe/Brussels")
+
+    # Populate cache evening before
+    fake_hass.states.set("sensor.energy_production_tomorrow", "13.0")
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 15, 22, 0, tzinfo=tz))
+    await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+
+    # 3 AM - today entity not set (unavailable)
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 3, 0, tzinfo=tz))
+    result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert result == pytest.approx(13.0)  # cached value
+
+
+@pytest.mark.asyncio
+async def test_solar_forecast_entity_unavailable_after_start_hour(fake_hass, monkeypatch):
+    """After start hour with entity unavailable and no cache → returns None."""
+    config = _base_config()
+    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_START_HOUR] = 20
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    tz = pytz.timezone("Europe/Brussels")
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 15, 21, 0, tzinfo=tz))
+
+    # Entity not set → _get_state_value returns None
+    result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_solar_forecast_after_start_hour_ignores_previous_day_cache_if_unavailable(
+    fake_hass, monkeypatch
+):
+    """After start hour, don't reuse previous-day cache when live forecast is unavailable."""
+    config = _base_config()
+    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_START_HOUR] = 20
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    tz = pytz.timezone("Europe/Brussels")
+
+    # Populate previous-day cache
+    fake_hass.states.set("sensor.energy_production_tomorrow", "16.0")
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 15, 22, 0, tzinfo=tz))
+    cached = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert cached == pytest.approx(16.0)
+    assert coordinator._solar_forecast_cache_date == datetime(2025, 6, 15, tzinfo=tz).date()
+
+    # New day after start hour: live forecast unavailable -> stale cache must be ignored
+    fake_hass.states.set("sensor.energy_production_tomorrow", "unknown")
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 20, 0, tzinfo=tz))
+    stale_result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert stale_result is None
+    assert coordinator._cached_solar_forecast is None
+    assert coordinator._solar_forecast_cache_date == datetime(2025, 6, 16, tzinfo=tz).date()
+    assert coordinator._solar_forecast_cache_hour == 20
+
+    # Once live data returns, cache should refresh normally
+    fake_hass.states.set("sensor.energy_production_tomorrow", "18.0")
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 21, 0, tzinfo=tz))
+    refreshed = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert refreshed == pytest.approx(18.0)
+
+
+@pytest.mark.asyncio
+async def test_solar_forecast_cache_persists_through_midnight(fake_hass, monkeypatch):
+    """Cache populated at 22:00 should persist past midnight to next day."""
+    config = _base_config()
+    config[CONF_SOLAR_FORECAST_ENTITY] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_START_HOUR] = 20
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    tz = pytz.timezone("Europe/Brussels")
+
+    # Cache at 22:00
+    fake_hass.states.set("sensor.energy_production_tomorrow", "16.0")
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 15, 22, 0, tzinfo=tz))
+    await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+
+    # 00:30 next day - no today entity
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 0, 30, tzinfo=tz))
+    result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert result == pytest.approx(16.0)
+
+    # 19:59 next day — still before start hour, still uses cache
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 19, 59, tzinfo=tz))
+    result2 = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert result2 == pytest.approx(16.0)
+
+    # 20:00 next day — after start hour, should refresh cache with new value
+    fake_hass.states.set("sensor.energy_production_tomorrow", "20.0")
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 20, 0, tzinfo=tz))
+    result3 = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    assert result3 == pytest.approx(20.0)

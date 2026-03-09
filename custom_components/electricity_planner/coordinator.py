@@ -5,7 +5,7 @@ import asyncio
 import hashlib
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -42,6 +42,9 @@ from .const import (
     CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_TRANSPORT_COST_ENTITY,
     CONF_GRID_POWER_ENTITY,
+    CONF_SOLAR_FORECAST_ENTITY,
+    CONF_SOLAR_FORECAST_TODAY_ENTITY,
+    CONF_SOLAR_FORECAST_START_HOUR,
     CONF_BASE_GRID_SETPOINT,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
@@ -62,6 +65,7 @@ from .const import (
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+    DEFAULT_SOLAR_FORECAST_START_HOUR,
     NORDPOOL_CACHE_MAX_SIZE,
     NORDPOOL_CACHE_TTL_MINUTES,
     PRICE_TIMELINE_MAX_AGE_HOURS,
@@ -154,6 +158,16 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._car_peak_limited_until: datetime | None = None
         self._car_peak_limit_started_at: datetime | None = None
 
+        # Solar forecast caching for sunny-day grid limit
+        # After the configured start hour (default 20:00), we read tomorrow's
+        # forecast and cache it.  The cache refreshes every hour so forecast
+        # improvements are picked up, but persists through midnight until the
+        # next start hour so the entity flip (tomorrow → today) doesn't affect
+        # overnight charging decisions.
+        self._cached_solar_forecast: float | None = None
+        self._solar_forecast_cache_date: date | None = None  # local date when cached
+        self._solar_forecast_cache_hour: int | None = None  # hour when last cached
+
         # Average threshold hysteresis tracking
         self._average_threshold_valid_count: int = 0  # Count of consecutive valid calculations
         self._average_threshold_enabled: bool = False  # Whether average threshold is active
@@ -177,6 +191,101 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             The override dict if active, None otherwise.
         """
         return self._manual_overrides.get(key)
+
+    async def _resolve_solar_forecast(self, entity_id: str) -> float | None:
+        """Resolve the solar forecast value with hourly-refreshing cache.
+
+        The forecast entity (``energy_production_tomorrow``) is read after the
+        configured start hour (default 20:00) and cached hourly so that
+        forecast improvements are picked up during the evening.
+
+        After midnight the ``energy_production_tomorrow`` entity flips to the
+        *next* day and no longer represents the day we're charging for.  If a
+        "today" forecast entity is configured (``energy_production_today``), we
+        use it live between midnight and the start hour because it now refers
+        to the correct day.  Otherwise we fall back to the last cached value
+        from the previous evening.
+        """
+        now_local = dt_util.now()
+        today = now_local.date()
+        current_hour = now_local.hour
+        start_hour = int(
+            self.config.get(CONF_SOLAR_FORECAST_START_HOUR, DEFAULT_SOLAR_FORECAST_START_HOUR)
+        )
+
+        live_value = await self._get_state_value(entity_id)
+
+        if current_hour >= start_hour:
+            # After start hour: refresh the cache once per hour (or if cache is empty).
+            needs_refresh = (
+                self._solar_forecast_cache_date != today
+                or self._solar_forecast_cache_hour != current_hour
+                or self._cached_solar_forecast is None
+            )
+            stale_day_cache = (
+                self._solar_forecast_cache_date is not None
+                and self._solar_forecast_cache_date != today
+            )
+            if needs_refresh and live_value is not None:
+                self._cached_solar_forecast = live_value
+                self._solar_forecast_cache_date = today
+                self._solar_forecast_cache_hour = current_hour
+                _LOGGER.debug(
+                    "Solar forecast cache updated for %s %02d:00: %.1f kWh",
+                    today,
+                    current_hour,
+                    live_value,
+                )
+            elif needs_refresh and live_value is None and stale_day_cache:
+                _LOGGER.warning(
+                    "Solar forecast unavailable after start hour (%02d:00), "
+                    "and cached value is from %s (stale day). Ignoring stale "
+                    "cache until fresh forecast is available.",
+                    start_hour,
+                    self._solar_forecast_cache_date,
+                )
+                self._cached_solar_forecast = None
+                self._solar_forecast_cache_date = today
+                self._solar_forecast_cache_hour = current_hour
+                return None
+            return self._cached_solar_forecast if self._cached_solar_forecast is not None else live_value
+        else:
+            # Before start hour: prefer the "today" entity (it now represents
+            # the correct day after midnight) over the stale cache.
+            today_entity = self.config.get(CONF_SOLAR_FORECAST_TODAY_ENTITY)
+            if today_entity:
+                today_value = await self._get_state_value(today_entity)
+                if today_value is not None:
+                    _LOGGER.debug(
+                        "Using energy_production_today (%.1f kWh) for "
+                        "overnight forecast validation",
+                        today_value,
+                    )
+                    return today_value
+
+            # No "today" entity configured/available → use cached value
+            if self._cached_solar_forecast is not None:
+                return self._cached_solar_forecast
+            # No cache yet (first run / restart before start hour).
+            # The live "tomorrow" entity now points to the *wrong* day
+            # (it flipped at midnight), so using it would give incorrect
+            # sunny-day decisions.  Return None to disable the feature
+            # until the start hour when the cache can be populated.
+            if live_value is not None:
+                reason = (
+                    "'today' entity unavailable" if today_entity
+                    else "no 'today' entity configured"
+                )
+                _LOGGER.warning(
+                    "Solar forecast: no cache and %s. "
+                    "Before the start hour (%02d:00) the 'tomorrow' entity "
+                    "points to the wrong day — sunny day logic disabled until "
+                    "cache is populated. Configure 'Energy Production Today' "
+                    "entity to avoid this gap.",
+                    reason,
+                    start_hour,
+                )
+            return None
 
     def _is_data_available(self, data: dict[str, Any]) -> bool:
         """Check if critical price data is available for decisions."""
@@ -1088,6 +1197,20 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         data["grid_power"] = await self._get_state_value(
             self.config.get(CONF_GRID_POWER_ENTITY)
         )
+
+        # Solar forecast with daily caching for stable overnight decisions.
+        # After the configured start hour: read the forecast entity (tomorrow's
+        # production) and cache it.  This cached value is used for all decisions
+        # until the next day's start hour, so midnight entity flips don't affect
+        # overnight charging.  Before the start hour on the first day (no cache
+        # yet), use the live value.
+        solar_forecast_entity = self.config.get(CONF_SOLAR_FORECAST_ENTITY)
+        if solar_forecast_entity:
+            data["solar_forecast_production"] = await self._resolve_solar_forecast(
+                solar_forecast_entity
+            )
+        else:
+            data["solar_forecast_production"] = None
 
         # Preserve car charging locked threshold across updates (for threshold continuity)
         data["car_charging_locked_threshold"] = self.data.get("car_charging_locked_threshold") if self.data else None

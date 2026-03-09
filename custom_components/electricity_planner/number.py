@@ -12,7 +12,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_MAX_SOC_THRESHOLD,
+    CONF_MAX_SOC_THRESHOLD_SUNNY,
     DEFAULT_MAX_SOC,
+    DEFAULT_MAX_SOC_SUNNY,
     DOMAIN,
 )
 from .coordinator import ElectricityPlannerCoordinator
@@ -30,6 +32,7 @@ async def async_setup_entry(
 
     entities = [
         MaxSocThresholdNumber(coordinator, entry),
+        MaxSocThresholdSunnyNumber(coordinator, entry),
     ]
 
     async_add_entities(entities)
@@ -56,7 +59,7 @@ class MaxSocThresholdNumber(CoordinatorEntity, NumberEntity):
         self._attr_icon = "mdi:battery-charging-high"
         self._attr_native_unit_of_measurement = "%"
         self._attr_mode = NumberMode.SLIDER
-        self._attr_native_min_value = 50
+        self._attr_native_min_value = 0
         self._attr_native_max_value = 100
         self._attr_native_step = 5
         self._attr_device_info = {
@@ -118,3 +121,84 @@ class MaxSocThresholdNumber(CoordinatorEntity, NumberEntity):
         # Trigger refresh to recalculate decisions with new threshold
         await self.coordinator.async_request_refresh()
 
+
+class MaxSocThresholdSunnyNumber(CoordinatorEntity, NumberEntity):
+    """Number entity to control the max SOC threshold for grid charging on high-solar days.
+
+    When the solar forecast exceeds half the total battery capacity, this lower
+    threshold is used instead of the standard max SOC threshold, preserving
+    battery capacity for free solar energy.
+    """
+
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the sunny max SOC threshold number."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = f"{entry.title} Battery Max SOC Threshold (High Solar)"
+        self._attr_unique_id = f"{entry.entry_id}_max_soc_threshold_sunny"
+        self._attr_icon = "mdi:weather-sunny"
+        self._attr_native_unit_of_measurement = "%"
+        self._attr_mode = NumberMode.SLIDER
+        self._attr_native_min_value = 0
+        self._attr_native_max_value = 100
+        self._attr_native_step = 5
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": entry.title,
+            "manufacturer": "Electricity Planner",
+            "model": "Smart Charging Controller",
+        }
+
+    @property
+    def native_value(self) -> float:
+        """Return the current sunny max SOC threshold value."""
+        return self.coordinator.config.get(CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes."""
+        current_value = self.native_value
+        normal_threshold = self.coordinator.config.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
+        sunny_active = self.coordinator.data.get("sunny_day_active", False) if self.coordinator.data else False
+
+        attrs = {
+            "description": (
+                f"When solar forecast is high, grid charging stops at {current_value:.0f}% "
+                f"instead of {normal_threshold:.0f}%, leaving room for free solar."
+            ),
+            "sunny_day_active": sunny_active,
+            "normal_threshold": f"{normal_threshold:.0f}%",
+        }
+
+        solar_forecast = self.coordinator.data.get("solar_forecast_production") if self.coordinator.data else None
+        if solar_forecast is not None:
+            attrs["solar_forecast_kwh"] = f"{solar_forecast:.1f} kWh"
+
+        return attrs
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Update the sunny max SOC threshold value."""
+        new_value = int(value)
+        _LOGGER.info("Updating sunny max SOC threshold to %d%%", new_value)
+
+        # Update config entry options for persistence
+        new_options = dict(self._entry.options)
+        new_options[CONF_MAX_SOC_THRESHOLD_SUNNY] = new_value
+
+        self.hass.config_entries.async_update_entry(
+            self._entry,
+            options=new_options,
+        )
+
+        # Update coordinator config for immediate effect (no reload needed)
+        self.coordinator.config[CONF_MAX_SOC_THRESHOLD_SUNNY] = new_value
+
+        # Refresh decision engine settings to apply new threshold
+        self.coordinator.decision_engine.refresh_settings(self.coordinator.config)
+
+        # Trigger refresh to recalculate decisions with new threshold
+        await self.coordinator.async_request_refresh()

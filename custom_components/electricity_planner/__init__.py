@@ -20,6 +20,8 @@ from .const import (
     ATTR_REASON,
     ATTR_TARGET,
     CONF_MAX_SOC_THRESHOLD,
+    CONF_MAX_SOC_THRESHOLD_SUNNY,
+    CONF_SOLAR_FORECAST_START_HOUR,
     DOMAIN,
     MANUAL_OVERRIDE_ACTION_FORCE_CHARGE,
     MANUAL_OVERRIDE_ACTION_FORCE_WAIT,
@@ -118,6 +120,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 # These are applied immediately via coordinator.config and decision_engine.refresh_settings()
 LIVE_UPDATE_OPTIONS = {
     CONF_MAX_SOC_THRESHOLD,
+    CONF_MAX_SOC_THRESHOLD_SUNNY,
+    CONF_SOLAR_FORECAST_START_HOUR,
 }
 
 
@@ -146,6 +150,11 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     # If only live-update options changed, skip reload
     if changed_keys and changed_keys.issubset(LIVE_UPDATE_OPTIONS):
+        # Apply merged config immediately so live-update options take effect
+        # without requiring a full integration reload.
+        coordinator.config = new_options
+        coordinator.decision_engine.refresh_settings(coordinator.config)
+        await coordinator.async_request_refresh()
         _LOGGER.debug(
             "Skipping reload - only live-update options changed: %s", changed_keys
         )

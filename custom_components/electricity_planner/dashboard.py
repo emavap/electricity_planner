@@ -36,7 +36,7 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 MANAGED_KEY = "electricity_planner_managed"
-MANAGED_VERSION = 3  # Bumped: Added Battery Controls (Max SOC Threshold, Disable Battery Charging)
+MANAGED_VERSION = 5  # Bumped: Ensure dual-threshold entities are wired into managed dashboard
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 
 ENTITY_WAIT_TIMEOUT = 30
@@ -81,12 +81,15 @@ ENTITY_REFERENCES: tuple[EntityReference, ...] = (
     EntityReference("switch.electricity_planner_car_permissive_mode", "car_permissive_mode"),
     EntityReference("switch.electricity_planner_disable_battery_charging", "disable_battery_charging"),
     EntityReference("number.electricity_planner_max_soc_threshold", "max_soc_threshold"),
+    EntityReference("number.electricity_planner_max_soc_threshold_sunny", "max_soc_threshold_sunny"),
 )
 
 CORE_ENTITY_SUFFIXES: tuple[str, ...] = (
     "battery_grid_charging",
     "car_grid_charging",
     "price_analysis",
+    "max_soc_threshold",
+    "max_soc_threshold_sunny",
 )
 
 
