@@ -1,6 +1,6 @@
 # Electricity Planner – Project Summary
 
-**Version 4.9.3** | **Config Schema Version 14** | **Home Assistant 2024.4+**
+**Version 4.9.4** | **Config Schema Version 14** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 

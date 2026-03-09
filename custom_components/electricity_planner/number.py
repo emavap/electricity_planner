@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
+from homeassistant.util import slugify
 
 from .const import (
     CONF_MAX_SOC_THRESHOLD,
@@ -119,6 +120,7 @@ class MaxSocThresholdNumber(CoordinatorEntity, NumberEntity):
         self._entry = entry
         self._attr_name = f"{entry.title} Battery Max SOC Threshold"
         self._attr_unique_id = f"{entry.entry_id}_max_soc_threshold"
+        self.entity_id = f"number.{slugify(entry.title or 'electricity_planner')}_max_soc_threshold"
         self._attr_icon = "mdi:battery-charging-high"
         self._attr_native_unit_of_measurement = "%"
         self._attr_mode = NumberMode.SLIDER
@@ -203,6 +205,9 @@ class MaxSocThresholdSunnyNumber(CoordinatorEntity, NumberEntity):
         self._entry = entry
         self._attr_name = f"{entry.title} Battery Max SOC Threshold (High Solar)"
         self._attr_unique_id = f"{entry.entry_id}_max_soc_threshold_sunny"
+        self.entity_id = (
+            f"number.{slugify(entry.title or 'electricity_planner')}_max_soc_threshold_sunny"
+        )
         self._attr_icon = "mdi:weather-sunny"
         self._attr_native_unit_of_measurement = "%"
         self._attr_mode = NumberMode.SLIDER
@@ -284,6 +289,9 @@ class SunnyForecastThresholdNumber(CoordinatorEntity, NumberEntity):
         self._entry = entry
         self._attr_name = f"{entry.title} Sunny Forecast Trigger"
         self._attr_unique_id = f"{entry.entry_id}_sunny_forecast_threshold_kwh"
+        self.entity_id = (
+            f"number.{slugify(entry.title or 'electricity_planner')}_sunny_forecast_threshold_kwh"
+        )
         self._attr_icon = "mdi:weather-partly-cloudy"
         self._attr_native_unit_of_measurement = "kWh"
         self._attr_mode = NumberMode.SLIDER

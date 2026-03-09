@@ -140,6 +140,37 @@ async def test_number_setup_with_forecast_entity_keeps_same_three_entities(fake_
 
 
 @pytest.mark.asyncio
+async def test_number_entities_use_stable_dashboard_friendly_entity_ids(fake_hass, monkeypatch):
+    """Number entities should expose stable IDs expected by dashboard templates."""
+    config = _base_config()
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Electricity Planner",
+        data=config,
+        options={},
+    )
+
+    monkeypatch.setattr(
+        coordinator_module.ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+
+    coordinator = ElectricityPlannerCoordinator(fake_hass, entry)
+
+    max_entity = MaxSocThresholdNumber(coordinator, entry)
+    sunny_entity = MaxSocThresholdSunnyNumber(coordinator, entry)
+    forecast_entity = SunnyForecastThresholdNumber(coordinator, entry)
+
+    assert max_entity.entity_id == "number.electricity_planner_max_soc_threshold"
+    assert sunny_entity.entity_id == "number.electricity_planner_max_soc_threshold_sunny"
+    assert (
+        forecast_entity.entity_id
+        == "number.electricity_planner_sunny_forecast_threshold_kwh"
+    )
+
+
+@pytest.mark.asyncio
 async def test_sunny_number_attributes_use_live_forecast_fallback_before_start_hour(fake_hass, monkeypatch):
     """When coordinator data is empty, UI attrs should still show today's forecast value."""
     config = _base_config()
