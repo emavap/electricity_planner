@@ -6,9 +6,12 @@ import pytest
 
 from custom_components.electricity_planner.const import (
     CONF_BASE_GRID_SETPOINT,
+    CONF_BATTERY_CAPACITIES,
     CONF_MAX_BATTERY_POWER,
     CONF_MAX_CAR_POWER,
     CONF_MAX_GRID_POWER,
+    CONF_MAX_SOC_THRESHOLD,
+    CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_MIN_CAR_CHARGING_THRESHOLD,
     CONF_FEEDIN_PRICE_THRESHOLD,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -621,3 +624,132 @@ def test_car_distribution_ignores_current_draw():
     assert result["phase_1"]["grid_setpoint"] == 5000
     assert result["phase_2"]["grid_setpoint"] == 5000
     assert result["phase_3"]["grid_setpoint"] == 0
+
+
+
+# ---------------------------------------------------------------------------
+# Sunny Day Grid Limit (_apply_sunny_day_grid_limit) Tests
+# ---------------------------------------------------------------------------
+
+
+def _battery_analysis(average_soc=50.0, max_soc=90.0):
+    """Create a minimal battery_analysis dict for sunny day tests."""
+    return {
+        "average_soc": average_soc,
+        "max_soc_threshold": max_soc,
+        "min_soc_threshold": 20.0,
+        "batteries_full": average_soc >= max_soc,
+        "remaining_capacity_percent": max_soc - average_soc,
+        "batteries_available": True,
+    }
+
+
+def test_sunny_day_no_forecast_returns_unchanged():
+    """No solar forecast in data → battery_analysis returned unchanged."""
+    engine = _engine({
+        CONF_MAX_SOC_THRESHOLD: 90,
+        CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+        CONF_BATTERY_CAPACITIES: {"sensor.bat": 10.0},
+    })
+    ba = _battery_analysis()
+    result = engine._apply_sunny_day_grid_limit(ba, {})
+    assert result is ba  # exact same object
+
+
+def test_sunny_day_feature_disabled_when_thresholds_equal():
+    """Sunny threshold >= normal threshold → feature disabled."""
+    engine = _engine({
+        CONF_MAX_SOC_THRESHOLD: 90,
+        CONF_MAX_SOC_THRESHOLD_SUNNY: 90,
+        CONF_BATTERY_CAPACITIES: {"sensor.bat": 10.0},
+    })
+    ba = _battery_analysis()
+    result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 20.0})
+    assert result is ba
+
+
+def test_sunny_day_no_battery_capacity_returns_unchanged():
+    """No battery capacities configured → skip sunny check."""
+    engine = _engine({
+        CONF_MAX_SOC_THRESHOLD: 90,
+        CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+    })
+    ba = _battery_analysis()
+    result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 20.0})
+    assert result is ba
+
+
+def test_sunny_day_forecast_below_threshold_not_sunny():
+    """Forecast below half capacity → not a sunny day."""
+    engine = _engine({
+        CONF_MAX_SOC_THRESHOLD: 90,
+        CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+        CONF_BATTERY_CAPACITIES: {"sensor.bat": 20.0},  # threshold = 10 kWh
+    })
+    ba = _battery_analysis()
+    result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 9.0})
+    assert result is ba  # not modified
+
+
+def test_sunny_day_forecast_above_threshold_applies_limit():
+    """Forecast >= half capacity → sunny day, max SOC reduced."""
+    engine = _engine({
+        CONF_MAX_SOC_THRESHOLD: 90,
+        CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+        CONF_BATTERY_CAPACITIES: {"sensor.bat": 20.0},  # threshold = 10 kWh
+    })
+    ba = _battery_analysis(average_soc=40.0, max_soc=90.0)
+    result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 12.0})
+
+    # Should be a different dict
+    assert result is not ba
+    assert result["max_soc_threshold"] == 50.0
+    assert result["remaining_capacity_percent"] == 10.0  # 50 - 40
+    assert result["batteries_full"] is False
+
+    # Original should be untouched
+    assert ba["max_soc_threshold"] == 90.0
+
+
+def test_sunny_day_batteries_full_in_sunny_mode():
+    """SOC >= sunny threshold → batteries_full should be True."""
+    engine = _engine({
+        CONF_MAX_SOC_THRESHOLD: 90,
+        CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+        CONF_BATTERY_CAPACITIES: {"sensor.bat": 20.0},
+    })
+    ba = _battery_analysis(average_soc=55.0, max_soc=90.0)
+    result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 15.0})
+
+    assert result["max_soc_threshold"] == 50.0
+    assert result["batteries_full"] is True
+    assert result["remaining_capacity_percent"] == -5.0  # 50 - 55
+
+
+def test_sunny_day_exactly_at_threshold():
+    """Forecast exactly at half capacity → should trigger sunny mode."""
+    engine = _engine({
+        CONF_MAX_SOC_THRESHOLD: 90,
+        CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+        CONF_BATTERY_CAPACITIES: {"sensor.bat1": 10.0, "sensor.bat2": 10.0},  # total 20, threshold 10
+    })
+    ba = _battery_analysis(average_soc=30.0, max_soc=90.0)
+    result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 10.0})
+
+    assert result is not ba
+    assert result["max_soc_threshold"] == 50.0
+
+
+def test_sunny_day_no_average_soc():
+    """If average_soc is None, batteries_full and remaining_capacity should not be set."""
+    engine = _engine({
+        CONF_MAX_SOC_THRESHOLD: 90,
+        CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+        CONF_BATTERY_CAPACITIES: {"sensor.bat": 20.0},
+    })
+    ba = {"max_soc_threshold": 90.0, "batteries_available": True}
+    result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 15.0})
+
+    assert result["max_soc_threshold"] == 50.0
+    assert "batteries_full" not in result
+    assert "remaining_capacity_percent" not in result

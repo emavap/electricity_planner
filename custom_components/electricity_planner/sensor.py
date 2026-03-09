@@ -37,6 +37,7 @@ from .const import (
     INTEGRATION_VERSION,
 )
 from .coordinator import ElectricityPlannerCoordinator
+from .helpers import extract_price_from_interval
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -531,7 +532,7 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
             return {}
 
         monthly_peak = self.coordinator.data.get("monthly_grid_peak", 0)
-        max_grid_setpoint = max(monthly_peak, 2500) if monthly_peak and monthly_peak > 2500 else 2500
+        max_grid_setpoint = max(monthly_peak or 0, 2500)
 
         attributes = {
             "grid_setpoint_reason": self.coordinator.data.get("grid_setpoint_reason", ""),
@@ -717,6 +718,16 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "very_low_price_threshold": config.get("very_low_price_threshold", 30),
                 "price_threshold": config.get("price_threshold", 0.15),
                 "feedin_price_threshold": config.get("feedin_price_threshold", 0.05),
+                "max_soc_threshold": config.get("max_soc_threshold", 90),
+                "max_soc_threshold_sunny": config.get("max_soc_threshold_sunny", 50),
+            },
+
+            # Solar forecast / sunny day status
+            "solar_forecast": {
+                "sunny_day_active": self.coordinator.data.get("sunny_day_active", False),
+                "solar_forecast_kwh": self.coordinator.data.get("solar_forecast_production"),
+                "solar_forecast_entity": config.get("solar_forecast_entity"),
+                "solar_forecast_today_entity": config.get("solar_forecast_today_entity"),
             },
 
             # Validation flags (for quick problem identification)
@@ -915,6 +926,8 @@ class BuyPriceMarginSensor(ElectricityPlannerSensorBase):
 
     @property
     def native_value(self) -> str | None:
+        if not self.coordinator.data:
+            return None
         price_analysis = self.coordinator.data.get("price_analysis", {})
         current_price = price_analysis.get("current_price")
         threshold = price_analysis.get("price_threshold")
@@ -930,6 +943,8 @@ class BuyPriceMarginSensor(ElectricityPlannerSensorBase):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        if not self.coordinator.data:
+            return {}
         price_analysis = self.coordinator.data.get("price_analysis", {})
         threshold = price_analysis.get("price_threshold")
         current_price = price_analysis.get("current_price")
@@ -956,6 +971,8 @@ class FeedinPriceMarginSensor(ElectricityPlannerSensorBase):
 
     @property
     def native_value(self) -> str | None:
+        if not self.coordinator.data:
+            return None
         threshold = self.coordinator.config.get(
             CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
         )
@@ -972,6 +989,8 @@ class FeedinPriceMarginSensor(ElectricityPlannerSensorBase):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        if not self.coordinator.data:
+            return {}
         threshold = self.coordinator.config.get(
             CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
         )
@@ -1105,6 +1124,8 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
     @property
     def native_value(self) -> str | None:
         """Return the sensor state (summary of available data)."""
+        if not self.coordinator.data:
+            return "unavailable"
         prices_today = self.coordinator.data.get("nordpool_prices_today")
         prices_tomorrow = self.coordinator.data.get("nordpool_prices_tomorrow")
 
@@ -1126,6 +1147,8 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return price data as attributes for use in dashboard cards."""
+        if not self.coordinator.data:
+            return {}
         prices_today = self.coordinator.data.get("nordpool_prices_today")
         prices_tomorrow = self.coordinator.data.get("nordpool_prices_tomorrow")
 
@@ -1199,22 +1222,6 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             "last_update": dt_util.now().isoformat(),
         }
 
-    @staticmethod
-    def _extract_price_value(data: dict[str, Any]) -> float | None:
-        """Return a numeric price from the Nord Pool entry dict."""
-        for key in ("value", "value_exc_vat", "price"):
-            value = data.get(key)
-            if isinstance(value, (int, float)):
-                return float(value)
-
-            if isinstance(value, str):
-                try:
-                    return float(value)
-                except (TypeError, ValueError):
-                    continue
-
-        return None
-
     def _normalize_price_interval(self, interval: Any, transport_cost_lookup: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
         """Return a normalized interval dict with a guaranteed price key.
 
@@ -1224,7 +1231,7 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         if not isinstance(interval, dict):
             return None
 
-        price_value = self._extract_price_value(interval)
+        price_value = extract_price_from_interval(interval)
         if price_value is None:
             return None
 
@@ -1244,7 +1251,7 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         # Add transport cost based on the interval's hour
         # Use lookup table built from historical data
         transport_cost = 0.0
-        fallback_transport = self.coordinator.data.get("transport_cost")
+        fallback_transport = self.coordinator.data.get("transport_cost") if self.coordinator.data else None
         applied_lookup_cost = False
 
         if transport_cost_lookup:

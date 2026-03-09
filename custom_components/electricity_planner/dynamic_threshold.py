@@ -1,7 +1,7 @@
 """Dynamic charging strategies for smarter threshold-based decisions."""
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .const import (
     DYNAMIC_THRESHOLD_HIGH_VOLATILITY,
@@ -36,8 +36,8 @@ class DynamicThresholdAnalyzer:
         current_price: float,
         highest_today: float,
         lowest_today: float,
-        next_price: Optional[float] = None
-    ) -> Dict[str, Any]:
+        next_price: float | None = None
+    ) -> dict[str, Any]:
         """Analyze if current price is good within the threshold range."""
 
         if current_price > self.max_threshold:

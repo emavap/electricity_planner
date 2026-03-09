@@ -43,6 +43,10 @@ from .const import (
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
     CONF_FEEDIN_PRICE_THRESHOLD,
+    CONF_SOLAR_FORECAST_ENTITY,
+    CONF_SOLAR_FORECAST_TODAY_ENTITY,
+    CONF_SOLAR_FORECAST_START_HOUR,
+    CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_MAX_BATTERY_POWER,
     CONF_MAX_CAR_POWER,
     CONF_MAX_GRID_POWER,
@@ -84,6 +88,8 @@ from .const import (
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
     DEFAULT_SOC_BUFFER_TARGET,
+    DEFAULT_MAX_SOC_SUNNY,
+    DEFAULT_SOLAR_FORECAST_START_HOUR,
 )
 from .migrations import CURRENT_VERSION
 
@@ -98,6 +104,8 @@ OPTIONAL_ENTITY_KEYS = {
     CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_TRANSPORT_COST_ENTITY,
     CONF_GRID_POWER_ENTITY,
+    CONF_SOLAR_FORECAST_ENTITY,
+    CONF_SOLAR_FORECAST_TODAY_ENTITY,
 }
 
 
@@ -360,6 +368,18 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
+                _optional_entity_schema(
+                    CONF_SOLAR_FORECAST_ENTITY,
+                    self.data.get(CONF_SOLAR_FORECAST_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                _optional_entity_schema(
+                    CONF_SOLAR_FORECAST_TODAY_ENTITY,
+                    self.data.get(CONF_SOLAR_FORECAST_TODAY_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
             }
         )
 
@@ -547,6 +567,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(
                 CONF_MAX_SOC_THRESHOLD,
                 default=self.data.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=100, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_SOLAR_FORECAST_START_HOUR,
+                default=self.data.get(CONF_SOLAR_FORECAST_START_HOUR, DEFAULT_SOLAR_FORECAST_START_HOUR)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=12, max=23, step=1, mode="slider"
+                )
+            ),
+            vol.Optional(
+                CONF_MAX_SOC_THRESHOLD_SUNNY,
+                default=self.data.get(CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY)
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0, max=100, unit_of_measurement="%"
@@ -1046,6 +1082,30 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 working_data.get(CONF_GRID_POWER_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
+            ),
+            _optional_entity_schema(
+                CONF_SOLAR_FORECAST_ENTITY,
+                working_data.get(CONF_SOLAR_FORECAST_ENTITY),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            _optional_entity_schema(
+                CONF_SOLAR_FORECAST_TODAY_ENTITY,
+                working_data.get(CONF_SOLAR_FORECAST_TODAY_ENTITY),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_SOLAR_FORECAST_START_HOUR,
+                default=working_data.get(CONF_SOLAR_FORECAST_START_HOUR, DEFAULT_SOLAR_FORECAST_START_HOUR),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=12, max=23, step=1, mode="slider")
+            ),
+            vol.Optional(
+                CONF_MAX_SOC_THRESHOLD_SUNNY,
+                default=working_data.get(CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")
             ),
             vol.Optional(
                 CONF_MIN_SOC_THRESHOLD,

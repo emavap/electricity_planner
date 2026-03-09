@@ -20,15 +20,11 @@ This is a Home Assistant custom integration called "Electricity Planner" - a sma
 - **Coordinator** (`coordinator.py`): Real-time data coordination with 30-second updates and state change triggers
   - Provides normalized access to all configuration and sensor data
   - Manages update cycles and entity state tracking
-- **Options-aware Config Flow** (`config_flow.py`): UI-based configuration for entity selection and thresholds
-  - Multi-step setup wizard (entities → capacities → thresholds → safety limits)
-  - Options flow defaults now merge `entry.data` + `entry.options` so users always see their latest selections
-  - Version 7 config schema with migration support
 - **Config Flow** (`config_flow.py`): UI-based configuration for entity selection and thresholds
-  - Multi-step wizard (entities → capacities → thresholds → safety limits)
-  - Options flow mirrors the same defaults and now merges with stored options
-  - Version 7 config schema with migration support
-- **Migrations** (`migrations.py`): Handles configuration upgrades from v1→v7
+  - Multi-step setup wizard (entities → capacities → thresholds → safety limits)
+  - Options flow defaults merge `entry.data` + `entry.options` so users always see their latest selections
+  - Version 13 config schema with migration support
+- **Migrations** (`migrations.py`): Handles configuration upgrades from v1→v13
   - Automatic migration on integration load
   - Safe removal of deprecated options
 - **Sensors** (`sensor.py`): Comprehensive analysis sensors
@@ -90,18 +86,45 @@ The car charging logic implements strict hysteresis to prevent short charging cy
 - Window validation: `coordinator.py:528-817` (`_check_minimum_charging_window`)
 - Threshold floor: `decision_engine.py:808-819` (threshold floor logic), `coordinator.py:250` (state storage)
 
+### Sunny Day Feature (v4.10.0+)
+
+Reduces the grid-charging Max SOC threshold when high solar production is forecast, preserving battery capacity for free solar energy.
+
+**How it works:**
+- `_resolve_solar_forecast()` in `coordinator.py` reads `energy_production_tomorrow` after the configurable start hour (default 20:00) and caches the value hourly
+- `_apply_sunny_day_grid_limit()` in `decision_engine.py` compares forecast against `total_battery_capacity / 2`
+- If sunny: `max_soc_threshold` is overridden by `max_soc_threshold_sunny` for grid charging only
+
+**Midnight flip handling:**
+- After midnight, the "tomorrow" entity flips to the *next* day (wrong day for overnight decisions)
+- If an optional "today" entity (`energy_production_today`) is configured, it's used live between midnight and the start hour
+- Otherwise, the cached value from the previous evening is used
+- If no cache and no "today" entity: returns `None` (feature safely disabled until start hour)
+
+**Configuration:**
+- `solar_forecast_entity`: Tomorrow's forecast sensor (e.g., `sensor.energy_production_tomorrow`)
+- `solar_forecast_today_entity`: Today's forecast sensor (optional, recommended)
+- `solar_forecast_start_hour`: Hour (12-23) to start reading forecast, default 20
+- `max_soc_threshold_sunny`: Grid charging max SOC on sunny days, default 50%
+
+**Formula:** `forecast_kwh >= (total_battery_capacity_kwh / 2)` → sunny day active
+
 ### Entity Dependencies
 
 **Required Nord Pool entities** (4 price entities):
 - Current price, highest price today, lowest price today, next hour price
 
-**Battery entities**: 
+**Battery entities**:
 - Battery SOC sensors (%) - supports multiple batteries
 - Battery capacity sensors (kWh) - optional but recommended
 
 **Power flow entities**:
 - House consumption (W)
 - Solar surplus = production - consumption (W)
+
+**Solar forecast entities** (optional):
+- Energy production tomorrow (kWh) - primary forecast source
+- Energy production today (kWh) - overnight validation/fallback
 
 ## Development Commands
 
@@ -129,13 +152,13 @@ custom_components/electricity_planner/
 ├── __init__.py           # Integration setup and platform registration
 ├── const.py             # Constants and configuration keys (35 CONF_ constants)
 ├── coordinator.py       # Data coordination and state management
-├── decision_engine.py   # Core charging decision algorithms (4538 lines)
+├── decision_engine.py   # Core charging decision algorithms
 ├── strategies.py        # Decision strategies (8 strategy classes)
-├── config_flow.py       # UI configuration + options flow (multi-step wizard, schema v7)
+├── config_flow.py       # UI configuration + options flow (multi-step wizard, schema v13)
 ├── sensor.py           # Analysis sensors (price, battery, power, diagnostics)
 ├── binary_sensor.py    # Main boolean outputs for charging decisions
-├── migrations.py       # Configuration migration system (v1→v7)
-├── manifest.json       # Integration metadata and dependencies (v3.0.0)
+├── migrations.py       # Configuration migration system (v1→v13)
+├── manifest.json       # Integration metadata and dependencies
 └── strings.json        # UI text and translations
 ```
 
@@ -168,20 +191,21 @@ The integration is designed for dynamic electricity markets:
 ## Configuration System
 
 ### Current Version
-- **Integration Version**: 3.0.0
-- **Config Schema Version**: 7
-- **Migration Path**: Automatic v1→v2→v3→v4→v5→v6→v7 migration
+- **Integration Version**: 4.10.3
+- **Config Schema Version**: 13
+- **Migration Path**: Automatic v1→v13 migration
 
 ### Configuration Categories
-1. **Entity Selection**: Nord Pool, battery, solar, car, power flow entities
-2. **SOC Thresholds**: Min/max SOC, emergency overrides, predictive logic thresholds
+1. **Entity Selection**: Nord Pool, battery, solar, car, power flow, solar forecast entities
+2. **SOC Thresholds**: Min/max SOC, sunny day max SOC, emergency overrides, predictive logic thresholds
 3. **Price Thresholds**: Price threshold, very low price %, feed-in threshold
 4. **Power Limits**: Max battery/car/grid power, charging thresholds
-5. **Solar Parameters**: Significant solar surplus threshold configuration
+5. **Solar Parameters**: Significant solar surplus threshold, forecast start hour
 
-### Recent Changes (v3.0.0)
-- **Improved**: Options flow defaults now reflect saved options without reverting to base config data
-- **Improved**: Feed-in binary sensor attributes sourced from merged configuration for accurate thresholds
-- **Added**: Comprehensive pytest suite runnable via Docker for quick regression coverage
-- **Fixed**: Historical migrations extended to schema version 7 (handles dynamic threshold + Nord Pool entry)
-- **Retained**: Safety guards against negative solar surplus and grid over-allocation
+### Recent Changes (v4.10.x)
+- **Added**: Sunny day feature — reduces grid charging max SOC when solar forecast is high
+- **Added**: Solar forecast caching with configurable start hour (12-23, default 20)
+- **Added**: Optional "today" forecast entity for overnight validation
+- **Added**: 187 pytest tests with comprehensive coverage for forecast and sunny day logic
+- **Fixed**: Silent wrong-day fallback bug in forecast resolution after midnight
+- **Fixed**: ~30 missing UI translation keys across config and options flows

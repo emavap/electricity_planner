@@ -8,6 +8,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner.const import DOMAIN
+from custom_components.electricity_planner.helpers import extract_price_from_interval
 from custom_components.electricity_planner.sensor import NordPoolPricesSensor
 
 
@@ -40,50 +41,40 @@ def fake_entry():
     )
 
 
-def test_extract_price_value_handles_price_key(fake_coordinator, fake_entry):
-    """Test that _extract_price_value extracts from 'price' key."""
-    sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
-
+def test_extract_price_value_handles_price_key():
+    """Test that extract_price_from_interval extracts from 'price' key."""
     data = {"price": 104.85}
-    assert sensor._extract_price_value(data) == 104.85
+    assert extract_price_from_interval(data) == 104.85
 
 
-def test_extract_price_value_handles_value_key(fake_coordinator, fake_entry):
-    """Test that _extract_price_value extracts from 'value' key."""
-    sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
-
+def test_extract_price_value_handles_value_key():
+    """Test that extract_price_from_interval extracts from 'value' key."""
     data = {"value": 104.85}
-    assert sensor._extract_price_value(data) == 104.85
+    assert extract_price_from_interval(data) == 104.85
 
 
-def test_extract_price_value_handles_value_exc_vat_key(fake_coordinator, fake_entry):
-    """Test that _extract_price_value extracts from 'value_exc_vat' key."""
-    sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
-
+def test_extract_price_value_handles_value_exc_vat_key():
+    """Test that extract_price_from_interval extracts from 'value_exc_vat' key."""
     data = {"value_exc_vat": 104.85}
-    assert sensor._extract_price_value(data) == 104.85
+    assert extract_price_from_interval(data) == 104.85
 
 
-def test_extract_price_value_handles_string_value(fake_coordinator, fake_entry):
-    """Test that _extract_price_value handles string values."""
-    sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
-
+def test_extract_price_value_handles_string_value():
+    """Test that extract_price_from_interval handles string values."""
     data = {"price": "104.85"}
-    assert sensor._extract_price_value(data) == 104.85
+    assert extract_price_from_interval(data) == 104.85
 
 
-def test_extract_price_value_returns_none_for_invalid(fake_coordinator, fake_entry):
-    """Test that _extract_price_value returns None for invalid data."""
-    sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
-
+def test_extract_price_value_returns_none_for_invalid():
+    """Test that extract_price_from_interval returns None for invalid data."""
     # No recognized keys
-    assert sensor._extract_price_value({"foo": 104.85}) is None
+    assert extract_price_from_interval({"foo": 104.85}) is None
 
     # Invalid string
-    assert sensor._extract_price_value({"price": "not a number"}) is None
+    assert extract_price_from_interval({"price": "not a number"}) is None
 
     # Empty dict
-    assert sensor._extract_price_value({}) is None
+    assert extract_price_from_interval({}) is None
 
 
 def test_normalize_price_interval_adds_price_key(fake_coordinator, fake_entry):

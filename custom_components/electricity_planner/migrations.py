@@ -1,8 +1,26 @@
-"""Migration utilities for Electricity Planner configuration."""
+"""Migration utilities for Electricity Planner configuration.
+
+Schema Version History
+----------------------
+v1  → v2:  Added ``base_grid_setpoint`` option.
+v2  → v3:  Added ``use_dynamic_threshold`` and ``dynamic_threshold_confidence``.
+v3  → v4:  Removed deprecated ``emergency_soc_override`` / ``winter_night_soc_override``.
+v4  → v5:  Removed unused ``grid_battery_charging_limit_soc``.
+v5  → v6:  Added price/feed-in adjustment multipliers and offsets.
+v6  → v7:  Added optional ``nordpool_config_entry`` field (no data migration needed).
+v7  → v8:  Added ``car_permissive_threshold_multiplier``.
+v8  → v9:  Added ``phase_mode``, ``phases``, and ``battery_phase_assignments`` for
+           three-phase support.
+v9  → v10: Added optional ``battery_power_entity`` per phase (no data migration needed).
+v10 → v11: Added ``soc_price_multiplier_max`` and ``soc_buffer_target`` for
+           SOC-based dynamic price threshold adjustments.
+v11 → v12: Added ``solar_forecast_entity`` and ``max_soc_threshold_sunny`` for
+           sunny-day grid charging limits.
+"""
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -21,6 +39,8 @@ from .const import (
     CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_SOC_PRICE_MULTIPLIER_MAX,
     CONF_SOC_BUFFER_TARGET,
+    CONF_MAX_SOC_THRESHOLD_SUNNY,
+    CONF_SOLAR_FORECAST_START_HOUR,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
@@ -31,17 +51,19 @@ from .const import (
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
     DEFAULT_SOC_BUFFER_TARGET,
+    DEFAULT_MAX_SOC_SUNNY,
+    DEFAULT_SOLAR_FORECAST_START_HOUR,
     PHASE_MODE_SINGLE,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 # Current config version
-CURRENT_VERSION = 11
+CURRENT_VERSION = 13
 
 
 def _validate_numeric_config(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     key: str,
     min_val: float,
     max_val: float,
@@ -261,5 +283,41 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
         _LOGGER.info("Migration to version 11 complete")
+
+    if entry.version == 11:
+        # Migrate from version 11 to version 12
+        new_data = {**entry.data}
+
+        # Add sunny-day grid charging limit
+        if CONF_MAX_SOC_THRESHOLD_SUNNY not in new_data:
+            new_data[CONF_MAX_SOC_THRESHOLD_SUNNY] = DEFAULT_MAX_SOC_SUNNY
+            _LOGGER.info("Added max_soc_threshold_sunny: %d%%", DEFAULT_MAX_SOC_SUNNY)
+
+        # solar_forecast_entity is optional, no default needed
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=12
+        )
+
+        _LOGGER.info("Migration to version 12 complete")
+
+    if entry.version == 12:
+        # Migrate from version 12 to version 13
+        new_data = {**entry.data}
+
+        # Add configurable solar forecast start hour
+        if CONF_SOLAR_FORECAST_START_HOUR not in new_data:
+            new_data[CONF_SOLAR_FORECAST_START_HOUR] = DEFAULT_SOLAR_FORECAST_START_HOUR
+            _LOGGER.info("Added solar_forecast_start_hour: %d", DEFAULT_SOLAR_FORECAST_START_HOUR)
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=13
+        )
+
+        _LOGGER.info("Migration to version 13 complete")
 
     return True

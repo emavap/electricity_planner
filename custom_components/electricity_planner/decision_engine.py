@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, TypedDict
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
@@ -16,6 +16,7 @@ from .const import (
     PHASE_IDS,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
+    CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_PRICE_THRESHOLD,
     CONF_BATTERY_CAPACITIES,
     CONF_EMERGENCY_SOC_THRESHOLD,
@@ -41,6 +42,7 @@ from .const import (
     CONF_SOC_BUFFER_TARGET,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
+    DEFAULT_MAX_SOC_SUNNY,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_EMERGENCY_SOC,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
@@ -66,6 +68,8 @@ from .const import (
     DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN,
     PERMISSIVE_MULTIPLIER_MIN,
     PERMISSIVE_MULTIPLIER_MAX,
+    MAX_POWER_VALIDATION_W,
+    MAX_CAR_POWER_VALIDATION_W,
 )
 
 from .defaults import (
@@ -101,7 +105,7 @@ class CarChargingDecision(TypedDict, total=False):
     car_solar_only: bool
 
 
-def _safe_optional_float(value: Any) -> Optional[float]:
+def _safe_optional_float(value: Any) -> float | None:
     """Best-effort conversion of arbitrary input to float."""
     try:
         return float(value) if value is not None else None
@@ -113,7 +117,7 @@ def _safe_optional_float(value: Any) -> Optional[float]:
 class ConfigExtractor:
     """Helper to extract and validate configuration values."""
 
-    config: Dict[str, Any]
+    config: dict[str, Any]
     validator: DataValidator
 
     def get_power_setting(
@@ -138,7 +142,7 @@ class ConfigExtractor:
         self,
         key: str,
         default: float,
-        name: Optional[str] = None,
+        name: str | None = None,
     ) -> float:
         """Extract and coerce a float value."""
         value = self.config.get(key, default)
@@ -155,9 +159,9 @@ class ConfigExtractor:
         self,
         key: str,
         default: int,
-        name: Optional[str] = None,
-        minimum: Optional[int] = None,
-        maximum: Optional[int] = None,
+        name: str | None = None,
+        minimum: int | None = None,
+        maximum: int | None = None,
     ) -> int:
         """Extract and coerce an int value with optional bounds."""
         coerced = self.get_float(key, default, name or key)
@@ -202,6 +206,7 @@ class EngineSettings:
     significant_solar_threshold: int
     min_soc_threshold: float
     max_soc_threshold: float
+    max_soc_threshold_sunny: float
     emergency_soc_threshold: float
     predictive_min_soc: float
     use_dynamic_threshold: bool
@@ -209,16 +214,16 @@ class EngineSettings:
     use_average_threshold: bool
     soc_price_multiplier_max: float
     soc_buffer_target: float
-    battery_capacities: Dict[str, float]
+    battery_capacities: dict[str, float]
 
     @classmethod
-    def from_config(cls, config: Dict[str, Any], validator: DataValidator) -> "EngineSettings":
+    def from_config(cls, config: dict[str, Any], validator: DataValidator) -> "EngineSettings":
         """Create sanitized settings from raw configuration."""
         extractor = ConfigExtractor(config, validator)
 
         # Extract battery capacities
         battery_capacity_config = config.get(CONF_BATTERY_CAPACITIES, {}) or {}
-        sanitized_capacities: Dict[str, float] = {}
+        sanitized_capacities: dict[str, float] = {}
         for entity_id, raw_capacity in battery_capacity_config.items():
             try:
                 capacity = float(raw_capacity)
@@ -232,13 +237,13 @@ class EngineSettings:
 
         # Extract power settings
         max_grid_power = extractor.get_power_setting(
-            CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER, 1000, 50000
+            CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER, 1000, MAX_POWER_VALIDATION_W
         )
         base_grid_setpoint = extractor.get_power_setting(
             CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT, 1000, 15000
         )
         max_battery_power = extractor.get_power_setting(
-            CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER, 500, 50000
+            CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER, 500, MAX_POWER_VALIDATION_W
         )
         max_car_power = extractor.get_power_setting(
             CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER, 500,
@@ -250,7 +255,7 @@ class EngineSettings:
         )
         significant_solar_threshold = extractor.get_power_setting(
             CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
-            0, 50000
+            0, MAX_POWER_VALIDATION_W
         )
 
         # Extract durations and counts
@@ -303,6 +308,10 @@ class EngineSettings:
         )
         max_soc_threshold = extractor.get_float(
             CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC, "max_soc_threshold"
+        )
+        max_soc_threshold_sunny = extractor.get_float(
+            CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY,
+            "max_soc_threshold_sunny"
         )
         emergency_soc_threshold = extractor.get_float(
             CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC,
@@ -359,6 +368,7 @@ class EngineSettings:
             significant_solar_threshold=significant_solar_threshold,
             min_soc_threshold=min_soc_threshold,
             max_soc_threshold=max_soc_threshold,
+            max_soc_threshold_sunny=max_soc_threshold_sunny,
             emergency_soc_threshold=emergency_soc_threshold,
             predictive_min_soc=predictive_min_soc,
             use_dynamic_threshold=use_dynamic_threshold,
@@ -374,7 +384,7 @@ class EngineSettings:
 class CarDecisionContext:
     """Immutable snapshot of the variables that drive car charging decisions."""
 
-    current_price: Optional[float]
+    current_price: float | None
     base_threshold: float
     effective_threshold: float
     previous_charging: bool
@@ -410,7 +420,7 @@ class CarDecisionContext:
 class ChargingDecisionEngine:
     """Engine for making charging decisions based on multiple factors."""
 
-    def __init__(self, hass: HomeAssistant, config: Dict[str, Any]) -> None:
+    def __init__(self, hass: HomeAssistant, config: dict[str, Any]) -> None:
         """Initialize the decision engine."""
         self.hass = hass
         self.config = config
@@ -425,7 +435,7 @@ class ChargingDecisionEngine:
 
         self.power_validator = PowerAllocationValidator()
 
-    def refresh_settings(self, config: Dict[str, Any]) -> None:
+    def refresh_settings(self, config: dict[str, Any]) -> None:
         """Refresh engine settings from updated config.
 
         Call this after config changes to apply new thresholds immediately
@@ -438,7 +448,7 @@ class ChargingDecisionEngine:
         self._settings = EngineSettings.from_config(config, self.validator)
         _LOGGER.debug("Decision engine settings refreshed")
 
-    async def evaluate_charging_decision(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def evaluate_charging_decision(self, data: dict[str, Any]) -> dict[str, Any]:
         """Evaluate whether to charge batteries and car from grid."""
         phase_mode = data.get(CONF_PHASE_MODE)
         if phase_mode == PHASE_MODE_THREE:
@@ -449,7 +459,7 @@ class ChargingDecisionEngine:
         """Get maximum allowed grid power with safety margin."""
         return self._settings.max_grid_power
 
-    def _get_safe_grid_setpoint(self, monthly_peak: Optional[float]) -> int:
+    def _get_safe_grid_setpoint(self, monthly_peak: float | None) -> int:
         """Calculate safe grid setpoint based on monthly peak."""
         base_setpoint = self._settings.base_grid_setpoint
         
@@ -457,7 +467,7 @@ class ChargingDecisionEngine:
             return int(monthly_peak * DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN)
         return base_setpoint
 
-    async def _evaluate_single_phase(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def _evaluate_single_phase(self, data: dict[str, Any]) -> dict[str, Any]:
         """Evaluate charging decisions for a single logical phase."""
         decision_data = self._initialize_decision_data()
         
@@ -498,16 +508,25 @@ class ChargingDecisionEngine:
         if not is_valid:
             _LOGGER.warning("Power allocation validation failed: %s", error)
         
-        # Make charging decisions
+        # Resolve effective max SOC for grid charging (sunny day logic)
+        grid_battery_analysis = self._apply_sunny_day_grid_limit(
+            battery_analysis, data
+        )
+        decision_data["sunny_day_active"] = (
+            grid_battery_analysis.get("max_soc_threshold")
+            != battery_analysis.get("max_soc_threshold")
+        )
+
+        # Make charging decisions (use grid-specific battery analysis)
         battery_decision = self._decide_battery_grid_charging(
-            price_analysis, battery_analysis, power_allocation, power_analysis, time_context, data
+            price_analysis, grid_battery_analysis, power_allocation, power_analysis, time_context, data
         )
         decision_data.update(battery_decision)
 
         # Get dynamic threshold from strategy manager (if dynamic pricing enabled)
         context = {
             "price_analysis": price_analysis,
-            "battery_analysis": battery_analysis,
+            "battery_analysis": grid_battery_analysis,
             "power_allocation": power_allocation,
             "power_analysis": power_analysis,
             "time_context": time_context,
@@ -519,21 +538,21 @@ class ChargingDecisionEngine:
             price_analysis["dynamic_threshold"] = dynamic_threshold
 
         car_decision = self._decide_car_grid_charging(
-            price_analysis, battery_analysis, power_allocation, data
+            price_analysis, grid_battery_analysis, power_allocation, data
         )
         decision_data.update(car_decision)
-        
+
         # Calculate power limits
         decision_data_for_downstream = {**data, **decision_data}
-        
+
         charger_limit_decision = self._calculate_charger_limit(
-            price_analysis, battery_analysis, power_allocation, decision_data_for_downstream
+            price_analysis, grid_battery_analysis, power_allocation, decision_data_for_downstream
         )
         decision_data.update(charger_limit_decision)
         decision_data_for_downstream.update(charger_limit_decision)
-        
+
         grid_setpoint_decision = self._calculate_grid_setpoint(
-            price_analysis, battery_analysis, power_allocation, decision_data_for_downstream,
+            price_analysis, grid_battery_analysis, power_allocation, decision_data_for_downstream,
             decision_data.get("charger_limit", 0)
         )
         decision_data.update(grid_setpoint_decision)
@@ -544,7 +563,7 @@ class ChargingDecisionEngine:
         
         return decision_data
 
-    async def _evaluate_three_phase(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def _evaluate_three_phase(self, data: dict[str, Any]) -> dict[str, Any]:
         """Evaluate charging decisions when operating in three-phase mode."""
         # Run the standard single-phase evaluation on aggregated totals
         aggregated_data = dict(data)
@@ -558,9 +577,9 @@ class ChargingDecisionEngine:
 
     def _distribute_phase_decisions(
         self,
-        overall_decision: Dict[str, Any],
-        data: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        overall_decision: dict[str, Any],
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
         """Break down the aggregated decision into per-phase guidance.
 
         This method takes the overall charging decision (which was computed on
@@ -593,7 +612,7 @@ class ChargingDecisionEngine:
                 "capacity_share": float (0-1)
             }
         """
-        phase_details: Dict[str, Dict[str, Any]] = data.get("phase_details") or {}
+        phase_details: dict[str, dict[str, Any]] = data.get("phase_details") or {}
         if not phase_details:
             _LOGGER.warning(
                 "Three-phase mode active but no phase details available - "
@@ -606,8 +625,8 @@ class ChargingDecisionEngine:
         if not ordered_phases:
             ordered_phases = list(phase_details.keys())
 
-        phase_capacity_map: Dict[str, float] = data.get("phase_capacity_map", {})
-        phase_batteries: Dict[str, List[Dict[str, Any]]] = data.get("phase_batteries", {})
+        phase_capacity_map: dict[str, float] = data.get("phase_capacity_map", {})
+        phase_batteries: dict[str, list[dict[str, Any]]] = data.get("phase_batteries", {})
         total_capacity_weight = sum(
             max(phase_capacity_map.get(phase, 0.0), 0.0) for phase in ordered_phases
         )
@@ -650,8 +669,8 @@ class ChargingDecisionEngine:
 
         # Determine weighting for car component
         # Car power is distributed equally across phases with car sensors (not by current draw)
-        car_weight_map: Dict[str, float] = {}
-        car_phases: List[str] = []
+        car_weight_map: dict[str, float] = {}
+        car_phases: list[str] = []
         for phase in ordered_phases:
             details = phase_details.get(phase, {})
             car_power = details.get("car_charging_power")
@@ -685,7 +704,7 @@ class ChargingDecisionEngine:
             else {phase: 0 for phase in ordered_phases}
         )
 
-        phase_results: Dict[str, Any] = {}
+        phase_results: dict[str, Any] = {}
         battery_reason = overall_decision.get("battery_grid_charging_reason")
         car_reason = overall_decision.get("car_grid_charging_reason")
 
@@ -738,9 +757,9 @@ class ChargingDecisionEngine:
     def _distribute_quantity(
         self,
         total: int,
-        phases: List[str],
-        weights: Dict[str, float],
-    ) -> Dict[str, int]:
+        phases: list[str],
+        weights: dict[str, float],
+    ) -> dict[str, int]:
         """Distribute an integer total across phases using weighted rounding."""
         if total <= 0 or not phases:
             return {phase: 0 for phase in phases}
@@ -773,7 +792,7 @@ class ChargingDecisionEngine:
 
         return allocation
 
-    def _initialize_decision_data(self) -> Dict[str, Any]:
+    def _initialize_decision_data(self) -> dict[str, Any]:
         """Initialize the decision data structure."""
         return {
             "battery_grid_charging": False,
@@ -795,7 +814,7 @@ class ChargingDecisionEngine:
             "phase_mode": PHASE_MODE_SINGLE,
         }
 
-    def _create_no_data_decision(self, decision_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _create_no_data_decision(self, decision_data: dict[str, Any]) -> dict[str, Any]:
         """Create decision when no price data is available."""
         reason = "No current price data available - all grid charging disabled for safety"
         decision_data["battery_grid_charging_reason"] = reason
@@ -806,7 +825,7 @@ class ChargingDecisionEngine:
         _LOGGER.warning("Critical price data unavailable - disabling all grid charging")
         return decision_data
 
-    def _analyze_comprehensive_pricing(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _analyze_comprehensive_pricing(self, data: dict[str, Any]) -> dict[str, Any]:
         """Analyze comprehensive pricing data from Nord Pool."""
         raw_current_price = data.get("current_price")
         raw_highest_price = data.get("highest_price")
@@ -906,9 +925,9 @@ class ChargingDecisionEngine:
 
     def _add_transport_cost_to_prices(
         self,
-        prices: Dict[str, Optional[float]],
+        prices: dict[str, float | None],
         transport_cost: float,
-    ) -> Dict[str, Optional[float]]:
+    ) -> dict[str, float | None]:
         """Add transport cost to all non-None prices."""
         return {
             key: (price + transport_cost if price is not None else None)
@@ -917,12 +936,12 @@ class ChargingDecisionEngine:
 
     def _create_unavailable_price_analysis(
         self,
-        highest_price: Optional[float],
-        lowest_price: Optional[float],
-        next_price: Optional[float],
+        highest_price: float | None,
+        lowest_price: float | None,
+        next_price: float | None,
         price_threshold: float,
         transport_cost: float = 0.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create price analysis when current price is unavailable."""
         return {
             "current_price": None,
@@ -947,7 +966,7 @@ class ChargingDecisionEngine:
             "transport_cost": transport_cost,
         }
 
-    def _analyze_power_flow(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _analyze_power_flow(self, data: dict[str, Any]) -> dict[str, Any]:
         """Analyze current power flow and consumption."""
         solar_production = data.get("solar_production", 0) or 0
         house_consumption = data.get("house_consumption", 0) or 0
@@ -956,13 +975,13 @@ class ChargingDecisionEngine:
         
         # Validate power values
         solar_production = self.validator.validate_power_value(
-            solar_production, name="solar_production", max_value=50000
+            solar_production, name="solar_production", max_value=MAX_POWER_VALIDATION_W
         )
         house_consumption = self.validator.validate_power_value(
-            house_consumption, name="house_consumption", max_value=50000
+            house_consumption, name="house_consumption", max_value=MAX_POWER_VALIDATION_W
         )
         car_charging_power = self.validator.validate_power_value(
-            car_charging_power, name="car_charging", max_value=22000
+            car_charging_power, name="car_charging", max_value=MAX_CAR_POWER_VALIDATION_W
         )
         
         significant_solar_threshold = self._settings.significant_solar_threshold
@@ -986,7 +1005,7 @@ class ChargingDecisionEngine:
             "has_excess_solar_available": solar_surplus > 0,
         }
 
-    def _analyze_solar_production(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _analyze_solar_production(self, data: dict[str, Any]) -> dict[str, Any]:
         """Analyze solar production status."""
         solar_production = data.get("solar_production", 0) or 0
         house_consumption = data.get("house_consumption", 0) or 0
@@ -1010,9 +1029,9 @@ class ChargingDecisionEngine:
 
     def _allocate_solar_power(
         self,
-        power_analysis: Dict[str, Any],
-        battery_analysis: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        power_analysis: dict[str, Any],
+        battery_analysis: dict[str, Any],
+    ) -> dict[str, Any]:
         """Hierarchically allocate solar surplus."""
         solar_surplus = power_analysis.get("solar_surplus", 0)
         significant_solar_threshold = self._settings.significant_solar_threshold
@@ -1080,9 +1099,9 @@ class ChargingDecisionEngine:
     def _create_insufficient_solar_allocation(
         self,
         solar_surplus: float,
-        power_analysis: Dict[str, Any],
+        power_analysis: dict[str, Any],
         threshold: float
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create allocation for insufficient solar."""
         car_charging_power = power_analysis.get("car_charging_power", 0)
         min_car_threshold = self._settings.min_car_charging_threshold
@@ -1104,7 +1123,7 @@ class ChargingDecisionEngine:
 
     def _calculate_car_solar_usage(
         self,
-        power_analysis: Dict[str, Any],
+        power_analysis: dict[str, Any],
         solar_surplus: float,
         settings: EngineSettings,
     ) -> int:
@@ -1119,7 +1138,7 @@ class ChargingDecisionEngine:
     def _calculate_battery_solar_allocation(
         self,
         available_solar: float,
-        battery_analysis: Dict[str, Any],
+        battery_analysis: dict[str, Any],
         significant_threshold: float,
         settings: EngineSettings,
     ) -> int:
@@ -1148,7 +1167,7 @@ class ChargingDecisionEngine:
     def _calculate_car_solar_allocation(
         self,
         available_solar: float,
-        battery_analysis: Dict[str, Any],
+        battery_analysis: dict[str, Any],
         settings: EngineSettings,
     ) -> int:
         """Calculate solar allocation for car."""
@@ -1178,7 +1197,7 @@ class ChargingDecisionEngine:
             )
         return 0
 
-    def _analyze_battery_status(self, battery_soc_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _analyze_battery_status(self, battery_soc_data: list[dict[str, Any]]) -> dict[str, Any]:
         """Analyze battery status for all configured batteries."""
         # Validate battery data
         is_valid, validation_msg = self.validator.validate_battery_data(battery_soc_data)
@@ -1220,7 +1239,7 @@ class ChargingDecisionEngine:
             "capacity_weighted": bool(self._settings.battery_capacities),
         }
 
-    def _create_no_battery_result(self) -> Dict[str, Any]:
+    def _create_no_battery_result(self) -> dict[str, Any]:
         """Create result when no batteries configured."""
         return {
             "average_soc": None,
@@ -1232,7 +1251,7 @@ class ChargingDecisionEngine:
             "validation_status": "No battery entities configured",
         }
 
-    def _create_unavailable_battery_result(self, count: int) -> Dict[str, Any]:
+    def _create_unavailable_battery_result(self, count: int) -> dict[str, Any]:
         """Create result when all batteries unavailable."""
         return {
             "average_soc": None,
@@ -1244,7 +1263,75 @@ class ChargingDecisionEngine:
             "validation_status": "All battery SOC sensors unavailable",
         }
 
-    def _calculate_weighted_average_soc(self, batteries: List[Dict[str, Any]]) -> float:
+    def _apply_sunny_day_grid_limit(
+        self,
+        battery_analysis: dict[str, Any],
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Apply sunny day max SOC limit for grid charging decisions.
+
+        When the solar forecast for the upcoming period exceeds half the total
+        battery capacity, reduce the grid charging max SOC to the sunny-day
+        threshold so that grid charging stops earlier and leaves room for free
+        solar charging.
+
+        Returns a (possibly modified) copy of battery_analysis.
+        """
+        solar_forecast = data.get("solar_forecast_production")
+        if solar_forecast is None:
+            return battery_analysis
+
+        sunny_threshold = self._settings.max_soc_threshold_sunny
+        normal_threshold = self._settings.max_soc_threshold
+
+        # If sunny threshold >= normal, feature effectively disabled
+        if sunny_threshold >= normal_threshold:
+            return battery_analysis
+
+        # Calculate total battery capacity from config
+        capacities = self._settings.battery_capacities
+        if capacities:
+            total_capacity_kwh = sum(capacities.values())
+        else:
+            total_capacity_kwh = 0.0
+
+        if total_capacity_kwh <= 0:
+            _LOGGER.debug(
+                "Sunny day check skipped: no battery capacity configured"
+            )
+            return battery_analysis
+
+        # Sunny if forecast >= half total battery capacity
+        sunny_production_threshold = total_capacity_kwh / 2.0
+
+        if solar_forecast >= sunny_production_threshold:
+            _LOGGER.debug(
+                "Sunny day detected: forecast %.1f kWh >= %.1f kWh "
+                "(half of %.1f kWh battery capacity) - "
+                "grid max SOC reduced from %.0f%% to %.0f%%",
+                solar_forecast,
+                sunny_production_threshold,
+                total_capacity_kwh,
+                normal_threshold,
+                sunny_threshold,
+            )
+            # Create modified copy for grid charging decisions only
+            grid_analysis = dict(battery_analysis)
+            grid_analysis["max_soc_threshold"] = sunny_threshold
+            average_soc = grid_analysis.get("average_soc")
+            if average_soc is not None:
+                grid_analysis["batteries_full"] = average_soc >= sunny_threshold
+                grid_analysis["remaining_capacity_percent"] = sunny_threshold - average_soc
+            return grid_analysis
+
+        _LOGGER.debug(
+            "Not a sunny day: forecast %.1f kWh < %.1f kWh threshold",
+            solar_forecast,
+            sunny_production_threshold,
+        )
+        return battery_analysis
+
+    def _calculate_weighted_average_soc(self, batteries: list[dict[str, Any]]) -> float:
         """Calculate capacity-weighted average SOC."""
         # Defensive check: ensure batteries list is not empty
         if not batteries:
@@ -1282,13 +1369,13 @@ class ChargingDecisionEngine:
 
     def _decide_battery_grid_charging(
         self,
-        price_analysis: Dict[str, Any],
-        battery_analysis: Dict[str, Any],
-        power_allocation: Dict[str, Any],
-        power_analysis: Dict[str, Any],
-        time_context: Dict[str, Any],
-        data: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        price_analysis: dict[str, Any],
+        battery_analysis: dict[str, Any],
+        power_allocation: dict[str, Any],
+        power_analysis: dict[str, Any],
+        time_context: dict[str, Any],
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
         """Decide battery charging using strategy pattern with hysteresis."""
         # Safety checks
         if battery_analysis.get("batteries_count", 0) == 0:
@@ -1372,11 +1459,11 @@ class ChargingDecisionEngine:
 
     def _decide_car_grid_charging(
         self,
-        price_analysis: Dict[str, Any],
-        battery_analysis: Dict[str, Any],
-        power_allocation: Dict[str, Any],
-        data: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        price_analysis: dict[str, Any],
+        battery_analysis: dict[str, Any],
+        power_allocation: dict[str, Any],
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
         """Decide whether to charge car from grid with hysteresis.
 
         Hysteresis logic:
@@ -1410,9 +1497,9 @@ class ChargingDecisionEngine:
 
     def _decide_feedin_solar(
         self,
-        price_analysis: Dict[str, Any],
-        power_allocation: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        price_analysis: dict[str, Any],
+        power_allocation: dict[str, Any],
+    ) -> dict[str, Any]:
         """Decide whether to enable solar feed-in."""
         if not price_analysis.get("data_available", True):
             return {
@@ -1471,9 +1558,9 @@ class ChargingDecisionEngine:
 
     def _build_car_decision_context(
         self,
-        price_analysis: Dict[str, Any],
-        power_allocation: Dict[str, Any],
-        data: Dict[str, Any],
+        price_analysis: dict[str, Any],
+        power_allocation: dict[str, Any],
+        data: dict[str, Any],
     ) -> CarDecisionContext:
         """Collect immutable inputs for car charging decision making."""
         base_threshold_raw = price_analysis.get("price_threshold")
@@ -1520,7 +1607,7 @@ class ChargingDecisionEngine:
     def _resolve_car_threshold(
         self,
         current_threshold: float,
-        locked_threshold: Optional[float],
+        locked_threshold: float | None,
         previous_car_charging: bool,
         permissive_mode_active: bool,
         permissive_multiplier: float,
@@ -1581,7 +1668,7 @@ class ChargingDecisionEngine:
     def _lock_car_charging_threshold(
         self,
         context: CarDecisionContext,
-        data: Dict[str, Any],
+        data: dict[str, Any],
     ) -> None:
         """Lock the price threshold when starting car charging (OFF→ON transition).
 
@@ -1595,7 +1682,7 @@ class ChargingDecisionEngine:
             context.base_threshold,
         )
 
-    def _unlock_car_charging_threshold(self, data: Dict[str, Any]) -> None:
+    def _unlock_car_charging_threshold(self, data: dict[str, Any]) -> None:
         """Clear the locked threshold when stopping car charging (ON→OFF transition)."""
         data[_CAR_CHARGING_LOCKED_THRESHOLD_KEY] = None
         _LOGGER.debug("Car charging stopping: clearing locked threshold")
@@ -1649,7 +1736,7 @@ class ChargingDecisionEngine:
     def _car_decision_for_very_low_price(
         self,
         context: CarDecisionContext,
-        data: Dict[str, Any],
+        data: dict[str, Any],
     ) -> CarChargingDecision:
         """Handle very low price cases."""
         price = context.display_price
@@ -1694,7 +1781,7 @@ class ChargingDecisionEngine:
     def _car_decision_for_low_price(
         self,
         context: CarDecisionContext,
-        data: Dict[str, Any],
+        data: dict[str, Any],
     ) -> CarChargingDecision:
         """Handle regular low price cases with hysteresis."""
         if context.previous_charging:
@@ -1750,7 +1837,7 @@ class ChargingDecisionEngine:
     def _car_decision_for_high_price(
         self,
         context: CarDecisionContext,
-        data: Dict[str, Any],
+        data: dict[str, Any],
     ) -> CarChargingDecision:
         """Handle high price cases where charging should pause or fall back to solar."""
         high_price_reason = self._format_high_price_reason(context)
@@ -1783,8 +1870,8 @@ class ChargingDecisionEngine:
         }
 
     def _apply_peak_import_limit(
-        self, result: Dict[str, Any], data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, result: dict[str, Any], data: dict[str, Any]
+    ) -> dict[str, Any]:
         """Halve charger limit while peak import protection is active."""
         if not data.get("car_peak_limited"):
             return result
@@ -1810,11 +1897,11 @@ class ChargingDecisionEngine:
 
     def _calculate_charger_limit(
         self,
-        price_analysis: Dict[str, Any],
-        battery_analysis: Dict[str, Any],
-        power_allocation: Dict[str, Any],
-        data: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        price_analysis: dict[str, Any],
+        battery_analysis: dict[str, Any],
+        power_allocation: dict[str, Any],
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
         """Calculate optimal charger power limit."""
         car_charging_power = _safe_optional_float(data.get("car_charging_power")) or 0.0
         min_threshold = self._settings.min_car_charging_threshold
@@ -1912,12 +1999,12 @@ class ChargingDecisionEngine:
 
     def _calculate_grid_setpoint(
         self,
-        price_analysis: Dict[str, Any],
-        battery_analysis: Dict[str, Any],
-        power_allocation: Dict[str, Any],
-        data: Dict[str, Any],
+        price_analysis: dict[str, Any],
+        battery_analysis: dict[str, Any],
+        power_allocation: dict[str, Any],
+        data: dict[str, Any],
         charger_limit: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Calculate grid setpoint based on energy management scenario."""
         car_charging_power = _safe_optional_float(data.get("car_charging_power")) or 0.0
         battery_grid_charging = data.get("battery_grid_charging", False)
@@ -1999,10 +2086,10 @@ class ChargingDecisionEngine:
 
     def recalculate_after_override(
         self,
-        baseline_data: Dict[str, Any],
-        decision: Dict[str, Any],
+        baseline_data: dict[str, Any],
+        decision: dict[str, Any],
         override_targets: set[str],
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Refresh dependent power limits after manual overrides adjust charging flags."""
         if not override_targets:
             return decision
@@ -2019,7 +2106,7 @@ class ChargingDecisionEngine:
         if not isinstance(power_allocation, dict):
             power_allocation = {}
 
-        combined_data: Dict[str, Any] = {}
+        combined_data: dict[str, Any] = {}
         if isinstance(baseline_data, dict):
             combined_data.update(baseline_data)
         combined_data.update(decision)

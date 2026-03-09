@@ -36,7 +36,7 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 MANAGED_KEY = "electricity_planner_managed"
-MANAGED_VERSION = 2  # Bumped: Added Entity Status card
+MANAGED_VERSION = 5  # Bumped: Ensure dual-threshold entities are wired into managed dashboard
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 
 ENTITY_WAIT_TIMEOUT = 30
@@ -79,12 +79,17 @@ ENTITY_REFERENCES: tuple[EntityReference, ...] = (
     EntityReference("sensor.electricity_planner_diagnostics_monitoring_emergency_soc_threshold", "emergency_soc_threshold"),
     EntityReference("sensor.electricity_planner_diagnostics_monitoring_entity_status", "entity_status"),
     EntityReference("switch.electricity_planner_car_permissive_mode", "car_permissive_mode"),
+    EntityReference("switch.electricity_planner_disable_battery_charging", "disable_battery_charging"),
+    EntityReference("number.electricity_planner_max_soc_threshold", "max_soc_threshold"),
+    EntityReference("number.electricity_planner_max_soc_threshold_sunny", "max_soc_threshold_sunny"),
 )
 
 CORE_ENTITY_SUFFIXES: tuple[str, ...] = (
     "battery_grid_charging",
     "car_grid_charging",
     "price_analysis",
+    "max_soc_threshold",
+    "max_soc_threshold_sunny",
 )
 
 
@@ -114,6 +119,8 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
             await handles.collection.async_load()
             _LOGGER.debug("DashboardsCollection loaded successfully")
     except Exception as err:
+        if isinstance(err, (KeyboardInterrupt, SystemExit)):
+            raise
         _LOGGER.error("Failed to load DashboardsCollection: %s", err, exc_info=True)
         return
 
@@ -163,6 +170,8 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
     try:
         storage = await _ensure_dashboard_record(hass, handles, entry, url_path)
     except Exception as err:
+        if isinstance(err, (KeyboardInterrupt, SystemExit)):
+            raise
         _LOGGER.error("Exception in _ensure_dashboard_record: %s", err, exc_info=True)
         return
 
@@ -246,6 +255,8 @@ async def _ensure_dashboard_record(
         collection_data = handles.collection.data
         _LOGGER.debug("Collection has %d items", len(collection_data))
     except Exception as err:
+        if isinstance(err, (KeyboardInterrupt, SystemExit)):
+            raise
         _LOGGER.error("Failed to access collection.data: %s", err, exc_info=True)
         return None
 
@@ -272,6 +283,8 @@ async def _ensure_dashboard_record(
             _LOGGER.error("Home Assistant error creating dashboard %s: %s", url_path, error, exc_info=True)
             return None
         except Exception as error:
+            if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                raise
             _LOGGER.error("Unexpected error creating dashboard %s: %s", url_path, error, exc_info=True)
             return None
     else:
@@ -292,6 +305,8 @@ async def _ensure_dashboard_record(
                 dashboard_item = await handles.collection.async_update_item(existing_item_id, updates)
                 _LOGGER.debug("Updated dashboard metadata for %s: %s", url_path, updates)
             except Exception as error:
+                if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                    raise
                 _LOGGER.warning("Unable to update dashboard metadata for %s: %s", url_path, error)
 
     if dashboard_item is None:
@@ -370,6 +385,8 @@ def _register_dashboard_panel(
         # Panel already registered (e.g., from previous setup)
         _LOGGER.debug("Panel registration skipped for %s (already exists): %s", url_path, err)
     except Exception as err:
+        if isinstance(err, (KeyboardInterrupt, SystemExit)):
+            raise
         _LOGGER.error("Failed to register dashboard panel for %s: %s", url_path, err)
 
 
@@ -390,6 +407,8 @@ def _get_lovelace_handles(hass: HomeAssistant) -> DashboardHandles | None:
         collection = ll_dashboard.DashboardsCollection(hass)
         _LOGGER.debug("Created DashboardsCollection instance")
     except Exception as err:
+        if isinstance(err, (KeyboardInterrupt, SystemExit)):
+            raise
         _LOGGER.error("Failed to create DashboardsCollection: %s", err, exc_info=True)
         return None
 
