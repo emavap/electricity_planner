@@ -1338,6 +1338,7 @@ async def test_solar_forecast_after_start_hour_caches_value(fake_hass, monkeypat
     assert coordinator._cached_solar_forecast == pytest.approx(15.5)
     assert coordinator._solar_forecast_cache_date == fake_now.date()
     assert coordinator._solar_forecast_cache_hour == 21
+    assert coordinator._solar_forecast_source == "tomorrow_live"
 
 
 @pytest.mark.asyncio
@@ -1386,6 +1387,7 @@ async def test_solar_forecast_before_start_hour_uses_today_entity(fake_hass, mon
 
     result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
     assert result == pytest.approx(15.0)
+    assert coordinator._solar_forecast_source == "today_live"
 
 
 @pytest.mark.asyncio
@@ -1424,6 +1426,7 @@ async def test_solar_forecast_before_start_hour_uses_cache_when_no_today(fake_ha
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 3, 0, tzinfo=tz))
     result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
     assert result == pytest.approx(14.0)  # uses cached, not live
+    assert coordinator._solar_forecast_source == "overnight_cache"
 
 
 @pytest.mark.asyncio

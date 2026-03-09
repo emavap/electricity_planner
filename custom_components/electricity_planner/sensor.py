@@ -732,6 +732,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
             "solar_forecast": {
                 "sunny_day_active": self.coordinator.data.get("sunny_day_active", False),
                 "solar_forecast_kwh": self.coordinator.data.get("solar_forecast_production"),
+                "solar_forecast_source": self.coordinator.data.get("solar_forecast_source"),
                 "solar_forecast_entity": config.get("solar_forecast_entity"),
                 "solar_forecast_today_entity": config.get("solar_forecast_today_entity"),
             },

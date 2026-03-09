@@ -169,6 +169,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._cached_solar_forecast: float | None = None
         self._solar_forecast_cache_date: date | None = None  # local date when cached
         self._solar_forecast_cache_hour: int | None = None  # hour when last cached
+        self._solar_forecast_source: str = "uninitialized"
 
         # Average threshold hysteresis tracking
         self._average_threshold_valid_count: int = 0  # Count of consecutive valid calculations
@@ -194,7 +195,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         """
         return self._manual_overrides.get(key)
 
-    async def _resolve_solar_forecast(self, entity_id: str) -> float | None:
+    async def _resolve_solar_forecast(self, entity_id: str | None = None) -> float | None:
         """Resolve the solar forecast value with hourly-refreshing cache.
 
         The forecast entity (``energy_production_tomorrow``) is read after the
@@ -214,10 +215,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         start_hour = int(
             self.config.get(CONF_SOLAR_FORECAST_START_HOUR, DEFAULT_SOLAR_FORECAST_START_HOUR)
         )
-
-        live_value = await self._get_state_value(entity_id)
+        tomorrow_entity = entity_id or self.config.get(CONF_SOLAR_FORECAST_ENTITY_TOMORROW)
+        today_entity = self.config.get(CONF_SOLAR_FORECAST_TODAY_ENTITY)
 
         if current_hour >= start_hour:
+            if not tomorrow_entity:
+                self._solar_forecast_source = "missing_tomorrow_entity"
+                return None
+
+            live_value = await self._get_state_value(tomorrow_entity)
             # After start hour: refresh the cache once per hour (or if cache is empty).
             needs_refresh = (
                 self._solar_forecast_cache_date != today
@@ -232,6 +238,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 self._cached_solar_forecast = live_value
                 self._solar_forecast_cache_date = today
                 self._solar_forecast_cache_hour = current_hour
+                self._solar_forecast_source = "tomorrow_live"
                 _LOGGER.debug(
                     "Solar forecast cache updated for %s %02d:00: %.1f kWh",
                     today,
@@ -249,15 +256,21 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 self._cached_solar_forecast = None
                 self._solar_forecast_cache_date = today
                 self._solar_forecast_cache_hour = current_hour
+                self._solar_forecast_source = "missing_live_after_start"
                 return None
-            return self._cached_solar_forecast if self._cached_solar_forecast is not None else live_value
+            if self._cached_solar_forecast is not None:
+                if live_value is None:
+                    self._solar_forecast_source = "tomorrow_cache"
+                return self._cached_solar_forecast
+            self._solar_forecast_source = "missing_live_after_start"
+            return live_value
         else:
             # Before start hour: prefer the "today" entity (it now represents
             # the correct day after midnight) over the stale cache.
-            today_entity = self.config.get(CONF_SOLAR_FORECAST_TODAY_ENTITY)
             if today_entity:
                 today_value = await self._get_state_value(today_entity)
                 if today_value is not None:
+                    self._solar_forecast_source = "today_live"
                     _LOGGER.debug(
                         "Using energy_production_today (%.1f kWh) for "
                         "overnight forecast validation",
@@ -267,12 +280,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
             # No "today" entity configured/available → use cached value
             if self._cached_solar_forecast is not None:
+                self._solar_forecast_source = "overnight_cache"
                 return self._cached_solar_forecast
             # No cache yet (first run / restart before start hour).
             # The live "tomorrow" entity now points to the *wrong* day
             # (it flipped at midnight), so using it would give incorrect
             # sunny-day decisions.  Return None to disable the feature
             # until the start hour when the cache can be populated.
+            live_value = await self._get_state_value(tomorrow_entity) if tomorrow_entity else None
             if live_value is not None:
                 reason = (
                     "'today' entity unavailable" if today_entity
@@ -287,6 +302,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     reason,
                     start_hour,
                 )
+            self._solar_forecast_source = "none_before_start"
             return None
 
     def _is_data_available(self, data: dict[str, Any]) -> bool:
@@ -1213,6 +1229,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             )
         else:
             data["solar_forecast_production"] = None
+            self._solar_forecast_source = "missing_tomorrow_entity"
+        data["solar_forecast_source"] = self._solar_forecast_source
 
         # Preserve car charging locked threshold across updates (for threshold continuity)
         data["car_charging_locked_threshold"] = self.data.get("car_charging_locked_threshold") if self.data else None

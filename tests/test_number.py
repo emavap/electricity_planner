@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from datetime import datetime
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+import pytz
+from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner import coordinator as coordinator_module
 from custom_components.electricity_planner.const import (
@@ -15,6 +18,8 @@ from custom_components.electricity_planner.const import (
     CONF_LOWEST_PRICE_ENTITY,
     CONF_NEXT_PRICE_ENTITY,
     CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
+    CONF_SOLAR_FORECAST_START_HOUR,
+    CONF_SOLAR_FORECAST_TODAY_ENTITY,
     DOMAIN,
 )
 from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
@@ -132,3 +137,31 @@ async def test_number_setup_with_forecast_entity_keeps_same_three_entities(fake_
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
     assert isinstance(entities[2], SunnyForecastThresholdNumber)
+
+
+@pytest.mark.asyncio
+async def test_sunny_number_attributes_use_live_forecast_fallback_before_start_hour(fake_hass, monkeypatch):
+    """When coordinator data is empty, UI attrs should still show today's forecast value."""
+    config = _base_config()
+    config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
+    config[CONF_SOLAR_FORECAST_TODAY_ENTITY] = "sensor.energy_production_today"
+    config[CONF_SOLAR_FORECAST_START_HOUR] = 20
+    entry = MockConfigEntry(domain=DOMAIN, data=config, options={})
+
+    monkeypatch.setattr(
+        coordinator_module.ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+
+    tz = pytz.timezone("Europe/Brussels")
+    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 19, 0, tzinfo=tz))
+
+    fake_hass.states.set("sensor.energy_production_today", "13.239")
+    coordinator = ElectricityPlannerCoordinator(fake_hass, entry)
+    coordinator.data = None
+
+    entity = MaxSocThresholdSunnyNumber(coordinator, entry)
+    attrs = entity.extra_state_attributes
+
+    assert attrs.get("solar_forecast_kwh") == "13.2 kWh"
