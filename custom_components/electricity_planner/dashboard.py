@@ -36,7 +36,7 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 MANAGED_KEY = "electricity_planner_managed"
-MANAGED_VERSION = 5  # Bumped: Ensure dual-threshold entities are wired into managed dashboard
+MANAGED_VERSION = 6  # Bumped: Always show dual-threshold controls for existing installs
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 
 ENTITY_WAIT_TIMEOUT = 30

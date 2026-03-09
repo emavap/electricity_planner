@@ -64,6 +64,8 @@ async def test_dashboard_creation_uses_registered_entities():
         f"{entry.entry_id}_price_analysis": "sensor.custom_price_sensor",
         f"{entry.entry_id}_battery_grid_charging": "binary_sensor.battery_grid_allowed",
         f"{entry.entry_id}_car_grid_charging": "binary_sensor.car_grid_allowed",
+        f"{entry.entry_id}_max_soc_threshold": "number.custom_max_soc",
+        f"{entry.entry_id}_max_soc_threshold_sunny": "number.custom_max_soc_sunny",
     }
     template = (
         "views:\n"
@@ -71,6 +73,8 @@ async def test_dashboard_creation_uses_registered_entities():
         "      - entity: sensor.electricity_planner_current_electricity_price\n"
         "      - entity: binary_sensor.electricity_planner_battery_charge_from_grid\n"
         "      - entity: binary_sensor.electricity_planner_car_charge_from_grid\n"
+        "      - entity: number.electricity_planner_max_soc_threshold\n"
+        "      - entity: number.electricity_planner_max_soc_threshold_sunny\n"
     )
 
     storage = FakeStorage()
@@ -91,6 +95,8 @@ async def test_dashboard_creation_uses_registered_entities():
     assert "sensor.custom_price_sensor" in config_str
     assert "binary_sensor.battery_grid_allowed" in config_str
     assert "binary_sensor.car_grid_allowed" in config_str
+    assert "number.custom_max_soc" in config_str
+    assert "number.custom_max_soc_sunny" in config_str
     assert storage.saved[dashboard.MANAGED_KEY]["entry_id"] == entry.entry_id
 
 
