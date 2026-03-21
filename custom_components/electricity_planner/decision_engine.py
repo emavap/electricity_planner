@@ -17,6 +17,7 @@ from .const import (
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
+    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     CONF_PRICE_THRESHOLD,
     CONF_BATTERY_CAPACITIES,
     CONF_EMERGENCY_SOC_THRESHOLD,
@@ -43,6 +44,7 @@ from .const import (
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_MAX_SOC_SUNNY,
+    DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_EMERGENCY_SOC,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
@@ -207,6 +209,7 @@ class EngineSettings:
     min_soc_threshold: float
     max_soc_threshold: float
     max_soc_threshold_sunny: float
+    sunny_forecast_threshold_kwh: float
     emergency_soc_threshold: float
     predictive_min_soc: float
     use_dynamic_threshold: bool
@@ -313,6 +316,12 @@ class EngineSettings:
             CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY,
             "max_soc_threshold_sunny"
         )
+        sunny_forecast_threshold_kwh = extractor.get_float(
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+            DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
+            "sunny_forecast_threshold_kwh",
+        )
+        sunny_forecast_threshold_kwh = max(0.0, sunny_forecast_threshold_kwh)
         emergency_soc_threshold = extractor.get_float(
             CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC,
             "emergency_soc_threshold"
@@ -369,6 +378,7 @@ class EngineSettings:
             min_soc_threshold=min_soc_threshold,
             max_soc_threshold=max_soc_threshold,
             max_soc_threshold_sunny=max_soc_threshold_sunny,
+            sunny_forecast_threshold_kwh=sunny_forecast_threshold_kwh,
             emergency_soc_threshold=emergency_soc_threshold,
             predictive_min_soc=predictive_min_soc,
             use_dynamic_threshold=use_dynamic_threshold,
@@ -1270,10 +1280,10 @@ class ChargingDecisionEngine:
     ) -> dict[str, Any]:
         """Apply sunny day max SOC limit for grid charging decisions.
 
-        When the solar forecast for the upcoming period exceeds half the total
-        battery capacity, reduce the grid charging max SOC to the sunny-day
-        threshold so that grid charging stops earlier and leaves room for free
-        solar charging.
+        When the solar forecast for the upcoming period exceeds the configured
+        sunny forecast threshold (kWh), reduce the grid charging max SOC to the
+        sunny-day threshold so that grid charging stops earlier and leaves room
+        for free solar charging.
 
         Returns a (possibly modified) copy of battery_analysis.
         """
@@ -1288,30 +1298,14 @@ class ChargingDecisionEngine:
         if sunny_threshold >= normal_threshold:
             return battery_analysis
 
-        # Calculate total battery capacity from config
-        capacities = self._settings.battery_capacities
-        if capacities:
-            total_capacity_kwh = sum(capacities.values())
-        else:
-            total_capacity_kwh = 0.0
-
-        if total_capacity_kwh <= 0:
-            _LOGGER.debug(
-                "Sunny day check skipped: no battery capacity configured"
-            )
-            return battery_analysis
-
-        # Sunny if forecast >= half total battery capacity
-        sunny_production_threshold = total_capacity_kwh / 2.0
+        sunny_production_threshold = self._settings.sunny_forecast_threshold_kwh
 
         if solar_forecast >= sunny_production_threshold:
             _LOGGER.debug(
-                "Sunny day detected: forecast %.1f kWh >= %.1f kWh "
-                "(half of %.1f kWh battery capacity) - "
+                "Sunny day detected: forecast %.1f kWh >= %.1f kWh threshold - "
                 "grid max SOC reduced from %.0f%% to %.0f%%",
                 solar_forecast,
                 sunny_production_threshold,
-                total_capacity_kwh,
                 normal_threshold,
                 sunny_threshold,
             )

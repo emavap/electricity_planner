@@ -43,9 +43,10 @@ from .const import (
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
     CONF_FEEDIN_PRICE_THRESHOLD,
-    CONF_SOLAR_FORECAST_ENTITY,
+    CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
     CONF_SOLAR_FORECAST_TODAY_ENTITY,
     CONF_SOLAR_FORECAST_START_HOUR,
+    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_MAX_BATTERY_POWER,
     CONF_MAX_CAR_POWER,
@@ -90,6 +91,7 @@ from .const import (
     DEFAULT_SOC_BUFFER_TARGET,
     DEFAULT_MAX_SOC_SUNNY,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
+    DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
 )
 from .migrations import CURRENT_VERSION
 
@@ -104,7 +106,7 @@ OPTIONAL_ENTITY_KEYS = {
     CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_TRANSPORT_COST_ENTITY,
     CONF_GRID_POWER_ENTITY,
-    CONF_SOLAR_FORECAST_ENTITY,
+    CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
     CONF_SOLAR_FORECAST_TODAY_ENTITY,
 }
 
@@ -131,6 +133,29 @@ def _optional_entity_schema(key: str, default_value: Any) -> vol.Optional:
     if default_value:
         return vol.Optional(key, default=default_value)
     return vol.Optional(key)
+
+
+def _default_sunny_forecast_threshold_kwh(config: dict[str, Any]) -> float:
+    """Derive default sunny-day forecast threshold from configured capacities."""
+    if CONF_SUNNY_FORECAST_THRESHOLD_KWH in config:
+        try:
+            return max(0.0, float(config[CONF_SUNNY_FORECAST_THRESHOLD_KWH]))
+        except (TypeError, ValueError):
+            return DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH
+
+    capacities = config.get(CONF_BATTERY_CAPACITIES, {}) or {}
+    total_capacity = 0.0
+    for value in capacities.values():
+        try:
+            capacity = float(value)
+        except (TypeError, ValueError):
+            continue
+        if capacity > 0:
+            total_capacity += capacity
+
+    if total_capacity > 0:
+        return round(total_capacity / 2.0, 1)
+    return DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -369,8 +394,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 _optional_entity_schema(
-                    CONF_SOLAR_FORECAST_ENTITY,
-                    self.data.get(CONF_SOLAR_FORECAST_ENTITY),
+                    CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
+                    self.data.get(CONF_SOLAR_FORECAST_ENTITY_TOMORROW),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -589,6 +614,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             ),
             vol.Optional(
+                CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+                default=_default_sunny_forecast_threshold_kwh(self.data),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=100, step=0.5, unit_of_measurement="kWh", mode="slider"
+                )
+            ),
+            vol.Optional(
                 CONF_PRICE_THRESHOLD,
                 default=self.data.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
             ): selector.NumberSelector(
@@ -716,6 +749,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "min_soc": "Minimum battery charge level to maintain",
                 "max_soc": "Maximum battery charge level target",
+                "sunny_forecast_threshold_kwh": "Forecast threshold (kWh) that activates sunny-day SOC limit",
                 "price_threshold": "Price threshold for charging decisions (maximum ceiling)",
                 "price_adjustment_multiplier": "Multiplier applied to raw price (set 1.12 for the Belgian example)",
                 "price_adjustment_offset": "Fixed €/kWh offset added after multiplier (e.g. 0.008 for 0.8 c€)",
@@ -865,6 +899,16 @@ def validate_config_consistency(config: dict[str, Any]) -> list[str]:
     very_low_price = config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
     if not 0 <= very_low_price <= 100:
         errors.append(f"very_low_price_threshold ({very_low_price}%) must be between 0 and 100")
+
+    sunny_forecast_threshold_kwh = config.get(
+        CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+        DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
+    )
+    if sunny_forecast_threshold_kwh < 0:
+        errors.append(
+            "sunny_forecast_threshold_kwh "
+            f"({sunny_forecast_threshold_kwh}kWh) cannot be negative"
+        )
 
     return errors
 
@@ -1084,8 +1128,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             _optional_entity_schema(
-                CONF_SOLAR_FORECAST_ENTITY,
-                working_data.get(CONF_SOLAR_FORECAST_ENTITY),
+                CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
+                working_data.get(CONF_SOLAR_FORECAST_ENTITY_TOMORROW),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
@@ -1106,6 +1150,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 default=working_data.get(CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY),
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")
+            ),
+            vol.Optional(
+                CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+                default=_default_sunny_forecast_threshold_kwh(working_data),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=100, step=0.5, unit_of_measurement="kWh", mode="slider"
+                )
             ),
             vol.Optional(
                 CONF_MIN_SOC_THRESHOLD,

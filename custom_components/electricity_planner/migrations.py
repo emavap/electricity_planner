@@ -16,6 +16,7 @@ v10 → v11: Added ``soc_price_multiplier_max`` and ``soc_buffer_target`` for
            SOC-based dynamic price threshold adjustments.
 v11 → v12: Added ``solar_forecast_entity`` and ``max_soc_threshold_sunny`` for
            sunny-day grid charging limits.
+v13 → v14: Added ``sunny_forecast_threshold_kwh`` trigger for sunny-day mode.
 """
 from __future__ import annotations
 
@@ -41,6 +42,8 @@ from .const import (
     CONF_SOC_BUFFER_TARGET,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_SOLAR_FORECAST_START_HOUR,
+    CONF_BATTERY_CAPACITIES,
+    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
@@ -53,13 +56,14 @@ from .const import (
     DEFAULT_SOC_BUFFER_TARGET,
     DEFAULT_MAX_SOC_SUNNY,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
+    DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
     PHASE_MODE_SINGLE,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 # Current config version
-CURRENT_VERSION = 13
+CURRENT_VERSION = 14
 
 
 def _validate_numeric_config(
@@ -86,6 +90,23 @@ def _validate_numeric_config(
                 name, config[key], default
             )
             config[key] = default
+
+
+def _derive_sunny_forecast_threshold_kwh(config: dict[str, Any]) -> float:
+    """Derive kWh trigger from configured battery capacities."""
+    capacities = config.get(CONF_BATTERY_CAPACITIES, {}) or {}
+    total_capacity = 0.0
+    for raw_value in capacities.values():
+        try:
+            capacity = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if capacity > 0:
+            total_capacity += capacity
+
+    if total_capacity > 0:
+        return round(total_capacity / 2.0, 1)
+    return DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -319,5 +340,25 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
         _LOGGER.info("Migration to version 13 complete")
+
+    if entry.version == 13:
+        # Migrate from version 13 to version 14
+        new_data = {**entry.data}
+
+        if CONF_SUNNY_FORECAST_THRESHOLD_KWH not in new_data:
+            derived_threshold = _derive_sunny_forecast_threshold_kwh(new_data)
+            new_data[CONF_SUNNY_FORECAST_THRESHOLD_KWH] = derived_threshold
+            _LOGGER.info(
+                "Added sunny_forecast_threshold_kwh: %.1f kWh",
+                derived_threshold,
+            )
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=14,
+        )
+
+        _LOGGER.info("Migration to version 14 complete")
 
     return True

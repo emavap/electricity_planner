@@ -140,28 +140,19 @@ views:
                 hold_action:
                   action: more-info
 
-          - type: conditional
-            conditions:
-              - condition: state
-                entity: number.electricity_planner_max_soc_threshold_sunny
-                state_not: unavailable
-              - condition: state
-                entity: number.electricity_planner_max_soc_threshold_sunny
-                state_not: unknown
-            card:
-              type: markdown
-              title: Active Grid Charging Limit
-              content: |
-                {% set sunny_entity = 'number.electricity_planner_max_soc_threshold_sunny' %}
-                {% set normal_entity = 'number.electricity_planner_max_soc_threshold' %}
-                {% set sunny_active = state_attr(sunny_entity, 'sunny_day_active') %}
-                {% if sunny_active %}
-                🌞 **High Solar forecast** — grid charges battery to **{{ states(sunny_entity) }}%** max
-                {% else %}
-                🔋 **Standard** — grid charges battery to **{{ states(normal_entity) }}%** max
-                {% endif %}
+          - type: markdown
+            title: Active Grid Charging Limit
+            content: |
+              {% set sunny_entity = 'number.electricity_planner_max_soc_threshold_sunny' %}
+              {% set normal_entity = 'number.electricity_planner_max_soc_threshold' %}
+              {% set sunny_active = state_attr(sunny_entity, 'sunny_day_active') %}
+              {% if sunny_active %}
+              🌞 **High Solar forecast** — grid charges battery to **{{ states(sunny_entity) }}%** max
+              {% else %}
+              🔋 **Standard** — grid charges battery to **{{ states(normal_entity) }}%** max
+              {% endif %}
 
-                _Solar forecast: {{ state_attr(sunny_entity, 'solar_forecast_kwh') or 'not available' }}_
+              _Solar forecast: {{ state_attr(sunny_entity, 'solar_forecast_kwh') or 'not available' }}_
 
           - type: entities
             title: Battery Controls
@@ -170,18 +161,9 @@ views:
               - entity: number.electricity_planner_max_soc_threshold
                 name: "Grid Max SOC"
                 icon: mdi:battery-charging-high
-              - type: conditional
-                conditions:
-                  - condition: state
-                    entity: number.electricity_planner_max_soc_threshold_sunny
-                    state_not: unavailable
-                  - condition: state
-                    entity: number.electricity_planner_max_soc_threshold_sunny
-                    state_not: unknown
-                row:
-                  entity: number.electricity_planner_max_soc_threshold_sunny
-                  name: "Grid Max SOC (high solar)"
-                  icon: mdi:weather-sunny
+              - entity: number.electricity_planner_max_soc_threshold_sunny
+                name: "Grid Max SOC (high solar)"
+                icon: mdi:weather-sunny
               - entity: switch.electricity_planner_disable_battery_charging
                 name: Disable Battery Charging
                 icon: mdi:battery-off

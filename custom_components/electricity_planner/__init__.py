@@ -10,6 +10,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
+from homeassistant.util import slugify
 
 from .const import (
     ATTR_ACTION,
@@ -22,6 +24,7 @@ from .const import (
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_SOLAR_FORECAST_START_HOUR,
+    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     DOMAIN,
     MANUAL_OVERRIDE_ACTION_FORCE_CHARGE,
     MANUAL_OVERRIDE_ACTION_FORCE_WAIT,
@@ -41,6 +44,12 @@ from .migrations import CURRENT_VERSION, async_migrate_entry
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH, Platform.NUMBER]
+
+NUMBER_ENTITY_ID_SUFFIXES: dict[str, str] = {
+    "max_soc_threshold": "max_soc_threshold",
+    "max_soc_threshold_sunny": "max_soc_threshold_sunny",
+    "sunny_forecast_threshold_kwh": "sunny_forecast_threshold_kwh",
+}
 
 MANUAL_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
     {
@@ -96,6 +105,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _register_services_once(hass)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await _async_migrate_number_entity_ids(hass, entry)
     hass.async_create_task(async_setup_or_update_dashboard(hass, entry))
 
     # Register listener for options updates to trigger reload
@@ -116,12 +126,57 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
+async def _async_migrate_number_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Rename number entities to stable IDs used by dashboard templates."""
+    registry = er.async_get(hass)
+    title_slug = slugify(entry.title or "electricity_planner")
+
+    for unique_suffix, object_suffix in NUMBER_ENTITY_ID_SUFFIXES.items():
+        unique_id = f"{entry.entry_id}_{unique_suffix}"
+        current_entity_id = registry.async_get_entity_id("number", DOMAIN, unique_id)
+        if not current_entity_id:
+            continue
+
+        target_entity_id = f"number.{title_slug}_{object_suffix}"
+        if current_entity_id == target_entity_id:
+            continue
+
+        if registry.async_get(target_entity_id) is not None:
+            _LOGGER.warning(
+                "Skipping entity ID migration for %s -> %s because target already exists",
+                current_entity_id,
+                target_entity_id,
+            )
+            continue
+
+        try:
+            registry.async_update_entity(
+                current_entity_id,
+                new_entity_id=target_entity_id,
+            )
+            _LOGGER.info(
+                "Migrated entity ID for %s: %s -> %s",
+                unique_id,
+                current_entity_id,
+                target_entity_id,
+            )
+        except ValueError as err:
+            _LOGGER.warning(
+                "Failed to migrate entity ID for %s: %s -> %s (%s)",
+                unique_id,
+                current_entity_id,
+                target_entity_id,
+                err,
+            )
+
+
 # Options that can be updated without requiring a full reload
 # These are applied immediately via coordinator.config and decision_engine.refresh_settings()
 LIVE_UPDATE_OPTIONS = {
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_SOLAR_FORECAST_START_HOUR,
+    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
 }
 
 
@@ -148,8 +203,14 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         if old_config.get(key) != new_options.get(key):
             changed_keys.add(key)
 
+    # No effective diff (often because live options were already applied in-place)
+    # -> nothing to reload.
+    if not changed_keys:
+        _LOGGER.debug("Skipping reload - no effective config changes detected")
+        return
+
     # If only live-update options changed, skip reload
-    if changed_keys and changed_keys.issubset(LIVE_UPDATE_OPTIONS):
+    if changed_keys.issubset(LIVE_UPDATE_OPTIONS):
         # Apply merged config immediately so live-update options take effect
         # without requiring a full integration reload.
         coordinator.config = new_options
