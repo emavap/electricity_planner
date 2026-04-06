@@ -36,6 +36,13 @@ from .const import (
     CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_TRANSPORT_COST_ENTITY,
     CONF_GRID_POWER_ENTITY,
+    CONF_P1_TARIFF_ENTITY,
+    CONF_TRANSPORT_COST_DAY,
+    CONF_TRANSPORT_COST_NIGHT,
+    CONF_ENERGY_TAX_ACCIJNS,
+    CONF_ENERGY_TAX_BIJDRAGE,
+    CONF_ENERGY_COST_GSC,
+    CONF_ENERGY_COST_WKK,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
@@ -54,6 +61,11 @@ from .const import (
     CONF_MIN_CAR_CHARGING_THRESHOLD,
     CONF_PREDICTIVE_CHARGING_MIN_SOC,
     CONF_BASE_GRID_SETPOINT,
+    CONF_MAX_INVERTER_POWER,
+    CONF_INVERTER_EXPORT_LIMIT,
+    CONF_INVERTER_EXPORT_DEADBAND,
+    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     CONF_USE_AVERAGE_THRESHOLD,
@@ -78,6 +90,11 @@ from .const import (
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_MAX_INVERTER_POWER,
+    DEFAULT_INVERTER_EXPORT_LIMIT,
+    DEFAULT_INVERTER_EXPORT_DEADBAND,
+    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_USE_AVERAGE_THRESHOLD,
@@ -92,6 +109,12 @@ from .const import (
     DEFAULT_MAX_SOC_SUNNY,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
+    DEFAULT_TRANSPORT_COST_DAY,
+    DEFAULT_TRANSPORT_COST_NIGHT,
+    DEFAULT_ENERGY_TAX_ACCIJNS,
+    DEFAULT_ENERGY_TAX_BIJDRAGE,
+    DEFAULT_ENERGY_COST_GSC,
+    DEFAULT_ENERGY_COST_WKK,
 )
 from .migrations import CURRENT_VERSION
 
@@ -108,6 +131,7 @@ OPTIONAL_ENTITY_KEYS = {
     CONF_GRID_POWER_ENTITY,
     CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
     CONF_SOLAR_FORECAST_TODAY_ENTITY,
+    CONF_P1_TARIFF_ENTITY,
 }
 
 
@@ -133,6 +157,21 @@ def _optional_entity_schema(key: str, default_value: Any) -> vol.Optional:
     if default_value:
         return vol.Optional(key, default=default_value)
     return vol.Optional(key)
+
+
+def _resolve_optional_entity_value(
+    submitted_data: dict[str, Any],
+    field_key: str,
+    existing_value: Any = None,
+    *,
+    preserve_when_missing: bool,
+) -> Any:
+    """Resolve an optional entity selector while allowing explicit clearing."""
+    if field_key in submitted_data:
+        return submitted_data.get(field_key) or None
+    if preserve_when_missing:
+        return existing_value
+    return None
 
 
 def _default_sunny_forecast_threshold_kwh(config: dict[str, Any]) -> float:
@@ -224,55 +263,62 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     car_key = f"{phase_id}_{CONF_PHASE_CAR_ENTITY}"
                     battery_power_key = f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}"
 
-                    # Normalize empty strings to None for optional entity selectors
-                    solar_entity = processed_input.pop(solar_key, None) or None
-                    consumption_entity = processed_input.pop(consumption_key, None) or None
-                    car_entity = processed_input.pop(car_key, None) or None
-                    battery_power_entity = processed_input.pop(battery_power_key, None) or None
-
                     existing_phase = existing_phases.get(phase_id, {})
+                    resolved_solar = _resolve_optional_entity_value(
+                        processed_input,
+                        solar_key,
+                        existing_phase.get(CONF_PHASE_SOLAR_ENTITY),
+                        preserve_when_missing=False,
+                    )
+                    processed_input.pop(solar_key, None)
+                    resolved_consumption = _resolve_optional_entity_value(
+                        processed_input,
+                        consumption_key,
+                        existing_phase.get(CONF_PHASE_CONSUMPTION_ENTITY),
+                        preserve_when_missing=False,
+                    )
+                    processed_input.pop(consumption_key, None)
+                    resolved_car = _resolve_optional_entity_value(
+                        processed_input,
+                        car_key,
+                        existing_phase.get(CONF_PHASE_CAR_ENTITY),
+                        preserve_when_missing=False,
+                    )
+                    processed_input.pop(car_key, None)
+                    resolved_battery_power = _resolve_optional_entity_value(
+                        processed_input,
+                        battery_power_key,
+                        existing_phase.get(CONF_PHASE_BATTERY_POWER_ENTITY),
+                        preserve_when_missing=False,
+                    )
+                    processed_input.pop(battery_power_key, None)
 
-                    # Only create phase entry if at least one sensor is provided or phase already exists
-                    # This prevents creating "ghost" phase configs with all None values
-                    if (
-                        solar_entity is not None
-                        or consumption_entity is not None
-                        or car_entity is not None
-                        or battery_power_entity is not None
-                        or existing_phase
+                    if any(
+                        value is not None
+                        for value in (
+                            resolved_solar,
+                            resolved_consumption,
+                            resolved_car,
+                            resolved_battery_power,
+                        )
                     ):
                         phase_entry = {
                             CONF_PHASE_NAME: existing_phase.get(
                                 CONF_PHASE_NAME, DEFAULT_PHASE_NAMES[phase_id]
                             ),
                         }
-                        # Only include entity keys if they have actual values
-                        resolved_solar = solar_entity or existing_phase.get(CONF_PHASE_SOLAR_ENTITY)
-                        if resolved_solar:
+                        if resolved_solar is not None:
                             phase_entry[CONF_PHASE_SOLAR_ENTITY] = resolved_solar
-
-                        resolved_consumption = consumption_entity or existing_phase.get(CONF_PHASE_CONSUMPTION_ENTITY)
-                        if resolved_consumption:
+                        if resolved_consumption is not None:
                             phase_entry[CONF_PHASE_CONSUMPTION_ENTITY] = resolved_consumption
-
-                        resolved_car = car_entity or existing_phase.get(CONF_PHASE_CAR_ENTITY)
-                        if resolved_car:
+                        if resolved_car is not None:
                             phase_entry[CONF_PHASE_CAR_ENTITY] = resolved_car
-
-                        resolved_battery_power = battery_power_entity or existing_phase.get(CONF_PHASE_BATTERY_POWER_ENTITY)
-                        if resolved_battery_power:
+                        if resolved_battery_power is not None:
                             phase_entry[CONF_PHASE_BATTERY_POWER_ENTITY] = resolved_battery_power
 
                         phases_config[phase_id] = phase_entry
 
                 self.data[CONF_PHASES] = phases_config
-                # Remove legacy single-phase bindings to avoid stale config
-                for legacy_key in (
-                    CONF_SOLAR_PRODUCTION_ENTITY,
-                    CONF_HOUSE_CONSUMPTION_ENTITY,
-                    CONF_CAR_CHARGING_POWER_ENTITY,
-                ):
-                    self.data.pop(legacy_key, None)
             else:
                 # Ensure phase-specific configuration is cleared when returning to single-phase mode
                 self.data.pop(CONF_PHASES, None)
@@ -382,10 +428,46 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 _optional_entity_schema(
-                    CONF_TRANSPORT_COST_ENTITY,
-                    self.data.get(CONF_TRANSPORT_COST_ENTITY),
+                    CONF_P1_TARIFF_ENTITY,
+                    self.data.get(CONF_P1_TARIFF_ENTITY),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(
+                    CONF_TRANSPORT_COST_DAY,
+                    default=self.data.get(CONF_TRANSPORT_COST_DAY, DEFAULT_TRANSPORT_COST_DAY),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                ),
+                vol.Optional(
+                    CONF_TRANSPORT_COST_NIGHT,
+                    default=self.data.get(CONF_TRANSPORT_COST_NIGHT, DEFAULT_TRANSPORT_COST_NIGHT),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                ),
+                vol.Optional(
+                    CONF_ENERGY_TAX_ACCIJNS,
+                    default=self.data.get(CONF_ENERGY_TAX_ACCIJNS, DEFAULT_ENERGY_TAX_ACCIJNS),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                ),
+                vol.Optional(
+                    CONF_ENERGY_TAX_BIJDRAGE,
+                    default=self.data.get(CONF_ENERGY_TAX_BIJDRAGE, DEFAULT_ENERGY_TAX_BIJDRAGE),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                ),
+                vol.Optional(
+                    CONF_ENERGY_COST_GSC,
+                    default=self.data.get(CONF_ENERGY_COST_GSC, DEFAULT_ENERGY_COST_GSC),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                ),
+                vol.Optional(
+                    CONF_ENERGY_COST_WKK,
+                    default=self.data.get(CONF_ENERGY_COST_WKK, DEFAULT_ENERGY_COST_WKK),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
                 ),
                 _optional_entity_schema(
                     CONF_GRID_POWER_ENTITY,
@@ -419,7 +501,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "battery_soc": "Battery State of Charge entities",
             "monthly_grid_peak": "Current month grid peak in W (optional)",
             "transport_cost": "Optional transport cost sensor (€/kWh) added to buy price, defaults to 0 if not configured",
-            "grid_power": "Optional total grid power sensor (W, positive=import). Used for peak shaving in 3-phase setups",
+            "grid_power": "Optional total grid power sensor (W, positive=import, negative=export). Used for peak shaving and inverter derating diagnostics",
         }
         if phase_mode == PHASE_MODE_SINGLE:
             description_placeholders.update(
@@ -469,10 +551,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.data[CONF_BATTERY_CAPACITIES] = {}
             return await self.async_step_settings()
 
+        current_capacities = self.data.get(CONF_BATTERY_CAPACITIES, {}) or {}
         battery_capacities = {}
         for entity_id in battery_entities:
             entity_key = f"capacity_{entity_id.replace('.', '_')}"
-            battery_capacities[vol.Optional(entity_key, default=10.0)] = selector.NumberSelector(
+            default_capacity = current_capacities.get(entity_id, 10.0)
+            battery_capacities[vol.Optional(entity_key, default=default_capacity)] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1.0,
                     max=200.0,
@@ -741,6 +825,54 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     min=1.1, max=1.5, step=0.1, mode="slider"
                 )
             ),
+            vol.Optional(
+                CONF_MAX_INVERTER_POWER,
+                default=self.data.get(CONF_MAX_INVERTER_POWER, DEFAULT_MAX_INVERTER_POWER)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=500, max=50000, step=100, unit_of_measurement="W"
+                )
+            ),
+            vol.Optional(
+                CONF_INVERTER_EXPORT_LIMIT,
+                default=self.data.get(CONF_INVERTER_EXPORT_LIMIT, DEFAULT_INVERTER_EXPORT_LIMIT)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=5000, step=10, unit_of_measurement="W"
+                )
+            ),
+            vol.Optional(
+                CONF_INVERTER_EXPORT_DEADBAND,
+                default=self.data.get(
+                    CONF_INVERTER_EXPORT_DEADBAND, DEFAULT_INVERTER_EXPORT_DEADBAND
+                )
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=500, step=5, unit_of_measurement="W"
+                )
+            ),
+            vol.Optional(
+                CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+                default=self.data.get(
+                    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+                    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+                )
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=120, step=1, unit_of_measurement="minutes"
+                )
+            ),
+            vol.Optional(
+                CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+                default=self.data.get(
+                    CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+                    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+                )
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=100, step=1, unit_of_measurement="%"
+                )
+            ),
         })
 
         return self.async_show_form(
@@ -751,16 +883,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "max_soc": "Maximum battery charge level target",
                 "sunny_forecast_threshold_kwh": "Forecast threshold (kWh) that activates sunny-day SOC limit",
                 "price_threshold": "Price threshold for charging decisions (maximum ceiling)",
-                "price_adjustment_multiplier": "Multiplier applied to raw price (set 1.12 for the Belgian example)",
-                "price_adjustment_offset": "Fixed €/kWh offset added after multiplier (e.g. 0.008 for 0.8 c€)",
+                "price_adjustment_multiplier": "Multiplier applied to raw price (default 1.04 for the Energie.be dynamic contract)",
+                "price_adjustment_offset": "Fixed €/kWh offset added after multiplier (default 0.005 for 0.5 c€, excl. VAT market basis)",
                 "emergency_soc": "Emergency SOC level that triggers charging regardless of price",
                 "very_low_price": "Percentage threshold for 'very low' price in daily range",
                 "significant_solar": "Solar surplus threshold considered significant",
                 "use_dynamic_threshold": "Enable intelligent price analysis (more selective, better prices)",
                 "dynamic_threshold_confidence": "Confidence required for dynamic charging (higher = more selective)",
                 "feedin_price_threshold": "Minimum export price required when no adjustment is set",
-                "feedin_adjustment_multiplier": "Multiplier applied to raw price when calculating net feed-in value",
-                "feedin_adjustment_offset": "Fixed €/kWh offset added to feed-in price (negative values model costs)",
+                "feedin_adjustment_multiplier": "Multiplier applied to raw price when calculating net feed-in value (default 1.0 for the Energie.be dynamic contract)",
+                "feedin_adjustment_offset": "Fixed €/kWh offset added to feed-in price (default -0.0098 for the Energie.be dynamic contract)",
             },
         )
 
@@ -769,6 +901,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle the safety limits step - Power and SOC Safety Limits."""
         errors = {}
+        validation_error_text = ""
         if user_input is not None:
             self.data.update(user_input)
 
@@ -778,7 +911,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Validate configuration consistency
             validation_errors = validate_config_consistency(self.data)
             if validation_errors:
-                errors["base"] = "Configuration validation failed: " + "; ".join(validation_errors)
+                errors["base"] = "invalid_config"
+                validation_error_text = "; ".join(validation_errors)
                 _LOGGER.warning("Configuration validation errors: %s", validation_errors)
             else:
                 return self.async_create_entry(
@@ -848,6 +982,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "min_car_charging_threshold": "Minimum power to consider car 'charging'",
                 "predictive_charging_min_soc": "Minimum SOC for predictive charging logic",
                 "base_grid_setpoint": "Base minimum grid setpoint when no monthly peak data available",
+                "validation_errors": (
+                    f"Validation error: {validation_error_text}"
+                    if validation_error_text
+                    else ""
+                ),
             },
         )
 
@@ -871,10 +1010,17 @@ def validate_config_consistency(config: dict[str, Any]) -> list[str]:
     # SOC threshold validation
     min_soc = config.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)
     max_soc = config.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
+    max_soc_sunny = config.get(CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY)
     emergency_soc = config.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC)
 
     if min_soc >= max_soc:
         errors.append(f"min_soc ({min_soc}%) must be less than max_soc ({max_soc}%)")
+
+    if max_soc_sunny > max_soc:
+        errors.append(
+            "max_soc_threshold_sunny "
+            f"({max_soc_sunny}%) must be less than or equal to max_soc ({max_soc}%)"
+        )
 
     if emergency_soc > min_soc:
         errors.append(f"emergency_soc ({emergency_soc}%) should be below min_soc ({min_soc}%)")
@@ -922,6 +1068,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Handle the options step (single-form flow for compatibility)."""
         existing_config = {**self.config_entry.data, **self.config_entry.options}
         working_data: dict[str, Any] = dict(existing_config)
+        errors: dict[str, str] = {}
+        validation_error_text = ""
 
         battery_entities: list[str] = working_data.get(CONF_BATTERY_SOC_ENTITIES, [])
         current_capacities: dict[str, float] = working_data.get(
@@ -934,7 +1082,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         )
 
         if user_input is not None:
-            updated_options = dict(user_input)
+            # Start from the currently effective config so omitted fields in the
+            # submitted payload do not silently reset live-tuned values.
+            updated_options = dict(working_data)
+            updated_options.update(user_input)
             phase_mode = updated_options.pop(CONF_PHASE_MODE, current_phase_mode)
 
             submitted_batteries = updated_options.get(
@@ -948,12 +1099,16 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 capacity_key = f"capacity_{entity_id.replace('.', '_')}"
                 if capacity_key in updated_options:
                     battery_capacities[entity_id] = updated_options.pop(capacity_key)
+                elif entity_id in current_capacities:
+                    battery_capacities[entity_id] = current_capacities[entity_id]
 
             # Extract battery phase assignments
             battery_phase_assignments: dict[str, list[str]] = {}
             for entity_id in battery_entities:
                 assignment_key = f"phase_assignment_{entity_id.replace('.', '_')}"
                 value = updated_options.pop(assignment_key, None)
+                if value is None:
+                    value = existing_assignments.get(entity_id)
                 if value:
                     battery_phase_assignments[entity_id] = list(value)
 
@@ -965,63 +1120,80 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 car_key = f"{phase_id}_{CONF_PHASE_CAR_ENTITY}"
                 battery_power_key = f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}"
 
-                # Normalize empty strings to None for optional entity selectors
-                solar_entity = updated_options.pop(solar_key, None) or None
-                consumption_entity = updated_options.pop(consumption_key, None) or None
-                car_entity = updated_options.pop(car_key, None) or None
-                battery_power_entity = updated_options.pop(battery_power_key, None) or None
-
                 existing_phase = existing_phases.get(phase_id, {})
-                if (
-                    solar_entity is not None
-                    or consumption_entity is not None
-                    or car_entity is not None
-                    or battery_power_entity is not None
-                    or existing_phase
+                resolved_solar = _resolve_optional_entity_value(
+                    updated_options,
+                    solar_key,
+                    existing_phase.get(CONF_PHASE_SOLAR_ENTITY),
+                    preserve_when_missing=True,
+                )
+                updated_options.pop(solar_key, None)
+                resolved_consumption = _resolve_optional_entity_value(
+                    updated_options,
+                    consumption_key,
+                    existing_phase.get(CONF_PHASE_CONSUMPTION_ENTITY),
+                    preserve_when_missing=True,
+                )
+                updated_options.pop(consumption_key, None)
+                resolved_car = _resolve_optional_entity_value(
+                    updated_options,
+                    car_key,
+                    existing_phase.get(CONF_PHASE_CAR_ENTITY),
+                    preserve_when_missing=True,
+                )
+                updated_options.pop(car_key, None)
+                resolved_battery_power = _resolve_optional_entity_value(
+                    updated_options,
+                    battery_power_key,
+                    existing_phase.get(CONF_PHASE_BATTERY_POWER_ENTITY),
+                    preserve_when_missing=True,
+                )
+                updated_options.pop(battery_power_key, None)
+
+                if any(
+                    value is not None
+                    for value in (
+                        resolved_solar,
+                        resolved_consumption,
+                        resolved_car,
+                        resolved_battery_power,
+                    )
                 ):
                     phase_entry = {
                         CONF_PHASE_NAME: existing_phase.get(
                             CONF_PHASE_NAME, DEFAULT_PHASE_NAMES[phase_id]
                         ),
                     }
-                    # Only include entity keys if they have actual values
-                    resolved_solar = solar_entity or existing_phase.get(CONF_PHASE_SOLAR_ENTITY)
-                    if resolved_solar:
+                    if resolved_solar is not None:
                         phase_entry[CONF_PHASE_SOLAR_ENTITY] = resolved_solar
 
-                    resolved_consumption = consumption_entity or existing_phase.get(CONF_PHASE_CONSUMPTION_ENTITY)
-                    if resolved_consumption:
+                    if resolved_consumption is not None:
                         phase_entry[CONF_PHASE_CONSUMPTION_ENTITY] = resolved_consumption
 
-                    resolved_car = car_entity or existing_phase.get(CONF_PHASE_CAR_ENTITY)
-                    if resolved_car:
+                    if resolved_car is not None:
                         phase_entry[CONF_PHASE_CAR_ENTITY] = resolved_car
 
-                    resolved_battery_power = battery_power_entity or existing_phase.get(CONF_PHASE_BATTERY_POWER_ENTITY)
-                    if resolved_battery_power:
+                    if resolved_battery_power is not None:
                         phase_entry[CONF_PHASE_BATTERY_POWER_ENTITY] = resolved_battery_power
 
                     phases_config[phase_id] = phase_entry
 
-            if phase_mode == PHASE_MODE_SINGLE:
-                # Preserve existing single-phase bindings unless user explicitly provides new ones
-                for key in (
-                    CONF_SOLAR_PRODUCTION_ENTITY,
-                    CONF_HOUSE_CONSUMPTION_ENTITY,
-                    CONF_CAR_CHARGING_POWER_ENTITY,
-                ):
-                    if key not in updated_options and working_data.get(key) is not None:
-                        updated_options[key] = working_data.get(key)
+            # Preserve existing single-phase bindings unless user explicitly provides new ones.
+            # In three-phase mode these remain useful as a compatibility fallback while the
+            # user incrementally configures per-phase entities.
+            for key in (
+                CONF_SOLAR_PRODUCTION_ENTITY,
+                CONF_HOUSE_CONSUMPTION_ENTITY,
+                CONF_CAR_CHARGING_POWER_ENTITY,
+            ):
+                if key not in updated_options and working_data.get(key) is not None:
+                    updated_options[key] = working_data.get(key)
 
             if phase_mode == PHASE_MODE_THREE:
                 # No validation - all per-phase sensors are optional, leave configuration to user
                 updated_options[CONF_PHASE_MODE] = PHASE_MODE_THREE
                 updated_options[CONF_PHASES] = phases_config
                 updated_options[CONF_BATTERY_PHASE_ASSIGNMENTS] = battery_phase_assignments
-                # Remove legacy single-phase keys if not provided
-                updated_options.pop(CONF_SOLAR_PRODUCTION_ENTITY, None)
-                updated_options.pop(CONF_HOUSE_CONSUMPTION_ENTITY, None)
-                updated_options.pop(CONF_CAR_CHARGING_POWER_ENTITY, None)
             else:
                 updated_options[CONF_PHASE_MODE] = PHASE_MODE_SINGLE
                 updated_options.pop(CONF_PHASES, None)
@@ -1032,7 +1204,27 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             updated_options[CONF_BATTERY_CAPACITIES] = battery_capacities
 
             # Normalize empty strings to None for optional entity fields
-            return self.async_create_entry(title="", data=normalize_entity_values(updated_options))
+            normalized_options = normalize_entity_values(updated_options)
+            merged_candidate = dict(existing_config)
+            merged_candidate.update(normalized_options)
+            if phase_mode == PHASE_MODE_SINGLE:
+                merged_candidate.pop(CONF_PHASES, None)
+                merged_candidate.pop(CONF_BATTERY_PHASE_ASSIGNMENTS, None)
+
+            validation_errors = validate_config_consistency(merged_candidate)
+            if validation_errors:
+                errors["base"] = "invalid_config"
+                validation_error_text = "; ".join(validation_errors)
+                working_data = merged_candidate
+                battery_entities = working_data.get(CONF_BATTERY_SOC_ENTITIES, [])
+                current_capacities = working_data.get(CONF_BATTERY_CAPACITIES, {})
+                current_phase_mode = working_data.get(CONF_PHASE_MODE, PHASE_MODE_SINGLE)
+                existing_phases = working_data.get(CONF_PHASES, {})
+                existing_assignments = working_data.get(
+                    CONF_BATTERY_PHASE_ASSIGNMENTS, {}
+                )
+            else:
+                return self.async_create_entry(title="", data=normalized_options)
 
         schema_dict: dict[Any, Any] = {
             vol.Required(
@@ -1116,10 +1308,46 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             _optional_entity_schema(
-                CONF_TRANSPORT_COST_ENTITY,
-                working_data.get(CONF_TRANSPORT_COST_ENTITY),
+                CONF_P1_TARIFF_ENTITY,
+                working_data.get(CONF_P1_TARIFF_ENTITY),
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                CONF_TRANSPORT_COST_DAY,
+                default=working_data.get(CONF_TRANSPORT_COST_DAY, DEFAULT_TRANSPORT_COST_DAY),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+            ),
+            vol.Optional(
+                CONF_TRANSPORT_COST_NIGHT,
+                default=working_data.get(CONF_TRANSPORT_COST_NIGHT, DEFAULT_TRANSPORT_COST_NIGHT),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+            ),
+            vol.Optional(
+                CONF_ENERGY_TAX_ACCIJNS,
+                default=working_data.get(CONF_ENERGY_TAX_ACCIJNS, DEFAULT_ENERGY_TAX_ACCIJNS),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+            ),
+            vol.Optional(
+                CONF_ENERGY_TAX_BIJDRAGE,
+                default=working_data.get(CONF_ENERGY_TAX_BIJDRAGE, DEFAULT_ENERGY_TAX_BIJDRAGE),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+            ),
+            vol.Optional(
+                CONF_ENERGY_COST_GSC,
+                default=working_data.get(CONF_ENERGY_COST_GSC, DEFAULT_ENERGY_COST_GSC),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+            ),
+            vol.Optional(
+                CONF_ENERGY_COST_WKK,
+                default=working_data.get(CONF_ENERGY_COST_WKK, DEFAULT_ENERGY_COST_WKK),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
             ),
             _optional_entity_schema(
                 CONF_GRID_POWER_ENTITY,
@@ -1341,6 +1569,54 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     min=1000, max=10000, step=100, unit_of_measurement="W"
                 )
             ),
+            vol.Optional(
+                CONF_MAX_INVERTER_POWER,
+                default=working_data.get(CONF_MAX_INVERTER_POWER, DEFAULT_MAX_INVERTER_POWER),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=500, max=50000, step=100, unit_of_measurement="W"
+                )
+            ),
+            vol.Optional(
+                CONF_INVERTER_EXPORT_LIMIT,
+                default=working_data.get(CONF_INVERTER_EXPORT_LIMIT, DEFAULT_INVERTER_EXPORT_LIMIT),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=5000, step=10, unit_of_measurement="W"
+                )
+            ),
+            vol.Optional(
+                CONF_INVERTER_EXPORT_DEADBAND,
+                default=working_data.get(
+                    CONF_INVERTER_EXPORT_DEADBAND, DEFAULT_INVERTER_EXPORT_DEADBAND
+                ),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=500, step=5, unit_of_measurement="W"
+                )
+            ),
+            vol.Optional(
+                CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+                default=working_data.get(
+                    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+                    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+                ),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=120, step=1, unit_of_measurement="minutes"
+                )
+            ),
+            vol.Optional(
+                CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+                default=working_data.get(
+                    CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+                    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+                ),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=100, step=1, unit_of_measurement="%"
+                )
+            ),
         })
 
         # Dynamic per-battery capacity fields
@@ -1416,7 +1692,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=schema,
+            errors=errors,
             description_placeholders={
                 "topology": "Select the grid topology and update entity bindings.",
+                "validation_errors": (
+                    f"Validation error: {validation_error_text}"
+                    if validation_error_text
+                    else ""
+                ),
             },
         )

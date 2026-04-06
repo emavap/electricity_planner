@@ -6,23 +6,23 @@ This folder contains example Home Assistant automations that integrate with the 
 
 ### 1. Car Charger Dynamic Control (`car_charger_dynamic_control.yaml`)
 
-**Purpose**: Automatically controls EV charger based on Electricity Planner decisions with price-based cutoff.
+**Purpose**: Automatically controls EV charging based on Electricity Planner decisions, with startup grace handling and a fail-safe cutoff if charger state stops reporting.
 
 **Features**:
-- Turns charger on/off based on grid charging recommendations
+- Turns the charger on only when the planner allows charging
+- Turns the charger off when charging is no longer allowed
+- Turns the charger off when no car is connected
 - Adjusts charging power dynamically based on planner limits
-- Implements price threshold override for battery protection
-- Handles charger initialization and status monitoring
-- Supports solar surplus charging
+- Waits through charger initialization before enforcing sensor-dependent logic
+- Cuts power if the charger stops reporting state after the grace period while charging is not allowed
+- Logs a warning if the charger still does not report state while charging is allowed
 
 **Required Entities**:
 - `binary_sensor.electricity_planner_car_charge_from_grid` - Charging decision
-- `sensor.electricity_planner_car_charger_limit` - Power limit
-- `sensor.electricity_planner_current_electricity_price` - Current price
-- `input_number.car_charger_price_threshold` - User-defined price cutoff
-- `sensor.huawei_charger_plugged_in` - Car connection status
+- `sensor.electricity_planner_car_charger_limit` - Planner power limit
+- `sensor.huawei_charger_plugged_in` - Car connection and charging status
 - `switch.evcharger` - Charger on/off control
-- `number.huawei_charger_dynamic_power_limit` - Power limit control
+- `number.huawei_charger_dynamic_power_limit` - Dynamic power limit control
 
 **Triggers**:
 - State changes of planner entities (with 2-minute debounce)
@@ -34,26 +34,31 @@ This folder contains example Home Assistant automations that integrate with the 
 
 ### 2. Solar Feed-in Control (`solar_feedin_control.yaml`)
 
-**Purpose**: Controls solar inverter power limit to prevent grid feed-in when not allowed by the planner.
+**Purpose**: Applies a recommended inverter derating target computed directly by Electricity Planner.
 
 **Features**:
-- Automatically derates inverter when feeding to grid is not profitable
-- Gradually increases power limit when feed-in is allowed
-- Adjusts based on actual grid power flow
-- Protects against excessive grid export
+- Uses `sensor.electricity_planner_inverter_derating_target` as the single recommended setpoint
+- Keeps the Home Assistant automation simple: read planner target, write target to the inverter number
+- Lets the planner own the feed-in policy and the derating logic
+- Tightens the inverter limit immediately when the planner lowers the target
+- Reopens the inverter only on the periodic pass so small PV fluctuations do not trigger constant writes
+- Re-applies the target periodically in case the inverter misses or loses the last write
 
-**Required Entities**:
-- `binary_sensor.electricity_planner_solar_feed_in_grid` - Feed-in decision
-- `sensor.grid` - Grid power (positive = importing, negative = exporting)
-- `number.huawei_inverter_power_limit` - Inverter power limit control
+**Required Entities / Helpers**:
+- `sensor.electricity_planner_inverter_derating_target` - Planner-computed inverter target
+- `binary_sensor.electricity_planner_solar_feed_in_grid` - Planner feed-in policy used to restore full power immediately when export becomes allowed
+- `number.inverter_power_derating` - Writable inverter power-limit entity
 
 **Triggers**:
-- State changes of planner or grid sensor
-- Every 30 seconds
+- State changes of the planner target sensor
+- State changes of the planner feed-in policy binary sensor
+- Periodic reevaluation every 5 minutes
 
 **Logic**:
-- When feed-in NOT allowed and exporting > 50W: Reduce limit by 120% of export power
-- When feed-in allowed or importing > 50W: Increase limit by 200W (max 4400W)
+- Read the planner target sensor
+- If feed-in becomes allowed, restore the planner target immediately
+- If feed-in is blocked and the planner lowers the target, apply the reduction immediately once it differs by at least `100 W`
+- If feed-in is blocked and the planner raises the target, only apply that reopening step on the periodic pass once it differs by at least `150 W`
 
 ---
 
@@ -79,24 +84,25 @@ This folder contains example Home Assistant automations that integrate with the 
 
 ### 4. Control Luna Battery Forcible Charge (`Control Luna Battery Forcible Charge.yaml`)
 
-**Purpose**: Force-charges Huawei Luna batteries during specific Electricity Planner states (e.g., upcoming price spikes).
+**Purpose**: Force-charges a Huawei Luna battery when `grid setpoint - house consumption` leaves enough headroom.
 
 **Features**:
-- Uses planner battery charging binary sensor to trigger temporary force-charge
-- Writes desired charge current to Huawei integration service
-- Prevents conflicts with manual overrides via helper toggles
-- Includes safety timeout so batteries revert to planner control automatically
+- Uses `grid setpoint - house consumption` as the excess-power calculation
+- Skips runs when the required sensors are `unknown` or `unavailable`
+- Starts forcible charge when excess power is above `1500W`
+- Sets Luna charge power to half of the computed excess power
+- Reissues forcible charge only when the target charge power changes
+- Stops forcible charge when excess power falls to `1500W` or below and the battery is actively charging
 
 **Required Entities / Helpers**:
-- `binary_sensor.electricity_planner_battery_charge_from_grid` – Planner green light
-- `sensor.electricity_planner_current_electricity_price` – Current tariff (for logging)
-- `switch.huawei_force_charge_enable` – Helper to allow/deny force charging
-- `number.huawei_battery_force_charge_current` – Charge current target
+- `sensor.electricity_planner_grid_setpoint` – Planner import headroom recommendation
+- `sensor.house_power_consumption_estimated` – Current house load estimate
+- `sensor.batteries_forcible_charge` – Huawei forcible-charge status entity with `mode` and `charge_power` attributes
+- Huawei Luna device ID for `huawei_solar.forcible_charge`
 
 **Triggers**:
-- Planner binary sensor changes
-- Force-charge enable switch toggled
-- Periodic safety check (every 15 minutes)
+- Grid setpoint changes
+- Periodic reevaluation (every 5 minutes)
 
 ---
 
@@ -105,22 +111,17 @@ This folder contains example Home Assistant automations that integrate with the 
 **Purpose**: Automatically resets the Nord Pool integration when the price sensor goes `unavailable` for an extended period.
 
 **Features**:
-- Watches `sensor.nordpool_kwh_*` entities for `unavailable`/`unknown` states
+- Watches the configured Nord Pool current-price sensor for both `unavailable` and `unknown`
 - Issues `homeassistant.reload_config_entry` for the Nord Pool config entry
-- Sends persistent notification so you know the reset happened
-- Avoids rapid-fire restarts through a cooldown helper
+- Avoids hardcoded automation IDs, so copying the example does not create duplicate-ID conflicts by itself
 
 **Required Entities / Helpers**:
-- `sensor.nordpool_kwh_*` – Your Nord Pool price sensor(s)
-- `input_boolean.nordpool_auto_recover_enabled` – Toggle to enable automation
-- `input_datetime.nordpool_last_recover` – Timestamp helper tracking latest recovery
-- `notify.notify` (or similar) – Notification target
+- `sensor.nord_pool_be_current_price` – Your Nord Pool current-price sensor
 - Nord Pool config entry ID (configured in the automation)
 
 **Triggers**:
-- Price sensor transitions to `unavailable` for >10 minutes
-- Manual enable switch toggled on
-- Time pattern (every hour) to clear cooldown
+- Price sensor transitions to `unavailable` for >1 minute
+- Price sensor transitions to `unknown` for >1 minute
 
 ---
 
@@ -131,7 +132,10 @@ This folder contains example Home Assistant automations that integrate with the 
    - Replace `huawei_charger_*` with your charger entities
    - Replace `victron_*` with your Victron entities
    - Replace `sensor.grid` with your grid power sensor
-3. Create any required `input_number` helpers (e.g., `car_charger_price_threshold`)
+   - Replace `number.inverter_power_derating` with your inverter limit entity if your Huawei setup exposes a different writable number
+   - Replace example `device_id` values with the ones from your HA instance
+   - Verify that every writable `number.*` entity in the examples actually exists before enabling the automation
+3. Ensure the charger connection-status sensor reports valid numeric states for disconnected/connected/charging
 4. Reload automations in Home Assistant
 
 ## Entity ID Reference
@@ -140,9 +144,11 @@ This folder contains example Home Assistant automations that integrate with the 
 These are the primary entities your automations should monitor:
 - `binary_sensor.electricity_planner_battery_charge_from_grid`
 - `binary_sensor.electricity_planner_car_charge_from_grid`
-- `binary_sensor.electricity_planner_solar_feed_in_grid` (not yet created by code)
+- `binary_sensor.electricity_planner_solar_feed_in_grid`
+- `binary_sensor.electricity_planner_solar_derating_alarm`
 - `sensor.electricity_planner_car_charger_limit`
 - `sensor.electricity_planner_grid_setpoint`
+- `sensor.electricity_planner_inverter_derating_target`
 
 ### Diagnostic/Monitoring Entities (Optional)
 These provide additional data for advanced logic:
@@ -158,15 +164,53 @@ These provide additional data for advanced logic:
 ## Customization Tips
 
 ### Car Charger Automation
-- Adjust `price_threshold` via the input_number helper to change when battery protection kicks in
+- Adjust `init_grace_seconds` to change how long the automation waits for charger initialization
+- Adjust `sensor_timeout_seconds` to change when the fail-safe power cutoff activates
 - Modify `difference_w > 500` to change power adjustment sensitivity
-- Change time patterns to suit your charging schedule
+- Change the time pattern to suit your polling cadence
 
 ### Solar Feed-in Automation
-- Adjust `grid_power > 50` threshold to change sensitivity
-- Modify `reduction = (grid_power * 1.2)` multiplier for faster/slower response
-- Change `increase = 200` to adjust ramp-up speed
-- Adjust max limit `4400` to match your inverter capacity
+- Configure `grid_power_entity` in the planner using the planner sign convention: positive = import, negative = export
+- Configure `solar_production_entity` in the planner so it can track the inverter's current solar output
+- Configure battery SOC entities if you want the planner to stop derating while the battery is below a chosen fill level
+- Set `max_inverter_power` to your inverter's actual limit
+- Set `inverter_export_limit` to the export target you want while feed-in is blocked, for example `80 W`
+- Set `inverter_export_deadband` to the allowed band around that target, for example `40 W`
+- Set `inverter_derating_unused_release_minutes` to how long PV may stay below the current derating cap before the planner releases back to max power. Default: `5` minutes
+- Set `inverter_derating_soc_bypass_threshold` to the SOC below which the planner should stop derating and let PV charge the battery
+- Keep the apply automation simple and let the planner own the derating logic
+
+### Solar Feed-in Automation Walkthrough
+Electricity Planner can now expose a direct inverter target sensor, similar to `grid_setpoint`.
+
+The integration computes `sensor.electricity_planner_inverter_derating_target` from:
+- the feed-in decision
+- current solar production
+- current grid power
+- optional battery SOC
+- configured inverter max power, export target, and SOC bypass threshold
+
+The planner logic is:
+- If feed-in is allowed, recommend full inverter power
+- If feed-in is blocked and average battery SOC is below the configured bypass threshold, recommend full inverter power so solar can charge the battery
+- If battery SOC is still below that threshold but export rises too high anyway, derate anyway and raise `binary_sensor.electricity_planner_solar_derating_alarm`
+- Otherwise, use a simple export deadband around the configured target:
+  - if export is below roughly `target - deadband`, reopen gradually instead of jumping straight to max power
+  - if export is above roughly `target + deadband`, reduce from the current solar output toward the target
+  - if export is inside that band, hold the previous derating target steady
+- With the default `80 W` target and `40 W` deadband, that means:
+  - below `40 W` export: reopen the inverter in small steps
+  - between `40 W` and `120 W`: hold the current target
+  - above `120 W`: derate further
+- If grid telemetry is missing, fall back to a conservative cap based on house consumption plus the configured export target
+
+That design keeps vendor-specific write behavior outside the planner:
+- the planner computes a recommended target
+- a normal Home Assistant automation applies that target to your inverter entity, with its own write-threshold to avoid unnecessary EEPROM-style writes
+
+This is the same design used by `sensor.electricity_planner_grid_setpoint`, and it is easier to adapt to non-Huawei hardware.
+
+If your installation already supports Huawei's own built-in limited feed-in / grid-tied point control, prefer that feature over an external automation loop. This example is primarily for users who need Home Assistant to enforce the planner's feed-in decision through a writable derating entity.
 
 ### Victron Setpoint Automation
 - Add additional conditions for manual override modes

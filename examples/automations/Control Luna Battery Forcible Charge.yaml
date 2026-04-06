@@ -8,52 +8,53 @@ triggers:
   - minutes: /5
     trigger: time_pattern
 conditions:
-  - condition: not
-    conditions:
-      - condition: state
-        entity_id: sensor.electricity_planner_grid_setpoint
-        state: unknown
-      - condition: state
-        entity_id: sensor.electricity_planner_grid_setpoint
-        state: unavailable
+  - condition: template
+    value_template: >-
+      {{
+        has_value('sensor.electricity_planner_grid_setpoint') and
+        has_value('sensor.house_power_consumption_estimated')
+      }}
 actions:
+  - variables:
+      start_threshold_w: 1500
+      forcible_charge_entity: sensor.batteries_forcible_charge
+      excess_power_w: >-
+        {{
+          [
+            (states('sensor.electricity_planner_grid_setpoint') | float(0)) -
+            (states('sensor.house_power_consumption_estimated') | float(0)),
+            0
+          ] | max
+        }}
+      charge_power_w: "{{ (excess_power_w / 2) | int }}"
+      forcible_charge_mode: "{{ state_attr(forcible_charge_entity, 'mode') | string }}"
+      current_charge_power_w: "{{ state_attr(forcible_charge_entity, 'charge_power') | int(0) }}"
   - choose:
-      # Enable forcible charge when excess power > 1500W
+      # Enable forcible charge when excess power > threshold and target changed
       - conditions:
           - condition: template
             value_template: >-
               {{
-                (states('sensor.electricity_planner_grid_setpoint') | float(0)) -
-                (states('sensor.house_power_consumption_estimated') | float(0))
-                > 1500
+                excess_power_w > start_threshold_w and
+                (
+                  forcible_charge_mode != 'Charging' or
+                  current_charge_power_w != charge_power_w
+                )
               }}
         sequence:
           - action: huawei_solar.forcible_charge
             data:
-              # Charge power = (grid_setpoint - house_consumption) / 2
               # Divide by 2 because Luna is one of two batteries - each gets half the excess
-              power: >-
-                {{
-                  (
-                    [
-                      (
-                        (states('sensor.electricity_planner_grid_setpoint') | float(0)) -
-                        (states('sensor.house_power_consumption_estimated') | float(0))
-                      ) / 2,
-                      0
-                    ] | max
-                  ) | int
-                }}
+              power: "{{ charge_power_w }}"
               device_id: 5f18f808c2a17aeb3c78b435012f6713
               duration: 15
-      # Stop forcible charge when excess power <= 1500W
+      # Stop forcible charge when excess power <= threshold and charging is active
       - conditions:
           - condition: template
             value_template: >-
               {{
-                (states('sensor.electricity_planner_grid_setpoint') | float(0)) -
-                (states('sensor.house_power_consumption_estimated') | float(0))
-                <= 1500
+                excess_power_w <= start_threshold_w and
+                forcible_charge_mode == 'Charging'
               }}
         sequence:
           - action: huawei_solar.stop_forcible_charge

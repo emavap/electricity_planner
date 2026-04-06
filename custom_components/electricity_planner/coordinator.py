@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -43,6 +44,19 @@ from .const import (
     CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_TRANSPORT_COST_ENTITY,
     CONF_GRID_POWER_ENTITY,
+    CONF_P1_TARIFF_ENTITY,
+    CONF_TRANSPORT_COST_DAY,
+    CONF_TRANSPORT_COST_NIGHT,
+    CONF_ENERGY_TAX_ACCIJNS,
+    CONF_ENERGY_TAX_BIJDRAGE,
+    CONF_ENERGY_COST_GSC,
+    CONF_ENERGY_COST_WKK,
+    DEFAULT_TRANSPORT_COST_DAY,
+    DEFAULT_TRANSPORT_COST_NIGHT,
+    DEFAULT_ENERGY_TAX_ACCIJNS,
+    DEFAULT_ENERGY_TAX_BIJDRAGE,
+    DEFAULT_ENERGY_COST_GSC,
+    DEFAULT_ENERGY_COST_WKK,
     CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
     CONF_SOLAR_FORECAST_TODAY_ENTITY,
     CONF_SOLAR_FORECAST_START_HOUR,
@@ -85,10 +99,17 @@ from .const import (
     BATTERY_SOC_DECIMAL_THRESHOLD,
 )
 from .decision_engine import ChargingDecisionEngine
-from .helpers import PriceInterval, extract_price_from_interval
+from .helpers import (
+    PriceInterval,
+    extract_price_from_interval,
+    resolve_transport_cost_from_lookup,
+    is_day_tariff,
+    calculate_transport_cost_from_components,
+)
 
 _LOGGER = logging.getLogger(__name__)
 _NUMERIC_PREFIX_RE = re.compile(r"^\s*([-+]?\d+(?:[.,]\d+)?)")
+_MANUAL_OVERRIDE_STORE_VERSION = 1
 
 
 class ElectricityPlannerCoordinator(DataUpdateCoordinator):
@@ -150,7 +171,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._manual_overrides: dict[str, dict[str, Any] | None] = {
             "battery_grid_charging": None,
             "car_grid_charging": None,
+            "charger_limit": None,
+            "grid_setpoint": None,
         }
+        self._manual_override_store: Store[dict[str, Any]] | None = None
         self._last_price_timeline: list[PriceInterval] | None = None
         self._last_price_timeline_generated_at: datetime | None = None
         self._last_price_timeline_data_hash: str | None = None  # Hash of price data used to build timeline
@@ -184,6 +208,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         self._setup_entity_listeners()
 
+    async def async_initialize_persistent_state(self) -> None:
+        """Initialize persisted state used by the coordinator."""
+        self._manual_override_store = Store(
+            self.hass,
+            _MANUAL_OVERRIDE_STORE_VERSION,
+            f"{DOMAIN}.{self.entry.entry_id}.manual_overrides",
+        )
+        await self._async_load_manual_overrides()
+
     def get_manual_override(self, key: str) -> dict[str, Any] | None:
         """Get the manual override for a specific key.
 
@@ -194,6 +227,97 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             The override dict if active, None otherwise.
         """
         return self._manual_overrides.get(key)
+
+    async def _async_load_manual_overrides(self) -> None:
+        """Load persisted manual overrides from storage."""
+        if self._manual_override_store is None:
+            return
+
+        try:
+            stored = await self._manual_override_store.async_load()
+        except Exception as err:
+            if isinstance(err, (KeyboardInterrupt, SystemExit)):
+                raise
+            _LOGGER.warning("Unable to load manual overrides for %s: %s", self.entry.entry_id, err)
+            return
+
+        if not isinstance(stored, dict):
+            return
+
+        serialized_overrides = stored.get("overrides", stored)
+        if not isinstance(serialized_overrides, dict):
+            return
+
+        overrides_changed = False
+        loaded_overrides: dict[str, dict[str, Any] | None] = {
+            key: None for key in self._manual_overrides
+        }
+
+        for key, payload in serialized_overrides.items():
+            if key not in loaded_overrides or not isinstance(payload, dict):
+                overrides_changed = True
+                continue
+
+            value = payload.get("value")
+            if value is None:
+                overrides_changed = True
+                continue
+
+            expires_at = self._parse_stored_datetime(payload.get("expires_at"))
+            if expires_at is not None and expires_at <= dt_util.utcnow():
+                overrides_changed = True
+                continue
+
+            loaded_overrides[key] = {
+                "value": value,
+                "reason": payload.get("reason", "Manual override"),
+                "set_at": self._parse_stored_datetime(payload.get("set_at")),
+                "expires_at": expires_at,
+            }
+
+        self._manual_overrides.update(loaded_overrides)
+
+        if overrides_changed:
+            await self._async_persist_manual_overrides()
+
+    async def _async_persist_manual_overrides(self) -> None:
+        """Persist active manual overrides for restart recovery."""
+        if self._manual_override_store is None:
+            return
+
+        overrides_to_save: dict[str, dict[str, Any]] = {}
+        for key, override in self._manual_overrides.items():
+            if not override:
+                continue
+            overrides_to_save[key] = {
+                "value": override.get("value"),
+                "reason": override.get("reason"),
+                "set_at": self._serialize_stored_datetime(override.get("set_at")),
+                "expires_at": self._serialize_stored_datetime(override.get("expires_at")),
+            }
+
+        await self._manual_override_store.async_save({"overrides": overrides_to_save})
+
+    def _schedule_manual_override_persist(self) -> None:
+        """Persist manual overrides without blocking sync callers."""
+        if self._manual_override_store is None:
+            return
+        self.hass.async_create_task(self._async_persist_manual_overrides())
+
+    @staticmethod
+    def _serialize_stored_datetime(value: datetime | None) -> str | None:
+        """Convert datetime to an ISO string for storage."""
+        return value.isoformat() if value is not None else None
+
+    @staticmethod
+    def _parse_stored_datetime(value: Any) -> datetime | None:
+        """Parse a datetime loaded from storage."""
+        if not value:
+            return None
+        parsed = dt_util.parse_datetime(str(value))
+        if parsed is None:
+            return None
+        return dt_util.as_utc(parsed)
 
     async def _resolve_solar_forecast(self, entity_id: str | None = None) -> float | None:
         """Resolve the solar forecast value with hourly-refreshing cache.
@@ -335,6 +459,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             if self.config.get(entity_key):
                 entities_to_track.append(self.config[entity_key])
 
+        # P1 tariff entity (for built-in transport cost day/night switching)
+        if self.config.get(CONF_P1_TARIFF_ENTITY):
+            entities_to_track.append(self.config[CONF_P1_TARIFF_ENTITY])
+
         if self.phase_mode == PHASE_MODE_THREE and self.phase_configs:
             for phase_config in self.phase_configs.values():
                 for entity_key in (
@@ -352,6 +480,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 self.hass, entities_to_track, self._handle_entity_change
             )
 
+    def _has_builtin_transport_cost(self) -> bool:
+        """Check if built-in transport cost components are configured."""
+        return self.config.get(CONF_TRANSPORT_COST_DAY) is not None
+
     def _resolve_transport_cost(
         self,
         transport_lookup: list[dict[str, Any]] | None,
@@ -360,64 +492,67 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
     ) -> float | None:
         """Resolve transport cost for a specific timestamp.
 
+        Uses built-in cost components when configured, otherwise falls back
+        to the legacy transport_cost_entity lookup.
+
         Args:
             transport_lookup: List of transport cost entries with timestamps
+                (legacy mode only)
             start_time_utc: The timestamp to resolve cost for
             reference_now: Reference time for "now" (defaults to current UTC time)
 
         Returns:
             Transport cost in €/kWh, or None if not available
         """
-        if not transport_lookup:
-            return None
+        if self._has_builtin_transport_cost():
+            return self._resolve_builtin_transport_cost(start_time_utc, reference_now)
 
+        # Legacy: resolve from external entity history
+        return resolve_transport_cost_from_lookup(
+            transport_lookup,
+            start_time_utc,
+            reference_now=reference_now,
+        )
+
+    def _resolve_builtin_transport_cost(
+        self,
+        start_time_utc: datetime,
+        reference_now: datetime | None = None,
+    ) -> float:
+        """Calculate transport cost from built-in components.
+
+        For the current time window, uses the P1 tariff entity if available
+        to determine day/night. For future timestamps, uses the standard
+        Belgian Fluvius schedule (Mon-Fri 07:00-22:00 = day).
+
+        Returns:
+            Total transport cost in €/kWh.
+        """
         if reference_now is None:
             reference_now = dt_util.utcnow()
 
-        # For future times, try to reuse the value from the same hour a week ago
-        if start_time_utc > reference_now:
-            week_ago = start_time_utc - timedelta(days=7)
-            cost_from_pattern: float | None = None
-            for entry in transport_lookup:
-                entry_cost = entry.get("cost")
-                if entry_cost is None:
-                    continue
-                entry_start_str = entry.get("start")
-                if entry_start_str is None:
-                    cost_from_pattern = float(entry_cost)
-                    continue
-                entry_start = dt_util.parse_datetime(entry_start_str)
-                if entry_start is None:
-                    continue
-                entry_start_utc = dt_util.as_utc(entry_start)
-                if entry_start_utc <= week_ago:
-                    cost_from_pattern = float(entry_cost)
-                else:
-                    break
+        # Determine day/night: use P1 tariff for "current" interval,
+        # schedule-based prediction for future intervals.
+        p1_tariff_code = None
+        current_interval_age = (reference_now - start_time_utc).total_seconds()
+        if 0 <= current_interval_age < 900:  # Current 15-minute slot only
+            p1_entity = self.config.get(CONF_P1_TARIFF_ENTITY)
+            if p1_entity:
+                state = self.hass.states.get(p1_entity)
+                if state and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                    p1_tariff_code = state.state
 
-            if cost_from_pattern is not None:
-                return cost_from_pattern
+        day = is_day_tariff(start_time_utc, p1_tariff_code)
 
-        # Otherwise use the most recent cost we have
-        cost: float | None = None
-        for entry in transport_lookup:
-            entry_cost = entry.get("cost")
-            if entry_cost is None:
-                continue
-            entry_start_str = entry.get("start")
-            if entry_start_str is None:
-                cost = float(entry_cost)
-                continue
-            entry_start = dt_util.parse_datetime(entry_start_str)
-            if entry_start is None:
-                continue
-            entry_start_utc = dt_util.as_utc(entry_start)
-            if entry_start_utc <= start_time_utc:
-                cost = float(entry_cost)
-            else:
-                break
-
-        return cost
+        return calculate_transport_cost_from_components(
+            is_day=day,
+            transport_day=self.config.get(CONF_TRANSPORT_COST_DAY, DEFAULT_TRANSPORT_COST_DAY),
+            transport_night=self.config.get(CONF_TRANSPORT_COST_NIGHT, DEFAULT_TRANSPORT_COST_NIGHT),
+            accijns=self.config.get(CONF_ENERGY_TAX_ACCIJNS, DEFAULT_ENERGY_TAX_ACCIJNS),
+            bijdrage=self.config.get(CONF_ENERGY_TAX_BIJDRAGE, DEFAULT_ENERGY_TAX_BIJDRAGE),
+            gsc=self.config.get(CONF_ENERGY_COST_GSC, DEFAULT_ENERGY_COST_GSC),
+            wkk=self.config.get(CONF_ENERGY_COST_WKK, DEFAULT_ENERGY_COST_WKK),
+        )
 
     def _resolve_override_targets(self, target: str) -> tuple[str, ...]:
         """Resolve override target string into coordinator keys.
@@ -437,6 +572,129 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             "all": ("battery_grid_charging", "car_grid_charging", "charger_limit", "grid_setpoint"),
         }
         return mapping.get(target, ())
+
+    def _build_price_analysis_overrides(
+        self,
+        prices_today: dict[str, Any] | None,
+        prices_tomorrow: dict[str, Any] | None,
+        transport_lookup: list[dict[str, Any]] | None,
+        current_transport_cost: float | None,
+        now: datetime | None = None,
+    ) -> dict[str, float | None] | None:
+        """Build timestamp-aware price summary values from Nord Pool intervals."""
+        if not prices_today and not prices_tomorrow:
+            return None
+
+        if now is None:
+            now = dt_util.utcnow()
+
+        multiplier = self.config.get(
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+        )
+        offset = self.config.get(
+            CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
+        )
+
+        intervals: list[dict[str, Any]] = []
+
+        def add_intervals(price_map: dict[str, Any] | None, source: str) -> None:
+            if not isinstance(price_map, dict):
+                return
+
+            area_code = next(iter(price_map.keys()), None)
+            if not area_code or not isinstance(price_map[area_code], list):
+                return
+
+            for interval in price_map[area_code]:
+                start_raw = interval.get("start")
+                if not start_raw:
+                    continue
+
+                start = dt_util.parse_datetime(start_raw)
+                if start is None:
+                    continue
+                start_utc = dt_util.as_utc(start)
+
+                raw_value = extract_price_from_interval(interval)
+                if raw_value is None:
+                    continue
+
+                raw_price = raw_value / 1000
+                adjusted_energy_price = (raw_price * multiplier) + offset
+                transport_cost = self._resolve_transport_cost(
+                    transport_lookup, start_utc, reference_now=now
+                )
+                if transport_cost is None:
+                    transport_cost = current_transport_cost if current_transport_cost is not None else 0.0
+
+                end_utc: datetime | None = None
+                end_raw = interval.get("end")
+                if end_raw:
+                    parsed_end = dt_util.parse_datetime(end_raw)
+                    if parsed_end is not None:
+                        candidate_end = dt_util.as_utc(parsed_end)
+                        if candidate_end > start_utc:
+                            end_utc = candidate_end
+
+                intervals.append(
+                    {
+                        "source": source,
+                        "start": start_utc,
+                        "end": end_utc,
+                        "raw_price": raw_price,
+                        "transport_cost": transport_cost,
+                        "final_price": adjusted_energy_price + transport_cost,
+                    }
+                )
+
+        add_intervals(prices_today, "today")
+        add_intervals(prices_tomorrow, "tomorrow")
+
+        if not intervals:
+            return None
+
+        intervals.sort(key=lambda item: item["start"])
+        deltas = [
+            intervals[idx + 1]["start"] - intervals[idx]["start"]
+            for idx in range(len(intervals) - 1)
+            if intervals[idx + 1]["start"] > intervals[idx]["start"]
+        ]
+        inferred_resolution = min(deltas) if deltas else timedelta(minutes=15)
+
+        for idx, item in enumerate(intervals):
+            if item["end"] is not None:
+                continue
+            next_start = intervals[idx + 1]["start"] if idx + 1 < len(intervals) else None
+            item["end"] = (
+                next_start
+                if next_start is not None and next_start > item["start"]
+                else item["start"] + inferred_resolution
+            )
+
+        current_interval = next(
+            (item for item in intervals if item["start"] <= now < item["end"]),
+            None,
+        )
+        next_interval = next((item for item in intervals if item["start"] > now), None)
+
+        today_intervals = [item for item in intervals if item["source"] == "today"]
+        highest_today = max(today_intervals, key=lambda item: item["final_price"]) if today_intervals else None
+        lowest_today = min(today_intervals, key=lambda item: item["final_price"]) if today_intervals else None
+
+        if current_interval is None and highest_today is None and next_interval is None:
+            return None
+
+        return {
+            "current_price": current_interval["final_price"] if current_interval else None,
+            "highest_price": highest_today["final_price"] if highest_today else None,
+            "lowest_price": lowest_today["final_price"] if lowest_today else None,
+            "next_price": next_interval["final_price"] if next_interval else None,
+            "raw_current_price": current_interval["raw_price"] if current_interval else None,
+            "raw_highest_price": highest_today["raw_price"] if highest_today else None,
+            "raw_lowest_price": lowest_today["raw_price"] if lowest_today else None,
+            "raw_next_price": next_interval["raw_price"] if next_interval else None,
+            "transport_cost": current_interval["transport_cost"] if current_interval else current_transport_cost,
+        }
 
     async def async_set_manual_override(
         self,
@@ -497,6 +755,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 expires_at.isoformat() if expires_at else "never",
             )
 
+        await self._async_persist_manual_overrides()
+
     async def async_clear_manual_override(self, target: str | None = None) -> None:
         """Clear manual overrides for the given target (or all)."""
         effective_target = target or "all"
@@ -504,6 +764,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             if self._manual_overrides.get(coordinator_key):
                 _LOGGER.info("Manual override cleared for %s", coordinator_key)
             self._manual_overrides[coordinator_key] = None
+        await self._async_persist_manual_overrides()
 
     def _update_peak_limit_state(self, data: dict[str, Any]) -> None:
         """Track 15-minute car charging limit after 5 minutes of sustained peak exceedance."""
@@ -655,6 +916,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         for key in expired_keys:
             self._manual_overrides[key] = None
             _LOGGER.debug("Removed expired manual override: %s", key)
+        if expired_keys:
+            self._schedule_manual_override_persist()
 
         if overrides_info:
             decision["manual_overrides"] = overrides_info
@@ -1216,6 +1479,16 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             self.config.get(CONF_GRID_POWER_ENTITY)
         )
 
+        # Preserve prior inverter target so the derating controller can hold or
+        # release curtailment gradually instead of jumping back to max power.
+        data["previous_inverter_derating_target"] = (
+            self.data.get("inverter_derating_target") if self.data else None
+        )
+        data["previous_inverter_derating_unreached_since"] = (
+            self.data.get("inverter_derating_unreached_since") if self.data else None
+        )
+        data["inverter_derating_evaluated_at"] = dt_util.utcnow()
+
         # Solar forecast with daily caching for stable overnight decisions.
         # After the configured start hour: read the forecast entity (tomorrow's
         # production) and cache it.  This cached value is used for all decisions
@@ -1240,9 +1513,23 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
 
 
-        data["transport_cost"] = await self._get_state_value(
-            self.config.get(CONF_TRANSPORT_COST_ENTITY)
-        )
+        # Transport cost: use built-in components if configured, otherwise legacy entity
+        if self._has_builtin_transport_cost():
+            # Built-in mode: no external entity or history lookup needed
+            data["transport_cost"] = self._resolve_builtin_transport_cost(dt_util.utcnow())
+            data["transport_cost_lookup"] = []
+            data["transport_cost_status"] = "builtin"
+            # Store current P1 tariff code for diagnostics
+            p1_entity = self.config.get(CONF_P1_TARIFF_ENTITY)
+            if p1_entity:
+                state = self.hass.states.get(p1_entity)
+                data["p1_tariff_code"] = state.state if state and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN) else None
+            else:
+                data["p1_tariff_code"] = None
+        else:
+            data["transport_cost"] = await self._get_state_value(
+                self.config.get(CONF_TRANSPORT_COST_ENTITY)
+            )
 
         # Fetch full day price data if Nord Pool config entry is configured
         # This retrieves all price intervals for today and tomorrow at whatever
@@ -1255,11 +1542,21 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             data["nordpool_prices_today"] = None
             data["nordpool_prices_tomorrow"] = None
 
-        transport_lookup, transport_status = await self._get_transport_cost_lookup(
-            data.get("transport_cost")
-        )
+        if self._has_builtin_transport_cost():
+            transport_lookup: list[dict[str, Any]] = []
+            transport_status = "builtin"
+        else:
+            transport_lookup, transport_status = await self._get_transport_cost_lookup(
+                data.get("transport_cost")
+            )
         data["transport_cost_lookup"] = transport_lookup
         data["transport_cost_status"] = transport_status
+        data["price_analysis_overrides"] = self._build_price_analysis_overrides(
+            data.get("nordpool_prices_today"),
+            data.get("nordpool_prices_tomorrow"),
+            transport_lookup,
+            data.get("transport_cost"),
+        )
 
         # Calculate average threshold if enabled
         average_threshold = self._calculate_average_threshold(
@@ -1451,13 +1748,19 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             "monthly_grid_peak": self._get_entity_status(
                 self.config.get(CONF_MONTHLY_GRID_PEAK_ENTITY), is_required=False
             ),
-            "transport_cost": self._get_entity_status(
-                self.config.get(CONF_TRANSPORT_COST_ENTITY), is_required=False
-            ),
             "grid_power": self._get_entity_status(
                 self.config.get(CONF_GRID_POWER_ENTITY), is_required=False
             ),
         }
+        # Transport cost: show P1 entity status in built-in mode, legacy entity otherwise
+        if self._has_builtin_transport_cost():
+            optional_entities["p1_tariff"] = self._get_entity_status(
+                self.config.get(CONF_P1_TARIFF_ENTITY), is_required=False
+            )
+        else:
+            optional_entities["transport_cost"] = self._get_entity_status(
+                self.config.get(CONF_TRANSPORT_COST_ENTITY), is_required=False
+            )
 
         # Calculate summary
         all_entities = []
@@ -1504,20 +1807,6 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             }
             Note: Interval duration is determined by Nord Pool and extracted from timestamps.
         """
-        # Check cache first - prices only update hourly, no need to fetch every 30s
-        now = dt_util.utcnow()
-        cache_key = f"{day}_{config_entry_id}"
-
-        # Check cache with safe tuple unpacking
-        if cache_key in self._nordpool_cache:
-            cached_data, cached_time = self._nordpool_cache[cache_key]
-            cache_age = now - cached_time
-            # Cache for configured TTL (prices change hourly, tomorrow appears at 13:00)
-            if cache_age < timedelta(minutes=NORDPOOL_CACHE_TTL_MINUTES):
-                _LOGGER.debug("Using cached Nord Pool prices for %s (age: %.1f minutes)",
-                            day, cache_age.total_seconds() / 60)
-                return cached_data
-
         try:
             # Calculate the target date
             now_local = dt_util.now()
@@ -1528,6 +1817,21 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             else:
                 _LOGGER.error("Invalid day parameter: %s (expected 'today' or 'tomorrow')", day)
                 return None
+
+            # Check cache after resolving the concrete date to avoid midnight rollover bleed.
+            now = dt_util.utcnow()
+            cache_key = f"{config_entry_id}_{target_date.isoformat()}"
+            if cache_key in self._nordpool_cache:
+                cached_data, cached_time = self._nordpool_cache[cache_key]
+                cache_age = now - cached_time
+                if cache_age < timedelta(minutes=NORDPOOL_CACHE_TTL_MINUTES):
+                    _LOGGER.debug(
+                        "Using cached Nord Pool prices for %s (%s) (age: %.1f minutes)",
+                        day,
+                        target_date.isoformat(),
+                        cache_age.total_seconds() / 60,
+                    )
+                    return cached_data
 
             # Call the Nord Pool service with exponential backoff retry
             max_retries = 3
@@ -2462,7 +2766,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         if data_is_available:
             # Data is available - reset tracking
             self._last_successful_update = now
-            if self._data_unavailable_since is not None:
+            if self._data_unavailable_since is not None and self._notification_sent:
                 # Data was unavailable but is now available - send recovery notification
                 unavailable_duration = now - self._data_unavailable_since
                 await self._send_notification(
@@ -2471,9 +2775,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     f"Charging decisions are now active.",
                     "electricity_planner_data_restored"
                 )
-                self._data_unavailable_since = None
-                self._notification_sent = False
                 _LOGGER.info("Data availability restored after %.1f seconds", unavailable_duration.total_seconds())
+            if self._data_unavailable_since is not None:
+                self._data_unavailable_since = None
+            self._notification_sent = False
         else:
             # Data is not available
             if self._data_unavailable_since is None:

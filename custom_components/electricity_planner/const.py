@@ -30,8 +30,17 @@ CONF_SOLAR_PRODUCTION_ENTITY = "solar_production_entity"
 CONF_HOUSE_CONSUMPTION_ENTITY = "house_consumption_entity"
 CONF_CAR_CHARGING_POWER_ENTITY = "car_charging_power_entity"
 CONF_MONTHLY_GRID_PEAK_ENTITY = "monthly_grid_peak_entity"
-CONF_TRANSPORT_COST_ENTITY = "transport_cost_entity"
+CONF_TRANSPORT_COST_ENTITY = "transport_cost_entity"  # Legacy — kept for migration
 CONF_GRID_POWER_ENTITY = "grid_power_entity"
+
+# Built-in transport cost components (replaces external transport_cost_entity)
+CONF_P1_TARIFF_ENTITY = "p1_tariff_entity"
+CONF_TRANSPORT_COST_DAY = "transport_cost_day"
+CONF_TRANSPORT_COST_NIGHT = "transport_cost_night"
+CONF_ENERGY_TAX_ACCIJNS = "energy_tax_accijns"
+CONF_ENERGY_TAX_BIJDRAGE = "energy_tax_bijdrage"
+CONF_ENERGY_COST_GSC = "energy_cost_gsc"
+CONF_ENERGY_COST_WKK = "energy_cost_wkk"
 
 CONF_MIN_SOC_THRESHOLD = "min_soc_threshold"
 CONF_MAX_SOC_THRESHOLD = "max_soc_threshold"
@@ -55,6 +64,11 @@ CONF_MAX_GRID_POWER = "max_grid_power"
 CONF_MIN_CAR_CHARGING_THRESHOLD = "min_car_charging_threshold"
 CONF_PREDICTIVE_CHARGING_MIN_SOC = "predictive_charging_min_soc"
 CONF_BASE_GRID_SETPOINT = "base_grid_setpoint"
+CONF_MAX_INVERTER_POWER = "max_inverter_power"
+CONF_INVERTER_EXPORT_LIMIT = "inverter_export_limit"
+CONF_INVERTER_EXPORT_DEADBAND = "inverter_export_deadband"
+CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES = "inverter_derating_unused_release_minutes"
+CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD = "inverter_derating_soc_bypass_threshold"
 CONF_USE_DYNAMIC_THRESHOLD = "use_dynamic_threshold"
 CONF_DYNAMIC_THRESHOLD_CONFIDENCE = "dynamic_threshold_confidence"
 CONF_USE_AVERAGE_THRESHOLD = "use_average_threshold"
@@ -69,13 +83,13 @@ CONF_SOC_BUFFER_TARGET = "soc_buffer_target"
 
 # Default Threshold Values
 DEFAULT_MIN_SOC = 20
-DEFAULT_MAX_SOC = 90
+DEFAULT_MAX_SOC = 70
 DEFAULT_PRICE_THRESHOLD = 0.15
 DEFAULT_EMERGENCY_SOC = 15
 DEFAULT_VERY_LOW_PRICE_THRESHOLD = 30  # Bottom 30% of daily range
 DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD = 1000  # 1kW
 DEFAULT_FEEDIN_PRICE_THRESHOLD = 0.05  # €0.05/kWh - export only above this price
-DEFAULT_MAX_SOC_SUNNY = 50  # Lower grid charge target when sunny day expected
+DEFAULT_MAX_SOC_SUNNY = 35  # Lower grid charge target when sunny day expected
 DEFAULT_SOLAR_FORECAST_START_HOUR = 20  # Start reading tomorrow's forecast at 8 PM
 DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH = 5.0  # kWh forecast that enables sunny-day SOC limit
 
@@ -90,16 +104,36 @@ DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE = 75  # Default confidence threshold (75% -
 DEFAULT_USE_AVERAGE_THRESHOLD = False  # Use average of future prices as threshold (opt-in)
 DEFAULT_MIN_CAR_CHARGING_DURATION = 2  # Minimum hours of low prices to start car charging
 DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER = 1.2  # 20% higher threshold when permissive mode active
-DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER = 1.0  # No adjustment by default
-DEFAULT_PRICE_ADJUSTMENT_OFFSET = 0.0  # €/kWh offset
-DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER = 1.0  # No adjustment by default
-DEFAULT_FEEDIN_ADJUSTMENT_OFFSET = 0.0  # €/kWh offset
+DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER = 1.04  # Energie.be dynamic buy formula coefficient (Apr 2026)
+DEFAULT_PRICE_ADJUSTMENT_OFFSET = 0.005  # €/kWh, excl. VAT market basis
+DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER = 1.0  # Energie.be dynamic feed-in formula coefficient (Apr 2026)
+DEFAULT_FEEDIN_ADJUSTMENT_OFFSET = -0.0098  # €/kWh, excl. VAT market basis
 DEFAULT_SOC_PRICE_MULTIPLIER_MAX = 1.3  # Accept prices up to 130% of threshold when battery is critically low
 DEFAULT_SOC_BUFFER_TARGET = 50  # Target SOC % above which no price relaxation is applied
+
+# Built-in transport cost defaults (€/kWh, excl. VAT — Energie.be / Fluvius Apr 2026)
+DEFAULT_TRANSPORT_COST_DAY = 0.0599    # Fluvius West "excl. nacht" digital meter
+DEFAULT_TRANSPORT_COST_NIGHT = 0.0498  # Fluvius West night/weekend digital meter
+DEFAULT_ENERGY_TAX_ACCIJNS = 0.050329  # Bijzondere accijns op Energie
+DEFAULT_ENERGY_TAX_BIJDRAGE = 0.002042  # Bijdrage op de Energie
+DEFAULT_ENERGY_COST_GSC = 0.0117       # Groene stroom certificaten
+DEFAULT_ENERGY_COST_WKK = 0.0039       # Warmte-krachtkoppeling
+
+# Belgian day/night tariff schedule (Fluvius standard)
+TARIFF_DAY_START_HOUR = 7    # Day tariff starts at 07:00 local
+TARIFF_DAY_END_HOUR = 22     # Day tariff ends at 22:00 local
+# Night tariff: Mon-Fri 22:00-07:00 + all day Saturday and Sunday
+# P1 meter tariff codes: "1" = day/peak, "2" = night/off-peak
 
 # Algorithm Constants
 DEFAULT_BASE_GRID_SETPOINT = 2500  # Conservative base grid limit (W)
 DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN = 0.9  # Use 90% of monthly peak
+DEFAULT_MAX_INVERTER_POWER = 4400  # 4.4kW common residential single-phase inverter limit
+DEFAULT_INVERTER_EXPORT_LIMIT = 80  # Target about 80W export when feed-in is disabled
+DEFAULT_INVERTER_EXPORT_DEADBAND = 40  # Hold derating steady within +/-40W of export target
+DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES = 5  # Release to max after this many idle minutes
+DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD = 95  # Below this SOC, keep PV unrestricted
+INVERTER_DERATING_ACTIVE_TOLERANCE_W = 75  # Treat the cap as "reached" within this margin
 
 # Cache and Performance Constants
 NORDPOOL_CACHE_MAX_SIZE = 10  # Maximum number of cached Nord Pool price entries
@@ -175,4 +209,4 @@ MANUAL_OVERRIDE_TARGET_ALL = "all"
 MAX_POWER_VALIDATION_W = 50000  # Maximum reasonable power for solar/consumption/grid validation
 MAX_CAR_POWER_VALIDATION_W = 22000  # Maximum reasonable car charging power
 
-INTEGRATION_VERSION = "4.10.0"
+INTEGRATION_VERSION = "4.10.24"

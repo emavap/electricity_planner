@@ -1,8 +1,14 @@
 alias: Recover Nord Pool when price sensor is unavailable
-description: ""
+description: >-
+  Reload the Nord Pool config entry when the current price sensor remains
+  unavailable or unknown for 1 minute.
 triggers:
   - entity_id: sensor.nord_pool_be_current_price
     to: unavailable
+    for: "00:01:00"
+    trigger: state
+  - entity_id: sensor.nord_pool_be_current_price
+    to: unknown
     for: "00:01:00"
     trigger: state
 conditions: []

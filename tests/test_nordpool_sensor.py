@@ -8,7 +8,10 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner.const import DOMAIN
-from custom_components.electricity_planner.helpers import extract_price_from_interval
+from custom_components.electricity_planner.helpers import (
+    extract_price_from_interval,
+    resolve_transport_cost_from_lookup,
+)
 from custom_components.electricity_planner.sensor import NordPoolPricesSensor
 
 
@@ -17,12 +20,28 @@ class FakeCoordinator:
 
     def __init__(self, data=None):
         self.data = data or {}
-        self.config = {}
+        self.config = {
+            "price_adjustment_multiplier": 1.0,
+            "price_adjustment_offset": 0.0,
+        }
+        self.builtin_transport_cost = 0.0
 
     @staticmethod
     def async_add_listener(callback):
         """Mock listener."""
         pass
+
+    def _has_builtin_transport_cost(self) -> bool:
+        """Check if built-in transport cost components are configured."""
+        return self.config.get("transport_cost_day") is not None
+
+    def _resolve_transport_cost(self, transport_lookup, start_time_utc, reference_now=None):
+        """Resolve transport cost using built-in or legacy test behavior."""
+        if self._has_builtin_transport_cost():
+            return self.builtin_transport_cost
+        return resolve_transport_cost_from_lookup(
+            transport_lookup, start_time_utc, reference_now=reference_now
+        )
 
 
 @pytest.fixture
@@ -93,6 +112,9 @@ def test_normalize_price_interval_adds_price_key(fake_coordinator, fake_entry):
     assert result is not None
     assert result["price"] == 0.10485  # Converted to €/kWh (divided by 1000)
     assert result["transport_cost"] == 0.0  # No transport cost
+    assert result["raw_price"] == 0.10485
+    assert result["adjusted_energy_price"] == 0.10485
+    assert result["contract_adjustment"] == 0.0
     assert result["start"] == "2025-10-14T00:00:00+00:00"
     assert result["end"] == "2025-10-14T00:15:00+00:00"
     assert "value" in result  # Original key preserved
@@ -132,6 +154,9 @@ def test_normalize_price_interval_applies_adjustments(fake_coordinator, fake_ent
     # Expected: (100/1000 × 1.21) + 0.05 ≈ 0.171
     assert result["price"] == pytest.approx(0.171, rel=1e-6)
     assert result["transport_cost"] == 0.0
+    assert result["raw_price"] == pytest.approx(0.1, rel=1e-6)
+    assert result["adjusted_energy_price"] == pytest.approx(0.171, rel=1e-6)
+    assert result["contract_adjustment"] == pytest.approx(0.071, rel=1e-6)
 
 
 def test_normalize_price_interval_applies_transport_cost(fake_coordinator, fake_entry, monkeypatch):
@@ -224,6 +249,42 @@ def test_normalize_price_interval_uses_local_time_zone(fake_coordinator, fake_en
         dt_util.set_default_time_zone(original_tz)
 
 
+def test_normalize_price_interval_matches_future_transport_by_local_week(fake_coordinator, fake_entry, monkeypatch):
+    """DST transitions should reuse the same local tariff slot, not the same UTC instant."""
+    from datetime import datetime, timezone
+
+    frozen_now = datetime(2026, 4, 4, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "utcnow", lambda: frozen_now)
+
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
+    try:
+        fake_coordinator.config = {
+            "price_adjustment_multiplier": 1.0,
+            "price_adjustment_offset": 0.0,
+        }
+        fake_coordinator.data = {}
+        sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
+
+        interval = {
+            "start": "2026-04-05T00:30:00+00:00",
+            "end": "2026-04-05T00:45:00+00:00",
+            "value": 100.0,
+        }
+        transport_lookup = [
+            {"start": "2026-03-29T00:00:00+00:00", "cost": 0.02},
+            {"start": "2026-03-29T01:00:00+00:00", "cost": 0.07},
+        ]
+
+        result = sensor._normalize_price_interval(interval, transport_lookup)
+
+        assert result is not None
+        assert result["transport_cost"] == pytest.approx(0.07, rel=1e-6)
+        assert result["price"] == pytest.approx(0.17, rel=1e-6)
+    finally:
+        dt_util.set_default_time_zone(original_tz)
+
+
 def test_native_value_unavailable_when_no_data(fake_coordinator, fake_entry):
     """Test that sensor shows unavailable when no data."""
     sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
@@ -300,6 +361,8 @@ def test_extra_state_attributes_combines_prices(fake_coordinator, fake_entry):
     assert attrs["price_range"] == 0.01
     assert attrs["transport_cost_applied"] is None
     assert attrs["transport_cost_status"] == "not_configured"
+    assert set(attrs["data"][0]) == {"start", "end", "price", "transport_cost", "raw_price", "adjusted_energy_price", "contract_adjustment"}
+    assert set(attrs["data"][1]) == {"start", "end", "price", "transport_cost", "raw_price", "adjusted_energy_price", "contract_adjustment"}
 
 
 def test_extra_state_attributes_handles_different_price_keys(fake_coordinator, fake_entry):
@@ -327,6 +390,75 @@ def test_extra_state_attributes_handles_different_price_keys(fake_coordinator, f
     assert attrs["max_price"] == 0.1
     assert attrs["transport_cost_applied"] is False
     assert attrs["transport_cost_status"] == "pending_history"
+
+
+def test_extra_state_attributes_marks_builtin_transport_cost_as_applied(fake_coordinator, fake_entry):
+    """Built-in transport cost mode should be reported as applied."""
+    fake_coordinator.config.update(
+        {
+            "transport_cost_day": 0.0599,
+            "transport_cost_night": 0.0498,
+        }
+    )
+    fake_coordinator.builtin_transport_cost = 0.127871
+    fake_coordinator.data = {
+        "nordpool_prices_today": {
+            "BE": [
+                {
+                    "start": "2025-10-14T10:00:00+00:00",
+                    "end": "2025-10-14T10:15:00+00:00",
+                    "value": 100.0,
+                },
+            ]
+        },
+        "nordpool_prices_tomorrow": None,
+        "transport_cost_lookup": [],
+        "transport_cost_status": "builtin",
+    }
+
+    sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
+    attrs = sensor.extra_state_attributes
+
+    assert attrs["transport_cost_applied"] is True
+    assert attrs["transport_cost_status"] == "builtin"
+    assert attrs["data"][0]["transport_cost"] == pytest.approx(0.127871, rel=1e-6)
+    assert attrs["data"][0]["price"] == pytest.approx(0.227871, rel=1e-6)
+
+
+def test_extra_state_attributes_compacts_interval_payload(fake_coordinator, fake_entry):
+    """Only expose the fields the dashboard needs to avoid recorder bloat."""
+    fake_coordinator.data = {
+        "nordpool_prices_today": {
+            "BE": [
+                {
+                    "start": "2025-10-14T10:00:00+00:00",
+                    "end": "2025-10-14T10:15:00+00:00",
+                    "value": 100.0,
+                    "currency": "EUR",
+                    "source": "nordpool",
+                    "metadata": {"foo": "bar"},
+                },
+            ]
+        },
+        "nordpool_prices_tomorrow": None,
+        "transport_cost_lookup": [],
+        "transport_cost_status": "not_configured",
+    }
+
+    sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
+    attrs = sensor.extra_state_attributes
+
+    assert attrs["data"] == [
+        {
+            "start": "2025-10-14T10:00:00+00:00",
+            "end": "2025-10-14T10:15:00+00:00",
+            "price": 0.1,
+            "transport_cost": 0.0,
+            "raw_price": 0.1,
+            "adjusted_energy_price": 0.1,
+            "contract_adjustment": 0.0,
+        }
+    ]
 
 
 def test_extra_state_attributes_skips_invalid_intervals(fake_coordinator, fake_entry):

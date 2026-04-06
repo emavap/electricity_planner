@@ -1,10 +1,11 @@
 # Development and testing requirements for Electricity Planner
 
 # Testing
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-pytest-cov>=4.1.0
-pytest-timeout>=2.1.0
+# Keep these aligned with pytest-homeassistant-custom-component 0.12.x.
+pytest==7.2.0
+pytest-asyncio==0.20.2
+pytest-cov==3.0.0
+pytest-timeout==2.1.0
 
 # Code quality
 black>=23.0.0
@@ -18,7 +19,8 @@ types-python-dateutil
 types-pytz
 
 # Home Assistant testing
-pytest-homeassistant-custom-component>=0.13.0
+# Pinned for Python 3.10 / Docker build compatibility; 0.13.x not on PyPI.
+pytest-homeassistant-custom-component==0.12.49
 
 # Mocking
 pytest-mock>=3.11.0

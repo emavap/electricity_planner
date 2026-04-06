@@ -24,3 +24,22 @@ async def test_evaluate_charging_decision_no_battery_soc(mocker):
     engine = ChargingDecisionEngine(hass=mocker.MagicMock(), config={})
     result = engine._analyze_battery_status([])
     assert result["batteries_available"] is False
+
+
+def test_analyze_battery_status_filters_out_of_range_soc(mocker):
+    """Out-of-range SOC values should not be included in battery metrics."""
+    engine = ChargingDecisionEngine(hass=mocker.MagicMock(), config={})
+
+    result = engine._analyze_battery_status(
+        [
+            {"entity_id": "sensor.bad_low", "soc": -5},
+            {"entity_id": "sensor.good", "soc": 45},
+            {"entity_id": "sensor.bad_high", "soc": 110},
+        ]
+    )
+
+    assert result["batteries_available"] is True
+    assert result["batteries_count"] == 1
+    assert result["average_soc"] == 45
+    assert result["min_soc"] == 45
+    assert result["max_soc"] == 45

@@ -19,6 +19,7 @@ from custom_components.electricity_planner.const import (
     ATTR_ACTION,
     ATTR_ENTRY_ID,
     ATTR_TARGET,
+    CONF_BASE_GRID_SETPOINT,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
@@ -37,12 +38,21 @@ from custom_components.electricity_planner.const import (
     CONF_LOWEST_PRICE_ENTITY,
     CONF_NEXT_PRICE_ENTITY,
     CONF_PRICE_THRESHOLD,
+    CONF_P1_TARIFF_ENTITY,
     CONF_SOLAR_PRODUCTION_ENTITY,
     CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
     CONF_SOLAR_FORECAST_TODAY_ENTITY,
     CONF_SOLAR_FORECAST_START_HOUR,
+    CONF_TRANSPORT_COST_DAY,
     CONF_TRANSPORT_COST_ENTITY,
+    CONF_TRANSPORT_COST_NIGHT,
     CONF_USE_AVERAGE_THRESHOLD,
+    DEFAULT_ENERGY_COST_GSC,
+    DEFAULT_ENERGY_COST_WKK,
+    DEFAULT_ENERGY_TAX_ACCIJNS,
+    DEFAULT_ENERGY_TAX_BIJDRAGE,
+    DEFAULT_TRANSPORT_COST_DAY,
+    DEFAULT_TRANSPORT_COST_NIGHT,
     DEFAULT_MIN_CAR_CHARGING_DURATION,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
     DOMAIN,
@@ -54,6 +64,7 @@ from custom_components.electricity_planner.const import (
     SERVICE_SET_MANUAL_OVERRIDE,
     PHASE_MODE_THREE,
 )
+from custom_components.electricity_planner.sensor import GridSetpointSensor
 from homeassistant.exceptions import HomeAssistantError
 
 
@@ -114,6 +125,8 @@ def _base_config():
         CONF_HIGHEST_PRICE_ENTITY: "sensor.highest_price",
         CONF_LOWEST_PRICE_ENTITY: "sensor.lowest_price",
         CONF_NEXT_PRICE_ENTITY: "sensor.next_price",
+        "price_adjustment_multiplier": 1.0,
+        "price_adjustment_offset": 0.0,
         CONF_BATTERY_SOC_ENTITIES: ["sensor.battery_soc_1", "sensor.battery_soc_2"],
         CONF_SOLAR_PRODUCTION_ENTITY: "sensor.solar_production",
         CONF_HOUSE_CONSUMPTION_ENTITY: "sensor.house_consumption",
@@ -179,6 +192,28 @@ def test_coordinator_merges_entry_options(fake_hass, monkeypatch):
 
     assert coordinator.config[CONF_PRICE_THRESHOLD] == 0.05
     assert coordinator.config[CONF_DYNAMIC_THRESHOLD_CONFIDENCE] == 80
+
+
+def test_grid_setpoint_sensor_uses_configured_base_setpoint_in_attributes(fake_hass, monkeypatch):
+    config = _base_config()
+    config[CONF_BASE_GRID_SETPOINT] = 4200
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator.data = {
+        "grid_setpoint": 4200,
+        "grid_setpoint_reason": "Automatic",
+        "monthly_grid_peak": 0,
+        "power_analysis": {},
+        "battery_analysis": {},
+    }
+
+    entry = MockConfigEntry(domain=DOMAIN, data=config, options={})
+    sensor = GridSetpointSensor(coordinator, entry)
+    attributes = sensor.extra_state_attributes
+
+    assert attributes["base_grid_setpoint"] == 4200
+    assert attributes["controlling_peak"] == 4200
+    assert attributes["peak_based_grid_setpoint"] == 3780
+    assert attributes["max_grid_setpoint"] == 3780
 
 
 @pytest.mark.asyncio
@@ -396,6 +431,37 @@ async def test_data_unavailability_triggers_notifications(fake_hass, monkeypatch
     assert coordinator.notification_sent is True
 
 
+@pytest.mark.asyncio
+async def test_short_outage_does_not_emit_restored_notification(fake_hass, monkeypatch):
+    """Short blips should not generate a misleading recovery notification."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    send_notification = AsyncMock()
+    monkeypatch.setattr(coordinator, "_send_notification", send_notification)
+
+    base_time = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
+    now_ref = {"value": base_time}
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: now_ref["value"], raising=False
+    )
+
+    unavailable = {"current_price": None, "price_analysis": {}}
+    available = {
+        "current_price": 0.11,
+        "highest_price": 0.2,
+        "lowest_price": 0.05,
+        "price_analysis": {"data_available": True},
+    }
+
+    await coordinator._check_data_availability(unavailable)
+    now_ref["value"] = base_time + timedelta(seconds=10)
+    await coordinator._check_data_availability(available)
+
+    send_notification.assert_not_awaited()
+    assert coordinator.notification_sent is False
+    assert coordinator.data_unavailable_since is None
+
+
 def _event_for(entity_id: str):
     return SimpleNamespace(data={"entity_id": entity_id})
 
@@ -575,6 +641,38 @@ async def test_nordpool_cache_prevents_redundant_calls(fake_hass, monkeypatch):
     result3 = await coordinator._fetch_nordpool_prices("test_config_entry_id", "today")
     assert fake_hass.services.async_call.await_count == 2  # Called again
     assert result3 == mock_response
+
+
+@pytest.mark.asyncio
+async def test_nordpool_cache_rolls_over_at_midnight(fake_hass, monkeypatch):
+    """Crossing midnight should invalidate the cached 'today' payload immediately."""
+    from custom_components.electricity_planner.const import CONF_NORDPOOL_CONFIG_ENTRY
+
+    config = _base_config()
+    config[CONF_NORDPOOL_CONFIG_ENTRY] = "test_config_entry_id"
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    clock = {"now": datetime(2024, 1, 1, 23, 58, tzinfo=timezone.utc)}
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: clock["now"], raising=False
+    )
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "now", lambda: clock["now"], raising=False
+    )
+
+    day_one = {"BE": [{"start": "2024-01-01T00:00:00+00:00", "price": 100.0}]}
+    day_two = {"BE": [{"start": "2024-01-02T00:00:00+00:00", "price": 200.0}]}
+    fake_hass.services.async_call = AsyncMock(side_effect=[day_one, day_two])
+
+    result1 = await coordinator._fetch_nordpool_prices("test_config_entry_id", "today")
+    assert result1 == day_one
+    assert fake_hass.services.async_call.await_count == 1
+
+    clock["now"] = datetime(2024, 1, 2, 0, 2, tzinfo=timezone.utc)
+    result2 = await coordinator._fetch_nordpool_prices("test_config_entry_id", "today")
+
+    assert result2 == day_two
+    assert fake_hass.services.async_call.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -1030,11 +1128,49 @@ async def test_manual_override_recomputes_gridpoint(fake_hass, monkeypatch):
         baseline_data, overridden, changed
     )
 
-    expected_setpoint = coordinator.decision_engine._settings.base_grid_setpoint
+    expected_setpoint = int(
+        coordinator.decision_engine._settings.base_grid_setpoint * 0.9
+    )
     assert updated["grid_setpoint"] == expected_setpoint
     assert updated["grid_components"]["battery"] == expected_setpoint
     assert updated["grid_components"]["car"] == 0
     assert "battery" in updated["grid_setpoint_reason"]
+
+
+class _MemoryOverrideStore:
+    def __init__(self, initial_data: dict | None = None):
+        self.data = initial_data
+
+    async def async_load(self):
+        return self.data
+
+    async def async_save(self, data):
+        self.data = data
+
+
+@pytest.mark.asyncio
+async def test_manual_override_persists_across_restart(fake_hass, monkeypatch):
+    """Indefinite overrides should survive coordinator recreation."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    store = _MemoryOverrideStore()
+    coordinator._manual_override_store = store
+
+    await coordinator.async_set_manual_override(
+        target="battery",
+        value=False,
+        duration=None,
+        reason="persisted disable",
+    )
+
+    restored = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    restored._manual_override_store = _MemoryOverrideStore(store.data)
+
+    await restored._async_load_manual_overrides()
+
+    override = restored.get_manual_override("battery_grid_charging")
+    assert override is not None
+    assert override["value"] is False
+    assert override["reason"] == "persisted disable"
 
 
 def test_forecast_summary_uses_price_timeline(fake_hass, monkeypatch):
@@ -1310,6 +1446,172 @@ async def test_transport_cost_lookup_uses_local_hour(fake_hass, monkeypatch):
         assert change_start.hour == 1
     finally:
         dt_util.set_default_time_zone(original_tz)
+
+
+def test_resolve_transport_cost_matches_local_week_across_dst(fake_hass, monkeypatch):
+    """Weekly transport matching should reuse the same local tariff slot across DST."""
+    base_time = datetime(2026, 4, 4, 12, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
+
+    try:
+        transport_lookup = [
+            {"start": "2026-03-29T00:00:00+00:00", "cost": 0.02},
+            {"start": "2026-03-29T01:00:00+00:00", "cost": 0.07},
+        ]
+
+        result = coordinator._resolve_transport_cost(
+            transport_lookup,
+            datetime(2026, 4, 5, 0, 30, tzinfo=timezone.utc),
+            reference_now=base_time,
+        )
+
+        assert result == pytest.approx(0.07, rel=1e-6)
+    finally:
+        dt_util.set_default_time_zone(original_tz)
+
+
+def test_resolve_builtin_transport_cost_uses_schedule_for_future_boundary(fake_hass, monkeypatch):
+    """A near-future boundary interval must not inherit the current P1 tariff code."""
+    reference_now = datetime(2026, 4, 6, 19, 55, tzinfo=timezone.utc)  # 21:55 local Brussels
+    _freeze_time(monkeypatch, reference_now)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_P1_TARIFF_ENTITY: "sensor.p1_tariff",
+            CONF_TRANSPORT_COST_DAY: DEFAULT_TRANSPORT_COST_DAY,
+            CONF_TRANSPORT_COST_NIGHT: DEFAULT_TRANSPORT_COST_NIGHT,
+        }
+    )
+    fake_hass.states.set("sensor.p1_tariff", "1")
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
+
+    try:
+        result = coordinator._resolve_builtin_transport_cost(
+            datetime(2026, 4, 6, 20, 0, tzinfo=timezone.utc),  # 22:00 local -> night tariff
+            reference_now=reference_now,
+        )
+    finally:
+        dt_util.set_default_time_zone(original_tz)
+
+    expected = (
+        DEFAULT_TRANSPORT_COST_NIGHT
+        + DEFAULT_ENERGY_TAX_ACCIJNS
+        + DEFAULT_ENERGY_TAX_BIJDRAGE
+        + DEFAULT_ENERGY_COST_GSC
+        + DEFAULT_ENERGY_COST_WKK
+    )
+    assert result == pytest.approx(expected, rel=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_data_populates_builtin_transport_cost(fake_hass, monkeypatch):
+    """Built-in transport mode should publish the current transport cost for pricing."""
+    reference_now = datetime(2026, 4, 6, 10, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, reference_now)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_P1_TARIFF_ENTITY: "sensor.p1_tariff",
+            CONF_TRANSPORT_COST_DAY: DEFAULT_TRANSPORT_COST_DAY,
+            CONF_TRANSPORT_COST_NIGHT: DEFAULT_TRANSPORT_COST_NIGHT,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    fake_hass.states.set("sensor.current_price", "0.10")
+    fake_hass.states.set("sensor.highest_price", "0.20")
+    fake_hass.states.set("sensor.lowest_price", "0.05")
+    fake_hass.states.set("sensor.next_price", "0.12")
+    fake_hass.states.set("sensor.battery_soc_1", "50")
+    fake_hass.states.set("sensor.battery_soc_2", "60")
+    fake_hass.states.set("sensor.solar_production", "1500")
+    fake_hass.states.set("sensor.house_consumption", "1000")
+    fake_hass.states.set("sensor.car_power", "0")
+    fake_hass.states.set("sensor.p1_tariff", "1")
+
+    data = await coordinator._fetch_all_data()
+
+    expected = (
+        DEFAULT_TRANSPORT_COST_DAY
+        + DEFAULT_ENERGY_TAX_ACCIJNS
+        + DEFAULT_ENERGY_TAX_BIJDRAGE
+        + DEFAULT_ENERGY_COST_GSC
+        + DEFAULT_ENERGY_COST_WKK
+    )
+    assert data["transport_cost_status"] == "builtin"
+    assert data["p1_tariff_code"] == "1"
+    assert data["transport_cost"] == pytest.approx(expected, rel=1e-6)
+
+
+def test_build_price_analysis_overrides_uses_interval_specific_transport(fake_hass, monkeypatch):
+    """Current and next price should use their own tariff slot transport costs."""
+    reference_now = datetime(2026, 4, 6, 19, 55, tzinfo=timezone.utc)  # 21:55 Brussels
+    _freeze_time(monkeypatch, reference_now)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_P1_TARIFF_ENTITY: "sensor.p1_tariff",
+            CONF_TRANSPORT_COST_DAY: DEFAULT_TRANSPORT_COST_DAY,
+            CONF_TRANSPORT_COST_NIGHT: DEFAULT_TRANSPORT_COST_NIGHT,
+        }
+    )
+    fake_hass.states.set("sensor.p1_tariff", "1")
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    prices_today = {
+        "BE": [
+            {"start": "2026-04-06T19:45:00+00:00", "end": "2026-04-06T20:00:00+00:00", "value": 100.0},
+            {"start": "2026-04-06T20:00:00+00:00", "end": "2026-04-06T20:15:00+00:00", "value": 100.0},
+            {"start": "2026-04-06T21:00:00+00:00", "end": "2026-04-06T21:15:00+00:00", "value": 150.0},
+            {"start": "2026-04-06T18:00:00+00:00", "end": "2026-04-06T18:15:00+00:00", "value": 50.0},
+        ]
+    }
+
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
+    try:
+        overrides = coordinator._build_price_analysis_overrides(
+            prices_today,
+            None,
+            [],
+            None,
+            now=reference_now,
+        )
+    finally:
+        dt_util.set_default_time_zone(original_tz)
+
+    day_transport = (
+        DEFAULT_TRANSPORT_COST_DAY
+        + DEFAULT_ENERGY_TAX_ACCIJNS
+        + DEFAULT_ENERGY_TAX_BIJDRAGE
+        + DEFAULT_ENERGY_COST_GSC
+        + DEFAULT_ENERGY_COST_WKK
+    )
+    night_transport = (
+        DEFAULT_TRANSPORT_COST_NIGHT
+        + DEFAULT_ENERGY_TAX_ACCIJNS
+        + DEFAULT_ENERGY_TAX_BIJDRAGE
+        + DEFAULT_ENERGY_COST_GSC
+        + DEFAULT_ENERGY_COST_WKK
+    )
+
+    assert overrides is not None
+    assert overrides["current_price"] == pytest.approx(0.1 + day_transport, rel=1e-6)
+    assert overrides["next_price"] == pytest.approx(0.1 + night_transport, rel=1e-6)
+    assert overrides["highest_price"] == pytest.approx(0.15 + night_transport, rel=1e-6)
+    assert overrides["lowest_price"] == pytest.approx(0.05 + day_transport, rel=1e-6)
+    assert overrides["transport_cost"] == pytest.approx(day_transport, rel=1e-6)
 
 
 

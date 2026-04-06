@@ -36,7 +36,7 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 MANAGED_KEY = "electricity_planner_managed"
-MANAGED_VERSION = 7  # Bumped: Add sunny forecast trigger slider (kWh)
+MANAGED_VERSION = 14  # Bumped: Surface inverter derating alarm in all dashboard summary sections
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 
 ENTITY_WAIT_TIMEOUT = 30
@@ -64,6 +64,7 @@ ENTITY_REFERENCES: tuple[EntityReference, ...] = (
     EntityReference("binary_sensor.electricity_planner_price_below_threshold", "low_price"),
     EntityReference("binary_sensor.electricity_planner_solar_producing_power", "solar_production"),
     EntityReference("binary_sensor.electricity_planner_solar_feed_in_grid", "feedin_solar"),
+    EntityReference("binary_sensor.electricity_planner_solar_derating_alarm", "inverter_derating_alarm"),
     EntityReference("binary_sensor.solar_feed_in_grid", "feedin_solar"),
     EntityReference("sensor.electricity_planner_current_electricity_price", "price_analysis"),
     EntityReference("sensor.electricity_planner_decision_diagnostics", "decision_diagnostics"),
@@ -71,6 +72,7 @@ ENTITY_REFERENCES: tuple[EntityReference, ...] = (
     EntityReference("sensor.electricity_planner_battery_soc_average", "battery_analysis"),
     EntityReference("sensor.electricity_planner_car_charger_limit", "charger_limit"),
     EntityReference("sensor.electricity_planner_grid_setpoint", "grid_setpoint"),
+    EntityReference("sensor.electricity_planner_inverter_derating_target", "inverter_derating_target"),
     EntityReference("sensor.electricity_planner_solar_surplus_power", "power_analysis"),
     EntityReference("sensor.electricity_planner_data_unavailable_duration", "data_unavailable_duration"),
     EntityReference("sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price", "feedin_price"),
@@ -218,11 +220,13 @@ async def async_remove_dashboard(hass: HomeAssistant, entry) -> None:
     # Ensure delayed dashboard retries don't resurrect dashboards after unload.
     _clear_entity_map_retry_state(hass, entry.entry_id)
 
+    url_path = _dashboard_url_path(entry)
+    _unregister_dashboard_panel(hass, url_path)
+
     handles = _get_lovelace_handles(hass)
     if handles is None:
         return
 
-    url_path = _dashboard_url_path(entry)
     storage = handles.dashboards.get(url_path)
     if storage is None or storage.config is None:
         return
@@ -413,6 +417,19 @@ def _register_dashboard_panel(
         if isinstance(err, (KeyboardInterrupt, SystemExit)):
             raise
         _LOGGER.error("Failed to register dashboard panel for %s: %s", url_path, err)
+
+
+def _unregister_dashboard_panel(hass: HomeAssistant, url_path: str) -> None:
+    """Remove the dashboard frontend panel when the entry unloads."""
+    try:
+        frontend.async_remove_panel(hass, url_path)
+        _LOGGER.debug("Removed frontend panel for %s", url_path)
+    except ValueError:
+        _LOGGER.debug("Panel removal skipped for %s (not registered)", url_path)
+    except Exception as err:
+        if isinstance(err, (KeyboardInterrupt, SystemExit)):
+            raise
+        _LOGGER.warning("Failed to remove dashboard panel for %s: %s", url_path, err)
 
 
 def _get_lovelace_handles(hass: HomeAssistant) -> DashboardHandles | None:

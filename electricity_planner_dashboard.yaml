@@ -1,9 +1,13 @@
 # REQUIRED: Install "Gauge Card Pro" from HACS
 # https://github.com/benjamin-dcs/gauge-card-pro
+# REQUIRED: Install "ApexCharts Card" from HACS
+# https://github.com/RomRider/apexcharts-card
+# REQUIRED: Install "Button Card" from HACS
+# https://github.com/custom-cards/button-card
 # This dashboard uses dynamic thresholds that update in real-time:
 # - Buy price gauge: green → yellow (dynamic threshold) → red (max threshold)
 # - Feed-in price gauge: red (negative) → yellow (zero) → green (feed-in threshold)
-# - Manual override buttons rely on `custom:button-card` (install via HACS) and prompt for duration dynamically
+# - Manual override buttons prompt for duration dynamically
 views:
   - title: Electricity Planner
     path: electricity-planner
@@ -329,22 +333,14 @@ views:
                     [endTime, threshold]
                   ];
 
-          - type: entities
+          - type: markdown
             title: Price components
-            show_header_toggle: false
-            entities:
-              - entity: sensor.electricity_planner_current_electricity_price
-                name: Total price
-              - type: attribute
-                entity: sensor.electricity_planner_current_electricity_price
-                attribute: raw_current_price
-                name: Energy market price
-                unit: "€/kWh"
-              - type: attribute
-                entity: sensor.electricity_planner_current_electricity_price
-                attribute: transport_cost
-                name: Transport cost
-                unit: "€/kWh"
+            content: |
+              **Total price:** {{ states('sensor.electricity_planner_current_electricity_price') | float(0) | round(4) }} €/kWh
+
+              **Energy market price:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'raw_current_price') | float(0) | round(4) }} €/kWh
+
+              **Transport cost:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'transport_cost') | float(0) | round(4) }} €/kWh
 
           - type: grid
             square: false
@@ -409,6 +405,10 @@ views:
 
               - entity: sensor.electricity_planner_grid_setpoint
                 name: Grid setpoint
+              - type: attribute
+                entity: sensor.electricity_planner_grid_setpoint
+                attribute: grid_setpoint_reason
+                name: Grid setpoint reason
 
           - type: markdown
             title: Algorithm thresholds

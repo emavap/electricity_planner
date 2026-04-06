@@ -1,14 +1,19 @@
 """Tests for grid setpoint, charger limits, feed-in, and phase handling."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import pytest
 
 from custom_components.electricity_planner.const import (
     CONF_BASE_GRID_SETPOINT,
+    CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    CONF_INVERTER_EXPORT_DEADBAND,
+    CONF_INVERTER_EXPORT_LIMIT,
     CONF_MAX_BATTERY_POWER,
     CONF_MAX_CAR_POWER,
     CONF_MAX_GRID_POWER,
+    CONF_MAX_INVERTER_POWER,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
@@ -23,6 +28,7 @@ from custom_components.electricity_planner.const import (
     PHASE_MODE_SINGLE,
     PHASE_MODE_THREE,
     PHASE_IDS,
+    DEFAULT_MAX_SOC,
 )
 from custom_components.electricity_planner.decision_engine import ChargingDecisionEngine
 
@@ -61,8 +67,11 @@ def test_grid_setpoint_without_battery_data():
         charger_limit=6000,
     )
 
-    assert result["grid_setpoint"] == int(4000 * 0.9)
-    assert "grid only for car" in result["grid_setpoint_reason"]
+    assert result["grid_setpoint"] == 3600
+    assert "grid import reserved for car pulling 3600W" in result["grid_setpoint_reason"]
+    assert "Peak this month is 4000W" in result["grid_setpoint_reason"]
+    assert "using 3600W" in result["grid_setpoint_reason"]
+    assert "(90% of 4000W)" in result["grid_setpoint_reason"]
 
 
 def test_grid_setpoint_distributes_between_car_and_battery():
@@ -88,10 +97,15 @@ def test_grid_setpoint_distributes_between_car_and_battery():
         charger_limit=7000,
     )
 
-    assert result["grid_setpoint"] == int(8000 * 0.9)
+    assert result["grid_setpoint"] == 7200
     reason = result["grid_setpoint_reason"]
-    assert "car 4500W" in reason
-    assert "battery 2700W" in reason
+    assert "car pulling 4500W" in reason
+    assert "battery charging 2700W" in reason
+    assert "Grid import reserved for" in reason
+    assert "Peak this month is 8000W" in reason
+    assert "max allowed peak is 3000W" in reason
+    assert "using 7200W" in reason
+    assert "(90% of 8000W)" in reason
 
 
 def test_grid_setpoint_zero_for_solar_only_car():
@@ -114,7 +128,96 @@ def test_grid_setpoint_zero_for_solar_only_car():
     )
 
     assert result["grid_setpoint"] == 0
-    assert "Solar-only car charging" in result["grid_setpoint_reason"]
+
+
+def test_grid_setpoint_honors_charger_limit_cap():
+    engine = _engine()
+    battery_analysis = {"average_soc": 80, "max_soc_threshold": 90}
+    power_allocation = {
+        "solar_for_car": 1000,
+        "car_current_solar_usage": 500,
+    }
+    data = {
+        "car_charging_power": 6000,
+        "car_grid_charging": True,
+        "battery_grid_charging": True,
+        "monthly_grid_peak": 8000,
+    }
+
+    result = engine._calculate_grid_setpoint(
+        {},
+        battery_analysis,
+        power_allocation,
+        data,
+        charger_limit=3000,
+    )
+
+    assert result["grid_setpoint"] == 5500
+    assert result["grid_components"]["car"] == 1500
+    assert result["grid_components"]["battery"] == 4000
+    assert "car pulling 1500W" in result["grid_setpoint_reason"]
+    assert "battery charging 4000W" in result["grid_setpoint_reason"]
+
+
+def test_battery_grid_charging_full_reason_uses_default_max_soc_when_missing():
+    engine = _engine()
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={"data_available": True},
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": True,
+            "average_soc": 75,
+        },
+        power_allocation={},
+        power_analysis={},
+        time_context={},
+        data={},
+    )
+
+    assert result["battery_grid_charging"] is False
+    assert f"≥ {DEFAULT_MAX_SOC}% threshold" in result["battery_grid_charging_reason"]
+
+
+def test_battery_decision_context_uses_sanitized_settings():
+    engine = _engine(
+        {
+            "emergency_soc_threshold": "bad",
+            "soc_price_multiplier_max": "bad",
+            "soc_buffer_target": "bad",
+        }
+    )
+
+    captured_context: dict[str, object] = {}
+
+    def _capture(context):
+        captured_context.update(context)
+        return False, "captured"
+
+    engine.strategy_manager.evaluate = _capture
+    engine.strategy_manager.get_last_trace = lambda: []
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={"data_available": True, "current_price": 0.2, "price_threshold": 0.15},
+        battery_analysis={"batteries_count": 1, "batteries_available": True, "batteries_full": False, "average_soc": 20},
+        power_allocation={},
+        power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
+        time_context={},
+        data={},
+    )
+
+    assert result["battery_grid_charging"] is False
+    assert captured_context["settings"] is engine._settings
+    assert engine._settings.emergency_soc_threshold == 15
+    assert engine._settings.soc_price_multiplier_max == 1.3
+    assert engine._settings.soc_buffer_target == 50
+
+
+def test_safe_grid_setpoint_uses_current_month_peak_when_already_above_configured_limit():
+    engine = _engine({CONF_BASE_GRID_SETPOINT: 5000})
+
+    assert engine._get_safe_grid_setpoint(5100) == 4590
 
 
 @pytest.mark.parametrize(
@@ -138,6 +241,7 @@ def test_feed_in_decision(current_price, threshold, expected):
     else:
         assert "disable" in result["feedin_solar_reason"]
     assert "feedin_effective_price" in result
+    assert "Net feed-in price" in result["feedin_solar_reason"]
 
 
 def test_feed_in_uses_adjustment_positive():
@@ -208,6 +312,251 @@ def test_feed_in_adjustment_respects_threshold():
     assert "0.020" in result["feedin_solar_reason"]
 
 
+def test_feed_in_reason_uses_effective_feed_price_with_default_contract_values():
+    engine = _engine({
+        CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.04,
+        CONF_PRICE_ADJUSTMENT_OFFSET: 0.005,
+        CONF_FEEDIN_ADJUSTMENT_MULTIPLIER: 1.0,
+        CONF_FEEDIN_ADJUSTMENT_OFFSET: -0.0098,
+        CONF_FEEDIN_PRICE_THRESHOLD: 0.01,
+    })
+    price_analysis = {
+        "data_available": True,
+        "current_price": 0.0568,
+        "raw_current_price": 0.02,
+    }
+
+    result = engine._decide_feedin_solar(price_analysis, {"remaining_solar": 600})
+
+    assert result["feedin_effective_price"] == pytest.approx(0.0102)
+    assert result["feedin_solar"] is True
+    assert "Net feed-in price 0.010€/kWh" in result["feedin_solar_reason"]
+    assert "0.056" not in result["feedin_solar_reason"]
+
+
+def test_inverter_derating_gradually_reopens_when_export_below_band():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_EXPORT_DEADBAND: 40,
+            CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD: 95,
+        }
+    )
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 2500,
+            "grid_power": -20,
+            "previous_inverter_derating_target": 1800,
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 1900
+    assert "reopen inverter gradually" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+
+
+def test_inverter_derating_holds_previous_target_inside_deadband():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_EXPORT_DEADBAND: 40,
+        }
+    )
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 2100,
+            "grid_power": -80,
+            "previous_inverter_derating_target": 1800,
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 1800
+    assert "hold the current derating target steady" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+
+
+def test_inverter_derating_does_not_reopen_until_pv_reaches_current_cap():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_EXPORT_DEADBAND: 40,
+        }
+    )
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 1500,
+            "grid_power": -20,
+            "previous_inverter_derating_target": 1800,
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 1800
+    assert "has not reached the current derating target" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+    assert result["inverter_derating_unreached_since"] is not None
+
+
+def test_inverter_derating_releases_to_max_when_cap_unused_for_minutes():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_EXPORT_DEADBAND: 40,
+        }
+    )
+    now = datetime.now(timezone.utc)
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 1500,
+            "grid_power": -20,
+            "previous_inverter_derating_target": 1800,
+            "previous_inverter_derating_unreached_since": now - timedelta(minutes=6),
+            "inverter_derating_evaluated_at": now,
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 4400
+    assert "release the inverter to max power" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+    assert result["inverter_derating_unreached_since"] is None
+
+
+def test_inverter_derating_respects_configured_unused_release_minutes():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_EXPORT_DEADBAND: 40,
+            CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES: 2,
+        }
+    )
+    now = datetime.now(timezone.utc)
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 1500,
+            "grid_power": -20,
+            "previous_inverter_derating_target": 1800,
+            "previous_inverter_derating_unreached_since": now - timedelta(minutes=3),
+            "inverter_derating_evaluated_at": now,
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 4400
+    assert "for 2 minutes" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+
+
+def test_inverter_derating_reduces_when_export_above_band():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_EXPORT_DEADBAND: 40,
+        }
+    )
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 2200,
+            "grid_power": -240,
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 2040
+    assert "reduce from current solar 2200W toward 80W export" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+
+
+def test_inverter_derating_raises_alarm_when_low_soc_still_requires_derating():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_EXPORT_DEADBAND: 40,
+            CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD: 95,
+        }
+    )
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 2200,
+            "grid_power": -260,
+            "battery_analysis": {"average_soc": 40},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 2020
+    assert result["inverter_derating_alarm"] is True
+    assert "Battery SOC 40%" in result["inverter_derating_alarm_reason"]
+
+
+def test_inverter_derating_bypasses_curtailment_for_low_soc_inside_tolerance():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_EXPORT_DEADBAND: 40,
+            CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD: 95,
+        }
+    )
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 2200,
+            "grid_power": -100,
+            "battery_analysis": {"average_soc": 40},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 4400
+    assert "keep inverter unrestricted" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+
+
+def test_inverter_derating_fallback_keeps_stable_house_cap_when_solar_already_below_it():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 100,
+        }
+    )
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 700,
+            "house_consumption": 900,
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 1000
+    assert "stable fallback cap" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+
+
 
 
 def test_price_analysis_unavailable_when_adjustment_missing_data():
@@ -228,7 +577,10 @@ def test_price_analysis_unavailable_when_adjustment_missing_data():
 
 
 def test_transport_cost_added_to_pricing():
-    engine = _engine()
+    engine = _engine({
+        CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.0,
+        CONF_PRICE_ADJUSTMENT_OFFSET: 0.0,
+    })
     analysis = engine._analyze_comprehensive_pricing(
         {
             "current_price": 0.10,
@@ -241,6 +593,42 @@ def test_transport_cost_added_to_pricing():
 
     assert analysis["current_price"] == pytest.approx(0.12)
     assert analysis["transport_cost"] == pytest.approx(0.02)
+
+
+def test_price_analysis_uses_interval_aware_overrides_when_available():
+    """Timestamp-aware summary overrides should bypass flat transport reuse."""
+    engine = _engine({
+        CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.0,
+        CONF_PRICE_ADJUSTMENT_OFFSET: 0.0,
+    })
+    analysis = engine._analyze_comprehensive_pricing(
+        {
+            "current_price": 0.10,
+            "highest_price": 0.20,
+            "lowest_price": 0.05,
+            "next_price": 0.12,
+            "transport_cost": 0.02,
+            "price_analysis_overrides": {
+                "current_price": 0.21,
+                "highest_price": 0.28,
+                "lowest_price": 0.14,
+                "next_price": 0.17,
+                "raw_current_price": 0.10,
+                "raw_highest_price": 0.18,
+                "raw_lowest_price": 0.09,
+                "raw_next_price": 0.11,
+                "transport_cost": 0.11,
+            },
+        }
+    )
+
+    assert analysis["current_price"] == pytest.approx(0.21)
+    assert analysis["highest_price"] == pytest.approx(0.28)
+    assert analysis["lowest_price"] == pytest.approx(0.14)
+    assert analysis["next_price"] == pytest.approx(0.17)
+    assert analysis["raw_current_price"] == pytest.approx(0.10)
+    assert analysis["raw_next_price"] == pytest.approx(0.11)
+    assert analysis["transport_cost"] == pytest.approx(0.11)
 
 
 def test_charger_limit_enforces_restrictions():
@@ -286,6 +674,78 @@ def test_charger_limit_for_solar_only_car():
 
     assert result["charger_limit"] == 2500
     assert "Solar-only car charging" in result["charger_limit_reason"]
+
+
+def test_charger_limit_for_solar_only_car_includes_current_solar_usage():
+    engine = _engine()
+    battery_analysis = {"average_soc": 85, "max_soc_threshold": 90}
+    power_allocation = {"solar_for_car": 0, "car_current_solar_usage": 1800}
+    data = {
+        "car_charging_power": 2200,
+        "car_grid_charging": True,
+        "car_solar_only": True,
+    }
+
+    result = engine._calculate_charger_limit(
+        {},
+        battery_analysis,
+        power_allocation,
+        data,
+    )
+
+    assert result["charger_limit"] == 1800
+    assert "1800W" in result["charger_limit_reason"]
+
+
+def test_charger_limit_uses_sanitized_predictive_min_soc():
+    engine = _engine({"predictive_charging_min_soc": "bad"})
+    battery_analysis = {"average_soc": 20, "max_soc_threshold": 90}
+    data = {
+        "car_charging_power": 3200,
+        "car_grid_charging": True,
+        "battery_grid_charging": True,
+    }
+
+    result = engine._calculate_charger_limit(
+        {},
+        battery_analysis,
+        {"solar_for_car": 0, "car_current_solar_usage": 0},
+        data,
+    )
+
+    assert result["charger_limit"] == 1350
+    assert "sharing grid power with batteries" in result["charger_limit_reason"]
+
+
+def test_car_high_price_uses_live_solar_fallback():
+    engine = _engine()
+    price_analysis = {
+        "data_available": True,
+        "current_price": 0.30,
+        "price_threshold": 0.15,
+        "very_low_price": False,
+        "is_low_price": False,
+    }
+    power_allocation = {
+        "solar_for_car": 0,
+        "car_current_solar_usage": 1200,
+    }
+    data = {
+        "car_permissive_mode_active": False,
+        "car_charging": False,
+        "car_grid_charging": False,
+    }
+
+    result = engine._decide_car_grid_charging(
+        price_analysis,
+        {"average_soc": 60, "max_soc_threshold": 90},
+        power_allocation,
+        data,
+    )
+
+    assert result["car_grid_charging"] is True
+    assert result["car_solar_only"] is True
+    assert "1200W" in result["car_grid_charging_reason"]
 
 
 def test_price_adjustment_failure_disables_charging():

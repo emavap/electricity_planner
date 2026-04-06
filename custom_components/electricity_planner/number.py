@@ -8,6 +8,7 @@ from typing import Any
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
@@ -30,6 +31,11 @@ from .coordinator import ElectricityPlannerCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 _NUMERIC_PREFIX_RE = re.compile(r"^\s*([-+]?\d+(?:[.,]\d+)?)")
+_LIVE_NUMBER_OPTION_KEYS = (
+    CONF_MAX_SOC_THRESHOLD,
+    CONF_MAX_SOC_THRESHOLD_SUNNY,
+    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+)
 
 
 def _parse_state_as_float(state_value: Any) -> float | None:
@@ -85,6 +91,43 @@ def _resolve_display_solar_forecast(coordinator: ElectricityPlannerCoordinator) 
     return None
 
 
+def _build_updated_number_options(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: ElectricityPlannerCoordinator,
+    option_key: str,
+    option_value: Any,
+) -> tuple[ConfigEntry, dict[str, Any]]:
+    """Build an options payload without dropping sibling live number values."""
+    latest_entry = hass.config_entries.async_get_entry(entry.entry_id) or entry
+
+    merged_config: dict[str, Any] = dict(latest_entry.data)
+    merged_config.update(latest_entry.options)
+    for live_key in _LIVE_NUMBER_OPTION_KEYS:
+        if live_key in coordinator.config:
+            merged_config[live_key] = coordinator.config[live_key]
+    merged_config[option_key] = option_value
+
+    new_options = dict(latest_entry.options)
+    for live_key in _LIVE_NUMBER_OPTION_KEYS:
+        if live_key not in merged_config:
+            new_options.pop(live_key, None)
+            continue
+
+        merged_value = merged_config[live_key]
+        data_value = latest_entry.data.get(live_key)
+        if (
+            merged_value != data_value
+            or live_key in latest_entry.options
+            or live_key == option_key
+        ):
+            new_options[live_key] = merged_value
+        else:
+            new_options.pop(live_key, None)
+
+    return latest_entry, new_options
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -134,13 +177,6 @@ class MaxSocThresholdNumber(CoordinatorEntity, NumberEntity):
             "model": "Smart Charging Controller",
         }
 
-    def _get_latest_options(self) -> dict[str, Any]:
-        """Return latest config-entry options to avoid stale overwrite races."""
-        latest_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
-        if latest_entry is not None:
-            self._entry = latest_entry
-        return dict(self._entry.options)
-
     @property
     def native_value(self) -> float:
         """Return the current max SOC threshold value."""
@@ -175,9 +211,26 @@ class MaxSocThresholdNumber(CoordinatorEntity, NumberEntity):
         new_value = int(value)
         _LOGGER.info("Updating battery max SOC threshold to %d%%", new_value)
 
+        current_sunny_threshold = int(
+            self.coordinator.config.get(
+                CONF_MAX_SOC_THRESHOLD_SUNNY,
+                DEFAULT_MAX_SOC_SUNNY,
+            )
+        )
+        if new_value < current_sunny_threshold:
+            raise HomeAssistantError(
+                "Battery Max SOC Threshold must be greater than or equal to "
+                f"High Solar Max SOC ({current_sunny_threshold}%)"
+            )
+
         # Update config entry options for persistence
-        new_options = self._get_latest_options()
-        new_options[CONF_MAX_SOC_THRESHOLD] = new_value
+        self._entry, new_options = _build_updated_number_options(
+            self.hass,
+            self._entry,
+            self.coordinator,
+            CONF_MAX_SOC_THRESHOLD,
+            new_value,
+        )
 
         self.hass.config_entries.async_update_entry(
             self._entry,
@@ -228,13 +281,6 @@ class MaxSocThresholdSunnyNumber(CoordinatorEntity, NumberEntity):
             "model": "Smart Charging Controller",
         }
 
-    def _get_latest_options(self) -> dict[str, Any]:
-        """Return latest config-entry options to avoid stale overwrite races."""
-        latest_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
-        if latest_entry is not None:
-            self._entry = latest_entry
-        return dict(self._entry.options)
-
     @property
     def native_value(self) -> float:
         """Return the current sunny max SOC threshold value."""
@@ -271,9 +317,26 @@ class MaxSocThresholdSunnyNumber(CoordinatorEntity, NumberEntity):
         new_value = int(value)
         _LOGGER.info("Updating sunny max SOC threshold to %d%%", new_value)
 
+        current_normal_threshold = int(
+            self.coordinator.config.get(
+                CONF_MAX_SOC_THRESHOLD,
+                DEFAULT_MAX_SOC,
+            )
+        )
+        if new_value > current_normal_threshold:
+            raise HomeAssistantError(
+                "High Solar Max SOC must be less than or equal to "
+                f"Battery Max SOC Threshold ({current_normal_threshold}%)"
+            )
+
         # Update config entry options for persistence
-        new_options = self._get_latest_options()
-        new_options[CONF_MAX_SOC_THRESHOLD_SUNNY] = new_value
+        self._entry, new_options = _build_updated_number_options(
+            self.hass,
+            self._entry,
+            self.coordinator,
+            CONF_MAX_SOC_THRESHOLD_SUNNY,
+            new_value,
+        )
 
         self.hass.config_entries.async_update_entry(
             self._entry,
@@ -319,13 +382,6 @@ class SunnyForecastThresholdNumber(CoordinatorEntity, NumberEntity):
             "model": "Smart Charging Controller",
         }
 
-    def _get_latest_options(self) -> dict[str, Any]:
-        """Return latest config-entry options to avoid stale overwrite races."""
-        latest_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
-        if latest_entry is not None:
-            self._entry = latest_entry
-        return dict(self._entry.options)
-
     @property
     def native_value(self) -> float:
         """Return the current sunny forecast trigger threshold."""
@@ -354,8 +410,13 @@ class SunnyForecastThresholdNumber(CoordinatorEntity, NumberEntity):
         new_value = max(0.0, float(value))
         _LOGGER.info("Updating sunny forecast trigger threshold to %.1f kWh", new_value)
 
-        new_options = self._get_latest_options()
-        new_options[CONF_SUNNY_FORECAST_THRESHOLD_KWH] = new_value
+        self._entry, new_options = _build_updated_number_options(
+            self.hass,
+            self._entry,
+            self.coordinator,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+            new_value,
+        )
 
         self.hass.config_entries.async_update_entry(
             self._entry,

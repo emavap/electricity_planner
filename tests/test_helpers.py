@@ -1,5 +1,7 @@
 """Unit tests for helper utilities used by Electricity Planner."""
 from datetime import datetime, timezone
+from pathlib import Path
+import re
 
 import pytest
 
@@ -194,3 +196,36 @@ def test_version_consistency():
         f"Version mismatch! manifest.json has '{manifest_version}' but const.py has '{INTEGRATION_VERSION}'. "
         "Please update both files to the same version."
     )
+
+
+def test_documented_versions_match_integration_version():
+    """Verify the published docs advertise the same integration version."""
+    import re
+    from pathlib import Path
+
+    from custom_components.electricity_planner.const import INTEGRATION_VERSION
+
+    repo_root = Path(__file__).parent.parent
+    version_pattern = re.compile(r"\*\*Version\s+([0-9.]+)\*\*")
+
+    for doc_name in ("README.md", "info.md"):
+        doc_path = repo_root / doc_name
+        content = doc_path.read_text(encoding="utf-8")
+        match = version_pattern.search(content)
+
+        assert match is not None, f"{doc_name} does not advertise a version string"
+        assert match.group(1) == INTEGRATION_VERSION, (
+            f"{doc_name} advertises '{match.group(1)}' but const.py has "
+            f"'{INTEGRATION_VERSION}'. Please keep release docs in sync."
+        )
+
+
+def test_info_release_notes_link_matches_existing_file():
+    """Published info doc should point at an existing release notes file."""
+    repo_root = Path(__file__).parent.parent
+    info_content = (repo_root / "info.md").read_text(encoding="utf-8")
+    match = re.search(r"\[Release Notes\]\((RELEASE_NOTES_[0-9.]+\.md)\)", info_content)
+
+    assert match is not None, "info.md should link to a concrete release notes file"
+    release_notes = repo_root / match.group(1)
+    assert release_notes.exists(), f"Linked release notes file is missing: {release_notes.name}"

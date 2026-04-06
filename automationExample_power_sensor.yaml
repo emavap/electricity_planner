@@ -1,7 +1,7 @@
-alias: Car Charger Dynamic Control
+alias: Car Charger Dynamic Control (Power Sensor)
 description: >-
   Control car charging only when allowed by the planner; cut power if the
-  charger does not report state after a grace period.
+  charger does not report power after a grace period.
 triggers:
   - trigger: state
     entity_id:
@@ -9,7 +9,7 @@ triggers:
       - sensor.electricity_planner_car_charger_limit
     for: "00:02:00"
   - trigger: state
-    entity_id: sensor.huawei_charger_plugged_in
+    entity_id: sensor.evcharger_power_2
   - trigger: state
     entity_id: switch.evcharger
     from: "off"
@@ -23,19 +23,22 @@ actions:
       init_grace_seconds: 300
       sensor_timeout_seconds: 600
       charger_is_off: "{{ is_state('switch.evcharger', 'off') }}"
-      charge_from_grid: "{{ is_state('binary_sensor.electricity_planner_car_charge_from_grid', 'on') }}"
+      charge_from_grid: >-
+        {{ is_state('binary_sensor.electricity_planner_car_charge_from_grid', 'on') }}
       charger_on_seconds: >-
         {{ (as_timestamp(now()) - as_timestamp(states.switch.evcharger.last_changed, 0)) | int(0) }}
       charger_recently_turned_on: >-
         {{ not charger_is_off and charger_on_seconds < init_grace_seconds }}
-      sensor_available: >-
-        {{ states('sensor.huawei_charger_plugged_in') not in ['unknown', 'unavailable'] }}
-      car_plugged_in: >-
-        {{ states('sensor.huawei_charger_plugged_in') | int(0) if sensor_available else 0 }}
-      car_is_charging: "{{ car_plugged_in == 3 }}"
-      car_is_connected: "{{ car_plugged_in in [2, 3] }}"
+      power_sensor_available: >-
+        {{ states('sensor.evcharger_power_2') not in ['unknown', 'unavailable', 'none'] }}
+      charger_power_w: >-
+        {{ states('sensor.evcharger_power_2') | float(0) if power_sensor_available else 0 }}
+      charger_is_working: "{{ charger_power_w > 0 }}"
+      car_is_charging: "{{ charger_power_w > 100 }}"
+      status_label: >-
+        {{ 'Charging' if car_is_charging else 'Charger idle' if charger_is_working else 'Enabled / waiting' }}
       charger_not_responding_too_long: >-
-        {{ not charger_is_off and not sensor_available and charger_on_seconds >= sensor_timeout_seconds }}
+        {{ not charger_is_off and not power_sensor_available and charger_on_seconds >= sensor_timeout_seconds }}
   - choose:
       - conditions:
           - condition: template
@@ -48,7 +51,8 @@ actions:
             data:
               name: Car Charger
               message: >-
-                Turned ON - planner allows charging, waiting for charger initialization.
+                Turned ON - planner allows charging, waiting for charger
+                initialization.
       - conditions:
           - condition: template
             value_template: "{{ not charger_is_off and charger_recently_turned_on }}"
@@ -57,7 +61,8 @@ actions:
             data:
               name: Car Charger
               message: >-
-                Charger initializing ({{ (charger_on_seconds / 60) | round(1) }} min).
+                Charger initializing ({{ (charger_on_seconds / 60) | round(1) }}
+                min).
       - conditions:
           - condition: template
             value_template: "{{ charger_not_responding_too_long and not charge_from_grid }}"
@@ -69,11 +74,13 @@ actions:
             data:
               name: Car Charger
               message: >-
-                Fail-safe OFF - planner does not allow charging and charger state
-                did not respond for {{ (charger_on_seconds / 60) | round(1) }} min.
+                Fail-safe OFF - planner does not allow charging and charger
+                power telemetry did not respond for {{ (charger_on_seconds / 60) |
+                round(1) }} min.
       - conditions:
           - condition: template
-            value_template: "{{ not charger_is_off and sensor_available and not charge_from_grid }}"
+            value_template: >-
+              {{ not charger_is_off and power_sensor_available and not charge_from_grid }}
         sequence:
           - action: switch.turn_off
             target:
@@ -81,23 +88,11 @@ actions:
           - action: logbook.log
             data:
               name: Car Charger
-              message: >-
-                Turned OFF - charging not allowed by planner.
+              message: Turned OFF - charging not allowed by planner.
       - conditions:
           - condition: template
-            value_template: "{{ not charger_is_off and sensor_available and charge_from_grid and not car_is_connected }}"
-        sequence:
-          - action: switch.turn_off
-            target:
-              entity_id: switch.evcharger
-          - action: logbook.log
-            data:
-              name: Car Charger
-              message: >-
-                Turned OFF - no car connected (status: {{ car_plugged_in }}).
-      - conditions:
-          - condition: template
-            value_template: "{{ not charger_is_off and sensor_available and charge_from_grid and car_is_connected }}"
+            value_template: >-
+              {{ not charger_is_off and power_sensor_available and charge_from_grid }}
         sequence:
           - variables:
               min_power_kw: >-
@@ -133,8 +128,8 @@ actions:
                       name: Car Charger
                       message: >-
                         Power adjusted from {{ current_limit_w | round(0) }}W to
-                        {{ target_limit_w_clamped | round(0) }}W
-                        (Status: {{ 'Charging' if car_is_charging else 'Connected' }})
+                        {{ target_limit_w_clamped | round(0) }}W (Status: {{
+                        status_label }})
               - conditions:
                   - condition: template
                     value_template: "{{ not planner_limit_valid }}"
@@ -143,9 +138,28 @@ actions:
                     data:
                       name: Car Charger
                       message: >-
-                        Planner limit unavailable/zero; leaving charger at
-                        {{ current_limit_w | round(0) }}W
-                        (Status: {{ 'Charging' if car_is_charging else 'Connected' }})
+                        Planner limit unavailable/zero; leaving charger at {{
+                        current_limit_w | round(0) }}W (Status: {{ status_label
+                        }})
+              - conditions:
+                  - condition: template
+                    value_template: "{{ not charger_is_working }}"
+                sequence:
+                  - action: logbook.log
+                    data:
+                      name: Car Charger
+                      message: >-
+                        Charger is enabled but no charger power is measured yet.
+              - conditions:
+                  - condition: template
+                    value_template: "{{ not car_is_charging }}"
+                sequence:
+                  - action: logbook.log
+                    data:
+                      name: Car Charger
+                      message: >-
+                        Charger is active but car charging power is still below
+                        100W (current: {{ charger_power_w | round(0) }}W).
       - conditions:
           - condition: template
             value_template: "{{ charger_not_responding_too_long and charge_from_grid }}"
@@ -154,6 +168,7 @@ actions:
             data:
               name: Car Charger
               message: >-
-                Warning: charger still not reporting state after
-                {{ (charger_on_seconds / 60) | round(1) }} min while planner allows charging.
+                Warning: charger still not reporting power after {{
+                (charger_on_seconds / 60) | round(1) }} min while planner allows
+                charging.
 mode: single

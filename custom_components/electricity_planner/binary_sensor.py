@@ -35,6 +35,7 @@ async def async_setup_entry(
         BatteryGridChargingBinarySensor(coordinator, entry, "_automation"),
         CarGridChargingBinarySensor(coordinator, entry, "_automation"),
         FeedinSolarBinarySensor(coordinator, entry, "_automation"),
+        InverterDeratingAlarmBinarySensor(coordinator, entry, "_automation"),
     ]
 
     # DIAGNOSTIC SENSORS: For monitoring and troubleshooting only
@@ -304,4 +305,36 @@ class FeedinSolarBinarySensor(ElectricityPlannerBinarySensorBase):
             "feedin_threshold": feedin_threshold,
             "remaining_solar": power_allocation.get("remaining_solar", 0),
             "total_solar_allocated": power_allocation.get("total_allocated", 0),
+        }
+
+
+class InverterDeratingAlarmBinarySensor(ElectricityPlannerBinarySensorBase):
+    """AUTOMATION SENSOR: Alarm when low-SOC bypass still needs derating."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        """Initialize the inverter derating alarm binary sensor."""
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Solar: Derating Alarm"
+        self._attr_unique_id = f"{entry.entry_id}_inverter_derating_alarm"
+        self._attr_icon = "mdi:alert-circle"
+        self._attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return true if the planner had to derate despite low battery SOC."""
+        if not self.coordinator.data:
+            return False
+        return self.coordinator.data.get("inverter_derating_alarm", False)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes."""
+        if not self.coordinator.data:
+            return {}
+
+        return {
+            "reason": self.coordinator.data.get("inverter_derating_alarm_reason", "No alarm"),
+            "inverter_derating_target": self.coordinator.data.get("inverter_derating_target"),
+            "grid_power": self.coordinator.data.get("grid_power"),
+            "battery_soc_average": self.coordinator.data.get("battery_analysis", {}).get("average_soc"),
         }

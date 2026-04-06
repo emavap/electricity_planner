@@ -9,6 +9,9 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 import pytz
+from homeassistant.components.number import async_set_value as async_number_set_value
+from homeassistant.core import ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner import coordinator as coordinator_module
@@ -253,3 +256,150 @@ async def test_max_soc_number_update_preserves_other_options(fake_hass, monkeypa
     assert coordinator.config[CONF_MAX_SOC_THRESHOLD] == 80
     coordinator.decision_engine.refresh_settings.assert_called_once_with(coordinator.config)
     coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sunny_max_soc_update_preserves_live_max_soc_from_coordinator(fake_hass, monkeypatch):
+    """Saving one live number should not drop sibling live values from the active config."""
+    config = _base_config()
+    config[CONF_MAX_SOC_THRESHOLD] = 90
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=config,
+        options={
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 5.0,
+        },
+    )
+
+    monkeypatch.setattr(
+        coordinator_module.ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+
+    fake_hass.config_entries._entries[entry.entry_id] = entry
+    coordinator = ElectricityPlannerCoordinator(fake_hass, entry)
+    coordinator.config[CONF_MAX_SOC_THRESHOLD] = 80
+    coordinator.decision_engine.refresh_settings = Mock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    entity = MaxSocThresholdSunnyNumber(coordinator, entry)
+    entity.hass = fake_hass
+
+    await entity.async_set_native_value(35)
+
+    assert entry.options[CONF_MAX_SOC_THRESHOLD] == 80
+    assert entry.options[CONF_MAX_SOC_THRESHOLD_SUNNY] == 35
+    assert entry.options[CONF_SUNNY_FORECAST_THRESHOLD_KWH] == 5.0
+
+
+@pytest.mark.asyncio
+async def test_max_soc_update_rejects_value_below_existing_sunny_threshold(fake_hass, monkeypatch):
+    """Normal max SOC cannot be lowered below the active sunny threshold."""
+    config = _base_config()
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=config,
+        options={
+            CONF_MAX_SOC_THRESHOLD: 70,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 35,
+        },
+    )
+
+    monkeypatch.setattr(
+        coordinator_module.ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+
+    fake_hass.config_entries._entries[entry.entry_id] = entry
+    coordinator = ElectricityPlannerCoordinator(fake_hass, entry)
+    coordinator.decision_engine.refresh_settings = Mock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    entity = MaxSocThresholdNumber(coordinator, entry)
+    entity.hass = fake_hass
+
+    with pytest.raises(HomeAssistantError):
+        await entity.async_set_native_value(30)
+
+    assert entry.options[CONF_MAX_SOC_THRESHOLD] == 70
+    assert entry.options[CONF_MAX_SOC_THRESHOLD_SUNNY] == 35
+    coordinator.decision_engine.refresh_settings.assert_not_called()
+    coordinator.async_request_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sunny_max_soc_update_rejects_value_above_normal_threshold(fake_hass, monkeypatch):
+    """Sunny max SOC cannot be raised above the active normal threshold."""
+    config = _base_config()
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=config,
+        options={
+            CONF_MAX_SOC_THRESHOLD: 70,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 35,
+        },
+    )
+
+    monkeypatch.setattr(
+        coordinator_module.ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+
+    fake_hass.config_entries._entries[entry.entry_id] = entry
+    coordinator = ElectricityPlannerCoordinator(fake_hass, entry)
+    coordinator.decision_engine.refresh_settings = Mock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    entity = MaxSocThresholdSunnyNumber(coordinator, entry)
+    entity.hass = fake_hass
+
+    with pytest.raises(HomeAssistantError):
+        await entity.async_set_native_value(75)
+
+    assert entry.options[CONF_MAX_SOC_THRESHOLD] == 70
+    assert entry.options[CONF_MAX_SOC_THRESHOLD_SUNNY] == 35
+    coordinator.decision_engine.refresh_settings.assert_not_called()
+    coordinator.async_request_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_number_service_wrapper_rejects_invalid_sunny_threshold(fake_hass, monkeypatch):
+    """Home Assistant's number service wrapper should propagate the sunny/max invariant."""
+    config = _base_config()
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Electricity Planner",
+        data=config,
+        options={
+            CONF_MAX_SOC_THRESHOLD: 70,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 35,
+        },
+    )
+    monkeypatch.setattr(
+        coordinator_module.ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+
+    fake_hass.config_entries._entries[entry.entry_id] = entry
+    coordinator = ElectricityPlannerCoordinator(fake_hass, entry)
+    coordinator.decision_engine.refresh_settings = Mock()
+    coordinator.async_request_refresh = AsyncMock()
+    entity = MaxSocThresholdSunnyNumber(coordinator, entry)
+    entity.hass = fake_hass
+
+    with pytest.raises(HomeAssistantError):
+        await async_number_set_value(
+            entity,
+            ServiceCall(
+                "number",
+                "set_value",
+                {"value": 75},
+            ),
+        )
+
+    assert entry.options[CONF_MAX_SOC_THRESHOLD] == 70
+    assert entry.options[CONF_MAX_SOC_THRESHOLD_SUNNY] == 35

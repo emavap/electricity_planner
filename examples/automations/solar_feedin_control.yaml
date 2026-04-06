@@ -1,47 +1,62 @@
-alias: Solar Feed-in Control
-description: Derate inverter when feeding to grid is not allowed
+alias: Solar Feed-in Control + Huawei Reload
+description: >-
+  Apply the inverter derating target computed by Electricity Planner. The
+  planner owns all feed-in and derating logic; this automation just writes
+  the recommended target to the Huawei inverter entity. Reloads the Huawei
+  integration if the derating entity stays unavailable for 5 minutes.
 triggers:
-  - entity_id:
-      - binary_sensor.solar_feed_in_grid
-      - sensor.grid
-    trigger: state
-  - seconds: /30
-    trigger: time_pattern
+  - trigger: state
+    entity_id: sensor.electricity_planner_automation_controls_inverter_derating_target
+    id: control
+  - trigger: time_pattern
+    minutes: "/2"
+    seconds: "0"
+    id: control
+  - trigger: state
+    entity_id: number.inverter_power_derating
+    to: unavailable
+    for:
+      minutes: 5
+    id: reload_huawei
+  - trigger: state
+    entity_id: number.inverter_power_derating
+    to: unknown
+    for:
+      minutes: 5
+    id: reload_huawei
 conditions: []
 actions:
   - choose:
       - conditions:
-          - condition: template
-            value_template: "{{ grid_power > 50 }}"
-          - condition: state
-            entity_id: binary_sensor.solar_feed_in_grid
-            state: "off"
+          - condition: trigger
+            id: reload_huawei
         sequence:
-          - target:
-              entity_id: number.huawei_inverter_power_limit
+          - action: homeassistant.reload_config_entry
             data:
-              value: >
-                {% set reduction = (grid_power * 1.2) | int %} {% set new_limit
-                = current_limit - reduction %} {{ [0, new_limit] | max | int }}
-            action: number.set_value
+              entry_id: 01JPJ86WM1CH015N836EWQRB6G
       - conditions:
-          - condition: or
-            conditions:
-              - condition: state
-                entity_id: binary_sensor.solar_feed_in_grid
-                state: "on"
-              - condition: template
-                value_template: "{{ grid_power < -50 }}"
+          - condition: trigger
+            id: control
+          - condition: template
+            value_template: >-
+              {{
+                has_value('sensor.electricity_planner_automation_controls_inverter_derating_target') and
+                has_value('number.inverter_power_derating')
+              }}
         sequence:
-          - target:
-              entity_id: number.huawei_inverter_power_limit
+          - variables:
+              target_limit_w: >-
+                {{ states('sensor.electricity_planner_automation_controls_inverter_derating_target') | int(0) }}
+              current_limit_w: >-
+                {{ states('number.inverter_power_derating') | int(0) }}
+              write_delta_w: >-
+                {{ (target_limit_w - current_limit_w) | abs }}
+          - condition: template
+            value_template: >-
+              {{ write_delta_w >= 100 }}
+          - action: number.set_value
+            target:
+              entity_id: number.inverter_power_derating
             data:
-              value: >
-                {% set increase = 200 %} {% set new_limit = current_limit +
-                increase %} {{ [new_limit, 4400] | min | int }}
-            action: number.set_value
-variables:
-  grid_power: "{{ states('sensor.grid') | float(0) }}"
-  feed_allowed: "{{ is_state('binary_sensor.solar_feed_in_grid', 'on') }}"
-  current_limit: "{{ states('number.huawei_inverter_power_limit') | float(4400) }}"
+              value: "{{ target_limit_w }}"
 mode: single

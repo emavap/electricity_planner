@@ -88,7 +88,7 @@ views:
 
           - type: grid
             square: false
-            columns: 3
+            columns: 4
             cards:
               - type: button
                 entity: binary_sensor.electricity_planner_battery_charge_from_grid
@@ -115,6 +115,16 @@ views:
                 icon_height: 60px
                 show_name: true
                 show_state: true
+
+              - type: button
+                entity: binary_sensor.electricity_planner_solar_derating_alarm
+                name: Derating alarm
+                icon: mdi:alert-circle
+                icon_height: 60px
+                show_name: true
+                show_state: true
+                tap_action:
+                  action: more-info
 
           - type: grid
             square: false
@@ -201,10 +211,24 @@ views:
                 entity: binary_sensor.electricity_planner_solar_feed_in_grid
                 attribute: reason
                 name: Feed-in reason
+              - entity: binary_sensor.electricity_planner_solar_derating_alarm
+                name: Derating alarm
+                secondary_info: last-changed
+              - type: attribute
+                entity: binary_sensor.electricity_planner_solar_derating_alarm
+                attribute: reason
+                name: Alarm reason
+              - entity: sensor.electricity_planner_inverter_derating_target
+                name: Inverter derating target
+                secondary_info: last-changed
+              - type: attribute
+                entity: sensor.electricity_planner_inverter_derating_target
+                attribute: inverter_derating_reason
+                name: Derating reason
 
           - type: custom:apexcharts-card
             header:
-              title: Nord Pool Electricity Prices (History + Future)
+              title: Electricity Buy Prices (History + Future)
               show: true
             graph_span: 38h
             span:
@@ -232,33 +256,43 @@ views:
                       return value.toFixed(4) + ' €/kWh';
                     }
             series:
-              # Transport cost column - shows the fixed transport cost component
+              # Transport cost column - shows the network/transport component of the buy price
               - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
                 name: Transport cost
                 type: column
                 color: "#95a5a6"
                 data_generator: |
-                  // Extract transport cost from each price interval and format for chart
                   return entity.attributes.data.map((interval) => {
                     const transport = interval.transport_cost ?? 0;
-                    return [new Date(interval.start).getTime(), Math.max(transport, 0)];
+                    return [new Date(interval.start).getTime(), transport];
                   });
                 show:
                   legend_value: false
-              # Energy price column - shows market price minus transport cost
+              # Contract energy column - shows the buy-side energy component before transport
               - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
-                name: Energy price
+                name: Contract energy price
                 type: column
                 color: "#3498db"
                 data_generator: |
-                  // Calculate pure energy price by subtracting transport from total
                   return entity.attributes.data.map((interval) => {
-                    const transport = interval.transport_cost ?? 0;
-                    const energy = (interval.price ?? 0) - transport;
-                    return [new Date(interval.start).getTime(), Math.max(energy, 0)];
+                    return [new Date(interval.start).getTime(), interval.adjusted_energy_price ?? 0];
                   });
                 show:
                   legend_value: false
+              # Raw market line - shows the unadjusted market reference separately from the buy-price stack
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Raw market price
+                type: line
+                stroke_width: 1
+                color: "#1f78d1"
+                curve: straight
+                opacity: 0.8
+                show:
+                  legend_value: false
+                data_generator: |
+                  return entity.attributes.data.map((interval) => {
+                    return [new Date(interval.start).getTime(), interval.raw_price ?? 0];
+                  });
               # Total price line - shows complete price including all components
               - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
                 name: Total price
@@ -283,18 +317,21 @@ views:
                 show:
                   legend_value: false
                 data_generator: |
-                  // Determine the active max threshold (average if enabled, otherwise fixed)
+                  // Determine the active decision threshold used by the pricing logic
+                  const currentPriceEntity = hass.states['sensor.electricity_planner_current_electricity_price'];
                   const diagnosticsEntity = hass.states['sensor.electricity_planner_decision_diagnostics'] ?? hass.states['sensor.electricity_planner_decision_diagnostics_diagnostic'];
                   const priceAnalysis = diagnosticsEntity?.attributes?.price_analysis;
-                  const averageThreshold = priceAnalysis?.average_threshold;
+                  const activeThreshold = currentPriceEntity?.attributes?.price_threshold;
+                  const diagnosticsThreshold = priceAnalysis?.price_threshold;
 
                   const maxThresholdEntity = hass.states['sensor.electricity_planner_diagnostics_monitoring_price_threshold'];
                   const fixedThreshold = maxThresholdEntity ? parseFloat(maxThresholdEntity.state) : 0.15;
 
-                  // Prefer average threshold if dynamic mode is enabled
                   let maxThreshold = fixedThreshold;
-                  if (averageThreshold != null && averageThreshold !== undefined) {
-                    maxThreshold = parseFloat(averageThreshold);
+                  if (activeThreshold != null && activeThreshold !== undefined) {
+                    maxThreshold = parseFloat(activeThreshold);
+                  } else if (diagnosticsThreshold != null && diagnosticsThreshold !== undefined) {
+                    maxThreshold = parseFloat(diagnosticsThreshold);
                   }
 
                   // Draw horizontal line across the entire time range
@@ -304,7 +341,8 @@ views:
 
                   const intervals = entity.attributes.data;
                   const startTime = new Date(intervals[0].start).getTime();
-                  const endTime = new Date(intervals[intervals.length - 1].start).getTime();
+                  const lastInterval = intervals[intervals.length - 1];
+                  const endTime = new Date(lastInterval.end ?? lastInterval.start).getTime();
 
                   return [
                     [startTime, maxThreshold],
@@ -338,29 +376,22 @@ views:
 
                   const intervals = entity.attributes.data;
                   const startTime = new Date(intervals[0].start).getTime();
-                  const endTime = new Date(intervals[intervals.length - 1].start).getTime();
+                  const lastInterval = intervals[intervals.length - 1];
+                  const endTime = new Date(lastInterval.end ?? lastInterval.start).getTime();
 
                   return [
                     [startTime, threshold],
                     [endTime, threshold]
                   ];
 
-          - type: entities
+          - type: markdown
             title: Price components
-            show_header_toggle: false
-            entities:
-              - entity: sensor.electricity_planner_current_electricity_price
-                name: Total price
-              - type: attribute
-                entity: sensor.electricity_planner_current_electricity_price
-                attribute: raw_current_price
-                name: Energy market price
-                unit: "€/kWh"
-              - type: attribute
-                entity: sensor.electricity_planner_current_electricity_price
-                attribute: transport_cost
-                name: Transport cost
-                unit: "€/kWh"
+            content: |
+              **Total price:** {{ states('sensor.electricity_planner_current_electricity_price') | float(0) | round(4) }} €/kWh
+
+              **Energy market price:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'raw_current_price') | float(0) | round(4) }} €/kWh
+
+              **Transport cost:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'transport_cost') | float(0) | round(4) }} €/kWh
 
           - type: grid
             square: false
@@ -373,7 +404,7 @@ views:
 
                   **Lowest price today:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'lowest_price') | float(0) | round(4) }} €/kWh
 
-                  **Raw Nord Pool price:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'raw_current_price') | float(0) | round(4) }} €/kWh
+                  **Raw market price:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'raw_current_price') | float(0) | round(4) }} €/kWh
 
                   **Transport cost:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'transport_cost') | float(0) | round(4) }} €/kWh
 
@@ -425,6 +456,16 @@ views:
 
               - entity: sensor.electricity_planner_grid_setpoint
                 name: Grid setpoint
+              - type: attribute
+                entity: sensor.electricity_planner_grid_setpoint
+                attribute: grid_setpoint_reason
+                name: Grid setpoint reason
+              - entity: sensor.electricity_planner_inverter_derating_target
+                name: Inverter derating target
+              - type: attribute
+                entity: sensor.electricity_planner_inverter_derating_target
+                attribute: inverter_derating_alarm_reason
+                name: Derating alarm reason
 
           - type: markdown
             title: Entity Status
@@ -550,6 +591,30 @@ views:
                 transform: |
                   const normalized = typeof x === 'string' ? x.toLowerCase() : x;
                   return normalized === 'on' || normalized === 'true' || normalized === true || normalized === 1 ? 0.8 : 0;
+                show:
+                  legend_value: false
+              - entity: binary_sensor.electricity_planner_solar_feed_in_grid
+                name: Feed-in enabled
+                type: line
+                yaxis_id: decisions
+                curve: stepline
+                stroke_width: 1
+                color: "#3498db"
+                transform: |
+                  const normalized = typeof x === 'string' ? x.toLowerCase() : x;
+                  return normalized === 'on' || normalized === 'true' || normalized === true || normalized === 1 ? 0.6 : 0;
+                show:
+                  legend_value: false
+              - entity: binary_sensor.electricity_planner_solar_derating_alarm
+                name: Derating alarm
+                type: line
+                yaxis_id: decisions
+                curve: stepline
+                stroke_width: 1
+                color: "#9b59b6"
+                transform: |
+                  const normalized = typeof x === 'string' ? x.toLowerCase() : x;
+                  return normalized === 'on' || normalized === 'true' || normalized === true || normalized === 1 ? 0.4 : 0;
                 show:
                   legend_value: false
 

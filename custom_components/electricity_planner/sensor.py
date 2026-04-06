@@ -2,12 +2,20 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from enum import Enum
 import logging
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
+try:
+    from homeassistant.const import EntityCategory
+except ImportError:
+    class EntityCategory(str, Enum):
+        """Fallback entity-category enum for older Home Assistant test deps."""
+
+        CONFIG = "config"
+        DIAGNOSTIC = "diagnostic"
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -16,6 +24,10 @@ from homeassistant.util import dt as dt_util
 from .const import (
     DOMAIN,
     PHASE_MODE_SINGLE,
+    CONF_BASE_GRID_SETPOINT,
+    CONF_INVERTER_EXPORT_DEADBAND,
+    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    CONF_INVERTER_EXPORT_LIMIT,
     CONF_PRICE_THRESHOLD,
     CONF_FEEDIN_PRICE_THRESHOLD,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -26,6 +38,8 @@ from .const import (
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     CONF_EMERGENCY_SOC_THRESHOLD,
+    CONF_MAX_INVERTER_POWER,
+    CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -35,7 +49,16 @@ from .const import (
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
     DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
+    DEFAULT_MAX_SOC,
+    DEFAULT_MAX_SOC_SUNNY,
     DEFAULT_EMERGENCY_SOC,
+    DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_INVERTER_EXPORT_DEADBAND,
+    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    DEFAULT_MAX_INVERTER_POWER,
+    DEFAULT_INVERTER_EXPORT_LIMIT,
+    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+    DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN,
     INTEGRATION_VERSION,
 )
 from .coordinator import ElectricityPlannerCoordinator
@@ -52,10 +75,11 @@ async def async_setup_entry(
     """Set up the sensor platform."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
 
-    # AUTOMATION SENSORS: Essential power sensors for automations (2/5 total automation sensors)
+    # AUTOMATION SENSORS: Essential power sensors for automations
     automation_entities = [
         ChargerLimitSensor(coordinator, entry, "_automation"),
         GridSetpointSensor(coordinator, entry, "_automation"),
+        InverterDeratingTargetSensor(coordinator, entry, "_automation"),
     ]
 
     # DIAGNOSTIC SENSORS: For monitoring and troubleshooting only
@@ -304,8 +328,8 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
         grid_power = self.coordinator.data.get("grid_power")
         if grid_power is not None:
             attributes["grid_power"] = grid_power
-            attributes["grid_import"] = abs(min(0, grid_power))  # Positive value for import
-            attributes["grid_export"] = max(0, grid_power)  # Positive value for export
+            attributes["grid_import"] = max(0, grid_power)  # Positive value for import
+            attributes["grid_export"] = abs(min(0, grid_power))  # Positive value for export
 
         # Expose peak import limiting status
         attributes["car_peak_limited"] = bool(self.coordinator.data.get("car_peak_limited", False))
@@ -534,7 +558,18 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
             return {}
 
         monthly_peak = self.coordinator.data.get("monthly_grid_peak", 0)
-        max_grid_setpoint = max(monthly_peak or 0, 2500)
+        base_grid_setpoint = self.coordinator.config.get(
+            CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT
+        )
+        try:
+            monthly_peak_value = max(0, int(float(monthly_peak or 0)))
+        except (TypeError, ValueError):
+            monthly_peak_value = 0
+        controlling_peak = max(monthly_peak_value, base_grid_setpoint)
+        peak_based_grid_setpoint = int(
+            controlling_peak * DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN
+        )
+        max_grid_setpoint = peak_based_grid_setpoint
 
         attributes = {
             "grid_setpoint_reason": self.coordinator.data.get("grid_setpoint_reason", ""),
@@ -543,6 +578,9 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
             "solar_surplus": self.coordinator.data.get("power_analysis", {}).get("solar_surplus", 0),
             "battery_average_soc": self.coordinator.data.get("battery_analysis", {}).get("average_soc", 0),
             "monthly_grid_peak": monthly_peak,
+            "base_grid_setpoint": base_grid_setpoint,
+            "controlling_peak": controlling_peak,
+            "peak_based_grid_setpoint": peak_based_grid_setpoint,
             "max_grid_setpoint": max_grid_setpoint,
         }
 
@@ -572,6 +610,47 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
             attributes["is_overridden"] = False
 
         return attributes
+
+
+class InverterDeratingTargetSensor(ElectricityPlannerSensorBase):
+    """AUTOMATION SENSOR: Recommended inverter derating target in Watts."""
+
+    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+        """Initialize the inverter derating target sensor."""
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Inverter Derating Target"
+        self._attr_unique_id = f"{entry.entry_id}_inverter_derating_target"
+        self._attr_icon = "mdi:solar-power-variant-outline"
+        self._attr_native_unit_of_measurement = "W"
+        self._attr_device_class = SensorDeviceClass.POWER
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the recommended inverter derating target."""
+        if not self.coordinator.data:
+            return None
+
+        return self.coordinator.data.get("inverter_derating_target")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes."""
+        if not self.coordinator.data:
+            return {}
+
+        return {
+            "inverter_derating_reason": self.coordinator.data.get("inverter_derating_reason", ""),
+            "inverter_derating_alarm": self.coordinator.data.get("inverter_derating_alarm", False),
+            "inverter_derating_alarm_reason": self.coordinator.data.get("inverter_derating_alarm_reason", ""),
+            "feedin_allowed": self.coordinator.data.get("feedin_solar", False),
+            "feedin_reason": self.coordinator.data.get("feedin_solar_reason", ""),
+            "grid_power": self.coordinator.data.get("grid_power"),
+            "solar_production": self.coordinator.data.get("solar_production"),
+            "house_consumption": self.coordinator.data.get("house_consumption"),
+            "export_limit_w": self.coordinator.config.get(
+                CONF_INVERTER_EXPORT_LIMIT, DEFAULT_INVERTER_EXPORT_LIMIT
+            ),
+        }
 
 
 class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
@@ -640,8 +719,12 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
             "power_outputs": {
                 "charger_limit": self.coordinator.data.get("charger_limit", 0),
                 "grid_setpoint": self.coordinator.data.get("grid_setpoint", 0),
+                "inverter_derating_target": self.coordinator.data.get("inverter_derating_target", 0),
                 "charger_limit_reason": self.coordinator.data.get("charger_limit_reason", ""),
                 "grid_setpoint_reason": self.coordinator.data.get("grid_setpoint_reason", ""),
+                "inverter_derating_reason": self.coordinator.data.get("inverter_derating_reason", ""),
+                "inverter_derating_alarm": self.coordinator.data.get("inverter_derating_alarm", False),
+                "inverter_derating_alarm_reason": self.coordinator.data.get("inverter_derating_alarm_reason", ""),
                 "grid_components": self.coordinator.data.get("grid_components", {}),
                 "phase_mode": self.coordinator.data.get("phase_mode", PHASE_MODE_SINGLE),
                 "phase_results": self.coordinator.data.get("phase_results", {}),
@@ -713,6 +796,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "max_battery_power": config.get("max_battery_power", 3000),
                 "max_car_power": config.get("max_car_power", 11000),
                 "max_grid_power": config.get("max_grid_power", 15000),
+                "max_inverter_power": config.get(CONF_MAX_INVERTER_POWER, DEFAULT_MAX_INVERTER_POWER),
                 "min_car_charging_threshold": config.get("min_car_charging_threshold", 100),
                 "min_car_charging_duration": config.get("min_car_charging_duration", 2),
                 "predictive_charging_min_soc": config.get("predictive_charging_min_soc", 30),
@@ -720,8 +804,20 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "very_low_price_threshold": config.get("very_low_price_threshold", 30),
                 "price_threshold": config.get("price_threshold", 0.15),
                 "feedin_price_threshold": config.get("feedin_price_threshold", 0.05),
-                "max_soc_threshold": config.get("max_soc_threshold", 90),
-                "max_soc_threshold_sunny": config.get("max_soc_threshold_sunny", 50),
+                "inverter_export_limit": config.get(CONF_INVERTER_EXPORT_LIMIT, DEFAULT_INVERTER_EXPORT_LIMIT),
+                "inverter_export_deadband": config.get(
+                    CONF_INVERTER_EXPORT_DEADBAND, DEFAULT_INVERTER_EXPORT_DEADBAND
+                ),
+                "inverter_derating_unused_release_minutes": config.get(
+                    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+                    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+                ),
+                "inverter_derating_soc_bypass_threshold": config.get(
+                    CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+                    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+                ),
+                "max_soc_threshold": config.get("max_soc_threshold", DEFAULT_MAX_SOC),
+                "max_soc_threshold_sunny": config.get("max_soc_threshold_sunny", DEFAULT_MAX_SOC_SUNNY),
                 "sunny_forecast_threshold_kwh": config.get(
                     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
                     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
@@ -814,7 +910,7 @@ class PriceThresholdSensor(ElectricityPlannerSensorBase):
         self._attr_unique_id = f"{entry.entry_id}_price_threshold"
         self._attr_icon = "mdi:currency-eur"
         self._attr_device_class = None
-        self._attr_unit_of_measurement = "€/kWh"
+        self._attr_native_unit_of_measurement = "€/kWh"
 
     @property
     def native_value(self) -> float:
@@ -833,8 +929,8 @@ class PriceThresholdSensor(ElectricityPlannerSensorBase):
         return {
             "description": "Price below which grid charging is considered favorable",
             "current_price": current_price,
-            "price_below_threshold": current_price < threshold if current_price else None,
-            "margin": round(current_price - threshold, 3) if current_price else None,
+            "price_below_threshold": current_price < threshold if current_price is not None else None,
+            "margin": round(current_price - threshold, 3) if current_price is not None else None,
         }
 
 
@@ -848,7 +944,7 @@ class FeedinPriceThresholdSensor(ElectricityPlannerSensorBase):
         self._attr_unique_id = f"{entry.entry_id}_feedin_price_threshold"
         self._attr_icon = "mdi:solar-power"
         self._attr_device_class = None
-        self._attr_unit_of_measurement = "€/kWh"
+        self._attr_native_unit_of_measurement = "€/kWh"
 
     @property
     def native_value(self) -> float:
@@ -861,14 +957,15 @@ class FeedinPriceThresholdSensor(ElectricityPlannerSensorBase):
         if not self.coordinator.data:
             return {}
 
-        current_price = self.coordinator.data.get("price_analysis", {}).get("current_price")
+        effective_price = self.coordinator.data.get("feedin_effective_price")
         threshold = self.native_value
 
         return {
             "description": "Price above which solar export to grid is enabled",
-            "current_price": current_price,
-            "price_above_threshold": current_price >= threshold if current_price else None,
-            "margin": round(current_price - threshold, 3) if current_price else None,
+            "current_price": effective_price,
+            "effective_price": effective_price,
+            "price_above_threshold": effective_price >= threshold if effective_price is not None else None,
+            "margin": round(effective_price - threshold, 3) if effective_price is not None else None,
             "feedin_enabled": self.coordinator.data.get("feedin_solar", False),
         }
 
@@ -1020,7 +1117,7 @@ class VeryLowPriceThresholdSensor(ElectricityPlannerSensorBase):
         self._attr_unique_id = f"{entry.entry_id}_very_low_price_threshold"
         self._attr_icon = "mdi:percent"
         self._attr_device_class = None
-        self._attr_unit_of_measurement = "%"
+        self._attr_native_unit_of_measurement = "%"
 
     @property
     def native_value(self) -> int:
@@ -1091,7 +1188,7 @@ class EmergencySOCThresholdSensor(ElectricityPlannerSensorBase):
         self._attr_unique_id = f"{entry.entry_id}_emergency_soc_threshold"
         self._attr_icon = "mdi:battery-alert"
         self._attr_device_class = None
-        self._attr_unit_of_measurement = "%"
+        self._attr_native_unit_of_measurement = "%"
 
     @property
     def native_value(self) -> int:
@@ -1173,7 +1270,9 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
                 for interval in prices_today[area_code]:
                     normalized = self._normalize_price_interval(interval, transport_lookup)
                     if normalized:
-                        combined_prices.append(normalized)
+                        compact = self._compact_price_interval(normalized)
+                        if compact:
+                            combined_prices.append(compact)
 
         if prices_tomorrow:
             area_code = next(iter(prices_tomorrow.keys()), None)
@@ -1181,7 +1280,9 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
                 for interval in prices_tomorrow[area_code]:
                     normalized = self._normalize_price_interval(interval, transport_lookup)
                     if normalized:
-                        combined_prices.append(normalized)
+                        compact = self._compact_price_interval(normalized)
+                        if compact:
+                            combined_prices.append(compact)
 
         # Calculate some useful statistics
         price_values = [price_entry["price"] for price_entry in combined_prices]
@@ -1220,13 +1321,34 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             "price_range": round(max_price - min_price, 4) if (max_price is not None and min_price is not None) else None,
             "transport_cost_applied": (
                 True
-                if transport_status in ("applied", "fallback_current")
+                if transport_status in ("applied", "fallback_current", "builtin")
                 else False
                 if transport_status in ("pending_history", "error")
                 else None
             ),
             "transport_cost_status": transport_status,
             "last_update": dt_util.now().isoformat(),
+        }
+
+    def _compact_price_interval(self, interval: dict[str, Any]) -> dict[str, Any] | None:
+        """Return a recorder-friendly interval payload for dashboard rendering."""
+        start = interval.get("start")
+        price = interval.get("price")
+        if start is None or price is None:
+            return None
+
+        transport_cost = interval.get("transport_cost", 0.0)
+        raw_price = interval.get("raw_price", 0.0)
+        adjusted_energy_price = interval.get("adjusted_energy_price", 0.0)
+        contract_adjustment = interval.get("contract_adjustment", 0.0)
+        return {
+            "start": start,
+            "end": interval.get("end"),
+            "price": round(float(price), 6),
+            "transport_cost": round(float(transport_cost), 6),
+            "raw_price": round(float(raw_price), 6),
+            "adjusted_energy_price": round(float(adjusted_energy_price), 6),
+            "contract_adjustment": round(float(contract_adjustment), 6),
         }
 
     def _normalize_price_interval(self, interval: Any, transport_cost_lookup: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
@@ -1254,79 +1376,37 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         )
 
         adjusted_price = (price_kwh * multiplier) + offset
+        contract_adjustment = adjusted_price - price_kwh
 
-        # Add transport cost based on the interval's hour
-        # Use lookup table built from historical data
         transport_cost = 0.0
-        fallback_transport = self.coordinator.data.get("transport_cost") if self.coordinator.data else None
-        applied_lookup_cost = False
+        start_time_str = interval.get("start")
+        interval_start = dt_util.parse_datetime(start_time_str) if start_time_str else None
+        interval_start_utc = dt_util.as_utc(interval_start) if interval_start is not None else None
 
-        if transport_cost_lookup:
-            start_time_str = interval.get("start")
-            interval_start = dt_util.parse_datetime(start_time_str) if start_time_str else None
-            if interval_start is not None:
-                interval_start_utc = dt_util.as_utc(interval_start)
+        # Use coordinator's unified transport cost resolution (handles both built-in and legacy)
+        if interval_start_utc is not None:
+            resolved = self.coordinator._resolve_transport_cost(
+                transport_cost_lookup,
+                interval_start_utc,
+                reference_now=dt_util.utcnow(),
+            )
+            if resolved is not None:
+                transport_cost = resolved
             else:
-                interval_start_utc = None
-
-            if interval_start_utc is not None:
-                now = dt_util.utcnow()
-                effective_cost: float | None = None
-
-                # For future times, look for the same hour from 1 week ago
-                if interval_start_utc > now:
-                    week_ago = interval_start_utc - timedelta(days=7)
-                    # Find the cost that was active at this same time last week
-                    cost_from_pattern: float | None = None
-                    for change in transport_cost_lookup:
-                        change_start_str = change.get("start")
-                        change_cost = change.get("cost")
-                        if change_cost is None:
-                            continue
-                        if change_start_str is None:
-                            cost_from_pattern = float(change_cost)
-                            continue
-                        change_start = dt_util.parse_datetime(change_start_str)
-                        if change_start is None:
-                            continue
-                        change_start_utc = dt_util.as_utc(change_start)
-                        if change_start_utc <= week_ago:
-                            cost_from_pattern = float(change_cost)
-                        else:
-                            break
-
-                    if cost_from_pattern is not None:
-                        effective_cost = cost_from_pattern
-
-                # For past/current times or if no week-old data, use most recent cost
-                if effective_cost is None:
-                    for change in transport_cost_lookup:
-                        change_start_str = change.get("start")
-                        change_cost = change.get("cost")
-                        if change_cost is None:
-                            continue
-                        if change_start_str is None:
-                            effective_cost = float(change_cost)
-                            continue
-                        change_start = dt_util.parse_datetime(change_start_str)
-                        if change_start is None:
-                            continue
-                        change_start_utc = dt_util.as_utc(change_start)
-                        if change_start_utc <= interval_start_utc:
-                            effective_cost = float(change_cost)
-                        else:
-                            break
-
-                if effective_cost is not None:
-                    transport_cost = effective_cost
-                    applied_lookup_cost = True
-
-        if not applied_lookup_cost and fallback_transport is not None:
-            transport_cost = fallback_transport
+                fallback_transport = self.coordinator.data.get("transport_cost") if self.coordinator.data else None
+                if fallback_transport is not None:
+                    transport_cost = fallback_transport
+        else:
+            fallback_transport = self.coordinator.data.get("transport_cost") if self.coordinator.data else None
+            if fallback_transport is not None:
+                transport_cost = fallback_transport
 
         final_price = adjusted_price + transport_cost
 
         normalized = dict(interval)
         normalized["price"] = final_price
         normalized["transport_cost"] = transport_cost
+        normalized["raw_price"] = price_kwh
+        normalized["adjusted_energy_price"] = adjusted_price
+        normalized["contract_adjustment"] = contract_adjustment
         return normalized

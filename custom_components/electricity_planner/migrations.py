@@ -17,6 +17,18 @@ v10 → v11: Added ``soc_price_multiplier_max`` and ``soc_buffer_target`` for
 v11 → v12: Added ``solar_forecast_entity`` and ``max_soc_threshold_sunny`` for
            sunny-day grid charging limits.
 v13 → v14: Added ``sunny_forecast_threshold_kwh`` trigger for sunny-day mode.
+v14 → v15: Preserved legacy SOC defaults for sparse older entries after the
+           default values changed for new installs.
+v15 → v16: Replaced external ``transport_cost_entity`` with built-in cost
+           components (P1 tariff entity, day/night network tariffs, taxes,
+           GSC, WKK).  Removes the legacy ``transport_cost_entity`` key.
+v16 → v17: Added ``max_inverter_power``, ``inverter_export_limit``, and
+           ``inverter_derating_soc_bypass_threshold`` for inverter derating
+           guidance.
+v17 → v18: Added ``inverter_export_deadband`` so the derating hold window is
+           configurable.
+v18 → v19: Added ``inverter_derating_unused_release_minutes`` so the planner
+           can release an unused cap after a configurable delay.
 """
 from __future__ import annotations
 
@@ -28,6 +40,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import (
     CONF_BASE_GRID_SETPOINT,
+    CONF_MAX_SOC_THRESHOLD,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
@@ -44,6 +57,18 @@ from .const import (
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_BATTERY_CAPACITIES,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+    CONF_TRANSPORT_COST_ENTITY,
+    CONF_TRANSPORT_COST_DAY,
+    CONF_TRANSPORT_COST_NIGHT,
+    CONF_ENERGY_TAX_ACCIJNS,
+    CONF_ENERGY_TAX_BIJDRAGE,
+    CONF_ENERGY_COST_GSC,
+    CONF_ENERGY_COST_WKK,
+    CONF_MAX_INVERTER_POWER,
+    CONF_INVERTER_EXPORT_LIMIT,
+    CONF_INVERTER_EXPORT_DEADBAND,
+    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
@@ -54,16 +79,29 @@ from .const import (
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
     DEFAULT_SOC_BUFFER_TARGET,
-    DEFAULT_MAX_SOC_SUNNY,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
+    DEFAULT_TRANSPORT_COST_DAY,
+    DEFAULT_TRANSPORT_COST_NIGHT,
+    DEFAULT_ENERGY_TAX_ACCIJNS,
+    DEFAULT_ENERGY_TAX_BIJDRAGE,
+    DEFAULT_ENERGY_COST_GSC,
+    DEFAULT_ENERGY_COST_WKK,
+    DEFAULT_MAX_INVERTER_POWER,
+    DEFAULT_INVERTER_EXPORT_LIMIT,
+    DEFAULT_INVERTER_EXPORT_DEADBAND,
+    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     PHASE_MODE_SINGLE,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
+_LEGACY_DEFAULT_MAX_SOC = 90
+_LEGACY_DEFAULT_MAX_SOC_SUNNY = 50
+
 # Current config version
-CURRENT_VERSION = 14
+CURRENT_VERSION = 19
 
 
 def _validate_numeric_config(
@@ -311,8 +349,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # Add sunny-day grid charging limit
         if CONF_MAX_SOC_THRESHOLD_SUNNY not in new_data:
-            new_data[CONF_MAX_SOC_THRESHOLD_SUNNY] = DEFAULT_MAX_SOC_SUNNY
-            _LOGGER.info("Added max_soc_threshold_sunny: %d%%", DEFAULT_MAX_SOC_SUNNY)
+            new_data[CONF_MAX_SOC_THRESHOLD_SUNNY] = _LEGACY_DEFAULT_MAX_SOC_SUNNY
+            _LOGGER.info(
+                "Added max_soc_threshold_sunny: %d%%",
+                _LEGACY_DEFAULT_MAX_SOC_SUNNY,
+            )
 
         # solar_forecast_entity is optional, no default needed
 
@@ -344,9 +385,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if entry.version == 13:
         # Migrate from version 13 to version 14
         new_data = {**entry.data}
+        merged_config = {**entry.data, **entry.options}
 
         if CONF_SUNNY_FORECAST_THRESHOLD_KWH not in new_data:
-            derived_threshold = _derive_sunny_forecast_threshold_kwh(new_data)
+            derived_threshold = _derive_sunny_forecast_threshold_kwh(merged_config)
             new_data[CONF_SUNNY_FORECAST_THRESHOLD_KWH] = derived_threshold
             _LOGGER.info(
                 "Added sunny_forecast_threshold_kwh: %.1f kWh",
@@ -360,5 +402,145 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
         _LOGGER.info("Migration to version 14 complete")
+
+    if entry.version == 14:
+        # Migrate from version 14 to version 15
+        # Preserve the historical 90/50 SOC defaults for legacy sparse entries
+        # that never explicitly stored these values.
+        new_data = {**entry.data}
+        merged_config = {**entry.data, **entry.options}
+
+        if CONF_MAX_SOC_THRESHOLD not in merged_config:
+            new_data[CONF_MAX_SOC_THRESHOLD] = _LEGACY_DEFAULT_MAX_SOC
+            _LOGGER.info(
+                "Backfilled legacy max_soc_threshold: %d%%",
+                _LEGACY_DEFAULT_MAX_SOC,
+            )
+
+        if CONF_MAX_SOC_THRESHOLD_SUNNY not in merged_config:
+            new_data[CONF_MAX_SOC_THRESHOLD_SUNNY] = _LEGACY_DEFAULT_MAX_SOC_SUNNY
+            _LOGGER.info(
+                "Backfilled legacy max_soc_threshold_sunny: %d%%",
+                _LEGACY_DEFAULT_MAX_SOC_SUNNY,
+            )
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=15,
+        )
+
+        _LOGGER.info("Migration to version 15 complete")
+
+    if entry.version == 15:
+        # Migrate from version 15 to version 16
+        # Replace external transport_cost_entity with built-in cost components
+        new_data = {**entry.data}
+
+        # Add built-in transport cost defaults
+        if CONF_TRANSPORT_COST_DAY not in new_data:
+            new_data[CONF_TRANSPORT_COST_DAY] = DEFAULT_TRANSPORT_COST_DAY
+        if CONF_TRANSPORT_COST_NIGHT not in new_data:
+            new_data[CONF_TRANSPORT_COST_NIGHT] = DEFAULT_TRANSPORT_COST_NIGHT
+        if CONF_ENERGY_TAX_ACCIJNS not in new_data:
+            new_data[CONF_ENERGY_TAX_ACCIJNS] = DEFAULT_ENERGY_TAX_ACCIJNS
+        if CONF_ENERGY_TAX_BIJDRAGE not in new_data:
+            new_data[CONF_ENERGY_TAX_BIJDRAGE] = DEFAULT_ENERGY_TAX_BIJDRAGE
+        if CONF_ENERGY_COST_GSC not in new_data:
+            new_data[CONF_ENERGY_COST_GSC] = DEFAULT_ENERGY_COST_GSC
+        if CONF_ENERGY_COST_WKK not in new_data:
+            new_data[CONF_ENERGY_COST_WKK] = DEFAULT_ENERGY_COST_WKK
+
+        # Remove legacy transport_cost_entity
+        legacy_entity = new_data.pop(CONF_TRANSPORT_COST_ENTITY, None)
+        if legacy_entity:
+            _LOGGER.info(
+                "Removed legacy transport_cost_entity (%s) — replaced by built-in cost components",
+                legacy_entity,
+            )
+
+        _LOGGER.info(
+            "Added built-in transport cost: day=%.4f, night=%.4f, accijns=%.6f, bijdrage=%.6f, gsc=%.4f, wkk=%.4f",
+            new_data[CONF_TRANSPORT_COST_DAY],
+            new_data[CONF_TRANSPORT_COST_NIGHT],
+            new_data[CONF_ENERGY_TAX_ACCIJNS],
+            new_data[CONF_ENERGY_TAX_BIJDRAGE],
+            new_data[CONF_ENERGY_COST_GSC],
+            new_data[CONF_ENERGY_COST_WKK],
+        )
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=16,
+        )
+
+        _LOGGER.info("Migration to version 16 complete")
+
+    if entry.version == 16:
+        # Migrate from version 16 to version 17
+        # Add inverter derating configuration options
+        new_data = {**entry.data}
+
+        if CONF_MAX_INVERTER_POWER not in new_data:
+            new_data[CONF_MAX_INVERTER_POWER] = DEFAULT_MAX_INVERTER_POWER
+            _LOGGER.info("Added max_inverter_power: %dW", DEFAULT_MAX_INVERTER_POWER)
+
+        if CONF_INVERTER_EXPORT_LIMIT not in new_data:
+            new_data[CONF_INVERTER_EXPORT_LIMIT] = DEFAULT_INVERTER_EXPORT_LIMIT
+            _LOGGER.info("Added inverter_export_limit: %dW", DEFAULT_INVERTER_EXPORT_LIMIT)
+
+        if CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD not in new_data:
+            new_data[CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD] = DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD
+            _LOGGER.info(
+                "Added inverter_derating_soc_bypass_threshold: %d%%",
+                DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+            )
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=17,
+        )
+
+        _LOGGER.info("Migration to version 17 complete")
+
+    if entry.version == 17:
+        new_data = {**entry.data}
+
+        if CONF_INVERTER_EXPORT_DEADBAND not in new_data:
+            new_data[CONF_INVERTER_EXPORT_DEADBAND] = DEFAULT_INVERTER_EXPORT_DEADBAND
+            _LOGGER.info(
+                "Added inverter_export_deadband: %dW",
+                DEFAULT_INVERTER_EXPORT_DEADBAND,
+            )
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=18,
+        )
+
+        _LOGGER.info("Migration to version 18 complete")
+
+    if entry.version == 18:
+        new_data = {**entry.data}
+
+        if CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES not in new_data:
+            new_data[CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES] = (
+                DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES
+            )
+            _LOGGER.info(
+                "Added inverter_derating_unused_release_minutes: %d",
+                DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+            )
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=19,
+        )
+
+        _LOGGER.info("Migration to version 19 complete")
 
     return True

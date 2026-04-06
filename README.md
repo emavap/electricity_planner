@@ -1,6 +1,6 @@
 # Electricity Planner
 
-**Version 4.10.0** | **Config Schema Version 14** | **Home Assistant 2024.4+**
+**Version 4.10.24** | **Config Schema Version 19** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
@@ -41,7 +41,7 @@ Electricity Planner is a Home Assistant custom integration that transforms Nord 
 - **Optional but recommended:**
   - EV charging power sensor (W)
   - Monthly grid peak entity (W)
-  - Transport cost sensor (€/kWh)
+  - P1 tariff sensor for live day/night switching
   - Grid power sensor (W, for real-time import/export tracking)
 
 ### Installation
@@ -159,11 +159,11 @@ Enable `use_average_threshold` to calculate a 24-hour rolling average price as y
 
 Configure price adjustments to account for taxes, fees, or currency conversion:
 
-- **`price_adjustment_multiplier`** (default: 1.0) – Multiplies raw Nord Pool prices
-- **`price_adjustment_offset`** (default: 0.0) – Adds fixed amount after multiplication
+- **`price_adjustment_multiplier`** (default: 1.04) – Multiplies raw market prices
+- **`price_adjustment_offset`** (default: 0.005) – Adds fixed amount after multiplication
 - **`feedin_adjustment_multiplier`** (default: 1.0) – Multiplies feed-in prices
-- **`feedin_adjustment_offset`** (default: 0.0) – Adds fixed amount to feed-in prices
-- **`transport_cost_entity`** – Optional sensor for dynamic transport costs
+- **`feedin_adjustment_offset`** (default: -0.0098) – Adds fixed amount to feed-in prices
+- **Built-in transport costs** – Day/night transport rates plus taxes/certificates, with an optional P1 tariff sensor for live switching
 
 **Formula:** `adjusted_price = (raw_price × multiplier) + offset + transport_cost`
 
@@ -402,7 +402,8 @@ is_low_price: true
 average_soc: 45.5
 batteries_count: 2
 min_soc_threshold: 15
-max_soc_threshold: 95
+max_soc_threshold: 70
+max_soc_threshold_sunny: 35
 remaining_capacity_percent: 49.5
 
 # Power Analysis
@@ -445,14 +446,21 @@ phase_results:
 | `car_charging_power_entity` | EV charging power sensor | No |
 | `grid_power_entity` | Grid import/export power sensor | No |
 | `monthly_peak_entity` | Monthly peak demand sensor | No |
-| `transport_cost_entity` | Dynamic transport cost sensor | No |
+| `p1_tariff_entity` | Optional P1 tariff sensor (`1`=day, `2`=night) | No |
+| `transport_cost_day` | Day transport tariff (`€/kWh`, excl. VAT) | No |
+| `transport_cost_night` | Night/weekend transport tariff (`€/kWh`, excl. VAT) | No |
+| `energy_tax_accijns` | Energy excise component (`€/kWh`) | No |
+| `energy_tax_bijdrage` | Energy contribution component (`€/kWh`) | No |
+| `energy_cost_gsc` | Green certificate component (`€/kWh`) | No |
+| `energy_cost_wkk` | CHP certificate component (`€/kWh`) | No |
 
 ### SOC Thresholds
 
 | Option | Default | Range | Description |
 |--------|---------|-------|-------------|
-| `min_soc_threshold` | 15% | 5–50% | Minimum battery SOC |
-| `max_soc_threshold` | 95% | 50–100% | Maximum battery SOC |
+| `min_soc_threshold` | 20% | 5–50% | Minimum battery SOC |
+| `max_soc_threshold` | 70% | 50–100% | Maximum battery SOC |
+| `max_soc_threshold_sunny` | 35% | 0–100% | Grid-charging max SOC on high-solar days |
 | `emergency_soc_threshold` | 15% | 5–30% | Force charging below this |
 | `predictive_charging_soc` | 30% | 10–50% | SOC for predictive logic |
 | `soc_buffer_target` | 50% | 20–80% | SOC above which no price relaxation |
@@ -468,10 +476,10 @@ phase_results:
 | `use_dynamic_threshold` | false | - | Enable dynamic threshold |
 | `dynamic_threshold_confidence` | 70% | 50–95% | Confidence level for dynamic |
 | `use_average_threshold` | false | - | Enable 24h average threshold |
-| `price_adjustment_multiplier` | 1.0 | 0.5–2.0 | Price multiplier |
-| `price_adjustment_offset` | 0.0 | -0.5–0.5 | Price offset (€/kWh) |
+| `price_adjustment_multiplier` | 1.04 | 0.5–2.0 | Price multiplier |
+| `price_adjustment_offset` | 0.005 | -0.5–0.5 | Price offset (€/kWh) |
 | `feedin_adjustment_multiplier` | 1.0 | 0.5–2.0 | Feed-in price multiplier |
-| `feedin_adjustment_offset` | 0.0 | -0.5–0.5 | Feed-in price offset |
+| `feedin_adjustment_offset` | -0.0098 | -0.5–0.5 | Feed-in price offset |
 
 ### Power Limits
 
@@ -734,7 +742,7 @@ custom_components/electricity_planner/
 ├── sensor.py             # 19 sensor entities
 ├── binary_sensor.py      # 6 binary sensor entities
 ├── switch.py             # Car permissive mode switch
-├── migrations.py         # Config version migrations (v1→v11)
+├── migrations.py         # Config version migrations (v1→v16)
 ├── manifest.json         # Integration metadata
 └── strings.json          # UI translations
 ```
@@ -761,11 +769,11 @@ custom_components/electricity_planner/
 
 ### Q: Can I use multiple instances for different systems?
 
-**A:** Currently, only one instance per Home Assistant installation is supported. Multi-instance support may be added in future versions.
+**A:** Yes. Multiple config entries are supported. When you call manual-override services and more than one entry is loaded, specify the target `entry_id`.
 
 ### Q: How do I migrate from an older version?
 
-**A:** Migrations are automatic. The integration detects your config version and upgrades through each version (v1→v2→...→v11). Check logs for migration messages.
+**A:** Migrations are automatic. The integration detects your config version and upgrades through each required schema step up to the current config schema version. Check logs for migration messages.
 
 ### Q: Why does car charging have hysteresis but battery charging doesn't?
 

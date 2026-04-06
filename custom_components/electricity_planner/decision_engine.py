@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
@@ -30,6 +30,11 @@ from .const import (
     CONF_MIN_CAR_CHARGING_THRESHOLD,
     CONF_PREDICTIVE_CHARGING_MIN_SOC,
     CONF_BASE_GRID_SETPOINT,
+    CONF_MAX_INVERTER_POWER,
+    CONF_INVERTER_EXPORT_LIMIT,
+    CONF_INVERTER_EXPORT_DEADBAND,
+    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     CONF_USE_AVERAGE_THRESHOLD,
@@ -56,6 +61,12 @@ from .const import (
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_MAX_INVERTER_POWER,
+    DEFAULT_INVERTER_EXPORT_LIMIT,
+    DEFAULT_INVERTER_EXPORT_DEADBAND,
+    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+    INVERTER_DERATING_ACTIVE_TOLERANCE_W,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_USE_AVERAGE_THRESHOLD,
@@ -113,6 +124,22 @@ def _safe_optional_float(value: Any) -> float | None:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _safe_optional_datetime(value: Any) -> datetime | None:
+    """Best-effort conversion of arbitrary input to an aware datetime."""
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value
+        return value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        parsed = dt_util.parse_datetime(value)
+        if parsed is None:
+            return None
+        if parsed.tzinfo is not None:
+            return parsed
+        return parsed.replace(tzinfo=timezone.utc)
+    return None
 
 
 @dataclass
@@ -192,6 +219,11 @@ class EngineSettings:
 
     max_grid_power: int
     base_grid_setpoint: int
+    max_inverter_power: int
+    inverter_export_limit: int
+    inverter_export_deadband: int
+    inverter_derating_unused_release_minutes: int
+    inverter_derating_soc_bypass_threshold: float
     max_battery_power: int
     max_car_power: int
     min_car_charging_threshold: int
@@ -244,6 +276,30 @@ class EngineSettings:
         )
         base_grid_setpoint = extractor.get_power_setting(
             CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT, 1000, 15000
+        )
+        max_inverter_power = extractor.get_power_setting(
+            CONF_MAX_INVERTER_POWER, DEFAULT_MAX_INVERTER_POWER, 0, MAX_POWER_VALIDATION_W
+        )
+        inverter_export_limit = extractor.get_power_setting(
+            CONF_INVERTER_EXPORT_LIMIT, DEFAULT_INVERTER_EXPORT_LIMIT, 0, 5000
+        )
+        inverter_export_deadband = extractor.get_power_setting(
+            CONF_INVERTER_EXPORT_DEADBAND, DEFAULT_INVERTER_EXPORT_DEADBAND, 0, 1000
+        )
+        inverter_derating_unused_release_minutes = extractor.get_int(
+            CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+            DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+            "inverter_derating_unused_release_minutes",
+            minimum=0,
+            maximum=120,
+        )
+        inverter_derating_soc_bypass_threshold = extractor.get_float(
+            CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+            DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+            "inverter_derating_soc_bypass_threshold",
+        )
+        inverter_derating_soc_bypass_threshold = max(
+            0.0, min(inverter_derating_soc_bypass_threshold, 100.0)
         )
         max_battery_power = extractor.get_power_setting(
             CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER, 500, MAX_POWER_VALIDATION_W
@@ -361,6 +417,11 @@ class EngineSettings:
         return cls(
             max_grid_power=max_grid_power,
             base_grid_setpoint=base_grid_setpoint,
+            max_inverter_power=max_inverter_power,
+            inverter_export_limit=inverter_export_limit,
+            inverter_export_deadband=inverter_export_deadband,
+            inverter_derating_unused_release_minutes=inverter_derating_unused_release_minutes,
+            inverter_derating_soc_bypass_threshold=inverter_derating_soc_bypass_threshold,
             max_battery_power=max_battery_power,
             max_car_power=max_car_power,
             min_car_charging_threshold=min_car_threshold,
@@ -388,6 +449,17 @@ class EngineSettings:
             soc_buffer_target=soc_buffer_target,
             battery_capacities=sanitized_capacities,
         )
+
+
+@dataclass(frozen=True)
+class GridSetpointContext:
+    """Resolved context for grid setpoint limits."""
+
+    monthly_peak: int
+    base_setpoint: int
+    controlling_peak: int
+    effective_max_setpoint: int
+    uses_monthly_peak: bool
 
 
 @dataclass(frozen=True)
@@ -469,13 +541,51 @@ class ChargingDecisionEngine:
         """Get maximum allowed grid power with safety margin."""
         return self._settings.max_grid_power
 
-    def _get_safe_grid_setpoint(self, monthly_peak: float | None) -> int:
-        """Calculate safe grid setpoint based on monthly peak."""
+    def _get_grid_setpoint_context(self, monthly_peak: float | None) -> GridSetpointContext:
+        """Resolve the effective grid setpoint cap for the current month."""
         base_setpoint = self._settings.base_grid_setpoint
-        
-        if monthly_peak and monthly_peak > base_setpoint:
-            return int(monthly_peak * DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN)
-        return base_setpoint
+        monthly_peak_value = max(0, int(_safe_optional_float(monthly_peak) or 0))
+        uses_monthly_peak = monthly_peak_value > base_setpoint
+        controlling_peak = max(monthly_peak_value, base_setpoint)
+        effective_max_setpoint = int(
+            controlling_peak * DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN
+        )
+
+        return GridSetpointContext(
+            monthly_peak=monthly_peak_value,
+            base_setpoint=base_setpoint,
+            controlling_peak=controlling_peak,
+            effective_max_setpoint=effective_max_setpoint,
+            uses_monthly_peak=uses_monthly_peak,
+        )
+
+    def _get_safe_grid_setpoint(self, monthly_peak: float | None) -> int:
+        """Calculate safe grid setpoint based on the configured cap and current month peak."""
+        return self._get_grid_setpoint_context(monthly_peak).effective_max_setpoint
+
+    def _format_grid_setpoint_context_reason(self, monthly_peak: float | None) -> str:
+        """Explain how the effective grid setpoint cap was chosen."""
+        context = self._get_grid_setpoint_context(monthly_peak)
+
+        if context.monthly_peak <= 0:
+            return (
+                f"No current month peak available, max allowed peak is "
+                f"{context.base_setpoint}W, using {context.effective_max_setpoint}W "
+                f"(90% of {context.controlling_peak}W)"
+            )
+
+        if context.uses_monthly_peak:
+            return (
+                f"Peak this month is {context.monthly_peak}W, max allowed peak is "
+                f"{context.base_setpoint}W, using {context.effective_max_setpoint}W "
+                f"(90% of {context.controlling_peak}W)"
+            )
+
+        return (
+            f"Peak this month is {context.monthly_peak}W, max allowed peak is "
+            f"{context.base_setpoint}W, using {context.effective_max_setpoint}W "
+            f"(90% of {context.controlling_peak}W)"
+        )
 
     async def _evaluate_single_phase(self, data: dict[str, Any]) -> dict[str, Any]:
         """Evaluate charging decisions for a single logical phase."""
@@ -566,10 +676,15 @@ class ChargingDecisionEngine:
             decision_data.get("charger_limit", 0)
         )
         decision_data.update(grid_setpoint_decision)
-        
-        # Feed-in decision
+
         feedin_decision = self._decide_feedin_solar(price_analysis, power_allocation)
         decision_data.update(feedin_decision)
+        decision_data_for_downstream.update(feedin_decision)
+
+        inverter_derating_decision = self._calculate_inverter_derating_target(
+            decision_data_for_downstream
+        )
+        decision_data.update(inverter_derating_decision)
         
         return decision_data
 
@@ -811,8 +926,12 @@ class ChargingDecisionEngine:
             "car_grid_charging_reason": "No decision made",
             "charger_limit": 0,
             "grid_setpoint": 0,
+            "inverter_derating_target": None,
             "charger_limit_reason": "No decision made",
             "grid_setpoint_reason": "No decision made",
+            "inverter_derating_reason": "No decision made",
+            "inverter_derating_alarm": False,
+            "inverter_derating_alarm_reason": "No alarm",
             "feedin_solar": False,
             "feedin_solar_reason": "No decision made",
             "next_evaluation": dt_util.utcnow() + timedelta(minutes=DEFAULT_SYSTEM_LIMITS.evaluation_interval),
@@ -832,25 +951,34 @@ class ChargingDecisionEngine:
         decision_data["charger_limit_reason"] = "No price data - limiting to solar only"
         decision_data["grid_setpoint_reason"] = "No price data - grid setpoint set to 0"
         decision_data["feedin_solar_reason"] = "No price data - feed-in decision disabled"
+        decision_data["inverter_derating_reason"] = "No price data - inverter derating target unavailable"
+        decision_data["inverter_derating_alarm_reason"] = "No price data - derating alarm unavailable"
         _LOGGER.warning("Critical price data unavailable - disabling all grid charging")
         return decision_data
 
     def _analyze_comprehensive_pricing(self, data: dict[str, Any]) -> dict[str, Any]:
         """Analyze comprehensive pricing data from Nord Pool."""
-        raw_current_price = data.get("current_price")
-        raw_highest_price = data.get("highest_price")
-        raw_lowest_price = data.get("lowest_price")
-        raw_next_price = data.get("next_price")
+        overrides = data.get("price_analysis_overrides") or {}
+        raw_current_price = overrides.get("raw_current_price", data.get("current_price"))
+        raw_highest_price = overrides.get("raw_highest_price", data.get("highest_price"))
+        raw_lowest_price = overrides.get("raw_lowest_price", data.get("lowest_price"))
+        raw_next_price = overrides.get("raw_next_price", data.get("next_price"))
         
         price_multiplier = self._settings.price_adjustment_multiplier
         price_offset = self._settings.price_adjustment_offset
 
-        current_price = apply_price_adjustment(raw_current_price, price_multiplier, price_offset)
-        highest_price = apply_price_adjustment(raw_highest_price, price_multiplier, price_offset)
-        lowest_price = apply_price_adjustment(raw_lowest_price, price_multiplier, price_offset)
-        next_price = apply_price_adjustment(raw_next_price, price_multiplier, price_offset)
-
-        transport_cost = data.get("transport_cost") or 0
+        if overrides:
+            current_price = overrides.get("current_price")
+            highest_price = overrides.get("highest_price")
+            lowest_price = overrides.get("lowest_price")
+            next_price = overrides.get("next_price")
+            transport_cost = overrides.get("transport_cost", data.get("transport_cost") or 0)
+        else:
+            current_price = apply_price_adjustment(raw_current_price, price_multiplier, price_offset)
+            highest_price = apply_price_adjustment(raw_highest_price, price_multiplier, price_offset)
+            lowest_price = apply_price_adjustment(raw_lowest_price, price_multiplier, price_offset)
+            next_price = apply_price_adjustment(raw_next_price, price_multiplier, price_offset)
+            transport_cost = data.get("transport_cost") or 0
 
         if current_price is None:
             _LOGGER.error(
@@ -864,20 +992,21 @@ class ChargingDecisionEngine:
                 transport_cost,
             )
 
-        # Add transport cost to all prices
-        adjusted_prices = self._add_transport_cost_to_prices(
-            {
-                "current_price": current_price,
-                "highest_price": highest_price,
-                "lowest_price": lowest_price,
-                "next_price": next_price,
-            },
-            transport_cost
-        )
-        current_price = adjusted_prices["current_price"]
-        highest_price = adjusted_prices["highest_price"]
-        lowest_price = adjusted_prices["lowest_price"]
-        next_price = adjusted_prices["next_price"]
+        if not overrides:
+            # Add transport cost to all prices when interval-aware overrides are unavailable.
+            adjusted_prices = self._add_transport_cost_to_prices(
+                {
+                    "current_price": current_price,
+                    "highest_price": highest_price,
+                    "lowest_price": lowest_price,
+                    "next_price": next_price,
+                },
+                transport_cost
+            )
+            current_price = adjusted_prices["current_price"]
+            highest_price = adjusted_prices["highest_price"]
+            lowest_price = adjusted_prices["lowest_price"]
+            next_price = adjusted_prices["next_price"]
 
         # Determine which threshold to use
         use_average_threshold = self._settings.use_average_threshold
@@ -1218,7 +1347,7 @@ class ChargingDecisionEngine:
         # Filter valid batteries
         valid_batteries = [
             battery for battery in battery_soc_data
-            if "soc" in battery and battery["soc"] is not None
+            if "soc" in battery and battery["soc"] is not None and 0 <= battery["soc"] <= 100
         ]
         
         if not valid_batteries:
@@ -1390,7 +1519,7 @@ class ChargingDecisionEngine:
             }
 
         if battery_analysis.get("batteries_full"):
-            max_threshold = battery_analysis.get("max_soc_threshold", 90)
+            max_threshold = battery_analysis.get("max_soc_threshold", DEFAULT_MAX_SOC)
             average_soc = battery_analysis.get("average_soc", 0)
             return {
                 "battery_grid_charging": False,
@@ -1438,6 +1567,7 @@ class ChargingDecisionEngine:
             "power_analysis": power_analysis,
             "time_context": time_context,
             "config": self.config,
+            "settings": self._settings,
             "battery_stable_threshold": stable_threshold,
         }
 
@@ -1503,7 +1633,7 @@ class ChargingDecisionEngine:
             }
         
         current_price = price_analysis.get("current_price")
-        raw_price = price_analysis.get("raw_current_price", current_price)
+        raw_price = price_analysis.get("raw_current_price")
 
         if current_price is None:
             return {
@@ -1511,43 +1641,280 @@ class ChargingDecisionEngine:
                 "feedin_solar_reason": "No adjusted price available for feed-in",
                 "feedin_effective_price": None,
             }
+
+        if raw_price is None:
+            raw_price = current_price
         
         feed_multiplier = self._settings.feedin_adjustment_multiplier
         feed_offset = self._settings.feedin_adjustment_offset
         feedin_threshold = self._settings.feedin_threshold
         remaining_solar = power_allocation.get("remaining_solar", 0)
         
-        adjustments_active = (
-            feed_multiplier != DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER
-            or feed_offset != DEFAULT_FEEDIN_ADJUSTMENT_OFFSET
-        )
         adjusted_feed_price = apply_price_adjustment(raw_price, feed_multiplier, feed_offset)
         if adjusted_feed_price is None:
-            adjusted_feed_price = current_price
-        
-        if adjustments_active:
-            effective_threshold = feedin_threshold
-            enable_feedin = adjusted_feed_price >= effective_threshold
-            comparator = "≥" if enable_feedin else "<"
-            action = "enable" if enable_feedin else "disable"
-            reason = (
-                f"Net feed-in price {adjusted_feed_price:.3f}€/kWh {comparator} "
-                f"{effective_threshold:.3f}€/kWh - {action} solar export "
-                f"(surplus: {remaining_solar}W)"
-            )
-        else:
-            enable_feedin = current_price >= feedin_threshold
-            comparator = "≥" if enable_feedin else "<"
-            action = "enable" if enable_feedin else "disable"
-            reason = (
-                f"Price {current_price:.3f}€/kWh {comparator} {feedin_threshold:.3f}€/kWh - "
-                f"{action} solar export (surplus: {remaining_solar}W)"
-            )
+            adjusted_feed_price = raw_price
+
+        enable_feedin = adjusted_feed_price >= feedin_threshold
+        comparator = "≥" if enable_feedin else "<"
+        action = "enable" if enable_feedin else "disable"
+        reason = (
+            f"Net feed-in price {adjusted_feed_price:.3f}€/kWh {comparator} "
+            f"{feedin_threshold:.3f}€/kWh - {action} solar export "
+            f"(surplus: {remaining_solar}W)"
+        )
         
         return {
             "feedin_solar": enable_feedin,
             "feedin_solar_reason": reason,
             "feedin_effective_price": adjusted_feed_price,
+        }
+
+    def _calculate_inverter_derating_target(
+        self,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Calculate a recommended inverter derating target in Watts.
+
+        Uses the planner convention for grid power:
+        positive = import, negative = export.
+        """
+        max_inverter_power = self._settings.max_inverter_power
+        export_limit_w = self._settings.inverter_export_limit
+        export_deadband_w = float(self._settings.inverter_export_deadband)
+        unused_release_minutes = self._settings.inverter_derating_unused_release_minutes
+        soc_bypass_threshold = self._settings.inverter_derating_soc_bypass_threshold
+        feed_allowed = bool(data.get("feedin_solar", False))
+        no_alarm = {
+            "inverter_derating_alarm": False,
+            "inverter_derating_alarm_reason": "No derating alarm",
+            "inverter_derating_unreached_since": None,
+        }
+
+        if feed_allowed:
+            return {
+                "inverter_derating_target": int(max_inverter_power),
+                "inverter_derating_reason": "Feed-in allowed - set inverter to max power",
+                **no_alarm,
+            }
+
+        battery_analysis = data.get("battery_analysis") or {}
+        average_soc_raw = battery_analysis.get("average_soc")
+        average_soc = _safe_optional_float(average_soc_raw)
+        battery_below_bypass_threshold = (
+            average_soc is not None and average_soc < soc_bypass_threshold
+        )
+
+        house_consumption_w = _safe_optional_float(data.get("house_consumption"))
+        solar_production_raw = data.get("solar_production")
+        solar_production_w = _safe_optional_float(solar_production_raw)
+        if solar_production_w is not None:
+            solar_production_w = max(0.0, solar_production_w)
+        previous_target_w = _safe_optional_float(
+            data.get("previous_inverter_derating_target")
+        )
+        if previous_target_w is not None:
+            previous_target_w = max(0.0, min(float(max_inverter_power), previous_target_w))
+        previous_unreached_since = _safe_optional_datetime(
+            data.get("previous_inverter_derating_unreached_since")
+        )
+        evaluated_at = _safe_optional_datetime(
+            data.get("inverter_derating_evaluated_at")
+        ) or dt_util.utcnow()
+
+        grid_power_raw = data.get("grid_power")
+        grid_power_w = _safe_optional_float(grid_power_raw)
+
+        # Preferred control path: use the current operating point and hold a
+        # simple deadband around the configured export target.
+        if solar_production_w is not None and grid_power_w is not None:
+            export_power_w = max(0.0, -grid_power_w)
+            release_step_w = 100.0
+            lower_export_w = max(0.0, export_limit_w - export_deadband_w)
+            upper_export_w = export_limit_w + export_deadband_w
+            release_to_max_after = timedelta(
+                minutes=unused_release_minutes
+            )
+            cap_reached_threshold_w = max(
+                0.0,
+                (previous_target_w or 0.0) - INVERTER_DERATING_ACTIVE_TOLERANCE_W,
+            )
+            previous_derating_active = (
+                previous_target_w is not None
+                and previous_target_w < float(max_inverter_power)
+            )
+            cap_is_binding = (
+                previous_derating_active
+                and solar_production_w >= cap_reached_threshold_w
+            )
+            cap_not_reached = previous_derating_active and not cap_is_binding
+            unreached_since = previous_unreached_since
+            if cap_not_reached and unreached_since is None:
+                unreached_since = evaluated_at
+            if not cap_not_reached:
+                unreached_since = None
+
+            def should_release_unused_cap() -> bool:
+                return (
+                    cap_not_reached
+                    and unreached_since is not None
+                    and evaluated_at - unreached_since >= release_to_max_after
+                )
+
+            if battery_below_bypass_threshold and export_power_w <= upper_export_w:
+                return {
+                    "inverter_derating_target": int(max_inverter_power),
+                    "inverter_derating_reason": (
+                        f"Battery SOC {average_soc:.0f}% < {soc_bypass_threshold:.0f}% and "
+                        f"export {export_power_w:.0f}W is within the low-SOC tolerance - "
+                        "keep inverter unrestricted so solar can charge the battery"
+                    ),
+                    **no_alarm,
+                }
+
+            if export_power_w < lower_export_w:
+                if should_release_unused_cap():
+                    return {
+                        "inverter_derating_target": int(max_inverter_power),
+                        "inverter_derating_reason": (
+                            f"Feed-in blocked but solar stayed at {solar_production_w:.0f}W, "
+                            f"below the current derating target {previous_target_w:.0f}W, "
+                            f"for {unused_release_minutes} minutes - "
+                            "release the inverter to max power because the cap is not active"
+                        ),
+                        **no_alarm,
+                    }
+                if cap_not_reached and previous_target_w is not None:
+                    return {
+                        "inverter_derating_target": int(previous_target_w),
+                        "inverter_derating_reason": (
+                            f"Feed-in blocked but export is only {export_power_w:.0f}W and "
+                            f"solar {solar_production_w:.0f}W has not reached the current "
+                            f"derating target {previous_target_w:.0f}W yet - hold the cap "
+                            "steady instead of reopening further"
+                        ),
+                        "inverter_derating_alarm": False,
+                        "inverter_derating_alarm_reason": "No derating alarm",
+                        "inverter_derating_unreached_since": unreached_since,
+                    }
+                reopened_target_w = previous_target_w
+                if reopened_target_w is None:
+                    reopened_target_w = solar_production_w
+                reopened_target_w = min(
+                    float(max_inverter_power),
+                    max(0.0, reopened_target_w + release_step_w),
+                )
+                return {
+                    "inverter_derating_target": int(reopened_target_w),
+                    "inverter_derating_reason": (
+                        f"Feed-in blocked but export is only {export_power_w:.0f}W < "
+                        f"{lower_export_w:.0f}W - reopen inverter gradually toward the "
+                        "export target instead of jumping straight to max power"
+                    ),
+                    **no_alarm,
+                }
+
+            if export_power_w > upper_export_w:
+                target = solar_production_w - (export_power_w - export_limit_w)
+                target = max(0.0, min(float(max_inverter_power), target))
+                reason = (
+                    f"Feed-in blocked and exporting {export_power_w:.0f}W > "
+                    f"{upper_export_w:.0f}W - "
+                    f"reduce from current solar {solar_production_w:.0f}W toward {export_limit_w}W export"
+                )
+                response = {
+                    "inverter_derating_target": int(target),
+                    "inverter_derating_reason": reason,
+                    **no_alarm,
+                }
+                if battery_below_bypass_threshold:
+                    response["inverter_derating_alarm"] = True
+                    response["inverter_derating_alarm_reason"] = (
+                        f"Battery SOC {average_soc:.0f}% is below the "
+                        f"{soc_bypass_threshold:.0f}% bypass threshold, but export is still "
+                        f"{export_power_w:.0f}W. Derating was forced to protect the grid target."
+                    )
+                return response
+
+            held_target_w = previous_target_w
+            if held_target_w is None:
+                held_target_w = solar_production_w
+            if should_release_unused_cap():
+                return {
+                    "inverter_derating_target": int(max_inverter_power),
+                    "inverter_derating_reason": (
+                        f"Feed-in blocked and export {export_power_w:.0f}W is within the band, "
+                        f"but solar stayed at {solar_production_w:.0f}W below the current "
+                        f"derating target {previous_target_w:.0f}W for "
+                        f"{unused_release_minutes} minutes - release the "
+                        "inverter to max power because the cap is not active"
+                    ),
+                    **no_alarm,
+                }
+            if cap_not_reached and previous_target_w is not None:
+                return {
+                    "inverter_derating_target": int(previous_target_w),
+                    "inverter_derating_reason": (
+                        f"Feed-in blocked and export {export_power_w:.0f}W is within the "
+                        f"{lower_export_w:.0f}-{upper_export_w:.0f}W band, but solar "
+                        f"{solar_production_w:.0f}W has not reached the current derating "
+                        f"target {previous_target_w:.0f}W yet - keep the cap steady"
+                    ),
+                    "inverter_derating_alarm": False,
+                    "inverter_derating_alarm_reason": "No derating alarm",
+                    "inverter_derating_unreached_since": unreached_since,
+                }
+            return {
+                "inverter_derating_target": int(held_target_w),
+                "inverter_derating_reason": (
+                    f"Feed-in blocked and export {export_power_w:.0f}W is within the "
+                    f"{lower_export_w:.0f}-{upper_export_w:.0f}W band - hold the current "
+                    "derating target steady"
+                ),
+                **no_alarm,
+            }
+
+        # Fallback when grid or solar telemetry is missing: use a conservative
+        # absolute cap based on house load plus allowed export.
+        if battery_below_bypass_threshold:
+            return {
+                "inverter_derating_target": int(max_inverter_power),
+                "inverter_derating_reason": (
+                    f"Battery SOC {average_soc:.0f}% < {soc_bypass_threshold:.0f}% and "
+                    "grid/solar telemetry is incomplete - keep inverter unrestricted"
+                ),
+                **no_alarm,
+            }
+
+        if house_consumption_w is None:
+            return {
+                "inverter_derating_target": None,
+                "inverter_derating_reason": (
+                    "House consumption unavailable - cannot calculate inverter target fallback"
+                ),
+                **no_alarm,
+            }
+
+        safe_output_w = max(0.0, house_consumption_w + export_limit_w)
+        if solar_production_w is not None and solar_production_w <= safe_output_w:
+            target = min(float(max_inverter_power), safe_output_w)
+            return {
+                "inverter_derating_target": int(target),
+                "inverter_derating_reason": (
+                    f"Available solar {solar_production_w:.0f}W is already below "
+                    f"house {house_consumption_w:.0f}W + export target {export_limit_w}W - "
+                    "keep publishing the stable fallback cap"
+                ),
+                **no_alarm,
+            }
+
+        target = min(float(max_inverter_power), safe_output_w)
+        return {
+            "inverter_derating_target": int(target),
+            "inverter_derating_reason": (
+                f"Feed-in blocked with incomplete telemetry - fallback to house "
+                f"{house_consumption_w:.0f}W + export target {export_limit_w}W"
+            ),
+            **no_alarm,
         }
 
     def _build_car_decision_context(
@@ -1578,7 +1945,10 @@ class ChargingDecisionEngine:
 
         current_price = price_analysis.get("current_price")
 
-        allocated_solar = _safe_optional_float(power_allocation.get("solar_for_car")) or 0.0
+        allocated_solar = (
+            (_safe_optional_float(power_allocation.get("solar_for_car")) or 0.0)
+            + (_safe_optional_float(power_allocation.get("car_current_solar_usage")) or 0.0)
+        )
 
         return CarDecisionContext(
             current_price=current_price,
@@ -1902,7 +2272,10 @@ class ChargingDecisionEngine:
         car_limit_cap = min(self._settings.max_car_power, DEFAULT_SYSTEM_LIMITS.max_car_charger_power)
         car_grid_charging = data.get("car_grid_charging", False)
         car_solar_only = data.get("car_solar_only", False)
-        allocated_solar = power_allocation.get("solar_for_car", 0)
+        allocated_solar = (
+            (_safe_optional_float(power_allocation.get("solar_for_car")) or 0.0)
+            + (_safe_optional_float(power_allocation.get("car_current_solar_usage")) or 0.0)
+        )
 
         if car_charging_power <= min_threshold and not (car_grid_charging or car_solar_only):
             return {
@@ -1945,16 +2318,14 @@ class ChargingDecisionEngine:
                 "charger_limit_reason": f"Battery data unavailable - conservative limit ({int(limit)}W)",
             }, data)
 
-        max_soc_threshold = battery_analysis.get("max_soc_threshold", 80)
+        max_soc_threshold = battery_analysis.get("max_soc_threshold", DEFAULT_MAX_SOC)
         monthly_peak = data.get("monthly_grid_peak", 0)
         max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
 
         # Check for low SOC power sharing: when battery SOC is critically low and both
         # battery and car are charging from grid, limit car to 50% to prioritize battery
         battery_grid_charging = data.get("battery_grid_charging", False)
-        predictive_min_soc = self.config.get(
-            CONF_PREDICTIVE_CHARGING_MIN_SOC, DEFAULT_PREDICTIVE_CHARGING_MIN_SOC
-        )
+        predictive_min_soc = self._settings.predictive_min_soc
 
         if (average_soc < predictive_min_soc and
             battery_grid_charging and
@@ -2004,6 +2375,8 @@ class ChargingDecisionEngine:
         battery_grid_charging = data.get("battery_grid_charging", False)
         car_grid_charging = data.get("car_grid_charging", False)
         average_soc = battery_analysis.get("average_soc")
+        monthly_peak = data.get("monthly_grid_peak", 0)
+        peak_context_reason = self._format_grid_setpoint_context_reason(monthly_peak)
 
         min_threshold = self._settings.min_car_charging_threshold
         significant_car_charging = car_charging_power >= min_threshold
@@ -2011,17 +2384,26 @@ class ChargingDecisionEngine:
         # Handle unavailable battery data
         if average_soc is None:
             if significant_car_charging and car_grid_charging:
-                monthly_peak = data.get("monthly_grid_peak", 0)
                 max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
-                grid_setpoint = min(car_charging_power, max_setpoint)
+                effective_car_power = (
+                    min(car_charging_power, charger_limit)
+                    if charger_limit > 0
+                    else car_charging_power
+                )
+                grid_setpoint = min(effective_car_power, max_setpoint)
                 return {
                     "grid_setpoint": int(grid_setpoint),
-                    "grid_setpoint_reason": f"Battery data unavailable - grid only for car ({int(grid_setpoint)}W)",
+                    "grid_setpoint_reason": (
+                        f"Battery data unavailable - grid import reserved for car pulling {int(grid_setpoint)}W"
+                        f" | {peak_context_reason}"
+                    ),
                     "grid_components": {"battery": 0, "car": int(grid_setpoint)},
                 }
             return {
                 "grid_setpoint": 0,
-                "grid_setpoint_reason": "Battery data unavailable - no grid power allocated",
+                "grid_setpoint_reason": (
+                    f"Battery data unavailable - no grid power allocated | {peak_context_reason}"
+                ),
                 "grid_components": {"battery": 0, "car": 0},
             }
         
@@ -2030,24 +2412,30 @@ class ChargingDecisionEngine:
         if significant_car_charging and car_solar_only:
             return {
                 "grid_setpoint": 0,
-                "grid_setpoint_reason": "Solar-only car charging detected - grid setpoint 0W",
+                "grid_setpoint_reason": (
+                    f"Solar-only car charging detected - grid setpoint 0W | {peak_context_reason}"
+                ),
                 "grid_components": {"battery": 0, "car": 0},
             }
         
         # Calculate grid needs
-        monthly_peak = data.get("monthly_grid_peak", 0)
         max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
         
         grid_setpoint_parts = []
         car_grid_need = 0
         
         if significant_car_charging and car_grid_charging:
-            allocated_solar = power_allocation.get("solar_for_car", 0)
-            car_current_solar = power_allocation.get("car_current_solar_usage", 0)
+            allocated_solar = (_safe_optional_float(power_allocation.get("solar_for_car")) or 0.0)
+            car_current_solar = (_safe_optional_float(power_allocation.get("car_current_solar_usage")) or 0.0)
             car_available_solar = allocated_solar + car_current_solar
-            car_grid_need = max(0, min(car_charging_power - car_available_solar, max_setpoint))
+            effective_car_power = (
+                min(car_charging_power, charger_limit)
+                if charger_limit > 0
+                else car_charging_power
+            )
+            car_grid_need = max(0, min(effective_car_power - car_available_solar, max_setpoint))
             if car_grid_need > 0:
-                grid_setpoint_parts.append(f"car {int(car_grid_need)}W")
+                grid_setpoint_parts.append(f"car pulling {int(car_grid_need)}W")
         
         battery_grid_need = 0
         if battery_grid_charging:
@@ -2055,7 +2443,7 @@ class ChargingDecisionEngine:
             max_battery_power = self._settings.max_battery_power
             battery_grid_need = min(remaining_capacity, max_battery_power)
             if battery_grid_need > 0:
-                grid_setpoint_parts.append(f"battery {int(battery_grid_need)}W")
+                grid_setpoint_parts.append(f"battery charging {int(battery_grid_need)}W")
         
         grid_setpoint = car_grid_need + battery_grid_need
         max_grid_power = self._get_max_grid_power()
@@ -2063,9 +2451,16 @@ class ChargingDecisionEngine:
         
         # Create reason
         if not grid_setpoint_parts:
-            reason = "No grid charging needed"
+            reason = f"No grid charging needed | {peak_context_reason}"
         else:
-            reason = f"Grid setpoint for {' + '.join(grid_setpoint_parts)} = {int(grid_setpoint)}W"
+            components_text = " + ".join(grid_setpoint_parts)
+            if len(grid_setpoint_parts) == 1:
+                reason = f"Grid import reserved for {components_text} | {peak_context_reason}"
+            else:
+                reason = (
+                    f"Grid import reserved for {components_text} = {int(grid_setpoint)}W"
+                    f" | {peak_context_reason}"
+                )
             if car_grid_need == 0 and significant_car_charging:
                 reason += " (car charging not allowed)"
         

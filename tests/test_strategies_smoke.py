@@ -9,6 +9,7 @@ from custom_components.electricity_planner.strategies import (
     SOCBufferChargingStrategy,
     StrategyManager,
 )
+from custom_components.electricity_planner.const import DEFAULT_MAX_SOC
 from custom_components.electricity_planner.defaults import calculate_soc_price_multiplier
 
 
@@ -63,6 +64,19 @@ def test_solar_priority_prevents_grid_when_solar_allocated():
     should_charge, reason = strategy.should_charge(context)
     assert should_charge is False
     assert "solar power" in reason.lower()
+
+
+def test_solar_priority_uses_default_max_soc_when_missing():
+    """Missing max_soc_threshold should use the integration default, not a stale literal."""
+    strategy = SolarPriorityStrategy()
+    context = {
+        "power_allocation": {"solar_for_batteries": 0, "remaining_solar": 500},
+        "battery_analysis": {"average_soc": DEFAULT_MAX_SOC - 5},
+    }
+
+    should_charge, reason = strategy.should_charge(context)
+    assert should_charge is False
+    assert "preventing solar waste" in reason
 
 
 def test_very_low_price_charges_at_bottom_prices():

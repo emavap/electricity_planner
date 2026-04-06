@@ -105,7 +105,7 @@ Reduces the grid-charging Max SOC threshold when high solar production is foreca
 - `solar_forecast_entity`: Tomorrow's forecast sensor (e.g., `sensor.energy_production_tomorrow`)
 - `solar_forecast_today_entity`: Today's forecast sensor (optional, recommended)
 - `solar_forecast_start_hour`: Hour (12-23) to start reading forecast, default 20
-- `max_soc_threshold_sunny`: Grid charging max SOC on sunny days, default 50%
+- `max_soc_threshold_sunny`: Grid charging max SOC on sunny days, default 35%
 
 **Formula:** `forecast_kwh >= (total_battery_capacity_kwh / 2)` → sunny day active
 

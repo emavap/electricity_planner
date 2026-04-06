@@ -2,17 +2,24 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Any, NamedTuple
 
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.util import dt as dt_util
 
+try:
+    from pytz import AmbiguousTimeError, NonExistentTimeError
+except ImportError:  # pragma: no cover - Home Assistant test env provides pytz
+    AmbiguousTimeError = NonExistentTimeError = ValueError
+
 from .const import (
     POWER_ALLOCATION_TOLERANCE,
     POWER_ALLOCATION_PRECISION,
     PRICE_POSITION_CACHE_SIZE,
+    TARIFF_DAY_START_HOUR,
+    TARIFF_DAY_END_HOUR,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,6 +60,144 @@ class PriceInterval(NamedTuple):
     start: datetime
     end: datetime
     price: float
+
+
+def _coerce_local_datetime(naive_local: datetime) -> datetime:
+    """Attach Home Assistant's local timezone to a naive wall-clock datetime."""
+    timezone = dt_util.DEFAULT_TIME_ZONE
+    if hasattr(timezone, "localize"):
+        try:
+            return timezone.localize(naive_local, is_dst=None)
+        except NonExistentTimeError:
+            # Preserve the intended local tariff slot by moving through spring-forward gaps.
+            return timezone.localize(naive_local, is_dst=False)
+        except AmbiguousTimeError:
+            return timezone.localize(naive_local, is_dst=False)
+    return naive_local.replace(tzinfo=timezone)
+
+
+def _same_local_time_last_week(target_time_utc: datetime) -> datetime:
+    """Return the same local wall-clock time one calendar week earlier."""
+    target_local = dt_util.as_local(target_time_utc)
+    week_ago_naive = target_local.replace(tzinfo=None) - timedelta(days=7)
+    return _coerce_local_datetime(week_ago_naive)
+
+
+def resolve_transport_cost_from_lookup(
+    transport_lookup: list[dict[str, Any]] | None,
+    start_time_utc: datetime,
+    reference_now: datetime | None = None,
+) -> float | None:
+    """Resolve transport cost for a timestamp using local-time weekly matching."""
+    if not transport_lookup:
+        return None
+
+    if reference_now is None:
+        reference_now = dt_util.utcnow()
+
+    target_local = dt_util.as_local(start_time_utc)
+
+    if start_time_utc > reference_now:
+        week_ago_local = _same_local_time_last_week(start_time_utc)
+        cost_from_pattern: float | None = None
+        for entry in transport_lookup:
+            entry_cost = entry.get("cost")
+            if entry_cost is None:
+                continue
+            entry_start_str = entry.get("start")
+            if entry_start_str is None:
+                cost_from_pattern = float(entry_cost)
+                continue
+            entry_start = dt_util.parse_datetime(entry_start_str)
+            if entry_start is None:
+                continue
+            entry_local = dt_util.as_local(dt_util.as_utc(entry_start))
+            if entry_local <= week_ago_local:
+                cost_from_pattern = float(entry_cost)
+            else:
+                break
+
+        if cost_from_pattern is not None:
+            return cost_from_pattern
+
+    cost: float | None = None
+    for entry in transport_lookup:
+        entry_cost = entry.get("cost")
+        if entry_cost is None:
+            continue
+        entry_start_str = entry.get("start")
+        if entry_start_str is None:
+            cost = float(entry_cost)
+            continue
+        entry_start = dt_util.parse_datetime(entry_start_str)
+        if entry_start is None:
+            continue
+        entry_local = dt_util.as_local(dt_util.as_utc(entry_start))
+        if entry_local <= target_local:
+            cost = float(entry_cost)
+        else:
+            break
+
+    return cost
+
+
+def is_day_tariff(timestamp_utc: datetime, p1_tariff_code: str | None = None) -> bool:
+    """Determine if a timestamp falls in the Belgian day tariff period.
+
+    Uses the P1 meter tariff code if available (real-time), otherwise
+    applies the standard Fluvius day/night schedule:
+      Day:   Mon-Fri 07:00 - 22:00 local time
+      Night: Mon-Fri 22:00 - 07:00 local time + all day Sat/Sun
+
+    Args:
+        timestamp_utc: The UTC timestamp to evaluate.
+        p1_tariff_code: Current P1 meter tariff code ("1" = day, "2" = night).
+            Only used when timestamp is within the current 15-minute window.
+
+    Returns:
+        True if the timestamp falls in the day tariff period.
+    """
+    if p1_tariff_code is not None:
+        # P1 tariff codes: "1" = day/peak, "2" = night/off-peak
+        return str(p1_tariff_code).strip() == "1"
+
+    # Fall back to standard Belgian schedule for future/past timestamps
+    local_time = dt_util.as_local(timestamp_utc)
+    weekday = local_time.weekday()  # 0=Mon, 6=Sun
+
+    # Weekend = always night tariff
+    if weekday >= 5:
+        return False
+
+    # Weekday: day tariff from 07:00 to 22:00
+    return TARIFF_DAY_START_HOUR <= local_time.hour < TARIFF_DAY_END_HOUR
+
+
+def calculate_transport_cost_from_components(
+    is_day: bool,
+    transport_day: float,
+    transport_night: float,
+    accijns: float,
+    bijdrage: float,
+    gsc: float,
+    wkk: float,
+) -> float:
+    """Calculate total transport cost from individual components.
+
+    Args:
+        is_day: True if day tariff applies, False for night/weekend.
+        transport_day: Fluvius day network tariff (€/kWh).
+        transport_night: Fluvius night/weekend network tariff (€/kWh).
+        accijns: Bijzondere accijns op Energie (€/kWh).
+        bijdrage: Bijdrage op de Energie (€/kWh).
+        gsc: Groene stroom certificaten (€/kWh).
+        wkk: Warmte-krachtkoppeling (€/kWh).
+
+    Returns:
+        Total transport + taxes + certificates cost in €/kWh.
+    """
+    network_rate = transport_day if is_day else transport_night
+    return network_rate + accijns + bijdrage + gsc + wkk
 
 
 class DataValidator:

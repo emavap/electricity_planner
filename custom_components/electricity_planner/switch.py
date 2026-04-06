@@ -6,7 +6,9 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import STATE_ON
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -36,7 +38,7 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class CarPermissiveModeSwitch(CoordinatorEntity, SwitchEntity):
+class CarPermissiveModeSwitch(CoordinatorEntity, RestoreEntity, SwitchEntity):
     """Switch to enable permissive car charging mode (higher price threshold)."""
 
     def __init__(
@@ -60,6 +62,25 @@ class CarPermissiveModeSwitch(CoordinatorEntity, SwitchEntity):
     def is_on(self) -> bool:
         """Return true if permissive mode is enabled."""
         return self.coordinator._car_permissive_mode_active
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last switch state after Home Assistant restarts."""
+        await super().async_added_to_hass()
+
+        last_state = await self.async_get_last_state()
+        if last_state is None:
+            return
+
+        restored_state = last_state.state == STATE_ON
+        if self.coordinator._car_permissive_mode_active == restored_state:
+            return
+
+        _LOGGER.info(
+            "Restored car permissive charging mode to %s",
+            "on" if restored_state else "off",
+        )
+        self.coordinator._car_permissive_mode_active = restored_state
+        await self.coordinator.async_request_refresh()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

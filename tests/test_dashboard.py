@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import yaml
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.electricity_planner import dashboard
@@ -74,6 +76,81 @@ def test_dashboard_core_entity_suffixes_include_dual_threshold_controls():
     assert "max_soc_threshold" in dashboard.CORE_ENTITY_SUFFIXES
     assert "max_soc_threshold_sunny" in dashboard.CORE_ENTITY_SUFFIXES
     assert "sunny_forecast_threshold_kwh" in dashboard.CORE_ENTITY_SUFFIXES
+
+
+def test_dashboard_template_shows_buy_price_stack_and_market_reference():
+    """The chart template should render buy-side components without stacking raw market into the total bars."""
+    template = Path(dashboard.__file__).with_name("dashboard_template.yaml").read_text()
+
+    assert "Math.max(transport, 0)" not in template
+    assert "attributes?.price_threshold" in template
+    assert "lastInterval.end ?? lastInterval.start" in template
+    assert "interval.raw_price ?? 0" in template
+    assert "interval.adjusted_energy_price ?? 0" in template
+    assert "name: Contract energy price" in template
+    assert "name: Raw market price" in template
+
+
+def test_bundled_single_phase_dashboard_renders_price_components_with_four_decimals():
+    """Bundled single-phase dashboard should render formatted values without custom rows."""
+    dashboard_path = Path(__file__).parent.parent / "electricity_planner_dashboard.yaml"
+    content = dashboard_path.read_text(encoding="utf-8")
+
+    assert "title: Price components" in content
+    assert "type: custom:template-entity-row" not in content
+    assert "type: markdown" in content
+    assert "**Total price:**" in content
+    assert "**Energy market price:**" in content
+    assert "**Transport cost:**" in content
+    assert "| round(4)" in content
+    assert "€/kWh" in content
+
+
+def test_bundled_single_phase_dashboard_documents_required_custom_cards():
+    """Bundled single-phase dashboard should declare every custom card it uses."""
+    dashboard_path = Path(__file__).parent.parent / "electricity_planner_dashboard.yaml"
+    content = dashboard_path.read_text(encoding="utf-8")
+
+    assert 'Install "Gauge Card Pro"' in content
+    assert 'Install "ApexCharts Card"' in content
+    assert 'Install "Button Card"' in content
+    assert "custom:gauge-card-pro" in content
+    assert "custom:apexcharts-card" in content
+    assert "custom:button-card" in content
+
+
+def test_bundled_three_phase_dashboard_uses_template_rows_for_phase_details():
+    """Bundled three-phase dashboard should not use unsupported attribute-row formatting."""
+    dashboard_path = Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    content = dashboard_path.read_text(encoding="utf-8")
+
+    assert "type: custom:template-entity-row" in content
+    assert "Battery reason" in content
+    assert "Car reason" in content
+    assert "~ ' W'" in content
+
+
+def test_bundled_three_phase_template_rows_define_backing_entities():
+    """Every template row in the bundled three-phase dashboard should define an entity."""
+    dashboard_path = Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    content = dashboard_path.read_text(encoding="utf-8")
+    parsed = yaml.safe_load(content)
+
+    missing_entity_rows: list[str] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "custom:template-entity-row" and "entity" not in node:
+                missing_entity_rows.append(node.get("name", "<unnamed>"))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(parsed)
+
+    assert missing_entity_rows == []
 
 
 @pytest.mark.asyncio
@@ -209,16 +286,18 @@ async def test_dashboard_removal_only_deletes_managed_dashboard():
 
     with patch.object(dashboard, "_dashboard_url_path", return_value="electricity-planner-planner-"), patch.object(
         dashboard, "_get_lovelace_handles", return_value=handles_managed
-    ):
+    ), patch.object(dashboard.frontend, "async_remove_panel") as remove_panel:
         await dashboard.async_remove_dashboard(hass, entry)
     assert collection.deleted == ["managed-id"]
+    remove_panel.assert_called_once_with(hass, "electricity-planner-planner-")
 
     collection.deleted.clear()
     with patch.object(dashboard, "_dashboard_url_path", return_value="electricity-planner-planner-"), patch.object(
         dashboard, "_get_lovelace_handles", return_value=handles_unmanaged
-    ):
+    ), patch.object(dashboard.frontend, "async_remove_panel") as remove_panel:
         await dashboard.async_remove_dashboard(hass, entry)
     assert collection.deleted == []
+    remove_panel.assert_called_once_with(hass, "electricity-planner-planner-")
 
 
 def test_schedule_entity_map_retry_deduplicates_pending_retry():
@@ -261,3 +340,21 @@ async def test_remove_dashboard_cancels_pending_entity_map_retry():
     retry_handles = hass.data[DOMAIN].get(dashboard.ENTITY_MAP_RETRY_HANDLES_KEY, {})
     assert entry.entry_id not in retry_counts
     assert entry.entry_id not in retry_handles
+
+
+@pytest.mark.asyncio
+async def test_dashboard_template_includes_grid_setpoint_reason():
+    """Bundled dashboard should render the grid setpoint reason attribute."""
+    template = dashboard._load_template_text()
+
+    assert "entity: sensor.electricity_planner_grid_setpoint" in template
+    assert "attribute: grid_setpoint_reason" in template
+
+
+@pytest.mark.asyncio
+async def test_dashboard_template_includes_inverter_derating_entities():
+    """Bundled dashboard should surface the inverter derating target and alarm."""
+    template = dashboard._load_template_text()
+
+    assert "entity: sensor.electricity_planner_inverter_derating_target" in template
+    assert "entity: binary_sensor.electricity_planner_solar_derating_alarm" in template

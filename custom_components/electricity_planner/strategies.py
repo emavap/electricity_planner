@@ -6,6 +6,7 @@ from typing import Any
 import logging
 
 from .const import (
+    DEFAULT_MAX_SOC,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_EMERGENCY_SOC,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
@@ -49,7 +50,7 @@ class SolarPriorityStrategy(ChargingStrategy):
         allocated_solar = allocation.get("solar_for_batteries", 0)
         remaining_solar = allocation.get("remaining_solar", 0)
         average_soc = battery.get("average_soc")
-        max_soc = battery.get("max_soc_threshold", 90)
+        max_soc = battery.get("max_soc_threshold", DEFAULT_MAX_SOC)
 
         # If battery data unavailable, cannot determine solar priority
         if average_soc is None:
@@ -132,7 +133,7 @@ class VeryLowPriceStrategy(ChargingStrategy):
             return False, ""
 
         # Simple logic: Very low price → charge (unless battery is full)
-        max_soc = battery.get("max_soc_threshold", 90)
+        max_soc = battery.get("max_soc_threshold", DEFAULT_MAX_SOC)
         average_soc = battery.get("average_soc")
 
         # If battery data unavailable, default to charging (price is very low!)
@@ -192,7 +193,7 @@ class SOCBufferChargingStrategy(ChargingStrategy):
         if average_soc is None:
             return False, ""
 
-        max_soc = battery.get("max_soc_threshold", 90)
+        max_soc = battery.get("max_soc_threshold", DEFAULT_MAX_SOC)
         if average_soc >= max_soc:
             return False, ""  # Battery full, no need to charge
 
@@ -273,7 +274,7 @@ class DynamicPriceStrategy(ChargingStrategy):
 
         # Check if battery is already full - no need to charge
         average_soc = battery.get("average_soc")
-        max_soc = battery.get("max_soc_threshold", 90)
+        max_soc = battery.get("max_soc_threshold", DEFAULT_MAX_SOC)
         if average_soc is not None and average_soc >= max_soc:
             return False, f"Battery full ({average_soc:.0f}% ≥ {max_soc}%) - no grid charging needed"
 
