@@ -53,7 +53,10 @@ actions:
                 {{ (target_limit_w - current_limit_w) | abs }}
           - condition: template
             value_template: >-
-              {{ write_delta_w >= 100 }}
+              {{
+                (target_limit_w < current_limit_w and write_delta_w >= 50) or
+                (target_limit_w >= current_limit_w and write_delta_w >= 100)
+              }}
           - action: number.set_value
             target:
               entity_id: number.inverter_power_derating

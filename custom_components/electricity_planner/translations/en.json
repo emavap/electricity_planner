@@ -14,6 +14,100 @@
             "settings": {
                 "title": "Settings & Thresholds",
                 "description": "Configure charging thresholds and preferences.",
+                "sections": {
+                    "battery_strategy": {
+                        "name": "Battery SOC Targets",
+                        "description": "These values define how much charge the planner tries to keep in the battery under normal and emergency conditions.",
+                        "data": {
+                            "min_soc_threshold": "Minimum SOC Threshold",
+                            "max_soc_threshold": "Maximum SOC Threshold",
+                            "emergency_soc_threshold": "Emergency SOC Threshold",
+                            "soc_buffer_target": "SOC Buffer Target",
+                            "soc_price_multiplier_max": "SOC Price Multiplier (Max)"
+                        },
+                        "data_description": {
+                            "min_soc_threshold": "Minimum battery charge level to maintain (%)",
+                            "max_soc_threshold": "Maximum battery charge level target (%)",
+                            "emergency_soc_threshold": "SOC level below which emergency charging is triggered regardless of price (%)",
+                            "soc_buffer_target": "SOC level above which no price relaxation is applied. Below this, the price threshold is gradually relaxed (%)",
+                            "soc_price_multiplier_max": "Maximum price threshold multiplier when battery is at/below emergency SOC (1.3 = accept 30% higher prices)"
+                        }
+                    },
+                    "forecast_entities": {
+                        "name": "Solar Forecast Behavior",
+                        "description": "These settings decide when the planner trusts solar forecasts and how much battery headroom it keeps for sunny days.",
+                        "data": {
+                            "solar_forecast_start_hour": "Forecast Start Hour",
+                            "max_soc_threshold_sunny": "Max SOC Grid Charge (Sunny Day)",
+                            "sunny_forecast_threshold_kwh": "Sunny Forecast Trigger (kWh)",
+                            "significant_solar_threshold": "Significant Solar Threshold"
+                        },
+                        "data_description": {
+                            "solar_forecast_start_hour": "Hour of the day (12-23) when the system starts reading tomorrow's solar forecast. Earlier = more time to react, later = more accurate forecast. Default: 20 (8 PM)",
+                            "max_soc_threshold_sunny": "Max SOC for grid charging when tomorrow is sunny (%). Grid charging stops at this level to leave room for free solar energy",
+                            "sunny_forecast_threshold_kwh": "Solar forecast threshold in kWh that activates sunny-day grid charging mode",
+                            "significant_solar_threshold": "Solar surplus power level considered significant enough to prefer over grid (W)"
+                        }
+                    },
+                    "price_strategy": {
+                        "name": "Price Logic",
+                        "description": "These thresholds control when the planner considers buying from the grid cheap enough or exporting solar valuable enough.",
+                        "data": {
+                            "price_threshold": "Price Threshold",
+                            "price_adjustment_multiplier": "Price Adjustment Multiplier",
+                            "price_adjustment_offset": "Price Adjustment Offset",
+                            "very_low_price_threshold": "Very Low Price Threshold",
+                            "feedin_price_threshold": "Feed-in Solar Price Threshold",
+                            "feedin_adjustment_multiplier": "Feed-in Adjustment Multiplier",
+                            "feedin_adjustment_offset": "Feed-in Adjustment Offset",
+                            "use_dynamic_threshold": "Use Dynamic Threshold",
+                            "dynamic_threshold_confidence": "Dynamic Threshold Confidence",
+                            "use_average_threshold": "Use Average Threshold"
+                        },
+                        "data_description": {
+                            "price_threshold": "Price threshold for charging decisions (€/kWh)",
+                            "price_adjustment_multiplier": "Multiplier applied to raw price (e.g. 1.04 for the Energie.be dynamic contract). Default: 1.04",
+                            "price_adjustment_offset": "Fixed €/kWh offset added after multiplier (e.g. 0.005 for 0.5 c€ on an excl. VAT market basis). Default: 0.005",
+                            "very_low_price_threshold": "Percentage of daily price range considered 'very low' (e.g., 30 = bottom 30%)",
+                            "feedin_price_threshold": "Price threshold above which solar export to grid is enabled (€/kWh)",
+                            "feedin_adjustment_multiplier": "Multiplier applied to raw price when calculating net feed-in value. Default: 1.0",
+                            "feedin_adjustment_offset": "Fixed €/kWh offset added to feed-in price (negative values model costs). Default: -0.0098",
+                            "use_dynamic_threshold": "Enable intelligent price analysis for more selective charging at better prices",
+                            "dynamic_threshold_confidence": "Confidence required for dynamic charging decisions (higher = more selective)",
+                            "use_average_threshold": "Use 24-hour rolling average of future prices as the charging threshold"
+                        }
+                    },
+                    "car_strategy": {
+                        "name": "Car Charging Rules",
+                        "description": "These values only affect EV charging behavior and how permissive the planner can be when deciding to start.",
+                        "data": {
+                            "min_car_charging_duration": "Min Car Charging Duration",
+                            "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier"
+                        },
+                        "data_description": {
+                            "min_car_charging_duration": "Minimum consecutive hours of low prices required before starting car charging",
+                            "car_permissive_threshold_multiplier": "Multiplier applied to car charging threshold when permissive mode is active (1.2 = +20% higher threshold)"
+                        }
+                    },
+                    "inverter_strategy": {
+                        "name": "Inverter Export Control",
+                        "description": "These settings tune how strongly the planner derates solar export when feed-in should be limited.",
+                        "data": {
+                            "max_inverter_power": "Max Inverter Power",
+                            "inverter_export_limit": "Inverter Export Target",
+                            "inverter_export_deadband": "Inverter Export Deadband",
+                            "inverter_derating_unused_release_minutes": "Derating Relaxation Delay",
+                            "inverter_derating_soc_bypass_threshold": "Derating SOC Bypass Threshold"
+                        },
+                        "data_description": {
+                            "max_inverter_power": "Maximum inverter output used when feed-in is allowed and as the upper cap for derating guidance (W)",
+                            "inverter_export_limit": "Grid export target used while feed-in is blocked. The planner aims to keep net export around this value, for example 80W (W)",
+                            "inverter_export_deadband": "Allowed deviation around the export target before the planner changes derating. With the default 40W deadband and 80W target, the planner holds steady between 40W and 120W export (W)",
+                            "inverter_derating_unused_release_minutes": "Minutes to wait before raising the inverter cap by one small step when export stays safely below the target. Higher values make derating reopen more cautiously. Default: 5 minutes",
+                            "inverter_derating_soc_bypass_threshold": "If average battery SOC is below this threshold, the planner stops derating and lets the inverter run freely so solar can charge the battery (%)"
+                        }
+                    }
+                },
                 "data": {
                     "min_soc_threshold": "Minimum SOC Threshold",
                     "max_soc_threshold": "Maximum SOC Threshold",
@@ -39,7 +133,7 @@
                     "max_inverter_power": "Max Inverter Power",
                     "inverter_export_limit": "Inverter Export Target",
                     "inverter_export_deadband": "Inverter Export Deadband",
-                    "inverter_derating_unused_release_minutes": "Unused Derating Release Delay",
+                    "inverter_derating_unused_release_minutes": "Derating Relaxation Delay",
                     "inverter_derating_soc_bypass_threshold": "Derating SOC Bypass Threshold"
                 },
                 "data_description": {
@@ -67,13 +161,119 @@
                     "max_inverter_power": "Maximum inverter output used when feed-in is allowed and as the upper cap for derating guidance (W)",
                     "inverter_export_limit": "Grid export target used while feed-in is blocked. The planner aims to keep net export around this value, for example 80W (W)",
                     "inverter_export_deadband": "Allowed deviation around the export target before the planner changes derating. With the default 40W deadband and 80W target, the planner holds steady between 40W and 120W export (W)",
-                    "inverter_derating_unused_release_minutes": "Minutes to wait before releasing derating back to max power if PV never reaches the current cap. Default: 5 minutes",
+                    "inverter_derating_unused_release_minutes": "Minutes to wait before raising the inverter cap by one small step when export stays safely below the target. Higher values make derating reopen more cautiously. Default: 5 minutes",
                     "inverter_derating_soc_bypass_threshold": "If average battery SOC is below this threshold, the planner stops derating and lets the inverter run freely so solar can charge the battery (%)"
                 }
             },
             "entities": {
                 "title": "Entity Selection",
                 "description": "Select sensors and entities used by the planner.",
+                "sections": {
+                    "price_entities": {
+                        "name": "Prices & Batteries",
+                        "description": "Core inputs the planner needs for price comparison and battery state tracking.",
+                        "data": {
+                            "nordpool_config_entry": "Nord Pool Configuration (Optional)",
+                            "current_price_entity": "Current Price Entity",
+                            "highest_price_entity": "Highest Price Entity",
+                            "lowest_price_entity": "Lowest Price Entity",
+                            "next_price_entity": "Next Price Entity",
+                            "battery_soc_entities": "Battery SOC Entities"
+                        },
+                        "data_description": {
+                            "nordpool_config_entry": "Select the Nord Pool config entry to enable full interval price data",
+                            "current_price_entity": "Current electricity price from Nord Pool integration",
+                            "highest_price_entity": "Highest electricity price today from Nord Pool",
+                            "lowest_price_entity": "Lowest electricity price today from Nord Pool",
+                            "next_price_entity": "Next hour electricity price from Nord Pool",
+                            "battery_soc_entities": "Entities providing battery state of charge (%)"
+                        }
+                    },
+                    "single_phase_entities": {
+                        "name": "Single-Phase Power Sensors",
+                        "description": "Use these sensors when your installation is monitored as one combined phase.",
+                        "data": {
+                            "solar_production_entity": "Solar Production Entity",
+                            "house_consumption_entity": "House Consumption Entity",
+                            "car_charging_power_entity": "Car Charging Power Entity (Optional)"
+                        },
+                        "data_description": {
+                            "solar_production_entity": "Current solar production in W",
+                            "house_consumption_entity": "Current house power consumption in W",
+                            "car_charging_power_entity": "Car charging power in W"
+                        }
+                    },
+                    "three_phase_entities": {
+                        "name": "Three-Phase Power Sensors",
+                        "description": "Optional per-phase sensors for L1, L2 and L3. Leave any field empty if that measurement is unavailable.",
+                        "data": {
+                            "phase_1_solar_entity": "Phase 1 Solar Entity (Optional)",
+                            "phase_1_consumption_entity": "Phase 1 Consumption Entity (Optional)",
+                            "phase_1_car_entity": "Phase 1 Car Power Entity (Optional)",
+                            "phase_1_battery_power_entity": "Phase 1 Battery Power Entity (Optional)",
+                            "phase_2_solar_entity": "Phase 2 Solar Entity (Optional)",
+                            "phase_2_consumption_entity": "Phase 2 Consumption Entity (Optional)",
+                            "phase_2_car_entity": "Phase 2 Car Power Entity (Optional)",
+                            "phase_2_battery_power_entity": "Phase 2 Battery Power Entity (Optional)",
+                            "phase_3_solar_entity": "Phase 3 Solar Entity (Optional)",
+                            "phase_3_consumption_entity": "Phase 3 Consumption Entity (Optional)",
+                            "phase_3_car_entity": "Phase 3 Car Power Entity (Optional)",
+                            "phase_3_battery_power_entity": "Phase 3 Battery Power Entity (Optional)"
+                        },
+                        "data_description": {
+                            "phase_1_solar_entity": "Phase L1 solar production sensor (leave blank if unavailable)",
+                            "phase_1_consumption_entity": "Phase L1 house consumption sensor (leave blank if unavailable)",
+                            "phase_1_car_entity": "Phase L1 EV charger power sensor (leave blank if unavailable)",
+                            "phase_1_battery_power_entity": "Phase L1 battery power sensor in W (negative = charging, leave blank if unavailable)",
+                            "phase_2_solar_entity": "Phase L2 solar production sensor (leave blank if unavailable)",
+                            "phase_2_consumption_entity": "Phase L2 house consumption sensor (leave blank if unavailable)",
+                            "phase_2_car_entity": "Phase L2 EV charger power sensor (leave blank if unavailable)",
+                            "phase_2_battery_power_entity": "Phase L2 battery power sensor in W (negative = charging, leave blank if unavailable)",
+                            "phase_3_solar_entity": "Phase L3 solar production sensor (leave blank if unavailable)",
+                            "phase_3_consumption_entity": "Phase L3 house consumption sensor (leave blank if unavailable)",
+                            "phase_3_car_entity": "Phase L3 EV charger power sensor (leave blank if unavailable)",
+                            "phase_3_battery_power_entity": "Phase L3 battery power sensor in W (negative = charging, leave blank if unavailable)"
+                        }
+                    },
+                    "grid_costs": {
+                        "name": "Grid & Tariffs",
+                        "description": "Optional network cost inputs used to calculate a more realistic buy price and power limits.",
+                        "data": {
+                            "monthly_grid_peak_entity": "Monthly Grid Peak Entity (Optional)",
+                            "p1_tariff_entity": "P1 Meter Tariff Entity (Optional)",
+                            "transport_cost_day": "Transport Cost Day",
+                            "transport_cost_night": "Transport Cost Night/Weekend",
+                            "energy_tax_accijns": "Bijzondere Accijns",
+                            "energy_tax_bijdrage": "Bijdrage op de Energie",
+                            "energy_cost_gsc": "GSC (Groene Stroom)",
+                            "energy_cost_wkk": "WKK",
+                            "grid_power_entity": "Grid Power Entity (Optional)"
+                        },
+                        "data_description": {
+                            "monthly_grid_peak_entity": "Current month grid peak in W for power management",
+                            "p1_tariff_entity": "P1 meter tariff sensor (1=day, 2=night) for day/night transport cost switching",
+                            "transport_cost_day": "Fluvius network tariff for day hours (€/kWh, excl. VAT)",
+                            "transport_cost_night": "Fluvius network tariff for night and weekends (€/kWh, excl. VAT)",
+                            "energy_tax_accijns": "Bijzondere accijns op Energie (€/kWh)",
+                            "energy_tax_bijdrage": "Bijdrage op de Energie (€/kWh)",
+                            "energy_cost_gsc": "Groene stroom certificaten (€/kWh)",
+                            "energy_cost_wkk": "Warmte-krachtkoppeling (€/kWh)",
+                            "grid_power_entity": "Real-time grid power in W (positive = import, negative = export) used for peak detection and inverter derating diagnostics"
+                        }
+                    },
+                    "forecast_entities": {
+                        "name": "Solar Forecast",
+                        "description": "Forecast sensors are optional, but they improve overnight charging decisions by keeping room for tomorrow's solar.",
+                        "data": {
+                            "solar_forecast_entity": "Energy Production Tomorrow (Optional)",
+                            "solar_forecast_today_entity": "Energy Production Today (Optional)"
+                        },
+                        "data_description": {
+                            "solar_forecast_entity": "Tomorrow's solar production forecast in kWh (e.g. sensor.energy_production_tomorrow). Read from the forecast start hour onwards to decide overnight grid charging",
+                            "solar_forecast_today_entity": "Today's solar production forecast in kWh (e.g. sensor.energy_production_today). Used between midnight and the forecast start hour to validate the cached forecast"
+                        }
+                    }
+                },
                 "data": {
                     "current_price_entity": "Current Price Entity",
                     "highest_price_entity": "Highest Price Entity",
@@ -154,6 +354,36 @@
             "safety_limits": {
                 "title": "Safety Limits",
                 "description": "Configure power and SOC safety limits. {validation_errors}",
+                "sections": {
+                    "power_limits": {
+                        "name": "Power Limits",
+                        "description": "Hard limits that the planner should never exceed while charging from the grid.",
+                        "data": {
+                            "max_battery_power": "Max Battery Power",
+                            "max_car_power": "Max Car Power",
+                            "max_grid_power": "Max Grid Power",
+                            "base_grid_setpoint": "Base Grid Setpoint"
+                        },
+                        "data_description": {
+                            "max_battery_power": "Maximum power limit for battery charging/discharging (W)",
+                            "max_car_power": "Maximum power limit for car charging (W)",
+                            "max_grid_power": "Maximum power limit from grid — safety limit (W)",
+                            "base_grid_setpoint": "Base minimum grid setpoint when no monthly peak data available (W)"
+                        }
+                    },
+                    "predictive_controls": {
+                        "name": "Charge Detection",
+                        "description": "Inputs that help the planner detect when a car is really charging and when predictive charging should become active.",
+                        "data": {
+                            "min_car_charging_threshold": "Min Car Charging Threshold",
+                            "predictive_charging_min_soc": "Predictive Charging Min SOC"
+                        },
+                        "data_description": {
+                            "min_car_charging_threshold": "Minimum power to consider car as actively charging (W)",
+                            "predictive_charging_min_soc": "Minimum SOC for predictive charging logic (%)"
+                        }
+                    }
+                },
                 "data": {
                     "max_battery_power": "Max Battery Power",
                     "max_car_power": "Max Car Power",
@@ -227,7 +457,235 @@
         "step": {
             "init": {
                 "title": "System Topology",
-                "description": "Select whether the planner operates in single-phase or three-phase mode. {validation_errors}",
+                "description": "Review and update the planner configuration step by step.",
+                "sections": {
+                    "topology_section": {
+                        "name": "Topology",
+                        "description": "Switch between single-phase and three-phase mode here. Existing single-phase bindings are kept so you can migrate gradually.",
+                        "data": {
+                            "phase_mode": "Topology"
+                        },
+                        "data_description": {
+                            "phase_mode": "Choose between single-phase or three-phase operation."
+                        }
+                    },
+                    "price_entities": {
+                        "name": "Prices & Batteries",
+                        "description": "Core price sensors and battery SOC inputs used by the planner.",
+                        "data": {
+                            "nordpool_config_entry": "Nord Pool Configuration (Optional)",
+                            "current_price_entity": "Current Price Entity",
+                            "highest_price_entity": "Highest Price Entity",
+                            "lowest_price_entity": "Lowest Price Entity",
+                            "next_price_entity": "Next Price Entity",
+                            "battery_soc_entities": "Battery SOC Entities"
+                        },
+                        "data_description": {
+                            "nordpool_config_entry": "Select the Nord Pool config entry to enable full interval price data",
+                            "current_price_entity": "Current electricity price from Nord Pool integration",
+                            "highest_price_entity": "Highest electricity price today from Nord Pool",
+                            "lowest_price_entity": "Lowest electricity price today from Nord Pool",
+                            "next_price_entity": "Next hour electricity price from Nord Pool",
+                            "battery_soc_entities": "Entities providing battery state of charge (%)"
+                        }
+                    },
+                    "single_phase_entities": {
+                        "name": "Single-Phase Power Sensors",
+                        "description": "Combined power sensors used for single-phase installations. These can stay configured even if you switch to three-phase mode.",
+                        "data": {
+                            "solar_production_entity": "Solar Production Entity",
+                            "house_consumption_entity": "House Consumption Entity",
+                            "car_charging_power_entity": "Car Charging Power Entity (Optional)"
+                        },
+                        "data_description": {
+                            "solar_production_entity": "Current solar production in W",
+                            "house_consumption_entity": "Current house power consumption in W",
+                            "car_charging_power_entity": "Car charging power in W"
+                        }
+                    },
+                    "grid_costs": {
+                        "name": "Grid & Tariffs",
+                        "description": "Optional cost and grid sensors that make buy-price calculations and peak handling more accurate.",
+                        "data": {
+                            "monthly_grid_peak_entity": "Monthly Grid Peak Entity (Optional)",
+                            "p1_tariff_entity": "P1 Meter Tariff Entity (Optional)",
+                            "transport_cost_day": "Transport Cost Day",
+                            "transport_cost_night": "Transport Cost Night/Weekend",
+                            "energy_tax_accijns": "Bijzondere Accijns",
+                            "energy_tax_bijdrage": "Bijdrage op de Energie",
+                            "energy_cost_gsc": "GSC (Groene Stroom)",
+                            "energy_cost_wkk": "WKK",
+                            "grid_power_entity": "Grid Power Entity (Optional)"
+                        },
+                        "data_description": {
+                            "monthly_grid_peak_entity": "Current month grid peak in W for power management",
+                            "p1_tariff_entity": "P1 meter tariff sensor (1=day, 2=night) for day/night transport cost switching",
+                            "transport_cost_day": "Fluvius network tariff for day hours (€/kWh, excl. VAT)",
+                            "transport_cost_night": "Fluvius network tariff for night and weekends (€/kWh, excl. VAT)",
+                            "energy_tax_accijns": "Bijzondere accijns op Energie (€/kWh)",
+                            "energy_tax_bijdrage": "Bijdrage op de Energie (€/kWh)",
+                            "energy_cost_gsc": "Groene stroom certificaten (€/kWh)",
+                            "energy_cost_wkk": "Warmte-krachtkoppeling (€/kWh)",
+                            "grid_power_entity": "Real-time grid power in W (positive = import, negative = export) used for peak detection and inverter derating diagnostics"
+                        }
+                    },
+                    "forecast_entities": {
+                        "name": "Forecast & Sunny-Day Rules",
+                        "description": "Forecast sensors and thresholds that keep room in the battery when strong solar production is expected.",
+                        "data": {
+                            "solar_forecast_entity": "Energy Production Tomorrow (Optional)",
+                            "solar_forecast_today_entity": "Energy Production Today (Optional)",
+                            "solar_forecast_start_hour": "Forecast Start Hour",
+                            "max_soc_threshold_sunny": "Max SOC Grid Charge (Sunny Day)",
+                            "sunny_forecast_threshold_kwh": "Sunny Forecast Trigger (kWh)"
+                        },
+                        "data_description": {
+                            "solar_forecast_entity": "Tomorrow's solar production forecast in kWh (e.g. sensor.energy_production_tomorrow). Read from the forecast start hour onwards to decide overnight grid charging",
+                            "solar_forecast_today_entity": "Today's solar production forecast in kWh (e.g. sensor.energy_production_today). Used between midnight and the forecast start hour to validate the cached forecast",
+                            "solar_forecast_start_hour": "Hour of the day (12-23) when the system starts reading tomorrow's solar forecast. Earlier = more time to react, later = more accurate forecast. Default: 20 (8 PM)",
+                            "max_soc_threshold_sunny": "Max SOC for grid charging when tomorrow is sunny (%). Grid charging stops at this level to leave room for free solar energy",
+                            "sunny_forecast_threshold_kwh": "Solar forecast threshold in kWh that activates sunny-day grid charging mode"
+                        }
+                    },
+                    "battery_strategy": {
+                        "name": "Battery SOC Targets",
+                        "description": "Targets that determine how aggressively the planner protects or fills the battery.",
+                        "data": {
+                            "min_soc_threshold": "Minimum SOC Threshold",
+                            "max_soc_threshold": "Maximum SOC Threshold",
+                            "emergency_soc_threshold": "Emergency SOC Threshold",
+                            "soc_buffer_target": "SOC Buffer Target",
+                            "soc_price_multiplier_max": "SOC Price Multiplier (Max)"
+                        },
+                        "data_description": {
+                            "min_soc_threshold": "Minimum battery charge level to maintain (%)",
+                            "max_soc_threshold": "Maximum battery charge level target (%)",
+                            "emergency_soc_threshold": "SOC level below which emergency charging is triggered regardless of price (%)",
+                            "soc_buffer_target": "SOC level above which no price relaxation is applied. Below this, the price threshold is gradually relaxed (%)",
+                            "soc_price_multiplier_max": "Maximum price threshold multiplier when battery is at/below emergency SOC (1.3 = accept 30% higher prices)"
+                        }
+                    },
+                    "price_strategy": {
+                        "name": "Price Logic",
+                        "description": "Thresholds and adjustments for buy and sell price calculations.",
+                        "data": {
+                            "price_threshold": "Price Threshold",
+                            "price_adjustment_multiplier": "Price Adjustment Multiplier",
+                            "price_adjustment_offset": "Price Adjustment Offset",
+                            "very_low_price_threshold": "Very Low Price Threshold",
+                            "significant_solar_threshold": "Significant Solar Threshold",
+                            "feedin_price_threshold": "Feed-in Solar Price Threshold",
+                            "feedin_adjustment_multiplier": "Feed-in Adjustment Multiplier",
+                            "feedin_adjustment_offset": "Feed-in Adjustment Offset",
+                            "use_dynamic_threshold": "Use Dynamic Threshold",
+                            "dynamic_threshold_confidence": "Dynamic Threshold Confidence",
+                            "use_average_threshold": "Use Average Threshold"
+                        },
+                        "data_description": {
+                            "price_threshold": "Price threshold for charging decisions (€/kWh)",
+                            "price_adjustment_multiplier": "Multiplier applied to raw price (e.g. 1.04 for the Energie.be dynamic contract). Default: 1.04",
+                            "price_adjustment_offset": "Fixed €/kWh offset added after multiplier (e.g. 0.005 for 0.5 c€ on an excl. VAT market basis). Default: 0.005",
+                            "very_low_price_threshold": "Percentage of daily price range considered 'very low' (e.g., 30 = bottom 30%)",
+                            "significant_solar_threshold": "Solar surplus power level considered significant enough to prefer over grid (W)",
+                            "feedin_price_threshold": "Price threshold above which solar export to grid is enabled (€/kWh)",
+                            "feedin_adjustment_multiplier": "Multiplier applied to raw price when calculating net feed-in value. Default: 1.0",
+                            "feedin_adjustment_offset": "Fixed €/kWh offset added to feed-in price (negative values model costs). Default: -0.0098",
+                            "use_dynamic_threshold": "Enable intelligent price analysis for more selective charging at better prices",
+                            "dynamic_threshold_confidence": "Confidence required for dynamic charging decisions (higher = more selective)",
+                            "use_average_threshold": "Use 24-hour rolling average of future prices as the charging threshold"
+                        }
+                    },
+                    "car_strategy": {
+                        "name": "Car Charging Rules",
+                        "description": "Settings that affect EV charging windows and permissive mode behavior.",
+                        "data": {
+                            "min_car_charging_duration": "Min Car Charging Duration",
+                            "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier"
+                        },
+                        "data_description": {
+                            "min_car_charging_duration": "Minimum consecutive hours of low prices required before starting car charging",
+                            "car_permissive_threshold_multiplier": "Multiplier applied to car charging threshold when permissive mode is active (1.2 = +20% higher threshold)"
+                        }
+                    },
+                    "power_limits": {
+                        "name": "Power Limits",
+                        "description": "Absolute grid, battery and car limits used as safety boundaries.",
+                        "data": {
+                            "max_battery_power": "Max Battery Power",
+                            "max_car_power": "Max Car Power",
+                            "max_grid_power": "Max Grid Power",
+                            "min_car_charging_threshold": "Min Car Charging Threshold",
+                            "predictive_charging_min_soc": "Predictive Charging Min SOC",
+                            "base_grid_setpoint": "Base Grid Setpoint"
+                        },
+                        "data_description": {
+                            "max_battery_power": "Maximum power limit for battery charging/discharging (W)",
+                            "max_car_power": "Maximum power limit for car charging (W)",
+                            "max_grid_power": "Maximum power limit from grid — safety limit (W)",
+                            "min_car_charging_threshold": "Minimum power to consider car as actively charging (W)",
+                            "predictive_charging_min_soc": "Minimum SOC for predictive charging logic (%)",
+                            "base_grid_setpoint": "Base minimum grid setpoint when no monthly peak data available (W)"
+                        }
+                    },
+                    "inverter_strategy": {
+                        "name": "Inverter Export Control",
+                        "description": "Advanced controls for keeping feed-in near a target export level.",
+                        "data": {
+                            "max_inverter_power": "Max Inverter Power",
+                            "inverter_export_limit": "Inverter Export Target",
+                            "inverter_export_deadband": "Inverter Export Deadband",
+                            "inverter_derating_unused_release_minutes": "Derating Relaxation Delay",
+                            "inverter_derating_soc_bypass_threshold": "Derating SOC Bypass Threshold"
+                        },
+                        "data_description": {
+                            "max_inverter_power": "Maximum inverter output used when feed-in is allowed and as the upper cap for derating guidance (W)",
+                            "inverter_export_limit": "Grid export target used while feed-in is blocked. The planner aims to keep net export around this value, for example 80W (W)",
+                            "inverter_export_deadband": "Allowed deviation around the export target before the planner changes derating. With the default 40W deadband and 80W target, the planner holds steady between 40W and 120W export (W)",
+                            "inverter_derating_unused_release_minutes": "Minutes to wait before raising the inverter cap by one small step when export stays safely below the target. Higher values make derating reopen more cautiously. Default: 5 minutes",
+                            "inverter_derating_soc_bypass_threshold": "If average battery SOC is below this threshold, the planner stops derating and lets the inverter run freely so solar can charge the battery (%)"
+                        }
+                    },
+                    "battery_capacity_section": {
+                        "name": "Battery Capacities",
+                        "description": "Set the nominal capacity for each configured battery sensor in kWh."
+                    },
+                    "battery_phase_mapping": {
+                        "name": "Battery Phase Mapping",
+                        "description": "For three-phase systems, select which phases each battery can charge or discharge on."
+                    },
+                    "three_phase_entities": {
+                        "name": "Three-Phase Power Sensors",
+                        "description": "Optional per-phase solar, consumption, car and battery power sensors.",
+                        "data": {
+                            "phase_1_solar_entity": "Phase 1 Solar Entity (Optional)",
+                            "phase_1_consumption_entity": "Phase 1 Consumption Entity (Optional)",
+                            "phase_1_car_entity": "Phase 1 Car Power Entity (Optional)",
+                            "phase_1_battery_power_entity": "Phase 1 Battery Power Entity (Optional)",
+                            "phase_2_solar_entity": "Phase 2 Solar Entity (Optional)",
+                            "phase_2_consumption_entity": "Phase 2 Consumption Entity (Optional)",
+                            "phase_2_car_entity": "Phase 2 Car Power Entity (Optional)",
+                            "phase_2_battery_power_entity": "Phase 2 Battery Power Entity (Optional)",
+                            "phase_3_solar_entity": "Phase 3 Solar Entity (Optional)",
+                            "phase_3_consumption_entity": "Phase 3 Consumption Entity (Optional)",
+                            "phase_3_car_entity": "Phase 3 Car Power Entity (Optional)",
+                            "phase_3_battery_power_entity": "Phase 3 Battery Power Entity (Optional)"
+                        },
+                        "data_description": {
+                            "phase_1_solar_entity": "Phase L1 solar production sensor (leave blank if unavailable)",
+                            "phase_1_consumption_entity": "Phase L1 house consumption sensor (leave blank if unavailable)",
+                            "phase_1_car_entity": "Phase L1 EV charger power sensor (leave blank if unavailable)",
+                            "phase_1_battery_power_entity": "Phase L1 battery power sensor in W (negative = charging, leave blank if unavailable)",
+                            "phase_2_solar_entity": "Phase L2 solar production sensor (leave blank if unavailable)",
+                            "phase_2_consumption_entity": "Phase L2 house consumption sensor (leave blank if unavailable)",
+                            "phase_2_car_entity": "Phase L2 EV charger power sensor (leave blank if unavailable)",
+                            "phase_2_battery_power_entity": "Phase L2 battery power sensor in W (negative = charging, leave blank if unavailable)",
+                            "phase_3_solar_entity": "Phase L3 solar production sensor (leave blank if unavailable)",
+                            "phase_3_consumption_entity": "Phase L3 house consumption sensor (leave blank if unavailable)",
+                            "phase_3_car_entity": "Phase L3 EV charger power sensor (leave blank if unavailable)",
+                            "phase_3_battery_power_entity": "Phase L3 battery power sensor in W (negative = charging, leave blank if unavailable)"
+                        }
+                    }
+                },
                 "data": {
                     "phase_mode": "Topology",
                     "nordpool_config_entry": "Nord Pool Configuration (Optional)",
@@ -277,7 +735,7 @@
                     "max_inverter_power": "Max Inverter Power",
                     "inverter_export_limit": "Inverter Export Target",
                     "inverter_export_deadband": "Inverter Export Deadband",
-                    "inverter_derating_unused_release_minutes": "Unused Derating Release Delay",
+                    "inverter_derating_unused_release_minutes": "Derating Relaxation Delay",
                     "inverter_derating_soc_bypass_threshold": "Derating SOC Bypass Threshold",
                     "min_car_charging_threshold": "Min Car Charging Threshold",
                     "predictive_charging_min_soc": "Predictive Charging Min SOC",
@@ -332,6 +790,40 @@
                     "phase_3_consumption_entity": "Phase 3 Consumption Entity (Optional)",
                     "phase_3_car_entity": "Phase 3 Car Power Entity (Optional)",
                     "phase_3_battery_power_entity": "Phase 3 Battery Power Entity (Optional)"
+                },
+                "data_description": {
+                    "current_price_entity": "Current electricity price from Nord Pool integration",
+                    "highest_price_entity": "Highest electricity price today from Nord Pool",
+                    "lowest_price_entity": "Lowest electricity price today from Nord Pool",
+                    "next_price_entity": "Next hour electricity price from Nord Pool",
+                    "nordpool_config_entry": "Select the Nord Pool config entry to enable full interval price data",
+                    "battery_soc_entities": "Entities providing battery state of charge (%)",
+                    "solar_production_entity": "Current solar production in W",
+                    "house_consumption_entity": "Current house power consumption in W",
+                    "car_charging_power_entity": "Car charging power in W",
+                    "monthly_grid_peak_entity": "Current month grid peak in W for power management",
+                    "p1_tariff_entity": "P1 meter tariff sensor (1=day, 2=night) for day/night transport cost switching",
+                    "transport_cost_day": "Fluvius network tariff for day hours (€/kWh, excl. VAT)",
+                    "transport_cost_night": "Fluvius network tariff for night and weekends (€/kWh, excl. VAT)",
+                    "energy_tax_accijns": "Bijzondere accijns op Energie (€/kWh)",
+                    "energy_tax_bijdrage": "Bijdrage op de Energie (€/kWh)",
+                    "energy_cost_gsc": "Groene stroom certificaten (€/kWh)",
+                    "energy_cost_wkk": "Warmte-krachtkoppeling (€/kWh)",
+                    "grid_power_entity": "Real-time grid power in W (positive = import, negative = export) used for peak detection and inverter derating diagnostics",
+                    "solar_forecast_entity": "Tomorrow's solar production forecast in kWh (e.g. sensor.energy_production_tomorrow). Read from the forecast start hour onwards to decide overnight grid charging",
+                    "solar_forecast_today_entity": "Today's solar production forecast in kWh (e.g. sensor.energy_production_today). Used between midnight and the forecast start hour to validate the cached forecast",
+                    "phase_1_solar_entity": "Phase L1 solar production sensor (leave blank if unavailable)",
+                    "phase_1_consumption_entity": "Phase L1 house consumption sensor (leave blank if unavailable)",
+                    "phase_1_car_entity": "Phase L1 EV charger power sensor (leave blank if unavailable)",
+                    "phase_1_battery_power_entity": "Phase L1 battery power sensor in W (negative = charging, leave blank if unavailable)",
+                    "phase_2_solar_entity": "Phase L2 solar production sensor (leave blank if unavailable)",
+                    "phase_2_consumption_entity": "Phase L2 house consumption sensor (leave blank if unavailable)",
+                    "phase_2_car_entity": "Phase L2 EV charger power sensor (leave blank if unavailable)",
+                    "phase_2_battery_power_entity": "Phase L2 battery power sensor in W (negative = charging, leave blank if unavailable)",
+                    "phase_3_solar_entity": "Phase L3 solar production sensor (leave blank if unavailable)",
+                    "phase_3_consumption_entity": "Phase L3 house consumption sensor (leave blank if unavailable)",
+                    "phase_3_car_entity": "Phase L3 EV charger power sensor (leave blank if unavailable)",
+                    "phase_3_battery_power_entity": "Phase L3 battery power sensor in W (negative = charging, leave blank if unavailable)"
                 }
             },
             "battery_capacities": {
@@ -344,11 +836,83 @@
             },
             "settings": {
                 "title": "Settings & Thresholds",
-                "description": "Configure charging thresholds and preferences."
+                "description": "Configure charging thresholds and preferences.",
+                "data": {
+                    "min_soc_threshold": "Minimum SOC Threshold",
+                    "max_soc_threshold": "Maximum SOC Threshold",
+                    "solar_forecast_start_hour": "Forecast Start Hour",
+                    "max_soc_threshold_sunny": "Max SOC Grid Charge (Sunny Day)",
+                    "sunny_forecast_threshold_kwh": "Sunny Forecast Trigger (kWh)",
+                    "price_threshold": "Price Threshold",
+                    "price_adjustment_multiplier": "Price Adjustment Multiplier",
+                    "price_adjustment_offset": "Price Adjustment Offset",
+                    "emergency_soc_threshold": "Emergency SOC Threshold",
+                    "soc_buffer_target": "SOC Buffer Target",
+                    "soc_price_multiplier_max": "SOC Price Multiplier (Max)",
+                    "very_low_price_threshold": "Very Low Price Threshold",
+                    "significant_solar_threshold": "Significant Solar Threshold",
+                    "feedin_price_threshold": "Feed-in Solar Price Threshold",
+                    "feedin_adjustment_multiplier": "Feed-in Adjustment Multiplier",
+                    "feedin_adjustment_offset": "Feed-in Adjustment Offset",
+                    "use_dynamic_threshold": "Use Dynamic Threshold",
+                    "dynamic_threshold_confidence": "Dynamic Threshold Confidence",
+                    "use_average_threshold": "Use Average Threshold",
+                    "min_car_charging_duration": "Min Car Charging Duration",
+                    "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier",
+                    "max_inverter_power": "Max Inverter Power",
+                    "inverter_export_limit": "Inverter Export Target",
+                    "inverter_export_deadband": "Inverter Export Deadband",
+                    "inverter_derating_unused_release_minutes": "Derating Relaxation Delay",
+                    "inverter_derating_soc_bypass_threshold": "Derating SOC Bypass Threshold"
+                },
+                "data_description": {
+                    "min_soc_threshold": "Minimum battery charge level to maintain (%)",
+                    "max_soc_threshold": "Maximum battery charge level target (%)",
+                    "solar_forecast_start_hour": "Hour of the day (12-23) when the system starts reading tomorrow's solar forecast. Earlier = more time to react, later = more accurate forecast. Default: 20 (8 PM)",
+                    "max_soc_threshold_sunny": "Max SOC for grid charging when tomorrow is sunny (%). Grid charging stops at this level to leave room for free solar energy",
+                    "sunny_forecast_threshold_kwh": "Solar forecast threshold in kWh that activates sunny-day grid charging mode",
+                    "price_threshold": "Price threshold for charging decisions (€/kWh)",
+                    "price_adjustment_multiplier": "Multiplier applied to raw price (e.g. 1.04 for the Energie.be dynamic contract). Default: 1.04",
+                    "price_adjustment_offset": "Fixed €/kWh offset added after multiplier (e.g. 0.005 for 0.5 c€ on an excl. VAT market basis). Default: 0.005",
+                    "emergency_soc_threshold": "SOC level below which emergency charging is triggered regardless of price (%)",
+                    "soc_buffer_target": "SOC level above which no price relaxation is applied. Below this, the price threshold is gradually relaxed (%)",
+                    "soc_price_multiplier_max": "Maximum price threshold multiplier when battery is at/below emergency SOC (1.3 = accept 30% higher prices)",
+                    "very_low_price_threshold": "Percentage of daily price range considered 'very low' (e.g., 30 = bottom 30%)",
+                    "significant_solar_threshold": "Solar surplus power level considered significant enough to prefer over grid (W)",
+                    "feedin_price_threshold": "Price threshold above which solar export to grid is enabled (€/kWh)",
+                    "feedin_adjustment_multiplier": "Multiplier applied to raw price when calculating net feed-in value. Default: 1.0",
+                    "feedin_adjustment_offset": "Fixed €/kWh offset added to feed-in price (negative values model costs). Default: -0.0098",
+                    "use_dynamic_threshold": "Enable intelligent price analysis for more selective charging at better prices",
+                    "dynamic_threshold_confidence": "Confidence required for dynamic charging decisions (higher = more selective)",
+                    "use_average_threshold": "Use 24-hour rolling average of future prices as the charging threshold",
+                    "min_car_charging_duration": "Minimum consecutive hours of low prices required before starting car charging",
+                    "car_permissive_threshold_multiplier": "Multiplier applied to car charging threshold when permissive mode is active (1.2 = +20% higher threshold)",
+                    "max_inverter_power": "Maximum inverter output used when feed-in is allowed and as the upper cap for derating guidance (W)",
+                    "inverter_export_limit": "Grid export target used while feed-in is blocked. The planner aims to keep net export around this value, for example 80W (W)",
+                    "inverter_export_deadband": "Allowed deviation around the export target before the planner changes derating. With the default 40W deadband and 80W target, the planner holds steady between 40W and 120W export (W)",
+                    "inverter_derating_unused_release_minutes": "Minutes to wait before raising the inverter cap by one small step when export stays safely below the target. Higher values make derating reopen more cautiously. Default: 5 minutes",
+                    "inverter_derating_soc_bypass_threshold": "If average battery SOC is below this threshold, the planner stops derating and lets the inverter run freely so solar can charge the battery (%)"
+                }
             },
             "safety_limits": {
                 "title": "Safety Limits",
-                "description": "Configure power and SOC safety limits."
+                "description": "Configure power and SOC safety limits. {validation_errors}",
+                "data": {
+                    "max_battery_power": "Max Battery Power",
+                    "max_car_power": "Max Car Power",
+                    "max_grid_power": "Max Grid Power",
+                    "min_car_charging_threshold": "Min Car Charging Threshold",
+                    "predictive_charging_min_soc": "Predictive Charging Min SOC",
+                    "base_grid_setpoint": "Base Grid Setpoint"
+                },
+                "data_description": {
+                    "max_battery_power": "Maximum power limit for battery charging/discharging (W)",
+                    "max_car_power": "Maximum power limit for car charging (W)",
+                    "max_grid_power": "Maximum power limit from grid — safety limit (W)",
+                    "min_car_charging_threshold": "Minimum power to consider car as actively charging (W)",
+                    "predictive_charging_min_soc": "Minimum SOC for predictive charging logic (%)",
+                    "base_grid_setpoint": "Base minimum grid setpoint when no monthly peak data available (W)"
+                }
             }
         }
     }

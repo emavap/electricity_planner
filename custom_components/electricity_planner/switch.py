@@ -33,6 +33,7 @@ async def async_setup_entry(
     entities = [
         CarPermissiveModeSwitch(coordinator, entry),
         BatteryChargingDisableSwitch(coordinator, entry),
+        BatteryDumpToGridSwitch(coordinator, entry),
     ]
 
     async_add_entities(entities)
@@ -202,4 +203,70 @@ class BatteryChargingDisableSwitch(CoordinatorEntity, SwitchEntity):
         """
         _LOGGER.info("Clearing manual battery charging disable - resuming automatic mode")
         await self.coordinator.async_clear_manual_override(target="battery")
+        await self.coordinator.async_request_refresh()
+
+
+class BatteryDumpToGridSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch to enable persistent battery dump-to-grid mode."""
+
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the battery dump switch."""
+        super().__init__(coordinator)
+        self._attr_name = f"{entry.title} Dump Battery To Grid"
+        self._attr_unique_id = f"{entry.entry_id}_battery_dump_to_grid"
+        self._attr_icon = "mdi:battery-arrow-down-outline"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": entry.title,
+            "manufacturer": "Electricity Planner",
+            "model": "Smart Charging Controller",
+        }
+
+    @property
+    def is_on(self) -> bool:
+        """Return true if dump-to-grid mode is enabled."""
+        override = self.coordinator.get_manual_override("battery_dump_to_grid")
+        return bool(override and override.get("value") is True)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes."""
+        dump_plan = self.coordinator.data.get("battery_dump_plan", {}) if self.coordinator.data else {}
+        override = self.coordinator.get_manual_override("battery_dump_to_grid")
+        set_at = override.get("set_at") if override else None
+
+        return {
+            "override_active": self.is_on,
+            "reason": dump_plan.get("reason") or (override.get("reason") if override else None),
+            "target_soc": dump_plan.get("target_soc"),
+            "currently_dumping": dump_plan.get("active", False),
+            "scheduled_window_start": dump_plan.get("window_start"),
+            "scheduled_window_end": dump_plan.get("window_end"),
+            "scheduled_window_average_price": dump_plan.get("window_average_price"),
+            "export_power": dump_plan.get("export_power"),
+            "configured_export_cap_w": dump_plan.get("configured_export_cap_w"),
+            "available_energy_kwh": dump_plan.get("available_energy_kwh"),
+            "set_at": set_at.isoformat() if set_at else None,
+            "description": (
+                "When enabled, the planner selects the best feed-in price window "
+                "and exports battery energy until the dump target SOC is reached."
+            ),
+        }
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn on dump-to-grid mode."""
+        _LOGGER.info("Enabling battery dump-to-grid mode")
+        await self.coordinator.async_set_battery_dump_mode(
+            reason="Manual battery dump via dashboard switch",
+        )
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn off dump-to-grid mode."""
+        _LOGGER.info("Clearing battery dump-to-grid mode")
+        await self.coordinator.async_clear_battery_dump_mode()
         await self.coordinator.async_request_refresh()

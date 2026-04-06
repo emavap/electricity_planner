@@ -159,6 +159,84 @@ def test_grid_setpoint_honors_charger_limit_cap():
     assert "battery charging 4000W" in result["grid_setpoint_reason"]
 
 
+def test_grid_setpoint_exports_battery_during_dump_window():
+    engine = _engine()
+    battery_analysis = {"average_soc": 70, "max_soc_threshold": 90}
+    power_allocation = {"solar_for_car": 0, "car_current_solar_usage": 0}
+    data = {
+        "car_charging_power": 0,
+        "car_grid_charging": False,
+        "battery_grid_charging": False,
+        "battery_dump_to_grid_active": True,
+        "battery_dump_export_power": 3500,
+        "battery_dump_to_grid_reason": "High-price export window is active",
+        "monthly_grid_peak": 4000,
+    }
+
+    result = engine._calculate_grid_setpoint(
+        {},
+        battery_analysis,
+        power_allocation,
+        data,
+        charger_limit=0,
+    )
+
+    assert result["grid_setpoint"] == -3500
+    assert result["grid_components"]["battery"] == -3500
+    assert result["grid_components"]["car"] == 0
+    assert "Grid export scheduled" in result["grid_setpoint_reason"]
+    assert "3500W export" in result["grid_setpoint_reason"]
+
+
+def test_battery_dump_mode_blocks_positive_price_grid_charging():
+    engine = _engine()
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={"data_available": True, "current_price": 0.08},
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+            "average_soc": 60,
+        },
+        power_allocation={},
+        power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
+        time_context={},
+        data={
+            "battery_dump_to_grid_enabled": True,
+            "battery_dump_to_grid_reason": "Scheduled export window",
+        },
+    )
+
+    assert result["battery_grid_charging"] is False
+    assert "grid charging is blocked unless the current price is negative" in result["battery_grid_charging_reason"]
+
+
+def test_battery_dump_mode_still_allows_negative_price_strategy():
+    engine = _engine()
+    engine.strategy_manager.evaluate = lambda context: (True, "negative price strategy")
+    engine.strategy_manager.get_last_trace = lambda: [{"strategy": "Stub"}]
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={"data_available": True, "current_price": -0.01},
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+            "average_soc": 20,
+        },
+        power_allocation={},
+        power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
+        time_context={},
+        data={
+            "battery_dump_to_grid_enabled": True,
+        },
+    )
+
+    assert result["battery_grid_charging"] is True
+    assert result["battery_grid_charging_reason"] == "negative price strategy"
+
+
 def test_battery_grid_charging_full_reason_uses_default_max_soc_when_missing():
     engine = _engine()
 
@@ -354,9 +432,10 @@ def test_inverter_derating_gradually_reopens_when_export_below_band():
         }
     )
 
-    assert result["inverter_derating_target"] == 1900
-    assert "reopen inverter gradually" in result["inverter_derating_reason"]
+    assert result["inverter_derating_target"] == 1800
+    assert "averaged export is only 20W < 40W" in result["inverter_derating_reason"]
     assert result["inverter_derating_alarm"] is False
+    assert result["inverter_derating_unreached_since"] is not None
 
 
 def test_inverter_derating_holds_previous_target_inside_deadband():
@@ -379,7 +458,7 @@ def test_inverter_derating_holds_previous_target_inside_deadband():
     )
 
     assert result["inverter_derating_target"] == 1800
-    assert "hold the current derating target steady" in result["inverter_derating_reason"]
+    assert "averaged export 80W is within the 40-120W band" in result["inverter_derating_reason"]
     assert result["inverter_derating_alarm"] is False
 
 
@@ -403,12 +482,12 @@ def test_inverter_derating_does_not_reopen_until_pv_reaches_current_cap():
     )
 
     assert result["inverter_derating_target"] == 1800
-    assert "has not reached the current derating target" in result["inverter_derating_reason"]
+    assert "averaged export is only 20W < 40W" in result["inverter_derating_reason"]
     assert result["inverter_derating_alarm"] is False
     assert result["inverter_derating_unreached_since"] is not None
 
 
-def test_inverter_derating_releases_to_max_when_cap_unused_for_minutes():
+def test_inverter_derating_relaxes_upward_one_step_when_export_stays_low():
     engine = _engine(
         {
             CONF_MAX_INVERTER_POWER: 4400,
@@ -430,8 +509,35 @@ def test_inverter_derating_releases_to_max_when_cap_unused_for_minutes():
         }
     )
 
-    assert result["inverter_derating_target"] == 4400
-    assert "release the inverter to max power" in result["inverter_derating_reason"]
+    assert result["inverter_derating_target"] == 1900
+    assert "averaged export stayed low at 20W < 40W" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+    assert result["inverter_derating_unreached_since"] == now
+
+
+def test_inverter_derating_recalculates_immediately_when_house_load_exceeds_pv():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_EXPORT_DEADBAND: 40,
+        }
+    )
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 1500,
+            "house_consumption": 2300,
+            "grid_power": 800,
+            "previous_inverter_derating_target": 1800,
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 2380
+    assert "house consumption 2300W already exceeds current solar 1500W" in result["inverter_derating_reason"]
+    assert "export target 80W" in result["inverter_derating_reason"]
     assert result["inverter_derating_alarm"] is False
     assert result["inverter_derating_unreached_since"] is None
 
@@ -459,9 +565,67 @@ def test_inverter_derating_respects_configured_unused_release_minutes():
         }
     )
 
-    assert result["inverter_derating_target"] == 4400
+    assert result["inverter_derating_target"] == 1900
     assert "for 2 minutes" in result["inverter_derating_reason"]
     assert result["inverter_derating_alarm"] is False
+
+
+def test_inverter_derating_relaxation_timer_survives_band_fluctuation():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_EXPORT_DEADBAND: 40,
+        }
+    )
+    now = datetime.now(timezone.utc)
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 1500,
+            "grid_power": -80,
+            "previous_inverter_derating_target": 1800,
+            "previous_inverter_derating_unreached_since": now - timedelta(minutes=20),
+            "inverter_derating_evaluated_at": now,
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 1900
+    assert "stayed at or below the 40-120W control band for 5 minutes" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+    assert result["inverter_derating_unreached_since"] == now
+
+
+def test_inverter_derating_averages_export_to_avoid_spike_resets():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_EXPORT_DEADBAND: 40,
+        }
+    )
+    now = datetime.now(timezone.utc)
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 1500,
+            "grid_power": -140,
+            "previous_grid_power": -20,
+            "previous_inverter_derating_target": 1800,
+            "previous_inverter_derating_unreached_since": now - timedelta(minutes=6),
+            "inverter_derating_evaluated_at": now,
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 1440
+    assert "export is 140W > 120W" in result["inverter_derating_reason"]
+    assert "reduce from current solar 1500W toward 80W export" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+    assert result["inverter_derating_unreached_since"] is None
 
 
 def test_inverter_derating_reduces_when_export_above_band():
@@ -483,7 +647,7 @@ def test_inverter_derating_reduces_when_export_above_band():
     )
 
     assert result["inverter_derating_target"] == 2040
-    assert "reduce from current solar 2200W toward 80W export" in result["inverter_derating_reason"]
+    assert "export is 240W > 120W" in result["inverter_derating_reason"]
     assert result["inverter_derating_alarm"] is False
 
 
@@ -509,6 +673,32 @@ def test_inverter_derating_raises_alarm_when_low_soc_still_requires_derating():
     assert result["inverter_derating_target"] == 2020
     assert result["inverter_derating_alarm"] is True
     assert "Battery SOC 40%" in result["inverter_derating_alarm_reason"]
+
+
+def test_inverter_derating_low_soc_bypass_does_not_ignore_current_overexport():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_EXPORT_DEADBAND: 40,
+            CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD: 95,
+        }
+    )
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 1500,
+            "grid_power": -140,
+            "previous_grid_power": -20,
+            "battery_analysis": {"average_soc": 40},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 1440
+    assert "export is 140W > 120W" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is True
+    assert "export is still 140W" in result["inverter_derating_alarm_reason"]
 
 
 def test_inverter_derating_bypasses_curtailment_for_low_soc_inside_tolerance():

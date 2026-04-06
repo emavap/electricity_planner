@@ -1,6 +1,6 @@
 # Electricity Planner
 
-**Version 4.10.24** | **Config Schema Version 19** | **Home Assistant 2024.4+**
+**Version 4.12.0** | **Config Schema Version 19** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
@@ -56,20 +56,20 @@ Electricity Planner is a Home Assistant custom integration that transforms Nord 
 1. **Settings → Devices & Services → `+ Add Integration`** → search for **Electricity Planner**
 2. Complete the multi-step wizard:
    - **Topology** – Single-phase or three-phase (L1/L2/L3) operation
-   - **Entities** – Nord Pool, battery SOC sensors, solar/consumption, EV sensors
-   - **Battery Capacities** – Per-battery kWh values and phase assignments (three-phase only)
-   - **SOC Thresholds** – min/max SOC, emergency threshold, predictive charging SOC
-   - **Price Thresholds** – static ceiling, very-low-price %, feed-in threshold
-   - **Power Limits** – max battery/car/grid power, base grid setpoint
-   - **Solar Parameters** – significant surplus threshold
-   - **Advanced** – Dynamic threshold, average threshold, SOC price multiplier settings
-3. Save and wait for the coordinator to populate sensors (~10–30 seconds)
+   - **Entities** – Nord Pool, battery SOC sensors, solar/consumption, EV, tariff, grid, and forecast sensors
+   - **Battery Capacities** – Per-battery nominal kWh values
+   - **Battery Phase Assignment** – Three-phase only; select which phases each battery can control
+   - **Settings & Thresholds** – SOC targets, price logic, forecast behavior, EV charging rules, and inverter export tuning
+   - **Safety Limits** – Max battery/car/grid power, predictive charging floor, and base grid setpoint
+3. Each field includes inline help text in Home Assistant explaining what it does and when it matters
+4. Save and wait for the coordinator to populate sensors (~10–30 seconds)
 
 ### Updating Configuration
 
 - **Settings → Devices & Services → Electricity Planner → Configure** reopens the options flow
-- Forms merge your saved `options` with original data—defaults always reflect current values
-- Submit only the steps you need to modify; unchanged values persist automatically
+- Reconfiguration follows the same step-by-step flow as first-time setup
+- Forms merge your saved `options` with original data, so defaults always reflect current values
+- Submit only the steps you need to modify; unchanged values persist automatically, including dynamic battery and three-phase fields
 
 ---
 
@@ -211,6 +211,23 @@ You can configure a second grid SOC limit for high-solar days:
 This allows overnight charging to stop earlier on days with strong expected production,
 leaving battery headroom for free solar.
 
+### Holiday / Monetization Mode
+
+Enable the **Dump Battery To Grid** switch when you want the planner to optimize for
+solar monetization during periods of low and stable home consumption, such as holidays.
+
+When enabled:
+
+- Solar can still charge the battery normally
+- The planner does **not** force discharge outside the selected export window
+- The planner selects the best eligible high-price feed-in window and recommends export there
+- Export only uses energy above the configured dump target SOC
+- Grid charging is blocked while the mode is enabled unless the current price is negative
+- If no long enough continuous window exists, the planner falls back to the best shorter eligible window and monetizes what it can
+
+The export recommendation appears as a **negative** `sensor.electricity_planner_grid_setpoint`.
+For example, `-4500 W` means “target roughly 4.5 kW export to grid”.
+
 ---
 
 ## 5. Three-Phase Support
@@ -223,9 +240,10 @@ Enable three-phase mode for installations with phase-specific batteries or inver
 2. Configure per-phase entities:
    - Solar production per phase
    - House consumption per phase
-   - Battery SOC sensors per phase
+   - Optional EV charger power per phase
    - Battery power sensors per phase (optional)
-3. Assign batteries to phases in the Battery Capacities step
+3. Select shared battery SOC entities in the Entities step
+4. Assign batteries to phases in the Battery Phase Assignment step
 
 ### How It Works
 
@@ -302,16 +320,20 @@ Force a specific charging decision for a duration:
 ```yaml
 service: electricity_planner.set_manual_override
 data:
-  target: battery  # or "car"
-  action: charge   # or "block"
-  duration: 60     # minutes (optional, default: 60)
+  target: battery
+  action: force_charge
+  duration: 60
 ```
 
 | Parameter | Values | Description |
 |-----------|--------|-------------|
-| `target` | `battery`, `car` | Which system to override |
-| `action` | `charge`, `block` | Force charging on or block it |
+| `target` | `battery`, `car`, `both`, `charger_limit`, `grid_setpoint`, `battery_dump` | Which override to apply |
+| `action` | `force_charge`, `force_wait` | Boolean override action for `battery`, `car`, or `both` |
 | `duration` | 1–1440 | Override duration in minutes |
+| `charger_limit` | 0–50000 | Optional manual EV charger limit override |
+| `grid_setpoint` | 0–50000 | Optional manual import setpoint override |
+
+`target: battery_dump` enables the persistent holiday monetization mode. It does not use `action` or `duration`.
 
 #### `electricity_planner.clear_manual_override`
 
@@ -320,7 +342,7 @@ Remove an active override:
 ```yaml
 service: electricity_planner.clear_manual_override
 data:
-  target: battery  # or "car"
+  target: battery_dump
 ```
 
 ### Override Behaviour
@@ -329,6 +351,7 @@ data:
 - Automatically expire after configured duration
 - Visible in `decision_diagnostics` sensor attributes
 - Can be cleared manually at any time
+- `battery_dump` is persistent until cleared manually
 
 ---
 
@@ -355,7 +378,7 @@ data:
 | Entity | Purpose | Unit |
 |--------|---------|------|
 | `sensor.electricity_planner_car_charger_limit` | Recommended EVSE power limit | W |
-| `sensor.electricity_planner_grid_setpoint` | Suggested grid power setpoint | W |
+| `sensor.electricity_planner_grid_setpoint` | Suggested grid import/export setpoint (negative = export) | W |
 
 ### Sensors (Diagnostic)
 
@@ -378,11 +401,23 @@ data:
 | `sensor.electricity_planner_car_charging_window` | Remaining low-price window | min |
 | `sensor.electricity_planner_next_low_price_window` | Time until next charging window | min |
 
-### Switch
+### Switches
 
 | Entity | Purpose |
 |--------|---------|
 | `switch.electricity_planner_car_permissive_mode` | Toggle permissive car charging mode |
+| `switch.electricity_planner_disable_battery_charging` | Persistently block battery charging from grid |
+| `switch.electricity_planner_battery_dump_to_grid` | Enable holiday / monetization mode for battery export |
+
+### Numbers
+
+| Entity | Purpose | Unit |
+|--------|---------|------|
+| `number.electricity_planner_max_soc_threshold` | Normal grid-charging battery SOC ceiling | % |
+| `number.electricity_planner_max_soc_threshold_sunny` | High-solar-day grid-charging SOC ceiling | % |
+| `number.electricity_planner_sunny_forecast_threshold_kwh` | Solar forecast trigger for sunny mode | kWh |
+| `number.electricity_planner_battery_dump_target_soc` | Minimum reserve SOC used by holiday monetization mode | % |
+| `number.electricity_planner_battery_dump_max_export_power` | Export cap used by holiday monetization mode (`0` = automatic) | W |
 
 ### Decision Diagnostics Attributes
 
@@ -461,6 +496,7 @@ phase_results:
 | `min_soc_threshold` | 20% | 5–50% | Minimum battery SOC |
 | `max_soc_threshold` | 70% | 50–100% | Maximum battery SOC |
 | `max_soc_threshold_sunny` | 35% | 0–100% | Grid-charging max SOC on high-solar days |
+| `battery_dump_target_soc` | 20% | 0–100% | Reserve floor for holiday monetization mode |
 | `emergency_soc_threshold` | 15% | 5–30% | Force charging below this |
 | `predictive_charging_soc` | 30% | 10–50% | SOC for predictive logic |
 | `soc_buffer_target` | 50% | 20–80% | SOC above which no price relaxation |
@@ -488,6 +524,7 @@ phase_results:
 | `max_battery_power` | 5000 W | 500–50000 | Max battery charging power |
 | `max_car_power` | 11000 W | 1000–22000 | Max EV charging power |
 | `max_grid_power` | 10000 W | 1000–50000 | Max grid import power |
+| `battery_dump_max_export_power` | 0 W | 0–50000 | Holiday export cap (`0` = automatic min of battery/grid limits) |
 | `base_grid_setpoint` | 5000 W | 1000–15000 | Base grid setpoint |
 | `min_car_charging_power` | 1400 W | 500–3000 | Min power to detect EV charging |
 | `min_car_charging_duration` | 2 h | 0.5–8 | Min charging window for hysteresis |
@@ -615,6 +652,31 @@ automation:
       - service: switch.turn_on
         target:
           entity_id: switch.electricity_planner_car_permissive_mode
+
+### Holiday Monetization Mode
+
+```yaml
+automation:
+  - alias: "Enable Holiday Monetization Mode"
+    trigger:
+      - platform: state
+        entity_id: input_boolean.holiday_mode
+        to: "on"
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.electricity_planner_battery_dump_to_grid
+      - service: number.set_value
+        target:
+          entity_id: number.electricity_planner_battery_dump_target_soc
+        data:
+          value: 20
+      - service: number.set_value
+        target:
+          entity_id: number.electricity_planner_battery_dump_max_export_power
+        data:
+          value: 4500
+```
 ```
 
 ---
@@ -741,7 +803,7 @@ custom_components/electricity_planner/
 ├── config_flow.py        # Multi-step configuration wizard
 ├── sensor.py             # 19 sensor entities
 ├── binary_sensor.py      # 6 binary sensor entities
-├── switch.py             # Car permissive mode switch
+├── switch.py             # Planner control switches
 ├── migrations.py         # Config version migrations (v1→v16)
 ├── manifest.json         # Integration metadata
 └── strings.json          # UI translations

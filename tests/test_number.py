@@ -16,6 +16,8 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner import coordinator as coordinator_module
 from custom_components.electricity_planner.const import (
+    CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
+    CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
@@ -31,6 +33,8 @@ from custom_components.electricity_planner.const import (
 )
 from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
 from custom_components.electricity_planner.number import (
+    BatteryDumpMaxExportPowerNumber,
+    BatteryDumpTargetSocNumber,
     MaxSocThresholdNumber,
     MaxSocThresholdSunnyNumber,
     SunnyForecastThresholdNumber,
@@ -131,10 +135,12 @@ async def test_number_setup_always_adds_standard_and_sunny_entities(fake_hass, m
     entities = []
     await async_setup_entry(fake_hass, entry, entities.extend)
 
-    assert len(entities) == 3
+    assert len(entities) == 5
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
     assert isinstance(entities[2], SunnyForecastThresholdNumber)
+    assert isinstance(entities[3], BatteryDumpTargetSocNumber)
+    assert isinstance(entities[4], BatteryDumpMaxExportPowerNumber)
 
 
 @pytest.mark.asyncio
@@ -156,10 +162,12 @@ async def test_number_setup_with_forecast_entity_keeps_same_three_entities(fake_
     entities = []
     await async_setup_entry(fake_hass, entry, entities.extend)
 
-    assert len(entities) == 3
+    assert len(entities) == 5
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
     assert isinstance(entities[2], SunnyForecastThresholdNumber)
+    assert isinstance(entities[3], BatteryDumpTargetSocNumber)
+    assert isinstance(entities[4], BatteryDumpMaxExportPowerNumber)
 
 
 @pytest.mark.asyncio
@@ -184,12 +192,22 @@ async def test_number_entities_use_stable_dashboard_friendly_entity_ids(fake_has
     max_entity = MaxSocThresholdNumber(coordinator, entry)
     sunny_entity = MaxSocThresholdSunnyNumber(coordinator, entry)
     forecast_entity = SunnyForecastThresholdNumber(coordinator, entry)
+    dump_entity = BatteryDumpTargetSocNumber(coordinator, entry)
+    dump_power_entity = BatteryDumpMaxExportPowerNumber(coordinator, entry)
 
     assert max_entity.entity_id == "number.electricity_planner_max_soc_threshold"
     assert sunny_entity.entity_id == "number.electricity_planner_max_soc_threshold_sunny"
     assert (
         forecast_entity.entity_id
         == "number.electricity_planner_sunny_forecast_threshold_kwh"
+    )
+    assert (
+        dump_entity.entity_id
+        == "number.electricity_planner_battery_dump_target_soc"
+    )
+    assert (
+        dump_power_entity.entity_id
+        == "number.electricity_planner_battery_dump_max_export_power"
     )
 
 
@@ -254,6 +272,62 @@ async def test_max_soc_number_update_preserves_other_options(fake_hass, monkeypa
     assert entry.options[CONF_MAX_SOC_THRESHOLD_SUNNY] == 35
     assert entry.options[CONF_SUNNY_FORECAST_THRESHOLD_KWH] == 5.0
     assert coordinator.config[CONF_MAX_SOC_THRESHOLD] == 80
+    coordinator.decision_engine.refresh_settings.assert_called_once_with(coordinator.config)
+    coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_battery_dump_target_update_persists_in_options(fake_hass, monkeypatch):
+    """Dump target SOC should persist like the other live number controls."""
+    config = _base_config()
+    entry = MockConfigEntry(domain=DOMAIN, data=config, options={})
+
+    monkeypatch.setattr(
+        coordinator_module.ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+
+    fake_hass.config_entries._entries[entry.entry_id] = entry
+    coordinator = ElectricityPlannerCoordinator(fake_hass, entry)
+    coordinator.decision_engine.refresh_settings = Mock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    entity = BatteryDumpTargetSocNumber(coordinator, entry)
+    entity.hass = fake_hass
+
+    await entity.async_set_native_value(25)
+
+    assert entry.options[CONF_BATTERY_DUMP_TARGET_SOC] == 25
+    assert coordinator.config[CONF_BATTERY_DUMP_TARGET_SOC] == 25
+    coordinator.decision_engine.refresh_settings.assert_called_once_with(coordinator.config)
+    coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_battery_dump_max_export_power_update_persists_in_options(fake_hass, monkeypatch):
+    """Dump max export power should persist like the other live number controls."""
+    config = _base_config()
+    entry = MockConfigEntry(domain=DOMAIN, data=config, options={})
+
+    monkeypatch.setattr(
+        coordinator_module.ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+
+    fake_hass.config_entries._entries[entry.entry_id] = entry
+    coordinator = ElectricityPlannerCoordinator(fake_hass, entry)
+    coordinator.decision_engine.refresh_settings = Mock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    entity = BatteryDumpMaxExportPowerNumber(coordinator, entry)
+    entity.hass = fake_hass
+
+    await entity.async_set_native_value(4500)
+
+    assert entry.options[CONF_BATTERY_DUMP_MAX_EXPORT_POWER] == 4500
+    assert coordinator.config[CONF_BATTERY_DUMP_MAX_EXPORT_POWER] == 4500
     coordinator.decision_engine.refresh_settings.assert_called_once_with(coordinator.config)
     coordinator.async_request_refresh.assert_awaited_once()
 

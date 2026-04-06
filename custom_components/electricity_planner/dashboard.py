@@ -36,7 +36,7 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 MANAGED_KEY = "electricity_planner_managed"
-MANAGED_VERSION = 14  # Bumped: Surface inverter derating alarm in all dashboard summary sections
+MANAGED_VERSION = 15  # Bumped: Surface battery dump-to-grid controls in dashboard
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 
 ENTITY_WAIT_TIMEOUT = 30
@@ -85,7 +85,10 @@ ENTITY_REFERENCES: tuple[EntityReference, ...] = (
     EntityReference("sensor.electricity_planner_diagnostics_monitoring_emergency_soc_threshold", "emergency_soc_threshold"),
     EntityReference("sensor.electricity_planner_diagnostics_monitoring_entity_status", "entity_status"),
     EntityReference("switch.electricity_planner_car_permissive_mode", "car_permissive_mode"),
+    EntityReference("switch.electricity_planner_battery_dump_to_grid", "battery_dump_to_grid"),
     EntityReference("switch.electricity_planner_disable_battery_charging", "disable_battery_charging"),
+    EntityReference("number.electricity_planner_battery_dump_max_export_power", "battery_dump_max_export_power"),
+    EntityReference("number.electricity_planner_battery_dump_target_soc", "battery_dump_target_soc"),
     EntityReference("number.electricity_planner_max_soc_threshold", "max_soc_threshold"),
     EntityReference("number.electricity_planner_max_soc_threshold_sunny", "max_soc_threshold_sunny"),
     EntityReference("number.electricity_planner_sunny_forecast_threshold_kwh", "sunny_forecast_threshold_kwh"),

@@ -66,7 +66,6 @@ from .const import (
     DEFAULT_INVERTER_EXPORT_DEADBAND,
     DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
     DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
-    INVERTER_DERATING_ACTIVE_TOLERANCE_W,
     DEFAULT_USE_DYNAMIC_THRESHOLD,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_USE_AVERAGE_THRESHOLD,
@@ -779,7 +778,7 @@ class ChargingDecisionEngine:
             phase: max(phase_capacity_map.get(phase, 0.0), 0.0)
             for phase in ordered_phases
         }
-        if not battery_phases and battery_component > 0:
+        if not battery_phases and battery_component != 0:
             battery_phases = ordered_phases
 
         battery_allocations = (
@@ -788,7 +787,7 @@ class ChargingDecisionEngine:
                 battery_phases,
                 {phase: battery_weight_map.get(phase, 0.0) for phase in battery_phases},
             )
-            if battery_component > 0 and battery_phases
+            if battery_component != 0 and battery_phases
             else {phase: 0 for phase in ordered_phases}
         )
 
@@ -886,25 +885,28 @@ class ChargingDecisionEngine:
         weights: dict[str, float],
     ) -> dict[str, int]:
         """Distribute an integer total across phases using weighted rounding."""
-        if total <= 0 or not phases:
+        if total == 0 or not phases:
             return {phase: 0 for phase in phases}
+
+        sign = -1 if total < 0 else 1
+        abs_total = abs(total)
 
         positive_weights = {phase: max(weights.get(phase, 0.0), 0.0) for phase in phases}
         weight_sum = sum(positive_weights.values())
 
         if weight_sum <= 0:
-            base_share = total // len(phases)
-            remainder = total - (base_share * len(phases))
+            base_share = abs_total // len(phases)
+            remainder = abs_total - (base_share * len(phases))
             allocation = {phase: base_share for phase in phases}
             for phase in phases[:remainder]:
                 allocation[phase] += 1
-            return allocation
+            return {phase: allocation[phase] * sign for phase in phases}
 
         raw_allocations = {
-            phase: (total * positive_weights[phase] / weight_sum) for phase in phases
+            phase: (abs_total * positive_weights[phase] / weight_sum) for phase in phases
         }
         allocation = {phase: int(raw_allocations[phase] // 1) for phase in phases}
-        remainder = int(total - sum(allocation.values()))
+        remainder = int(abs_total - sum(allocation.values()))
 
         if remainder > 0:
             fractional_order = sorted(
@@ -915,7 +917,7 @@ class ChargingDecisionEngine:
             for phase in fractional_order[:remainder]:
                 allocation[phase] += 1
 
-        return allocation
+        return {phase: allocation[phase] * sign for phase in phases}
 
     def _initialize_decision_data(self) -> dict[str, Any]:
         """Initialize the decision data structure."""
@@ -1534,6 +1536,18 @@ class ChargingDecisionEngine:
                 "strategy_trace": [],
             }
 
+        if data.get("battery_dump_to_grid_enabled"):
+            current_price = _safe_optional_float(price_analysis.get("current_price"))
+            if current_price is None or current_price >= 0:
+                return {
+                    "battery_grid_charging": False,
+                    "battery_grid_charging_reason": (
+                        "Battery dump-to-grid mode active - "
+                        "grid charging is blocked unless the current price is negative"
+                    ),
+                    "strategy_trace": [],
+                }
+
         # Early return: If significant solar available + medium/high SOC
         # → Skip grid charging and wait for solar instead (always prefer free solar)
         significant_solar = power_analysis.get("significant_solar_surplus", False)
@@ -1705,6 +1719,11 @@ class ChargingDecisionEngine:
         )
 
         house_consumption_w = _safe_optional_float(data.get("house_consumption"))
+        safe_output_w = (
+            max(0.0, house_consumption_w + export_limit_w)
+            if house_consumption_w is not None
+            else None
+        )
         solar_production_raw = data.get("solar_production")
         solar_production_w = _safe_optional_float(solar_production_raw)
         if solar_production_w is not None:
@@ -1723,74 +1742,122 @@ class ChargingDecisionEngine:
 
         grid_power_raw = data.get("grid_power")
         grid_power_w = _safe_optional_float(grid_power_raw)
+        previous_grid_power_w = _safe_optional_float(data.get("previous_grid_power"))
 
         # Preferred control path: use the current operating point and hold a
         # simple deadband around the configured export target.
         if solar_production_w is not None and grid_power_w is not None:
             export_power_w = max(0.0, -grid_power_w)
+            previous_export_power_w = (
+                max(0.0, -previous_grid_power_w)
+                if previous_grid_power_w is not None
+                else export_power_w
+            )
+            smoothed_export_power_w = (
+                export_power_w + previous_export_power_w
+            ) / 2.0
             release_step_w = 100.0
             lower_export_w = max(0.0, export_limit_w - export_deadband_w)
             upper_export_w = export_limit_w + export_deadband_w
-            release_to_max_after = timedelta(
+            relax_cap_after = timedelta(
                 minutes=unused_release_minutes
-            )
-            cap_reached_threshold_w = max(
-                0.0,
-                (previous_target_w or 0.0) - INVERTER_DERATING_ACTIVE_TOLERANCE_W,
             )
             previous_derating_active = (
                 previous_target_w is not None
                 and previous_target_w < float(max_inverter_power)
             )
-            cap_is_binding = (
-                previous_derating_active
-                and solar_production_w >= cap_reached_threshold_w
+            export_below_band = smoothed_export_power_w < lower_export_w
+            current_export_above_band = export_power_w > upper_export_w
+            export_above_band = (
+                current_export_above_band
+                or smoothed_export_power_w > upper_export_w
             )
-            cap_not_reached = previous_derating_active and not cap_is_binding
-            unreached_since = previous_unreached_since
-            if cap_not_reached and unreached_since is None:
-                unreached_since = evaluated_at
-            if not cap_not_reached:
+            # Relaxation is allowed when export is at or below the upper band
+            # (not just below the lower band).  This lets the relaxation timer
+            # survive brief fluctuations into the deadband instead of resetting.
+            allow_relaxation_progress = previous_derating_active and not export_above_band
+            if previous_derating_active and previous_unreached_since is not None and not export_above_band:
+                unreached_since = previous_unreached_since
+            else:
                 unreached_since = None
+            if previous_derating_active and export_below_band and unreached_since is None:
+                unreached_since = evaluated_at
 
-            def should_release_unused_cap() -> bool:
+            def should_relax_cap_upward() -> bool:
                 return (
-                    cap_not_reached
+                    allow_relaxation_progress
                     and unreached_since is not None
-                    and evaluated_at - unreached_since >= release_to_max_after
+                    and evaluated_at - unreached_since >= relax_cap_after
                 )
 
-            if battery_below_bypass_threshold and export_power_w <= upper_export_w:
+            if battery_below_bypass_threshold and not export_above_band:
                 return {
                     "inverter_derating_target": int(max_inverter_power),
                     "inverter_derating_reason": (
                         f"Battery SOC {average_soc:.0f}% < {soc_bypass_threshold:.0f}% and "
-                        f"export {export_power_w:.0f}W is within the low-SOC tolerance - "
+                        f"averaged export {smoothed_export_power_w:.0f}W is within the "
+                        "low-SOC tolerance - "
                         "keep inverter unrestricted so solar can charge the battery"
                     ),
                     **no_alarm,
                 }
 
-            if export_power_w < lower_export_w:
-                if should_release_unused_cap():
+            if export_below_band:
+                if (
+                    house_consumption_w is not None
+                    and house_consumption_w > solar_production_w
+                    and safe_output_w is not None
+                ):
+                    recalculated_target_w = min(
+                        float(max_inverter_power),
+                        safe_output_w,
+                    )
+                    if (
+                        previous_target_w is None
+                        or recalculated_target_w > previous_target_w
+                    ):
+                        return {
+                            "inverter_derating_target": int(recalculated_target_w),
+                            "inverter_derating_reason": (
+                                f"Feed-in blocked, but house consumption "
+                                f"{house_consumption_w:.0f}W already exceeds current solar "
+                                f"{solar_production_w:.0f}W - recalculate the inverter cap "
+                                f"immediately to house {house_consumption_w:.0f}W + export "
+                                f"target {export_limit_w}W"
+                            ),
+                            **no_alarm,
+                        }
+                if should_relax_cap_upward() and previous_target_w is not None:
+                    reopened_target_w = min(
+                        float(max_inverter_power),
+                        max(0.0, previous_target_w + release_step_w),
+                    )
                     return {
-                        "inverter_derating_target": int(max_inverter_power),
+                        "inverter_derating_target": int(reopened_target_w),
                         "inverter_derating_reason": (
-                            f"Feed-in blocked but solar stayed at {solar_production_w:.0f}W, "
-                            f"below the current derating target {previous_target_w:.0f}W, "
-                            f"for {unused_release_minutes} minutes - "
-                            "release the inverter to max power because the cap is not active"
+                            f"Feed-in blocked and averaged export stayed low at "
+                            f"{smoothed_export_power_w:.0f}W < "
+                            f"{lower_export_w:.0f}W for {unused_release_minutes} minutes - "
+                            f"raise the inverter cap cautiously from {previous_target_w:.0f}W "
+                            f"to {reopened_target_w:.0f}W instead of jumping back to max power"
                         ),
-                        **no_alarm,
+                        "inverter_derating_alarm": False,
+                        "inverter_derating_alarm_reason": "No derating alarm",
+                        "inverter_derating_unreached_since": (
+                            evaluated_at
+                            if reopened_target_w < float(max_inverter_power)
+                            else None
+                        ),
                     }
-                if cap_not_reached and previous_target_w is not None:
+                if previous_derating_active and previous_target_w is not None:
                     return {
                         "inverter_derating_target": int(previous_target_w),
                         "inverter_derating_reason": (
-                            f"Feed-in blocked but export is only {export_power_w:.0f}W and "
-                            f"solar {solar_production_w:.0f}W has not reached the current "
-                            f"derating target {previous_target_w:.0f}W yet - hold the cap "
-                            "steady instead of reopening further"
+                            f"Feed-in blocked but averaged export is only "
+                            f"{smoothed_export_power_w:.0f}W < "
+                            f"{lower_export_w:.0f}W - hold the current derating target "
+                            f"{previous_target_w:.0f}W steady until low export has remained "
+                            f"stable for {unused_release_minutes} minutes before increasing it"
                         ),
                         "inverter_derating_alarm": False,
                         "inverter_derating_alarm_reason": "No derating alarm",
@@ -1806,18 +1873,21 @@ class ChargingDecisionEngine:
                 return {
                     "inverter_derating_target": int(reopened_target_w),
                     "inverter_derating_reason": (
-                        f"Feed-in blocked but export is only {export_power_w:.0f}W < "
+                        f"Feed-in blocked but averaged export is only "
+                        f"{smoothed_export_power_w:.0f}W < "
                         f"{lower_export_w:.0f}W - reopen inverter gradually toward the "
                         "export target instead of jumping straight to max power"
                     ),
                     **no_alarm,
                 }
 
-            if export_power_w > upper_export_w:
-                target = solar_production_w - (export_power_w - export_limit_w)
+            if export_above_band:
+                target = solar_production_w - (
+                    max(export_power_w, smoothed_export_power_w) - export_limit_w
+                )
                 target = max(0.0, min(float(max_inverter_power), target))
                 reason = (
-                    f"Feed-in blocked and exporting {export_power_w:.0f}W > "
+                    f"Feed-in blocked and export is {max(export_power_w, smoothed_export_power_w):.0f}W > "
                     f"{upper_export_w:.0f}W - "
                     f"reduce from current solar {solar_production_w:.0f}W toward {export_limit_w}W export"
                 )
@@ -1831,46 +1901,51 @@ class ChargingDecisionEngine:
                     response["inverter_derating_alarm_reason"] = (
                         f"Battery SOC {average_soc:.0f}% is below the "
                         f"{soc_bypass_threshold:.0f}% bypass threshold, but export is still "
-                        f"{export_power_w:.0f}W. Derating was forced to protect the grid target."
+                        f"{max(export_power_w, smoothed_export_power_w):.0f}W. Derating was forced to protect the "
+                        "grid target."
                     )
                 return response
 
+            # Within-band path: export is between lower and upper deadband.
+            # We still allow relaxation here (not only in the below-band path)
+            # so the timer isn't wasted when export oscillates around the edge.
+            # unreached_since is preserved in the return so the countdown
+            # carries over to the next evaluation cycle.
             held_target_w = previous_target_w
             if held_target_w is None:
                 held_target_w = solar_production_w
-            if should_release_unused_cap():
+            if should_relax_cap_upward() and previous_target_w is not None:
+                reopened_target_w = min(
+                    float(max_inverter_power),
+                    max(0.0, previous_target_w + release_step_w),
+                )
                 return {
-                    "inverter_derating_target": int(max_inverter_power),
+                    "inverter_derating_target": int(reopened_target_w),
                     "inverter_derating_reason": (
-                        f"Feed-in blocked and export {export_power_w:.0f}W is within the band, "
-                        f"but solar stayed at {solar_production_w:.0f}W below the current "
-                        f"derating target {previous_target_w:.0f}W for "
-                        f"{unused_release_minutes} minutes - release the "
-                        "inverter to max power because the cap is not active"
-                    ),
-                    **no_alarm,
-                }
-            if cap_not_reached and previous_target_w is not None:
-                return {
-                    "inverter_derating_target": int(previous_target_w),
-                    "inverter_derating_reason": (
-                        f"Feed-in blocked and export {export_power_w:.0f}W is within the "
-                        f"{lower_export_w:.0f}-{upper_export_w:.0f}W band, but solar "
-                        f"{solar_production_w:.0f}W has not reached the current derating "
-                        f"target {previous_target_w:.0f}W yet - keep the cap steady"
+                        f"Feed-in blocked and averaged export has stayed at or below the "
+                        f"{lower_export_w:.0f}-{upper_export_w:.0f}W control band for "
+                        f"{unused_release_minutes} minutes - raise the inverter cap cautiously "
+                        f"from {previous_target_w:.0f}W to {reopened_target_w:.0f}W"
                     ),
                     "inverter_derating_alarm": False,
                     "inverter_derating_alarm_reason": "No derating alarm",
-                    "inverter_derating_unreached_since": unreached_since,
+                    "inverter_derating_unreached_since": (
+                        evaluated_at
+                        if reopened_target_w < float(max_inverter_power)
+                        else None
+                    ),
                 }
             return {
                 "inverter_derating_target": int(held_target_w),
                 "inverter_derating_reason": (
-                    f"Feed-in blocked and export {export_power_w:.0f}W is within the "
+                    f"Feed-in blocked and averaged export {smoothed_export_power_w:.0f}W is "
+                    f"within the "
                     f"{lower_export_w:.0f}-{upper_export_w:.0f}W band - hold the current "
                     "derating target steady"
                 ),
-                **no_alarm,
+                "inverter_derating_alarm": False,
+                "inverter_derating_alarm_reason": "No derating alarm",
+                "inverter_derating_unreached_since": unreached_since,
             }
 
         # Fallback when grid or solar telemetry is missing: use a conservative
@@ -1894,7 +1969,6 @@ class ChargingDecisionEngine:
                 **no_alarm,
             }
 
-        safe_output_w = max(0.0, house_consumption_w + export_limit_w)
         if solar_production_w is not None and solar_production_w <= safe_output_w:
             target = min(float(max_inverter_power), safe_output_w)
             return {
@@ -2423,6 +2497,11 @@ class ChargingDecisionEngine:
         
         grid_setpoint_parts = []
         car_grid_need = 0
+        battery_dump_active = bool(data.get("battery_dump_to_grid_active", False))
+        battery_dump_export_power = max(
+            0,
+            int(_safe_optional_float(data.get("battery_dump_export_power")) or 0),
+        )
         
         if significant_car_charging and car_grid_charging:
             allocated_solar = (_safe_optional_float(power_allocation.get("solar_for_car")) or 0.0)
@@ -2438,7 +2517,16 @@ class ChargingDecisionEngine:
                 grid_setpoint_parts.append(f"car pulling {int(car_grid_need)}W")
         
         battery_grid_need = 0
-        if battery_grid_charging:
+        if battery_dump_active and battery_dump_export_power > 0:
+            battery_grid_need = -min(
+                battery_dump_export_power,
+                self._settings.max_battery_power,
+                self._get_max_grid_power(),
+            )
+            grid_setpoint_parts.append(
+                f"battery exporting {int(abs(battery_grid_need))}W"
+            )
+        elif battery_grid_charging:
             remaining_capacity = max(0, max_setpoint - car_grid_need)
             max_battery_power = self._settings.max_battery_power
             battery_grid_need = min(remaining_capacity, max_battery_power)
@@ -2446,12 +2534,30 @@ class ChargingDecisionEngine:
                 grid_setpoint_parts.append(f"battery charging {int(battery_grid_need)}W")
         
         grid_setpoint = car_grid_need + battery_grid_need
-        max_grid_power = self._get_max_grid_power()
-        grid_setpoint = min(grid_setpoint, max_setpoint, max_grid_power)
+        if grid_setpoint > 0:
+            max_grid_power = self._get_max_grid_power()
+            grid_setpoint = min(grid_setpoint, max_setpoint, max_grid_power)
         
         # Create reason
         if not grid_setpoint_parts:
             reason = f"No grid charging needed | {peak_context_reason}"
+        elif battery_dump_active and battery_grid_need < 0:
+            components_text = " + ".join(grid_setpoint_parts)
+            if grid_setpoint < 0:
+                reason = (
+                    f"Grid export scheduled for {components_text} = {int(abs(grid_setpoint))}W export"
+                    f" | {data.get('battery_dump_to_grid_reason', 'Battery dump-to-grid mode active')}"
+                )
+            elif grid_setpoint == 0:
+                reason = (
+                    f"Battery export fully offset by local EV load ({components_text})"
+                    f" | {data.get('battery_dump_to_grid_reason', 'Battery dump-to-grid mode active')}"
+                )
+            else:
+                reason = (
+                    f"Battery export netted against local EV load ({components_text}) = {int(grid_setpoint)}W import"
+                    f" | {peak_context_reason}"
+                )
         else:
             components_text = " + ".join(grid_setpoint_parts)
             if len(grid_setpoint_parts) == 1:

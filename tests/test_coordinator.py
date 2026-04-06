@@ -20,6 +20,8 @@ from custom_components.electricity_planner.const import (
     ATTR_ENTRY_ID,
     ATTR_TARGET,
     CONF_BASE_GRID_SETPOINT,
+    CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
+    CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
@@ -59,6 +61,7 @@ from custom_components.electricity_planner.const import (
     MANUAL_OVERRIDE_ACTION_FORCE_CHARGE,
     MANUAL_OVERRIDE_ACTION_FORCE_WAIT,
     MANUAL_OVERRIDE_TARGET_BATTERY,
+    MANUAL_OVERRIDE_TARGET_BATTERY_DUMP,
     MANUAL_OVERRIDE_TARGET_CAR,
     SERVICE_CLEAR_MANUAL_OVERRIDE,
     SERVICE_SET_MANUAL_OVERRIDE,
@@ -1173,6 +1176,184 @@ async def test_manual_override_persists_across_restart(fake_hass, monkeypatch):
     assert override["reason"] == "persisted disable"
 
 
+@pytest.mark.asyncio
+async def test_battery_dump_mode_persists_across_restart(fake_hass, monkeypatch):
+    """Battery dump mode should survive coordinator recreation."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    store = _MemoryOverrideStore()
+    coordinator._manual_override_store = store
+
+    await coordinator.async_set_battery_dump_mode(reason="persisted dump")
+
+    restored = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    restored._manual_override_store = _MemoryOverrideStore(store.data)
+
+    await restored._async_load_manual_overrides()
+
+    override = restored.get_manual_override("battery_dump_to_grid")
+    assert override is not None
+    assert override["value"] is True
+    assert override["reason"] == "persisted dump"
+
+
+def test_battery_dump_plan_prefers_highest_export_window(fake_hass, monkeypatch):
+    """Battery dump planner should choose the highest-value eligible export window."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_BATTERY_DUMP_TARGET_SOC: 20,
+            "feedin_adjustment_multiplier": 1.0,
+            "feedin_adjustment_offset": 0.0,
+            "feedin_price_threshold": 0.05,
+            "max_battery_power": 2000,
+            "max_grid_power": 6000,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._manual_overrides["battery_dump_to_grid"] = {
+        "value": True,
+        "reason": "Dump mode",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    lower_window = [
+        _make_price_interval(base_time + timedelta(minutes=15 * slot), 70.0)
+        for slot in range(8)
+    ]
+    higher_window = [
+        _make_price_interval(base_time + timedelta(hours=2, minutes=15 * slot), 110.0)
+        for slot in range(8)
+    ]
+
+    plan = coordinator._calculate_battery_dump_plan(
+        {
+            "battery_details": [
+                {
+                    "entity_id": "sensor.battery_soc_1",
+                    "soc": 60,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                }
+            ],
+            "nordpool_prices_today": {"BE": lower_window + higher_window},
+            "nordpool_prices_tomorrow": None,
+        }
+    )
+
+    assert plan["enabled"] is True
+    assert plan["active"] is False
+    assert plan["required_duration_hours"] == pytest.approx(2.0, rel=1e-6)
+    assert plan["window_average_price"] == pytest.approx(0.11, rel=1e-6)
+    parsed_start = dt_util.parse_datetime(plan["window_start"])
+    assert dt_util.as_utc(parsed_start) == base_time + timedelta(hours=2)
+
+
+def test_battery_dump_plan_honors_configured_export_cap(fake_hass, monkeypatch):
+    """Configured dump export cap should further limit the automatic battery/grid cap."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_BATTERY_DUMP_TARGET_SOC: 20,
+            CONF_BATTERY_DUMP_MAX_EXPORT_POWER: 4500,
+            "feedin_adjustment_multiplier": 1.0,
+            "feedin_adjustment_offset": 0.0,
+            "feedin_price_threshold": 0.05,
+            "max_battery_power": 6000,
+            "max_grid_power": 8000,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._manual_overrides["battery_dump_to_grid"] = {
+        "value": True,
+        "reason": "Dump mode",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    intervals = [
+        _make_price_interval(base_time + timedelta(minutes=15 * slot), 100.0)
+        for slot in range(16)
+    ]
+
+    plan = coordinator._calculate_battery_dump_plan(
+        {
+            "battery_details": [
+                {
+                    "entity_id": "sensor.battery_soc_1",
+                    "soc": 65,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                }
+            ],
+            "nordpool_prices_today": {"BE": intervals},
+            "nordpool_prices_tomorrow": None,
+        }
+    )
+
+    assert plan["configured_export_cap_w"] == 4500
+
+
+def test_battery_dump_plan_falls_back_to_best_shorter_window(fake_hass, monkeypatch):
+    """If no full dump window exists, the planner should still monetize the best shorter slot."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_BATTERY_DUMP_TARGET_SOC: 20,
+            "feedin_adjustment_multiplier": 1.0,
+            "feedin_adjustment_offset": 0.0,
+            "feedin_price_threshold": 0.05,
+            "max_battery_power": 2000,
+            "max_grid_power": 6000,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._manual_overrides["battery_dump_to_grid"] = {
+        "value": True,
+        "reason": "Dump mode",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    # 3 kWh available above target needs 1.5h at 2kW, but only 1h windows exist.
+    first_window = [
+        _make_price_interval(base_time + timedelta(minutes=15 * slot), 80.0)
+        for slot in range(4)
+    ]
+    second_window = [
+        _make_price_interval(base_time + timedelta(hours=2, minutes=15 * slot), 120.0)
+        for slot in range(4)
+    ]
+
+    plan = coordinator._calculate_battery_dump_plan(
+        {
+            "battery_details": [
+                {
+                    "entity_id": "sensor.battery_soc_1",
+                    "soc": 50,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                }
+            ],
+            "nordpool_prices_today": {"BE": first_window + second_window},
+            "nordpool_prices_tomorrow": None,
+        }
+    )
+
+    assert plan["window_covers_full_dump"] is False
+    assert plan["window_average_price"] == pytest.approx(0.12, rel=1e-6)
+    assert "best available shorter high-price window" in plan["reason"]
+
+
 def test_forecast_summary_uses_price_timeline(fake_hass, monkeypatch):
     """Forecast summary exposes cheapest interval and best window."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
@@ -1400,6 +1581,34 @@ async def test_service_accepts_explicit_entry(fake_hass, monkeypatch):
     )
 
     coordinator.async_clear_manual_override.assert_awaited_once_with(MANUAL_OVERRIDE_TARGET_CAR)
+    coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_service_can_enable_battery_dump_mode(fake_hass, monkeypatch):
+    """Battery dump target should route to the dedicated coordinator helper."""
+    config = _base_config()
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator.async_set_battery_dump_mode = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    from custom_components.electricity_planner.__init__ import _register_services_once
+
+    fake_hass.data.setdefault(DOMAIN, {})[coordinator.entry.entry_id] = coordinator
+
+    _register_services_once(fake_hass)
+
+    handler = fake_hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
+
+    await handler(
+        FakeServiceCall(
+            {
+                ATTR_TARGET: MANUAL_OVERRIDE_TARGET_BATTERY_DUMP,
+            }
+        )
+    )
+
+    coordinator.async_set_battery_dump_mode.assert_awaited_once_with(reason=None)
     coordinator.async_request_refresh.assert_awaited_once()
 
 

@@ -107,9 +107,18 @@ views:
               - entity: number.electricity_planner_max_soc_threshold
                 name: Max SOC Threshold
                 icon: mdi:battery-charging-high
+              - entity: number.electricity_planner_battery_dump_target_soc
+                name: Dump Target SOC
+                icon: mdi:battery-arrow-down-outline
+              - entity: number.electricity_planner_battery_dump_max_export_power
+                name: Dump Max Export Power
+                icon: mdi:transmission-tower-export
               - entity: switch.electricity_planner_disable_battery_charging
                 name: Disable Battery Charging
                 icon: mdi:battery-off
+              - entity: switch.electricity_planner_battery_dump_to_grid
+                name: Dump Battery To Grid
+                icon: mdi:transmission-tower-export
               - entity: switch.electricity_planner_car_permissive_mode
                 name: Car Permissive Mode
                 icon: mdi:car-electric-outline

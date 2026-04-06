@@ -22,7 +22,10 @@ from custom_components.electricity_planner.const import (
     DOMAIN,
 )
 from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
-from custom_components.electricity_planner.switch import CarPermissiveModeSwitch
+from custom_components.electricity_planner.switch import (
+    BatteryDumpToGridSwitch,
+    CarPermissiveModeSwitch,
+)
 
 
 class FakeState:
@@ -126,3 +129,27 @@ async def test_car_permissive_switch_skips_restore_when_no_last_state(fake_hass,
 
     assert coordinator._car_permissive_mode_active is False
     coordinator.async_request_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_battery_dump_switch_uses_persistent_override(fake_hass, monkeypatch):
+    """Dump switch should delegate persistence to the coordinator override store."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entity = BatteryDumpToGridSwitch(coordinator, entry)
+
+    coordinator.async_set_battery_dump_mode = AsyncMock()
+    coordinator.async_clear_battery_dump_mode = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    await entity.async_turn_on()
+
+    coordinator.async_set_battery_dump_mode.assert_awaited_once()
+    coordinator.async_request_refresh.assert_awaited_once()
+
+    coordinator.async_request_refresh.reset_mock()
+
+    await entity.async_turn_off()
+
+    coordinator.async_clear_battery_dump_mode.assert_awaited_once()
+    coordinator.async_request_refresh.assert_awaited_once()

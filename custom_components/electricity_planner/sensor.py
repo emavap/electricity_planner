@@ -577,6 +577,11 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
             "current_car_power": self.coordinator.data.get("power_analysis", {}).get("car_charging_power", 0),
             "solar_surplus": self.coordinator.data.get("power_analysis", {}).get("solar_surplus", 0),
             "battery_average_soc": self.coordinator.data.get("battery_analysis", {}).get("average_soc", 0),
+            "battery_dump_to_grid_active": self.coordinator.data.get("battery_dump_to_grid_active", False),
+            "battery_dump_export_power": self.coordinator.data.get("battery_dump_export_power", 0),
+            "battery_dump_configured_export_cap_w": (
+                self.coordinator.data.get("battery_dump_plan", {}).get("configured_export_cap_w")
+            ),
             "monthly_grid_peak": monthly_peak,
             "base_grid_setpoint": base_grid_setpoint,
             "controlling_peak": controlling_peak,
@@ -705,9 +710,12 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "battery_grid_charging": self.coordinator.data.get("battery_grid_charging", False),
                 "car_grid_charging": self.coordinator.data.get("car_grid_charging", False),
                 "feedin_solar": self.coordinator.data.get("feedin_solar", False),
+                "battery_dump_to_grid_enabled": self.coordinator.data.get("battery_dump_to_grid_enabled", False),
+                "battery_dump_to_grid_active": self.coordinator.data.get("battery_dump_to_grid_active", False),
                 "battery_reason": self.coordinator.data.get("battery_grid_charging_reason", ""),
                 "car_reason": self.coordinator.data.get("car_grid_charging_reason", ""),
                 "feedin_reason": self.coordinator.data.get("feedin_solar_reason", ""),
+                "battery_dump_reason": self.coordinator.data.get("battery_dump_to_grid_reason", ""),
                 "manual_overrides": self.coordinator.data.get("manual_overrides", {}),
             },
 
@@ -725,6 +733,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "inverter_derating_reason": self.coordinator.data.get("inverter_derating_reason", ""),
                 "inverter_derating_alarm": self.coordinator.data.get("inverter_derating_alarm", False),
                 "inverter_derating_alarm_reason": self.coordinator.data.get("inverter_derating_alarm_reason", ""),
+                "battery_dump_plan": self.coordinator.data.get("battery_dump_plan", {}),
                 "grid_components": self.coordinator.data.get("grid_components", {}),
                 "phase_mode": self.coordinator.data.get("phase_mode", PHASE_MODE_SINGLE),
                 "phase_results": self.coordinator.data.get("phase_results", {}),

@@ -7,7 +7,7 @@ import json
 import logging
 import re
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Callable
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
@@ -62,23 +62,37 @@ from .const import (
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_BASE_GRID_SETPOINT,
     CONF_MIN_SOC_THRESHOLD,
+    CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
+    CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
+    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    CONF_FEEDIN_ADJUSTMENT_OFFSET,
+    CONF_FEEDIN_PRICE_THRESHOLD,
+    CONF_MAX_BATTERY_POWER,
+    CONF_MAX_GRID_POWER,
     CONF_USE_AVERAGE_THRESHOLD,
     CONF_MIN_CAR_CHARGING_DURATION,
     CONF_MIN_CAR_CHARGING_THRESHOLD,
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_MIN_SOC,
+    DEFAULT_BATTERY_DUMP_MAX_EXPORT_POWER,
+    DEFAULT_BATTERY_DUMP_TARGET_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
+    DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
+    DEFAULT_FEEDIN_PRICE_THRESHOLD,
     DEFAULT_USE_AVERAGE_THRESHOLD,
     DEFAULT_MIN_CAR_CHARGING_DURATION,
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
     DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_MAX_BATTERY_POWER,
+    DEFAULT_MAX_GRID_POWER,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
     NORDPOOL_CACHE_MAX_SIZE,
@@ -101,6 +115,7 @@ from .const import (
 from .decision_engine import ChargingDecisionEngine
 from .helpers import (
     PriceInterval,
+    apply_price_adjustment,
     extract_price_from_interval,
     resolve_transport_cost_from_lookup,
     is_day_tariff,
@@ -170,6 +185,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Manual override tracking
         self._manual_overrides: dict[str, dict[str, Any] | None] = {
             "battery_grid_charging": None,
+            "battery_dump_to_grid": None,
             "car_grid_charging": None,
             "charger_limit": None,
             "grid_setpoint": None,
@@ -227,6 +243,30 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             The override dict if active, None otherwise.
         """
         return self._manual_overrides.get(key)
+
+    def is_battery_dump_mode_enabled(self) -> bool:
+        """Return whether persistent battery dump mode is enabled."""
+        override = self.get_manual_override("battery_dump_to_grid")
+        return bool(override and override.get("value") is True)
+
+    async def async_set_battery_dump_mode(self, reason: str | None = None) -> None:
+        """Persistently enable battery dump-to-grid mode."""
+        now = dt_util.utcnow()
+        self._manual_overrides["battery_dump_to_grid"] = {
+            "value": True,
+            "reason": reason or "Battery dump-to-grid mode enabled",
+            "expires_at": None,
+            "set_at": now,
+        }
+        _LOGGER.info("Battery dump-to-grid mode enabled")
+        await self._async_persist_manual_overrides()
+
+    async def async_clear_battery_dump_mode(self) -> None:
+        """Disable persistent battery dump-to-grid mode."""
+        if self._manual_overrides.get("battery_dump_to_grid"):
+            _LOGGER.info("Battery dump-to-grid mode cleared")
+        self._manual_overrides["battery_dump_to_grid"] = None
+        await self._async_persist_manual_overrides()
 
     async def _async_load_manual_overrides(self) -> None:
         """Load persisted manual overrides from storage."""
@@ -565,11 +605,18 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         """
         mapping = {
             "battery": ("battery_grid_charging",),
+            "battery_dump": ("battery_dump_to_grid",),
             "car": ("car_grid_charging",),
             "both": ("battery_grid_charging", "car_grid_charging"),
             "charger_limit": ("charger_limit",),
             "grid_setpoint": ("grid_setpoint",),
-            "all": ("battery_grid_charging", "car_grid_charging", "charger_limit", "grid_setpoint"),
+            "all": (
+                "battery_grid_charging",
+                "battery_dump_to_grid",
+                "car_grid_charging",
+                "charger_limit",
+                "grid_setpoint",
+            ),
         }
         return mapping.get(target, ())
 
@@ -857,6 +904,19 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             override_value = override["value"]
             manual_reason: str = override.get("reason", "Manual override")
 
+            if coordinator_key == "battery_dump_to_grid":
+                overrides_info[coordinator_key] = {
+                    "value": override_value,
+                    "reason": manual_reason,
+                    "set_at": override.get("set_at").isoformat() if override.get("set_at") else None,
+                    "expires_at": expires_at.isoformat() if expires_at else None,
+                    "target_soc": self.config.get(
+                        CONF_BATTERY_DUMP_TARGET_SOC,
+                        DEFAULT_BATTERY_DUMP_TARGET_SOC,
+                    ),
+                }
+                continue
+
             # Handle numeric overrides (charger_limit, grid_setpoint)
             if coordinator_key in ("charger_limit", "grid_setpoint"):
                 previous_value = decision.get(coordinator_key)
@@ -927,22 +987,19 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         return decision, changed_targets
 
-    def _build_price_timeline(
+    def _parse_intervals_to_timeline(
         self,
         prices_today: dict[str, Any] | None,
         prices_tomorrow: dict[str, Any] | None,
-        transport_lookup: list[dict[str, Any]] | None,
-        current_transport_cost: float | None,
         now: datetime,
+        price_fn: Callable[[dict[str, Any], float, datetime], float | None],
     ) -> list[PriceInterval]:
-        """Build a chronological price timeline with fully resolved intervals."""
-        multiplier = self.config.get(
-            CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
-        )
-        offset = self.config.get(
-            CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
-        )
+        """Build a chronological price timeline using a pluggable price function.
 
+        The *price_fn* callback receives ``(interval, raw_price_kwh, start_utc)``
+        and must return the final €/kWh price to record, or ``None`` to skip the
+        interval.
+        """
         future_intervals: list[tuple[datetime, datetime | None, float]] = []
 
         def process_intervals(intervals: list[dict[str, Any]]) -> None:
@@ -992,20 +1049,11 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                         )
                         continue
 
-                    price_kwh = price_value / 1000
-                    adjusted_price = (price_kwh * multiplier) + offset
+                    raw_price_kwh = price_value / 1000
+                    final_price = price_fn(interval, raw_price_kwh, start_time_utc)
+                    if final_price is None:
+                        continue
 
-                    transport_cost = self._resolve_transport_cost(
-                        transport_lookup, start_time_utc, reference_now=now
-                    )
-                    if transport_cost is None:
-                        transport_cost = (
-                            current_transport_cost
-                            if current_transport_cost is not None
-                            else 0.0
-                        )
-
-                    final_price = adjusted_price + transport_cost
                     future_intervals.append((start_time_utc, end_time, final_price))
 
                 except (ValueError, TypeError, KeyError, AttributeError) as err:
@@ -1070,6 +1118,310 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             timeline.append(PriceInterval(start_time, interval_end, price))
 
         return timeline
+
+    def _build_price_timeline(
+        self,
+        prices_today: dict[str, Any] | None,
+        prices_tomorrow: dict[str, Any] | None,
+        transport_lookup: list[dict[str, Any]] | None,
+        current_transport_cost: float | None,
+        now: datetime,
+    ) -> list[PriceInterval]:
+        """Build a chronological price timeline with fully resolved intervals."""
+        multiplier = self.config.get(
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+        )
+        offset = self.config.get(
+            CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
+        )
+
+        def _purchase_price(
+            interval: dict[str, Any], raw_price_kwh: float, start_utc: datetime,
+        ) -> float | None:
+            adjusted_price = (raw_price_kwh * multiplier) + offset
+            transport_cost = self._resolve_transport_cost(
+                transport_lookup, start_utc, reference_now=now
+            )
+            if transport_cost is None:
+                transport_cost = (
+                    current_transport_cost
+                    if current_transport_cost is not None
+                    else 0.0
+                )
+            return adjusted_price + transport_cost
+
+        return self._parse_intervals_to_timeline(
+            prices_today, prices_tomorrow, now, _purchase_price,
+        )
+
+    def _build_feedin_price_timeline(
+        self,
+        prices_today: dict[str, Any] | None,
+        prices_tomorrow: dict[str, Any] | None,
+        now: datetime,
+    ) -> list[PriceInterval]:
+        """Build a chronological price timeline for feed-in planning."""
+        multiplier = self.config.get(
+            CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+            DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
+        )
+        offset = self.config.get(
+            CONF_FEEDIN_ADJUSTMENT_OFFSET,
+            DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
+        )
+
+        def _feedin_price(
+            interval: dict[str, Any], raw_price_kwh: float, start_utc: datetime,
+        ) -> float | None:
+            final_price = apply_price_adjustment(raw_price_kwh, multiplier, offset)
+            return final_price if final_price is not None else raw_price_kwh
+
+        return self._parse_intervals_to_timeline(
+            prices_today, prices_tomorrow, now, _feedin_price,
+        )
+
+    def _find_best_export_window(
+        self,
+        timeline: list[PriceInterval],
+        now: datetime,
+        required_duration: timedelta,
+        minimum_price: float,
+    ) -> dict[str, Any] | None:
+        """Find the highest-value continuous export window."""
+        if required_duration <= timedelta(0):
+            return None
+
+        best_window: dict[str, Any] | None = None
+        best_partial_window: dict[str, Any] | None = None
+        gap_tolerance = timedelta(seconds=PRICE_INTERVAL_GAP_TOLERANCE_SECONDS)
+
+        for idx in range(len(timeline)):
+            start, end, price = timeline[idx]
+            if end <= now or price < minimum_price:
+                continue
+
+            window_start = max(start, now)
+            window_end_target = window_start + required_duration
+            window_duration = timedelta(0)
+            revenue_sum = 0.0
+            current_time = window_start
+            last_end = current_time
+            contiguous_run_end = current_time
+
+            for segment_idx in range(idx, len(timeline)):
+                segment_start, segment_end, segment_price = timeline[segment_idx]
+                if segment_end <= current_time:
+                    continue
+                if segment_price < minimum_price:
+                    break
+                if segment_start > last_end + gap_tolerance:
+                    break
+
+                effective_start = max(segment_start, current_time)
+                effective_end = min(segment_end, window_end_target)
+                if effective_end <= effective_start:
+                    continue
+
+                duration = effective_end - effective_start
+                hours = duration.total_seconds() / 3600
+                revenue_sum += segment_price * hours
+                window_duration += duration
+                current_time = effective_end
+                last_end = segment_end
+                contiguous_run_end = effective_end
+
+                if current_time >= window_end_target:
+                    break
+
+            if window_duration > timedelta(0):
+                hours_total = window_duration.total_seconds() / 3600
+                if hours_total > 0:
+                    average_price = revenue_sum / hours_total
+                    partial_candidate = {
+                        "start": window_start,
+                        "end": contiguous_run_end,
+                        "average_price": average_price,
+                        "covers_full_dump": window_duration >= required_duration,
+                    }
+                    if (
+                        best_partial_window is None
+                        or average_price > best_partial_window["average_price"]
+                        or (
+                            average_price == best_partial_window["average_price"]
+                            and partial_candidate["end"] > best_partial_window["end"]
+                        )
+                    ):
+                        best_partial_window = partial_candidate
+
+            if window_duration < required_duration or window_duration <= timedelta(0):
+                continue
+
+            candidate = {
+                "start": window_start,
+                "end": current_time,
+                "average_price": partial_candidate["average_price"],
+                "covers_full_dump": True,
+            }
+
+            if (
+                best_window is None
+                or candidate["average_price"] > best_window["average_price"]
+                or (
+                    candidate["average_price"] == best_window["average_price"]
+                    and candidate["start"] < best_window["start"]
+                )
+            ):
+                best_window = candidate
+
+        return best_window or best_partial_window
+
+    def _calculate_battery_dump_plan(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Build the current battery dump-to-grid plan and status."""
+        enabled = self.is_battery_dump_mode_enabled()
+        target_soc = float(
+            self.config.get(
+                CONF_BATTERY_DUMP_TARGET_SOC,
+                DEFAULT_BATTERY_DUMP_TARGET_SOC,
+            )
+        )
+        target_soc = min(100.0, max(0.0, target_soc))
+
+        plan: dict[str, Any] = {
+            "enabled": enabled,
+            "active": False,
+            "reason": "Battery dump-to-grid mode disabled",
+            "target_soc": round(target_soc, 1),
+            "configured_export_cap_w": 0,
+            "available_energy_kwh": 0.0,
+            "required_duration_hours": 0.0,
+            "window_start": None,
+            "window_end": None,
+            "window_average_price": None,
+            "window_covers_full_dump": False,
+            "export_power": 0,
+        }
+        if not enabled:
+            return plan
+
+        battery_details = data.get("battery_details") or []
+        if not battery_details:
+            plan["reason"] = "Battery dump-to-grid enabled but no battery data is available"
+            return plan
+
+        available_energy_kwh = 0.0
+        for battery in battery_details:
+            capacity = float(battery.get("capacity") or 0.0)
+            soc = float(battery.get("soc") or 0.0)
+            if capacity <= 0:
+                continue
+            available_energy_kwh += capacity * max(0.0, soc - target_soc) / 100.0
+
+        plan["available_energy_kwh"] = round(available_energy_kwh, 3)
+        if available_energy_kwh <= 0:
+            plan["reason"] = (
+                f"Battery dump target already reached (average energy above {target_soc:.0f}% is unavailable)"
+            )
+            return plan
+
+        max_battery_power = int(
+            self.config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)
+        )
+        max_grid_power = int(
+            self.config.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER)
+        )
+        configured_export_cap = int(
+            self.config.get(
+                CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
+                DEFAULT_BATTERY_DUMP_MAX_EXPORT_POWER,
+            )
+        )
+        automatic_export_cap = min(max_battery_power, max_grid_power)
+        export_power_cap = (
+            automatic_export_cap
+            if configured_export_cap <= 0
+            else min(configured_export_cap, automatic_export_cap)
+        )
+        plan["configured_export_cap_w"] = export_power_cap
+        if export_power_cap <= 0:
+            plan["reason"] = "Battery dump-to-grid enabled but no export power is available"
+            return plan
+
+        required_duration_hours = available_energy_kwh / (export_power_cap / 1000)
+        required_duration = timedelta(hours=required_duration_hours)
+        plan["required_duration_hours"] = round(required_duration_hours, 2)
+
+        now = dt_util.utcnow()
+        timeline = self._build_feedin_price_timeline(
+            data.get("nordpool_prices_today"),
+            data.get("nordpool_prices_tomorrow"),
+            now,
+        )
+        if not timeline:
+            plan["reason"] = "Battery dump-to-grid enabled but no feed-in price timeline is available"
+            return plan
+
+        feedin_threshold = float(
+            self.config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
+        )
+        best_window = self._find_best_export_window(
+            timeline,
+            now,
+            required_duration,
+            feedin_threshold,
+        )
+        if best_window is None:
+            plan["reason"] = (
+                f"No continuous feed-in window is currently available above {feedin_threshold:.3f}€/kWh"
+            )
+            return plan
+
+        def _iso_local(dt_obj: datetime) -> str:
+            return dt_util.as_local(dt_obj).isoformat()
+
+        plan["window_start"] = _iso_local(best_window["start"])
+        plan["window_end"] = _iso_local(best_window["end"])
+        plan["window_average_price"] = round(best_window["average_price"], 4)
+        plan["window_covers_full_dump"] = bool(best_window.get("covers_full_dump", False))
+
+        if best_window["start"] <= now < best_window["end"]:
+            remaining_window_hours = max(
+                (best_window["end"] - now).total_seconds() / 3600,
+                0.0,
+            )
+            export_power = export_power_cap
+            if remaining_window_hours > 0:
+                export_power = min(
+                    export_power_cap,
+                    max(0, int(round((available_energy_kwh / remaining_window_hours) * 1000))),
+                )
+            plan["active"] = export_power > 0
+            plan["export_power"] = export_power
+            if plan["active"]:
+                if plan["window_covers_full_dump"]:
+                    plan["reason"] = (
+                        f"Dumping battery to grid until {target_soc:.0f}% during the highest feed-in window "
+                        f"({best_window['average_price']:.3f}€/kWh)"
+                    )
+                else:
+                    plan["reason"] = (
+                        f"Dumping battery to grid during the best available high-price window "
+                        f"({best_window['average_price']:.3f}€/kWh); more export will be scheduled later if needed"
+                    )
+            else:
+                plan["reason"] = "Battery dump window is active but no export power is available"
+        else:
+            if plan["window_covers_full_dump"]:
+                plan["reason"] = (
+                    f"Battery dump scheduled for the highest feed-in window at "
+                    f"{best_window['average_price']:.3f}€/kWh"
+                )
+            else:
+                plan["reason"] = (
+                    f"Battery dump scheduled for the best available shorter high-price window at "
+                    f"{best_window['average_price']:.3f}€/kWh"
+                )
+
+        return plan
 
     @callback
     def _handle_entity_change(self, event: Event) -> None:
@@ -1235,6 +1587,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
             # Update peak import limit state based on current grid power
             self._update_peak_limit_state(data)
+
+            battery_dump_plan = self._calculate_battery_dump_plan(data)
+            data["battery_dump_plan"] = battery_dump_plan
+            data["battery_dump_to_grid_enabled"] = battery_dump_plan.get("enabled", False)
+            data["battery_dump_to_grid_active"] = battery_dump_plan.get("active", False)
+            data["battery_dump_to_grid_reason"] = battery_dump_plan.get("reason")
+            data["battery_dump_target_soc"] = battery_dump_plan.get("target_soc")
+            data["battery_dump_export_power"] = battery_dump_plan.get("export_power", 0)
 
             charging_decision = await self.decision_engine.evaluate_charging_decision(data)
             charging_decision, override_targets = self._apply_manual_overrides(charging_decision)
@@ -1477,6 +1837,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         data["grid_power"] = await self._get_state_value(
             self.config.get(CONF_GRID_POWER_ENTITY)
+        )
+        data["previous_grid_power"] = (
+            self.data.get("grid_power") if self.data else None
         )
 
         # Preserve prior inverter target so the derating controller can hold or

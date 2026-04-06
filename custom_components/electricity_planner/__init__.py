@@ -21,6 +21,8 @@ from .const import (
     ATTR_GRID_SETPOINT_OVERRIDE,
     ATTR_REASON,
     ATTR_TARGET,
+    CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
+    CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_SOLAR_FORECAST_START_HOUR,
@@ -30,6 +32,7 @@ from .const import (
     MANUAL_OVERRIDE_ACTION_FORCE_WAIT,
     MANUAL_OVERRIDE_TARGET_ALL,
     MANUAL_OVERRIDE_TARGET_BATTERY,
+    MANUAL_OVERRIDE_TARGET_BATTERY_DUMP,
     MANUAL_OVERRIDE_TARGET_BOTH,
     MANUAL_OVERRIDE_TARGET_CAR,
     MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
@@ -46,6 +49,8 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH, Platform.NUMBER]
 
 NUMBER_ENTITY_ID_SUFFIXES: dict[str, str] = {
+    "battery_dump_max_export_power": "battery_dump_max_export_power",
+    "battery_dump_target_soc": "battery_dump_target_soc",
     "max_soc_threshold": "max_soc_threshold",
     "max_soc_threshold_sunny": "max_soc_threshold_sunny",
     "sunny_forecast_threshold_kwh": "sunny_forecast_threshold_kwh",
@@ -57,6 +62,7 @@ MANUAL_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
         vol.Required(ATTR_TARGET): vol.In(
             (
                 MANUAL_OVERRIDE_TARGET_BATTERY,
+                MANUAL_OVERRIDE_TARGET_BATTERY_DUMP,
                 MANUAL_OVERRIDE_TARGET_CAR,
                 MANUAL_OVERRIDE_TARGET_BOTH,
                 MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
@@ -79,6 +85,7 @@ CLEAR_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_TARGET, default=MANUAL_OVERRIDE_TARGET_ALL): vol.In(
             (
                 MANUAL_OVERRIDE_TARGET_BATTERY,
+                MANUAL_OVERRIDE_TARGET_BATTERY_DUMP,
                 MANUAL_OVERRIDE_TARGET_CAR,
                 MANUAL_OVERRIDE_TARGET_BOTH,
                 MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
@@ -174,6 +181,8 @@ async def _async_migrate_number_entity_ids(hass: HomeAssistant, entry: ConfigEnt
 # Options that can be updated without requiring a full reload
 # These are applied immediately via coordinator.config and decision_engine.refresh_settings()
 LIVE_UPDATE_OPTIONS = {
+    CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
+    CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_SOLAR_FORECAST_START_HOUR,
@@ -273,6 +282,11 @@ def _register_services_once(hass: HomeAssistant) -> None:
         duration = timedelta(minutes=duration_minutes) if duration_minutes is not None else None
         charger_limit = call.data.get(ATTR_CHARGER_LIMIT_OVERRIDE)
         grid_setpoint = call.data.get(ATTR_GRID_SETPOINT_OVERRIDE)
+
+        if target == MANUAL_OVERRIDE_TARGET_BATTERY_DUMP:
+            await coordinator.async_set_battery_dump_mode(reason=reason)
+            await coordinator.async_request_refresh()
+            return
 
         # For numeric-only targets, action is optional
         # For boolean targets (battery/car/both), action is required

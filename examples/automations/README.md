@@ -176,7 +176,7 @@ These provide additional data for advanced logic:
 - Set `max_inverter_power` to your inverter's actual limit
 - Set `inverter_export_limit` to the export target you want while feed-in is blocked, for example `80 W`
 - Set `inverter_export_deadband` to the allowed band around that target, for example `40 W`
-- Set `inverter_derating_unused_release_minutes` to how long PV may stay below the current derating cap before the planner releases back to max power. Default: `5` minutes
+- Set `inverter_derating_unused_release_minutes` to how long export must stay safely below target before the planner raises the derating cap by one small step. Default: `5` minutes
 - Set `inverter_derating_soc_bypass_threshold` to the SOC below which the planner should stop derating and let PV charge the battery
 - Keep the apply automation simple and let the planner own the derating logic
 
