@@ -313,16 +313,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 overrides_changed = True
                 continue
 
-            reason = self._normalize_manual_override_reason(
-                key,
-                payload.get("reason", "Manual override"),
-            )
-            if reason != payload.get("reason", "Manual override"):
-                overrides_changed = True
-
             loaded_overrides[key] = {
                 "value": value,
-                "reason": reason,
+                "reason": payload.get("reason", "Manual override"),
                 "set_at": self._parse_stored_datetime(payload.get("set_at")),
                 "expires_at": expires_at,
             }
@@ -331,14 +324,6 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         if overrides_changed:
             await self._async_persist_manual_overrides()
-
-    @staticmethod
-    def _normalize_manual_override_reason(key: str, reason: Any) -> str:
-        """Normalize legacy persisted reason strings to current wording."""
-        normalized = str(reason or "Manual override")
-        if key == "battery_dump_to_grid" and normalized == "Manual battery dump via dashboard switch":
-            return "Manual arbitrage mode via dashboard switch"
-        return normalized
 
     async def _async_persist_manual_overrides(self) -> None:
         """Persist active manual overrides for restart recovery."""
