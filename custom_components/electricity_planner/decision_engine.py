@@ -40,6 +40,7 @@ from .const import (
     CONF_USE_AVERAGE_THRESHOLD,
     CONF_MIN_CAR_CHARGING_DURATION,
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+    CONF_CAR_USE_BATTERY_ARBITRAGE,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -71,6 +72,7 @@ from .const import (
     DEFAULT_USE_AVERAGE_THRESHOLD,
     DEFAULT_MIN_CAR_CHARGING_DURATION,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+    DEFAULT_CAR_USE_BATTERY_ARBITRAGE,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -78,6 +80,7 @@ from .const import (
     DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
     DEFAULT_SOC_BUFFER_TARGET,
     DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN,
+    MONTH_PEAK_TRANSITION_LEAD_MINUTES,
     PERMISSIVE_MULTIPLIER_MIN,
     PERMISSIVE_MULTIPLIER_MAX,
     MAX_POWER_VALIDATION_W,
@@ -98,6 +101,7 @@ from .helpers import (
     PowerAllocationValidator,
     format_reason,
     apply_price_adjustment,
+    is_in_month_peak_transition_window,
 )
 
 from .strategies import StrategyManager
@@ -113,6 +117,7 @@ _HAS_MIN_CHARGING_WINDOW_KEY = "has_min_charging_window"
 class CarChargingDecision(TypedDict, total=False):
     """Type definition for car charging decision results."""
     car_grid_charging: bool
+    car_grid_import_allowed: bool
     car_grid_charging_reason: str
     car_solar_only: bool
 
@@ -228,6 +233,7 @@ class EngineSettings:
     min_car_charging_threshold: int
     min_car_charging_duration: int
     car_permissive_threshold_multiplier: float
+    car_use_battery_arbitrage: bool
     price_adjustment_multiplier: float
     price_adjustment_offset: float
     feedin_adjustment_multiplier: float
@@ -326,6 +332,9 @@ class EngineSettings:
         car_permissive_multiplier = extractor.get_float(
             CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER, DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
             "car_permissive_threshold_multiplier"
+        )
+        car_use_battery_arbitrage = extractor.get_bool(
+            CONF_CAR_USE_BATTERY_ARBITRAGE, DEFAULT_CAR_USE_BATTERY_ARBITRAGE
         )
 
         # Extract price adjustments
@@ -426,6 +435,7 @@ class EngineSettings:
             min_car_charging_threshold=min_car_threshold,
             min_car_charging_duration=min_car_duration,
             car_permissive_threshold_multiplier=car_permissive_multiplier,
+            car_use_battery_arbitrage=car_use_battery_arbitrage,
             price_adjustment_multiplier=price_multiplier,
             price_adjustment_offset=price_offset,
             feedin_adjustment_multiplier=feed_multiplier,
@@ -455,10 +465,12 @@ class GridSetpointContext:
     """Resolved context for grid setpoint limits."""
 
     monthly_peak: int
+    applied_monthly_peak: int
     base_setpoint: int
     controlling_peak: int
     effective_max_setpoint: int
     uses_monthly_peak: bool
+    month_peak_transition_active: bool
 
 
 @dataclass(frozen=True)
@@ -544,38 +556,49 @@ class ChargingDecisionEngine:
         """Resolve the effective grid setpoint cap for the current month."""
         base_setpoint = self._settings.base_grid_setpoint
         monthly_peak_value = max(0, int(_safe_optional_float(monthly_peak) or 0))
-        uses_monthly_peak = monthly_peak_value > base_setpoint
-        controlling_peak = max(monthly_peak_value, base_setpoint)
+        month_peak_transition_active = is_in_month_peak_transition_window(
+            now=dt_util.utcnow()
+        )
+        applied_monthly_peak = 0 if month_peak_transition_active else monthly_peak_value
+        uses_monthly_peak = applied_monthly_peak > base_setpoint
+        controlling_peak = max(applied_monthly_peak, base_setpoint)
         effective_max_setpoint = int(
             controlling_peak * DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN
         )
 
         return GridSetpointContext(
             monthly_peak=monthly_peak_value,
+            applied_monthly_peak=applied_monthly_peak,
             base_setpoint=base_setpoint,
             controlling_peak=controlling_peak,
             effective_max_setpoint=effective_max_setpoint,
             uses_monthly_peak=uses_monthly_peak,
+            month_peak_transition_active=month_peak_transition_active,
         )
 
     def _get_safe_grid_setpoint(self, monthly_peak: float | None) -> int:
         """Calculate safe grid setpoint based on the configured cap and current month peak."""
         return self._get_grid_setpoint_context(monthly_peak).effective_max_setpoint
 
-    def _format_grid_setpoint_context_reason(self, monthly_peak: float | None) -> str:
+    def _format_grid_setpoint_context_reason_from_context(
+        self, context: GridSetpointContext
+    ) -> str:
         """Explain how the effective grid setpoint cap was chosen."""
-        context = self._get_grid_setpoint_context(monthly_peak)
+        if (
+            context.month_peak_transition_active
+            and context.monthly_peak > context.base_setpoint
+        ):
+            return (
+                f"Month changes in under {MONTH_PEAK_TRANSITION_LEAD_MINUTES}min, "
+                "using next month baseline "
+                f"{context.base_setpoint}W instead of current month peak "
+                f"{context.monthly_peak}W, using {context.effective_max_setpoint}W "
+                f"(90% of {context.controlling_peak}W)"
+            )
 
         if context.monthly_peak <= 0:
             return (
                 f"No current month peak available, max allowed peak is "
-                f"{context.base_setpoint}W, using {context.effective_max_setpoint}W "
-                f"(90% of {context.controlling_peak}W)"
-            )
-
-        if context.uses_monthly_peak:
-            return (
-                f"Peak this month is {context.monthly_peak}W, max allowed peak is "
                 f"{context.base_setpoint}W, using {context.effective_max_setpoint}W "
                 f"(90% of {context.controlling_peak}W)"
             )
@@ -585,6 +608,11 @@ class ChargingDecisionEngine:
             f"{context.base_setpoint}W, using {context.effective_max_setpoint}W "
             f"(90% of {context.controlling_peak}W)"
         )
+
+    def _format_grid_setpoint_context_reason(self, monthly_peak: float | None) -> str:
+        """Explain how the effective grid setpoint cap was chosen."""
+        context = self._get_grid_setpoint_context(monthly_peak)
+        return self._format_grid_setpoint_context_reason_from_context(context)
 
     async def _evaluate_single_phase(self, data: dict[str, Any]) -> dict[str, Any]:
         """Evaluate charging decisions for a single logical phase."""
@@ -656,8 +684,12 @@ class ChargingDecisionEngine:
         if dynamic_threshold is not None:
             price_analysis["dynamic_threshold"] = dynamic_threshold
 
+        car_decision_input = {
+            **data,
+            "battery_grid_charging": battery_decision.get("battery_grid_charging", False),
+        }
         car_decision = self._decide_car_grid_charging(
-            price_analysis, grid_battery_analysis, power_allocation, data
+            price_analysis, grid_battery_analysis, power_allocation, car_decision_input
         )
         decision_data.update(car_decision)
 
@@ -924,6 +956,7 @@ class ChargingDecisionEngine:
         return {
             "battery_grid_charging": False,
             "car_grid_charging": False,
+            "car_grid_import_allowed": False,
             "battery_grid_charging_reason": "No decision made",
             "car_grid_charging_reason": "No decision made",
             "charger_limit": 0,
@@ -1542,7 +1575,7 @@ class ChargingDecisionEngine:
                 return {
                     "battery_grid_charging": False,
                     "battery_grid_charging_reason": (
-                        "Battery dump-to-grid mode active - "
+                        "Arbitrage mode active - "
                         "grid charging is blocked unless the current price is negative"
                     ),
                     "strategy_trace": [],
@@ -1613,15 +1646,14 @@ class ChargingDecisionEngine:
         if not price_analysis.get("data_available", True):
             return {
                 "car_grid_charging": False,
+                "car_grid_import_allowed": False,
                 "car_grid_charging_reason": "No price data available",
             }
 
         context = self._build_car_decision_context(price_analysis, power_allocation, data)
-
         if context.very_low_price:
-            return self._car_decision_for_very_low_price(context, data)
-
-        if (
+            base_decision = self._car_decision_for_very_low_price(context, data)
+        elif (
             context.is_low_price_flag
             or (
                 context.permissive_mode_active
@@ -1629,9 +1661,39 @@ class ChargingDecisionEngine:
             )
             or (context.previous_charging and context.effective_low_price)
         ):
-            return self._car_decision_for_low_price(context, data)
+            base_decision = self._car_decision_for_low_price(context, data)
+        else:
+            base_decision = self._car_decision_for_high_price(context, data)
 
-        return self._car_decision_for_high_price(context, data)
+        charging_allowed = bool(base_decision.get("car_grid_charging", False))
+        solar_only = bool(base_decision.get("car_solar_only", False))
+        grid_import_allowed = charging_allowed and not solar_only
+
+        arbitrage_power = self._get_car_arbitrage_power(battery_analysis, data)
+        if arbitrage_power > 0:
+            grid_import_allowed = bool(
+                grid_import_allowed
+                or price_analysis.get("is_low_price")
+                or context.very_low_price
+            )
+            source_parts = [f"up to {arbitrage_power}W battery arbitrage"]
+            if context.has_allocated_solar:
+                source_parts.insert(0, f"{context.format_solar_watts()} solar")
+            if grid_import_allowed:
+                source_parts.append("allowed grid import")
+            reason = (
+                f"Arbitrage mode active - charging allowed with {' + '.join(source_parts)}"
+            )
+            return {
+                "car_grid_charging": True,
+                "car_grid_import_allowed": grid_import_allowed,
+                "car_grid_charging_reason": self._append_permissive_mode_to_reason(
+                    reason, context
+                ),
+            }
+
+        base_decision["car_grid_import_allowed"] = grid_import_allowed
+        return base_decision
 
     def _decide_feedin_solar(
         self,
@@ -2333,6 +2395,45 @@ class ChargingDecisionEngine:
         )
         return result
 
+    def _get_car_arbitrage_power(
+        self,
+        battery_analysis: dict[str, Any],
+        data: dict[str, Any],
+    ) -> int:
+        """Return arbitrage discharge power that can be diverted locally to the EV.
+
+        The EV can only use export power that is already scheduled by arbitrage mode,
+        and only when the normal battery-protection logic is not trying to keep that
+        energy in the battery.
+
+        NOTE: This method reads ``battery_dump_to_grid_active`` from the
+        coordinator data and expects ``battery_grid_charging`` in ``data`` to
+        already reflect the current-cycle battery decision before the car
+        decision runs.
+        """
+        if not self._settings.car_use_battery_arbitrage:
+            return 0
+
+        if not data.get("battery_dump_to_grid_active"):
+            return 0
+
+        export_power = max(
+            0,
+            int(_safe_optional_float(data.get("battery_dump_export_power")) or 0),
+        )
+        if export_power <= 0 or data.get("battery_grid_charging"):
+            return 0
+
+        average_soc = battery_analysis.get("average_soc")
+        if average_soc is None:
+            return 0
+
+        max_soc_threshold = battery_analysis.get("max_soc_threshold", DEFAULT_MAX_SOC)
+        if average_soc < max_soc_threshold:
+            return 0
+
+        return export_power
+
     def _calculate_charger_limit(
         self,
         price_analysis: dict[str, Any],
@@ -2344,14 +2445,22 @@ class ChargingDecisionEngine:
         car_charging_power = _safe_optional_float(data.get("car_charging_power")) or 0.0
         min_threshold = self._settings.min_car_charging_threshold
         car_limit_cap = min(self._settings.max_car_power, DEFAULT_SYSTEM_LIMITS.max_car_charger_power)
-        car_grid_charging = data.get("car_grid_charging", False)
+        car_charging_allowed = data.get("car_grid_charging", False)
+        car_grid_import_allowed = data.get("car_grid_import_allowed", car_charging_allowed)
         car_solar_only = data.get("car_solar_only", False)
+        car_arbitrage_power = (
+            self._get_car_arbitrage_power(battery_analysis, data)
+            if car_charging_allowed and not car_solar_only
+            else 0
+        )
         allocated_solar = (
             (_safe_optional_float(power_allocation.get("solar_for_car")) or 0.0)
             + (_safe_optional_float(power_allocation.get("car_current_solar_usage")) or 0.0)
         )
 
-        if car_charging_power <= min_threshold and not (car_grid_charging or car_solar_only):
+        if car_charging_power <= min_threshold and not (
+            car_charging_allowed or car_solar_only or car_arbitrage_power > 0
+        ):
             return {
                 "charger_limit": 0,
                 "charger_limit_reason": "Car not currently charging",
@@ -2371,30 +2480,46 @@ class ChargingDecisionEngine:
                     "charger_limit_reason": "Solar-only mode but no solar available",
                 }
 
-        # If grid charging not allowed, set limit to 0
-        if not car_grid_charging:
+        # Calculate based on battery SOC and grid limits
+        # At this point: car_grid_charging=True and not solar_only
+        average_soc = battery_analysis.get("average_soc")
+        max_soc_threshold = battery_analysis.get("max_soc_threshold", DEFAULT_MAX_SOC)
+
+        if not car_grid_import_allowed and car_arbitrage_power <= 0:
+            if (
+                data.get("battery_dump_to_grid_active")
+                and average_soc is not None
+                and average_soc < max_soc_threshold
+            ):
+                return {
+                    "charger_limit": 0,
+                    "charger_limit_reason": (
+                        f"Battery {average_soc:.0f}% < {max_soc_threshold}% - "
+                        "keeping arbitrage energy in the battery"
+                    ),
+                }
             return {
                 "charger_limit": 0,
                 "charger_limit_reason": "Car grid charging not allowed",
             }
 
-        # Calculate based on battery SOC and grid limits
-        # At this point: car_grid_charging=True and not solar_only
-        average_soc = battery_analysis.get("average_soc")
-
         if average_soc is None:
             # No battery data available - use conservative grid-based limit
             monthly_peak = data.get("monthly_grid_peak", 0)
-            max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
-            limit = min(max_setpoint, car_limit_cap)
+            grid_allowance = (
+                self._get_safe_grid_setpoint(monthly_peak)
+                if car_grid_import_allowed
+                else 0
+            )
+            limit = min(grid_allowance, car_limit_cap)
             return self._apply_peak_import_limit({
                 "charger_limit": int(limit),
                 "charger_limit_reason": f"Battery data unavailable - conservative limit ({int(limit)}W)",
             }, data)
 
-        max_soc_threshold = battery_analysis.get("max_soc_threshold", DEFAULT_MAX_SOC)
         monthly_peak = data.get("monthly_grid_peak", 0)
         max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
+        grid_allowance = max_setpoint if car_grid_import_allowed else 0
 
         # Check for low SOC power sharing: when battery SOC is critically low and both
         # battery and car are charging from grid, limit car to 50% to prioritize battery
@@ -2403,8 +2528,8 @@ class ChargingDecisionEngine:
 
         if (average_soc < predictive_min_soc and
             battery_grid_charging and
-            car_grid_charging):
-            limit = min(max_setpoint / 2, car_limit_cap)
+            car_grid_import_allowed):
+            limit = min(grid_allowance / 2, car_limit_cap)
             _LOGGER.info(
                 "Low SOC power sharing: battery %.0f%% < %.0f%%, limiting car to 50%% of grid (%dW)",
                 average_soc, predictive_min_soc, int(limit)
@@ -2418,7 +2543,7 @@ class ChargingDecisionEngine:
             }, data)
 
         if average_soc < max_soc_threshold:
-            limit = min(max_setpoint, car_limit_cap)
+            limit = min(grid_allowance, car_limit_cap)
             return self._apply_peak_import_limit({
                 "charger_limit": int(limit),
                 "charger_limit_reason": (f"Battery {average_soc:.0f}% < {max_soc_threshold}% - "
@@ -2426,14 +2551,22 @@ class ChargingDecisionEngine:
             }, data)
 
         available_surplus = power_allocation.get("remaining_solar", 0)
-        available_power = available_surplus + max_setpoint
+        available_power = available_surplus + car_arbitrage_power + grid_allowance
         limit = min(available_power, car_limit_cap)
+        source_parts: list[str] = []
+        if available_surplus > 0:
+            source_parts.append(f"{available_surplus}W solar")
+        if car_arbitrage_power > 0:
+            source_parts.append(f"{car_arbitrage_power}W battery arbitrage")
+        if grid_allowance > 0:
+            source_parts.append(f"{grid_allowance}W grid")
+        if not source_parts:
+            source_parts.append("0W available")
 
         return self._apply_peak_import_limit({
             "charger_limit": int(limit),
             "charger_limit_reason": (f"Battery {average_soc:.0f}% ≥ {max_soc_threshold}% - "
-                                    f"car can use remaining surplus + grid ({int(limit)}W = "
-                                    f"{available_surplus}W + {max_setpoint}W)"),
+                                    f"car can use {' + '.join(source_parts)} ({int(limit)}W total)"),
         }, data)
 
     def _calculate_grid_setpoint(
@@ -2447,18 +2580,28 @@ class ChargingDecisionEngine:
         """Calculate grid setpoint based on energy management scenario."""
         car_charging_power = _safe_optional_float(data.get("car_charging_power")) or 0.0
         battery_grid_charging = data.get("battery_grid_charging", False)
-        car_grid_charging = data.get("car_grid_charging", False)
+        car_charging_allowed = data.get("car_grid_charging", False)
+        car_grid_import_allowed = data.get("car_grid_import_allowed", car_charging_allowed)
+        car_solar_only = data.get("car_solar_only", False)
         average_soc = battery_analysis.get("average_soc")
         monthly_peak = data.get("monthly_grid_peak", 0)
-        peak_context_reason = self._format_grid_setpoint_context_reason(monthly_peak)
+        peak_context = self._get_grid_setpoint_context(monthly_peak)
+        peak_context_reason = self._format_grid_setpoint_context_reason_from_context(
+            peak_context
+        )
+        car_arbitrage_power = (
+            self._get_car_arbitrage_power(battery_analysis, data)
+            if car_charging_allowed and not car_solar_only
+            else 0
+        )
 
         min_threshold = self._settings.min_car_charging_threshold
         significant_car_charging = car_charging_power >= min_threshold
-        
+
         # Handle unavailable battery data
         if average_soc is None:
-            if significant_car_charging and car_grid_charging:
-                max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
+            if significant_car_charging and car_grid_import_allowed:
+                max_setpoint = peak_context.effective_max_setpoint
                 effective_car_power = (
                     min(car_charging_power, charger_limit)
                     if charger_limit > 0
@@ -2482,7 +2625,6 @@ class ChargingDecisionEngine:
             }
         
         # Solar-only car charging
-        car_solar_only = data.get("car_solar_only", False)
         if significant_car_charging and car_solar_only:
             return {
                 "grid_setpoint": 0,
@@ -2493,17 +2635,18 @@ class ChargingDecisionEngine:
             }
         
         # Calculate grid needs
-        max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
+        max_setpoint = peak_context.effective_max_setpoint
         
         grid_setpoint_parts = []
         car_grid_need = 0
+        car_battery_need = 0
         battery_dump_active = bool(data.get("battery_dump_to_grid_active", False))
         battery_dump_export_power = max(
             0,
             int(_safe_optional_float(data.get("battery_dump_export_power")) or 0),
         )
-        
-        if significant_car_charging and car_grid_charging:
+
+        if significant_car_charging and car_charging_allowed:
             allocated_solar = (_safe_optional_float(power_allocation.get("solar_for_car")) or 0.0)
             car_current_solar = (_safe_optional_float(power_allocation.get("car_current_solar_usage")) or 0.0)
             car_available_solar = allocated_solar + car_current_solar
@@ -2512,20 +2655,30 @@ class ChargingDecisionEngine:
                 if charger_limit > 0
                 else car_charging_power
             )
-            car_grid_need = max(0, min(effective_car_power - car_available_solar, max_setpoint))
+            residual_car_need = max(0.0, effective_car_power - car_available_solar)
+            car_battery_need = min(residual_car_need, car_arbitrage_power)
+            residual_car_need = max(0.0, residual_car_need - car_battery_need)
+            if car_grid_import_allowed:
+                car_grid_need = max(0, min(residual_car_need, max_setpoint))
             if car_grid_need > 0:
                 grid_setpoint_parts.append(f"car pulling {int(car_grid_need)}W")
+            if car_battery_need > 0:
+                grid_setpoint_parts.append(
+                    f"battery supplying car {int(car_battery_need)}W"
+                )
         
         battery_grid_need = 0
         if battery_dump_active and battery_dump_export_power > 0:
-            battery_grid_need = -min(
-                battery_dump_export_power,
-                self._settings.max_battery_power,
-                self._get_max_grid_power(),
-            )
-            grid_setpoint_parts.append(
-                f"battery exporting {int(abs(battery_grid_need))}W"
-            )
+            remaining_export_power = max(0, battery_dump_export_power - int(car_battery_need))
+            if remaining_export_power > 0:
+                battery_grid_need = -min(
+                    remaining_export_power,
+                    self._settings.max_battery_power,
+                    self._get_max_grid_power(),
+                )
+                grid_setpoint_parts.append(
+                    f"battery exporting {int(abs(battery_grid_need))}W"
+                )
         elif battery_grid_charging:
             remaining_capacity = max(0, max_setpoint - car_grid_need)
             max_battery_power = self._settings.max_battery_power
@@ -2546,12 +2699,12 @@ class ChargingDecisionEngine:
             if grid_setpoint < 0:
                 reason = (
                     f"Grid export scheduled for {components_text} = {int(abs(grid_setpoint))}W export"
-                    f" | {data.get('battery_dump_to_grid_reason', 'Battery dump-to-grid mode active')}"
+                    f" | {data.get('battery_dump_to_grid_reason', 'Arbitrage mode active')}"
                 )
             elif grid_setpoint == 0:
                 reason = (
                     f"Battery export fully offset by local EV load ({components_text})"
-                    f" | {data.get('battery_dump_to_grid_reason', 'Battery dump-to-grid mode active')}"
+                    f" | {data.get('battery_dump_to_grid_reason', 'Arbitrage mode active')}"
                 )
             else:
                 reason = (
@@ -2567,9 +2720,7 @@ class ChargingDecisionEngine:
                     f"Grid import reserved for {components_text} = {int(grid_setpoint)}W"
                     f" | {peak_context_reason}"
                 )
-            if car_grid_need == 0 and significant_car_charging:
-                reason += " (car charging not allowed)"
-        
+
         return {
             "grid_setpoint": int(grid_setpoint),
             "grid_setpoint_reason": reason,
@@ -2578,6 +2729,19 @@ class ChargingDecisionEngine:
                 "car": int(car_grid_need),
             },
         }
+
+    def _normalize_car_override_state(
+        self,
+        data: dict[str, Any],
+    ) -> None:
+        """Reset derived car charging flags after a manual ON/OFF override."""
+        if not data.get("car_grid_charging", False):
+            data["car_solar_only"] = False
+            data["car_grid_import_allowed"] = False
+            return
+
+        data["car_solar_only"] = False
+        data["car_grid_import_allowed"] = True
 
     def recalculate_after_override(
         self,
@@ -2607,6 +2771,8 @@ class ChargingDecisionEngine:
         combined_data.update(decision)
 
         if "car_grid_charging" in override_targets:
+            self._normalize_car_override_state(decision)
+            self._normalize_car_override_state(combined_data)
             charger_limit_decision = self._calculate_charger_limit(
                 price_analysis, battery_analysis, power_allocation, combined_data
             )

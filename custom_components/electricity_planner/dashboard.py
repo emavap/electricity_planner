@@ -31,13 +31,14 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import slugify
 
-from .const import DOMAIN
+from .const import CONF_PHASE_MODE, DOMAIN, PHASE_MODE_SINGLE, PHASE_MODE_THREE
 
 _LOGGER = logging.getLogger(__name__)
 
 MANAGED_KEY = "electricity_planner_managed"
-MANAGED_VERSION = 15  # Bumped: Surface battery dump-to-grid controls in dashboard
+MANAGED_VERSION = 22  # Bumped: phase-aware managed dashboards now append three-phase detail cards
 TEMPLATE_FILENAME = "dashboard_template.yaml"
+THREE_PHASE_APPENDIX_FILENAME = "dashboard_template_3phase_appendix.yaml"
 
 ENTITY_WAIT_TIMEOUT = 30
 ENTITY_WAIT_INTERVAL = 1.0
@@ -87,7 +88,6 @@ ENTITY_REFERENCES: tuple[EntityReference, ...] = (
     EntityReference("switch.electricity_planner_car_permissive_mode", "car_permissive_mode"),
     EntityReference("switch.electricity_planner_battery_dump_to_grid", "battery_dump_to_grid"),
     EntityReference("switch.electricity_planner_disable_battery_charging", "disable_battery_charging"),
-    EntityReference("number.electricity_planner_battery_dump_max_export_power", "battery_dump_max_export_power"),
     EntityReference("number.electricity_planner_battery_dump_target_soc", "battery_dump_target_soc"),
     EntityReference("number.electricity_planner_max_soc_threshold", "max_soc_threshold"),
     EntityReference("number.electricity_planner_max_soc_threshold_sunny", "max_soc_threshold_sunny"),
@@ -163,7 +163,7 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
 
     _clear_entity_map_retry_state(hass, entry.entry_id)
 
-    template_text = await _async_load_template_text(hass)
+    template_text = await _async_load_template_text(hass, TEMPLATE_FILENAME)
     if not template_text:
         _LOGGER.error("Dashboard template %s missing; skipping creation", TEMPLATE_FILENAME)
         return
@@ -185,6 +185,23 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
         _LOGGER.error("Rendered dashboard template invalid; skipping (type=%s, has_views=%s)",
                      type(dashboard_config), "views" in dashboard_config if isinstance(dashboard_config, dict) else False)
         return
+
+    if _entry_phase_mode(entry) == PHASE_MODE_THREE:
+        appendix_text = await _async_load_template_text(hass, THREE_PHASE_APPENDIX_FILENAME)
+        if not appendix_text:
+            _LOGGER.error("Dashboard appendix %s missing; skipping creation", THREE_PHASE_APPENDIX_FILENAME)
+            return
+
+        rendered_appendix = _apply_replacements(appendix_text, replacements)
+        try:
+            appendix_cards = yaml.safe_load(rendered_appendix)
+        except yaml.YAMLError as error:
+            _LOGGER.error("Failed to parse dashboard appendix: %s", error)
+            return
+
+        if not _append_cards_to_primary_stack(dashboard_config, appendix_cards):
+            _LOGGER.error("Unable to merge dashboard appendix into managed dashboard structure")
+            return
 
     dashboard_config[MANAGED_KEY] = {
         "entry_id": entry.entry_id,
@@ -605,15 +622,53 @@ def _dashboard_url_path(entry) -> str:
     return f"electricity-planner-{slug}-{suffix}"
 
 
+def _entry_phase_mode(entry) -> str:
+    """Return the effective phase mode for the config entry."""
+    options = getattr(entry, "options", None) or {}
+    data = getattr(entry, "data", None) or {}
+    return options.get(CONF_PHASE_MODE) or data.get(CONF_PHASE_MODE) or PHASE_MODE_SINGLE
+
+
+def _append_cards_to_primary_stack(
+    dashboard_config: dict[str, Any], appendix_cards: Any
+) -> bool:
+    """Append extra cards to the main vertical stack used by managed dashboards."""
+    if not isinstance(appendix_cards, list):
+        return False
+
+    views = dashboard_config.get("views")
+    if not isinstance(views, list) or not views:
+        return False
+
+    first_view = views[0]
+    if not isinstance(first_view, dict):
+        return False
+
+    view_cards = first_view.get("cards")
+    if not isinstance(view_cards, list) or not view_cards:
+        return False
+
+    primary_card = view_cards[0]
+    if not isinstance(primary_card, dict):
+        return False
+
+    stack_cards = primary_card.get("cards")
+    if not isinstance(stack_cards, list):
+        return False
+
+    stack_cards.extend(appendix_cards)
+    return True
+
+
 def _configs_equal(config_a: dict[str, Any], config_b: dict[str, Any]) -> bool:
     """Return True when two dashboard configs are logically equivalent."""
     return json.dumps(config_a, sort_keys=True) == json.dumps(config_b, sort_keys=True)
 
 
-def _load_template_text() -> str:
+def _load_template_text(template_filename: str = TEMPLATE_FILENAME) -> str:
     """Synchronously load the bundled dashboard template."""
     try:
-        template_path = resources.files(__package__) / TEMPLATE_FILENAME
+        template_path = resources.files(__package__) / template_filename
     except FileNotFoundError:
         return ""
 
@@ -623,9 +678,11 @@ def _load_template_text() -> str:
         return ""
 
 
-async def _async_load_template_text(hass: HomeAssistant) -> str:
+async def _async_load_template_text(
+    hass: HomeAssistant, template_filename: str = TEMPLATE_FILENAME
+) -> str:
     """Async wrapper for loading the dashboard template without blocking."""
-    return await hass.async_add_executor_job(_load_template_text)
+    return await hass.async_add_executor_job(_load_template_text, template_filename)
 
 
 def _apply_replacements(template: str, replacements: dict[str, str]) -> str:

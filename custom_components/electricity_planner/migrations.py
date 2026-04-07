@@ -29,6 +29,8 @@ v17 → v18: Added ``inverter_export_deadband`` so the derating hold window is
            configurable.
 v18 → v19: Added ``inverter_derating_unused_release_minutes`` so the planner
            can release an unused cap after a configurable delay.
+v19 → v20: Added ``battery_dump_deadline_hour`` so the arbitrage mode cutoff can
+           be configured instead of always using noon.
 """
 from __future__ import annotations
 
@@ -38,6 +40,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
+from .helpers import coerce_integral_range
 from .const import (
     CONF_BASE_GRID_SETPOINT,
     CONF_MAX_SOC_THRESHOLD,
@@ -53,6 +56,7 @@ from .const import (
     CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_SOC_PRICE_MULTIPLIER_MAX,
     CONF_SOC_BUFFER_TARGET,
+    CONF_BATTERY_DUMP_DEADLINE_HOUR,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_BATTERY_CAPACITIES,
@@ -79,6 +83,7 @@ from .const import (
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
     DEFAULT_SOC_BUFFER_TARGET,
+    DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
     DEFAULT_TRANSPORT_COST_DAY,
@@ -101,7 +106,7 @@ _LEGACY_DEFAULT_MAX_SOC = 90
 _LEGACY_DEFAULT_MAX_SOC_SUNNY = 50
 
 # Current config version
-CURRENT_VERSION = 19
+CURRENT_VERSION = 20
 
 
 def _validate_numeric_config(
@@ -128,6 +133,36 @@ def _validate_numeric_config(
                 name, config[key], default
             )
             config[key] = default
+
+
+def _normalize_integral_config(
+    config: dict[str, Any],
+    key: str,
+    min_val: int,
+    max_val: int,
+    default: int,
+    name: str,
+) -> None:
+    """Validate an integral config value and reset invalid values to the default."""
+    if key not in config:
+        return
+
+    normalized = coerce_integral_range(
+        config[key],
+        min_value=min_val,
+        max_value=max_val,
+    )
+    if normalized is None:
+        _LOGGER.warning(
+            "Migration: %s value %s invalid, resetting to default %d",
+            name,
+            config[key],
+            default,
+        )
+        config[key] = default
+        return
+
+    config[key] = normalized
 
 
 def _derive_sunny_forecast_threshold_kwh(config: dict[str, Any]) -> float:
@@ -542,5 +577,34 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
         _LOGGER.info("Migration to version 19 complete")
+
+    if entry.version == 19:
+        new_data = {**entry.data}
+
+        if CONF_BATTERY_DUMP_DEADLINE_HOUR not in new_data:
+            new_data[CONF_BATTERY_DUMP_DEADLINE_HOUR] = (
+                DEFAULT_BATTERY_DUMP_DEADLINE_HOUR
+            )
+            _LOGGER.info(
+                "Added battery_dump_deadline_hour: %d",
+                DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
+            )
+
+        _normalize_integral_config(
+            new_data,
+            CONF_BATTERY_DUMP_DEADLINE_HOUR,
+            0,
+            23,
+            DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
+            "battery_dump_deadline_hour",
+        )
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=20,
+        )
+
+        _LOGGER.info("Migration to version 20 complete")
 
     return True

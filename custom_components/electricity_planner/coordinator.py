@@ -62,6 +62,7 @@ from .const import (
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_BASE_GRID_SETPOINT,
     CONF_MIN_SOC_THRESHOLD,
+    CONF_BATTERY_DUMP_DEADLINE_HOUR,
     CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
     CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_MAX_SOC_THRESHOLD,
@@ -78,6 +79,7 @@ from .const import (
     CONF_MIN_CAR_CHARGING_THRESHOLD,
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_MIN_SOC,
+    DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
     DEFAULT_BATTERY_DUMP_MAX_EXPORT_POWER,
     DEFAULT_BATTERY_DUMP_TARGET_SOC,
     DEFAULT_MAX_SOC,
@@ -116,8 +118,11 @@ from .decision_engine import ChargingDecisionEngine
 from .helpers import (
     PriceInterval,
     apply_price_adjustment,
+    coerce_integral_range,
     extract_price_from_interval,
+    is_in_month_peak_transition_window,
     resolve_transport_cost_from_lookup,
+    resolve_local_deadline,
     is_day_tariff,
     calculate_transport_cost_from_components,
 )
@@ -245,26 +250,26 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         return self._manual_overrides.get(key)
 
     def is_battery_dump_mode_enabled(self) -> bool:
-        """Return whether persistent battery dump mode is enabled."""
+        """Return whether persistent arbitrage mode is enabled."""
         override = self.get_manual_override("battery_dump_to_grid")
         return bool(override and override.get("value") is True)
 
     async def async_set_battery_dump_mode(self, reason: str | None = None) -> None:
-        """Persistently enable battery dump-to-grid mode."""
+        """Persistently enable arbitrage mode."""
         now = dt_util.utcnow()
         self._manual_overrides["battery_dump_to_grid"] = {
             "value": True,
-            "reason": reason or "Battery dump-to-grid mode enabled",
+            "reason": reason or "Arbitrage mode enabled",
             "expires_at": None,
             "set_at": now,
         }
-        _LOGGER.info("Battery dump-to-grid mode enabled")
+        _LOGGER.info("Arbitrage mode enabled")
         await self._async_persist_manual_overrides()
 
     async def async_clear_battery_dump_mode(self) -> None:
-        """Disable persistent battery dump-to-grid mode."""
+        """Disable persistent arbitrage mode."""
         if self._manual_overrides.get("battery_dump_to_grid"):
-            _LOGGER.info("Battery dump-to-grid mode cleared")
+            _LOGGER.info("Arbitrage mode cleared")
         self._manual_overrides["battery_dump_to_grid"] = None
         await self._async_persist_manual_overrides()
 
@@ -825,7 +830,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Calculate threshold (configurable % over effective peak)
         monthly_peak = data.get("monthly_grid_peak")
         base_grid_setpoint = self.config.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT)
-        effective_peak = max(monthly_peak or 0, base_grid_setpoint)
+        try:
+            monthly_peak_value = max(0.0, float(monthly_peak or 0))
+        except (TypeError, ValueError):
+            monthly_peak_value = 0.0
+        if is_in_month_peak_transition_window(now=now):
+            monthly_peak_value = 0.0
+        effective_peak = max(monthly_peak_value, base_grid_setpoint)
         peak_threshold = effective_peak * PEAK_THRESHOLD_MULTIPLIER if effective_peak > 0 else None
 
         # Check current state
@@ -1180,103 +1191,100 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             prices_today, prices_tomorrow, now, _feedin_price,
         )
 
-    def _find_best_export_window(
+    def _select_export_slots(
         self,
         timeline: list[PriceInterval],
         now: datetime,
         required_duration: timedelta,
         minimum_price: float,
+        latest_end: datetime | None = None,
     ) -> dict[str, Any] | None:
-        """Find the highest-value continuous export window."""
+        """Select the highest-value eligible export slots and derive an arbitrage threshold."""
         if required_duration <= timedelta(0):
             return None
 
-        best_window: dict[str, Any] | None = None
-        best_partial_window: dict[str, Any] | None = None
-        gap_tolerance = timedelta(seconds=PRICE_INTERVAL_GAP_TOLERANCE_SECONDS)
+        eligible_slots: list[dict[str, Any]] = []
+        current_slot_price: float | None = None
 
-        for idx in range(len(timeline)):
-            start, end, price = timeline[idx]
+        for start, end, price in timeline:
+            if latest_end is not None and start >= latest_end:
+                continue
+            if latest_end is not None and end > latest_end:
+                end = latest_end
             if end <= now or price < minimum_price:
                 continue
 
-            window_start = max(start, now)
-            window_end_target = window_start + required_duration
-            window_duration = timedelta(0)
-            revenue_sum = 0.0
-            current_time = window_start
-            last_end = current_time
-            contiguous_run_end = current_time
-
-            for segment_idx in range(idx, len(timeline)):
-                segment_start, segment_end, segment_price = timeline[segment_idx]
-                if segment_end <= current_time:
-                    continue
-                if segment_price < minimum_price:
-                    break
-                if segment_start > last_end + gap_tolerance:
-                    break
-
-                effective_start = max(segment_start, current_time)
-                effective_end = min(segment_end, window_end_target)
-                if effective_end <= effective_start:
-                    continue
-
-                duration = effective_end - effective_start
-                hours = duration.total_seconds() / 3600
-                revenue_sum += segment_price * hours
-                window_duration += duration
-                current_time = effective_end
-                last_end = segment_end
-                contiguous_run_end = effective_end
-
-                if current_time >= window_end_target:
-                    break
-
-            if window_duration > timedelta(0):
-                hours_total = window_duration.total_seconds() / 3600
-                if hours_total > 0:
-                    average_price = revenue_sum / hours_total
-                    partial_candidate = {
-                        "start": window_start,
-                        "end": contiguous_run_end,
-                        "average_price": average_price,
-                        "covers_full_dump": window_duration >= required_duration,
-                    }
-                    if (
-                        best_partial_window is None
-                        or average_price > best_partial_window["average_price"]
-                        or (
-                            average_price == best_partial_window["average_price"]
-                            and partial_candidate["end"] > best_partial_window["end"]
-                        )
-                    ):
-                        best_partial_window = partial_candidate
-
-            if window_duration < required_duration or window_duration <= timedelta(0):
+            segment_start = max(start, now)
+            if end <= segment_start:
                 continue
+            if start <= now < end:
+                current_slot_price = price
+            eligible_slots.append(
+                {
+                    "start": segment_start,
+                    "end": end,
+                    "price": price,
+                    "duration": end - segment_start,
+                }
+            )
 
-            candidate = {
-                "start": window_start,
-                "end": current_time,
-                "average_price": partial_candidate["average_price"],
-                "covers_full_dump": True,
-            }
+        if not eligible_slots:
+            return None
 
-            if (
-                best_window is None
-                or candidate["average_price"] > best_window["average_price"]
-                or (
-                    candidate["average_price"] == best_window["average_price"]
-                    and candidate["start"] < best_window["start"]
-                )
-            ):
-                best_window = candidate
+        selected_slots: list[dict[str, Any]] = []
+        selected_duration = timedelta(0)
 
-        return best_window or best_partial_window
+        for slot in sorted(
+            eligible_slots,
+            key=lambda item: (-item["price"], item["start"]),
+        ):
+            if selected_duration >= required_duration:
+                break
+
+            selected_slots.append(slot)
+            selected_duration += slot["duration"]
+
+        if not selected_slots:
+            return None
+
+        selected_slots.sort(key=lambda item: item["start"])
+        selected_prices = [float(slot["price"]) for slot in selected_slots]
+        dump_price_threshold = min(selected_prices) if selected_prices else None
+        total_hours = selected_duration.total_seconds() / 3600
+        return {
+            "selected_slots": selected_slots,
+            "selected_slots_count": len(selected_slots),
+            "dump_price_threshold": dump_price_threshold,
+            "current_slot_price": current_slot_price,
+            "covers_full_dump": selected_duration >= required_duration,
+            "selected_duration_hours": round(total_hours, 3),
+        }
+
+    def _battery_dump_deadline(self, now: datetime) -> datetime:
+        """Return the export deadline: next occurrence of the configured local hour."""
+        now_local = dt_util.as_local(now)
+        configured_deadline_hour = self.config.get(
+            CONF_BATTERY_DUMP_DEADLINE_HOUR,
+            DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
+        )
+        deadline_hour = coerce_integral_range(
+            configured_deadline_hour,
+            min_value=0,
+            max_value=23,
+        )
+        if deadline_hour is None:
+            deadline_hour = DEFAULT_BATTERY_DUMP_DEADLINE_HOUR
+
+        deadline_local = resolve_local_deadline(now_local.date(), deadline_hour)
+        if now_local >= deadline_local:
+            deadline_local = resolve_local_deadline(
+                now_local.date() + timedelta(days=1),
+                deadline_hour,
+            )
+        return dt_util.as_utc(deadline_local)
 
     def _calculate_battery_dump_plan(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Build the current battery dump-to-grid plan and status."""
+        """Build the current arbitrage plan and status."""
         enabled = self.is_battery_dump_mode_enabled()
         target_soc = float(
             self.config.get(
@@ -1289,15 +1297,17 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         plan: dict[str, Any] = {
             "enabled": enabled,
             "active": False,
-            "reason": "Battery dump-to-grid mode disabled",
+            "reason": "Arbitrage mode disabled",
             "target_soc": round(target_soc, 1),
             "configured_export_cap_w": 0,
+            "deadline": None,
             "available_energy_kwh": 0.0,
             "required_duration_hours": 0.0,
-            "window_start": None,
-            "window_end": None,
-            "window_average_price": None,
-            "window_covers_full_dump": False,
+            "slots_cover_full_dump": False,
+            "dump_price_threshold": None,
+            "current_slot_price": None,
+            "selected_slots": [],
+            "selected_slots_count": 0,
             "export_power": 0,
         }
         if not enabled:
@@ -1305,7 +1315,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         battery_details = data.get("battery_details") or []
         if not battery_details:
-            plan["reason"] = "Battery dump-to-grid enabled but no battery data is available"
+            plan["reason"] = "Arbitrage mode enabled but no battery data is available"
             return plan
 
         available_energy_kwh = 0.0
@@ -1319,7 +1329,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         plan["available_energy_kwh"] = round(available_energy_kwh, 3)
         if available_energy_kwh <= 0:
             plan["reason"] = (
-                f"Battery dump target already reached (average energy above {target_soc:.0f}% is unavailable)"
+                f"Arbitrage reserve target already reached (average energy above {target_soc:.0f}% is unavailable)"
             )
             return plan
 
@@ -1343,12 +1353,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         )
         plan["configured_export_cap_w"] = export_power_cap
         if export_power_cap <= 0:
-            plan["reason"] = "Battery dump-to-grid enabled but no export power is available"
+            plan["reason"] = "Arbitrage mode enabled but no export power is available"
             return plan
 
         required_duration_hours = available_energy_kwh / (export_power_cap / 1000)
         required_duration = timedelta(hours=required_duration_hours)
         plan["required_duration_hours"] = round(required_duration_hours, 2)
+
+        def _iso_local(dt_obj: datetime) -> str:
+            return dt_util.as_local(dt_obj).isoformat()
 
         now = dt_util.utcnow()
         timeline = self._build_feedin_price_timeline(
@@ -1357,68 +1370,78 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             now,
         )
         if not timeline:
-            plan["reason"] = "Battery dump-to-grid enabled but no feed-in price timeline is available"
+            plan["reason"] = "Arbitrage mode enabled but no feed-in price timeline is available"
             return plan
 
         feedin_threshold = float(
             self.config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
         )
-        best_window = self._find_best_export_window(
+        deadline = self._battery_dump_deadline(now)
+        plan["deadline"] = _iso_local(deadline)
+        slot_selection = self._select_export_slots(
             timeline,
             now,
             required_duration,
             feedin_threshold,
+            latest_end=deadline,
         )
-        if best_window is None:
+        if slot_selection is None:
             plan["reason"] = (
-                f"No continuous feed-in window is currently available above {feedin_threshold:.3f}€/kWh"
+                f"No eligible feed-in slots are currently available above {feedin_threshold:.3f}€/kWh before {plan['deadline']}"
             )
             return plan
 
-        def _iso_local(dt_obj: datetime) -> str:
-            return dt_util.as_local(dt_obj).isoformat()
+        selected_slots = slot_selection.get("selected_slots", [])
+        plan["selected_slots"] = [
+            {
+                "start": _iso_local(slot["start"]),
+                "end": _iso_local(slot["end"]),
+                "price": round(slot["price"], 4),
+            }
+            for slot in selected_slots
+        ]
+        plan["selected_slots_count"] = int(slot_selection.get("selected_slots_count", 0))
+        plan["slots_cover_full_dump"] = bool(slot_selection.get("covers_full_dump", False))
+        dump_price_threshold = slot_selection.get("dump_price_threshold")
+        current_slot_price = slot_selection.get("current_slot_price")
+        plan["dump_price_threshold"] = (
+            round(float(dump_price_threshold), 4)
+            if dump_price_threshold is not None
+            else None
+        )
+        plan["current_slot_price"] = (
+            round(float(current_slot_price), 4)
+            if current_slot_price is not None
+            else None
+        )
 
-        plan["window_start"] = _iso_local(best_window["start"])
-        plan["window_end"] = _iso_local(best_window["end"])
-        plan["window_average_price"] = round(best_window["average_price"], 4)
-        plan["window_covers_full_dump"] = bool(best_window.get("covers_full_dump", False))
-
-        if best_window["start"] <= now < best_window["end"]:
-            remaining_window_hours = max(
-                (best_window["end"] - now).total_seconds() / 3600,
-                0.0,
-            )
-            export_power = export_power_cap
-            if remaining_window_hours > 0:
-                export_power = min(
-                    export_power_cap,
-                    max(0, int(round((available_energy_kwh / remaining_window_hours) * 1000))),
+        if (
+            current_slot_price is not None
+            and dump_price_threshold is not None
+            and float(current_slot_price) >= float(dump_price_threshold)
+        ):
+            plan["active"] = True
+            plan["export_power"] = export_power_cap
+            if plan["slots_cover_full_dump"]:
+                plan["reason"] = (
+                    f"Arbitrage export active at {float(current_slot_price):.3f}€/kWh "
+                    f"(arbitrage threshold {float(dump_price_threshold):.3f}€/kWh)"
                 )
-            plan["active"] = export_power > 0
-            plan["export_power"] = export_power
-            if plan["active"]:
-                if plan["window_covers_full_dump"]:
-                    plan["reason"] = (
-                        f"Dumping battery to grid until {target_soc:.0f}% during the highest feed-in window "
-                        f"({best_window['average_price']:.3f}€/kWh)"
-                    )
-                else:
-                    plan["reason"] = (
-                        f"Dumping battery to grid during the best available high-price window "
-                        f"({best_window['average_price']:.3f}€/kWh); more export will be scheduled later if needed"
-                    )
             else:
-                plan["reason"] = "Battery dump window is active but no export power is available"
+                plan["reason"] = (
+                    f"Arbitrage export active at {float(current_slot_price):.3f}€/kWh using the best available slots "
+                    f"(arbitrage threshold {float(dump_price_threshold):.3f}€/kWh)"
+                )
         else:
-            if plan["window_covers_full_dump"]:
+            if plan["slots_cover_full_dump"]:
                 plan["reason"] = (
-                    f"Battery dump scheduled for the highest feed-in window at "
-                    f"{best_window['average_price']:.3f}€/kWh"
+                    f"Arbitrage mode armed for the top {plan['selected_slots_count']} eligible slots "
+                    f"with arbitrage threshold {float(dump_price_threshold):.3f}€/kWh"
                 )
             else:
                 plan["reason"] = (
-                    f"Battery dump scheduled for the best available shorter high-price window at "
-                    f"{best_window['average_price']:.3f}€/kWh"
+                    f"Arbitrage mode armed for the best available {plan['selected_slots_count']} eligible slots "
+                    f"with arbitrage threshold {float(dump_price_threshold):.3f}€/kWh"
                 )
 
         return plan

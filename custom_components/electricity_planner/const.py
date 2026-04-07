@@ -45,6 +45,7 @@ CONF_ENERGY_COST_WKK = "energy_cost_wkk"
 CONF_MIN_SOC_THRESHOLD = "min_soc_threshold"
 CONF_MAX_SOC_THRESHOLD = "max_soc_threshold"
 CONF_BATTERY_DUMP_TARGET_SOC = "battery_dump_target_soc"
+CONF_BATTERY_DUMP_DEADLINE_HOUR = "battery_dump_deadline_hour"
 CONF_BATTERY_DUMP_MAX_EXPORT_POWER = "battery_dump_max_export_power"
 CONF_PRICE_THRESHOLD = "price_threshold"
 CONF_EMERGENCY_SOC_THRESHOLD = "emergency_soc_threshold"
@@ -76,6 +77,7 @@ CONF_DYNAMIC_THRESHOLD_CONFIDENCE = "dynamic_threshold_confidence"
 CONF_USE_AVERAGE_THRESHOLD = "use_average_threshold"
 CONF_MIN_CAR_CHARGING_DURATION = "min_car_charging_duration"
 CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER = "car_permissive_threshold_multiplier"
+CONF_CAR_USE_BATTERY_ARBITRAGE = "car_use_battery_arbitrage"
 CONF_PRICE_ADJUSTMENT_MULTIPLIER = "price_adjustment_multiplier"
 CONF_PRICE_ADJUSTMENT_OFFSET = "price_adjustment_offset"
 CONF_FEEDIN_ADJUSTMENT_MULTIPLIER = "feedin_adjustment_multiplier"
@@ -86,7 +88,8 @@ CONF_SOC_BUFFER_TARGET = "soc_buffer_target"
 # Default Threshold Values
 DEFAULT_MIN_SOC = 20
 DEFAULT_MAX_SOC = 70
-DEFAULT_BATTERY_DUMP_TARGET_SOC = DEFAULT_MIN_SOC
+DEFAULT_BATTERY_DUMP_TARGET_SOC = 40
+DEFAULT_BATTERY_DUMP_DEADLINE_HOUR = 12
 DEFAULT_BATTERY_DUMP_MAX_EXPORT_POWER = 0  # 0 = automatic cap based on battery/grid limits
 DEFAULT_PRICE_THRESHOLD = 0.15
 DEFAULT_EMERGENCY_SOC = 15
@@ -108,6 +111,7 @@ DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE = 75  # Default confidence threshold (75% -
 DEFAULT_USE_AVERAGE_THRESHOLD = False  # Use average of future prices as threshold (opt-in)
 DEFAULT_MIN_CAR_CHARGING_DURATION = 2  # Minimum hours of low prices to start car charging
 DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER = 1.2  # 20% higher threshold when permissive mode active
+DEFAULT_CAR_USE_BATTERY_ARBITRAGE = True  # Let EV consume scheduled arbitrage export locally
 DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER = 1.04  # Energie.be dynamic buy formula coefficient (Apr 2026)
 DEFAULT_PRICE_ADJUSTMENT_OFFSET = 0.005  # €/kWh, excl. VAT market basis
 DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER = 1.0  # Energie.be dynamic feed-in formula coefficient (Apr 2026)
@@ -146,6 +150,7 @@ NORDPOOL_CACHE_TTL_MINUTES = 5  # Cache time-to-live in minutes
 PRICE_INTERVAL_LOOKBACK_HOURS = 1  # How far back to look for price intervals
 PEAK_MONITORING_DURATION_MINUTES = 5  # Duration to monitor before triggering peak limit
 PEAK_LIMIT_DURATION_MINUTES = 15  # Duration of peak limit once triggered
+MONTH_PEAK_TRANSITION_LEAD_MINUTES = 30  # Start using next month's peak baseline before month end
 PRICE_INTERVAL_MINUTES = 15  # Default price interval duration
 PRICE_INTERVAL_GAP_TOLERANCE_SECONDS = 30  # Tolerance for gaps between intervals (increased from 5s)
 
@@ -213,4 +218,4 @@ MANUAL_OVERRIDE_TARGET_ALL = "all"
 MAX_POWER_VALIDATION_W = 50000  # Maximum reasonable power for solar/consumption/grid validation
 MAX_CAR_POWER_VALIDATION_W = 22000  # Maximum reasonable car charging power
 
-INTEGRATION_VERSION = "4.12.0"
+INTEGRATION_VERSION = "4.13.0"

@@ -4,8 +4,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pytz
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner import coordinator as coordinator_module
 from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
@@ -166,6 +168,70 @@ def test_peak_threshold_uses_max_of_monthly_and_base(fake_hass, monkeypatch):
     # Effective peak = max(3500, 5000) = 5000
     # Threshold = 5000 * 1.05 = 5250
     assert data_b["car_peak_limit_threshold"] == pytest.approx(5250.0, rel=1e-6)
+
+
+def test_peak_threshold_switches_to_next_month_baseline_30_minutes_before_month_end(
+    fake_hass, monkeypatch
+):
+    """The last 30 minutes of the month should stop following the old peak."""
+    base_time = datetime(2025, 10, 31, 22, 35, tzinfo=timezone.utc)  # 23:35 local Brussels
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config[CONF_BASE_GRID_SETPOINT] = 5000
+    config[CONF_GRID_POWER_ENTITY] = "sensor.grid_power"
+    config[CONF_MONTHLY_GRID_PEAK_ENTITY] = "sensor.monthly_peak"
+    config[CONF_CAR_CHARGING_POWER_ENTITY] = "sensor.car_power"
+
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
+
+    try:
+        coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+        data = {
+            "monthly_grid_peak": 8000.0,
+            "grid_power": 3000.0,
+            "car_charging_power": 2000.0,
+        }
+
+        coordinator._update_peak_limit_state(data)
+    finally:
+        dt_util.set_default_time_zone(original_tz)
+
+    assert data["car_peak_limit_threshold"] == pytest.approx(5250.0, rel=1e-6)
+
+
+def test_peak_threshold_stays_on_new_month_baseline_after_midnight_until_sensor_resets(
+    fake_hass, monkeypatch
+):
+    """A stale previous-month peak must not reopen the old cap right after midnight."""
+    base_time = datetime(2025, 10, 31, 23, 10, tzinfo=timezone.utc)  # 00:10 local Brussels
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config[CONF_BASE_GRID_SETPOINT] = 5000
+    config[CONF_GRID_POWER_ENTITY] = "sensor.grid_power"
+    config[CONF_MONTHLY_GRID_PEAK_ENTITY] = "sensor.monthly_peak"
+    config[CONF_CAR_CHARGING_POWER_ENTITY] = "sensor.car_power"
+
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
+
+    try:
+        coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+        data = {
+            "monthly_grid_peak": 8000.0,
+            "grid_power": 3000.0,
+            "car_charging_power": 2000.0,
+        }
+
+        coordinator._update_peak_limit_state(data)
+    finally:
+        dt_util.set_default_time_zone(original_tz)
+
+    assert data["car_peak_limit_threshold"] == pytest.approx(5250.0, rel=1e-6)
 
 
 def test_peak_monitoring_starts_when_exceeding_threshold(fake_hass, monkeypatch):

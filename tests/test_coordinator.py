@@ -20,6 +20,7 @@ from custom_components.electricity_planner.const import (
     ATTR_ENTRY_ID,
     ATTR_TARGET,
     CONF_BASE_GRID_SETPOINT,
+    CONF_BATTERY_DUMP_DEADLINE_HOUR,
     CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
     CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_BATTERY_SOC_ENTITIES,
@@ -1196,8 +1197,8 @@ async def test_battery_dump_mode_persists_across_restart(fake_hass, monkeypatch)
     assert override["reason"] == "persisted dump"
 
 
-def test_battery_dump_plan_prefers_highest_export_window(fake_hass, monkeypatch):
-    """Battery dump planner should choose the highest-value eligible export window."""
+def test_battery_dump_plan_prefers_highest_export_slots(fake_hass, monkeypatch):
+    """Battery dump planner should derive its threshold from the highest-value eligible slots."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
 
@@ -1247,9 +1248,9 @@ def test_battery_dump_plan_prefers_highest_export_window(fake_hass, monkeypatch)
     assert plan["enabled"] is True
     assert plan["active"] is False
     assert plan["required_duration_hours"] == pytest.approx(2.0, rel=1e-6)
-    assert plan["window_average_price"] == pytest.approx(0.11, rel=1e-6)
-    parsed_start = dt_util.parse_datetime(plan["window_start"])
-    assert dt_util.as_utc(parsed_start) == base_time + timedelta(hours=2)
+    assert plan["selected_slots_count"] == 8
+    assert plan["dump_price_threshold"] == pytest.approx(0.11, rel=1e-6)
+    assert "top 8 eligible slots" in plan["reason"]
 
 
 def test_battery_dump_plan_honors_configured_export_cap(fake_hass, monkeypatch):
@@ -1300,8 +1301,8 @@ def test_battery_dump_plan_honors_configured_export_cap(fake_hass, monkeypatch):
     assert plan["configured_export_cap_w"] == 4500
 
 
-def test_battery_dump_plan_falls_back_to_best_shorter_window(fake_hass, monkeypatch):
-    """If no full dump window exists, the planner should still monetize the best shorter slot."""
+def test_battery_dump_plan_derives_threshold_from_selected_slots(fake_hass, monkeypatch):
+    """The arbitrage threshold should be the lowest price among the selected top slots."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
 
@@ -1324,7 +1325,7 @@ def test_battery_dump_plan_falls_back_to_best_shorter_window(fake_hass, monkeypa
         "set_at": base_time,
     }
 
-    # 3 kWh available above target needs 1.5h at 2kW, but only 1h windows exist.
+    # 3 kWh available above target needs 1.5h at 2kW = 6 slots.
     first_window = [
         _make_price_interval(base_time + timedelta(minutes=15 * slot), 80.0)
         for slot in range(4)
@@ -1349,9 +1350,336 @@ def test_battery_dump_plan_falls_back_to_best_shorter_window(fake_hass, monkeypa
         }
     )
 
-    assert plan["window_covers_full_dump"] is False
-    assert plan["window_average_price"] == pytest.approx(0.12, rel=1e-6)
-    assert "best available shorter high-price window" in plan["reason"]
+    assert plan["slots_cover_full_dump"] is True
+    assert plan["selected_slots_count"] == 6
+    assert plan["dump_price_threshold"] == pytest.approx(0.08, rel=1e-6)
+    assert plan["current_slot_price"] == pytest.approx(0.08, rel=1e-6)
+    assert plan["active"] is True
+    assert "arbitrage threshold 0.080€/kWh" in plan["reason"]
+
+
+def test_battery_dump_plan_activates_during_current_selected_window(fake_hass, monkeypatch):
+    """Export should activate when the current price is at or above the arbitrage threshold."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_BATTERY_DUMP_TARGET_SOC: 20,
+            "feedin_adjustment_multiplier": 1.0,
+            "feedin_adjustment_offset": 0.0,
+            "feedin_price_threshold": 0.05,
+            "max_battery_power": 2000,
+            "max_grid_power": 6000,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._manual_overrides["battery_dump_to_grid"] = {
+        "value": True,
+        "reason": "Dump mode",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    current_window = [
+        _make_price_interval(base_time + timedelta(minutes=15 * slot), 120.0)
+        for slot in range(2)
+    ]
+    later_window = [
+        _make_price_interval(base_time + timedelta(hours=2, minutes=15 * slot), 110.0)
+        for slot in range(4)
+    ]
+
+    plan = coordinator._calculate_battery_dump_plan(
+        {
+            "battery_details": [
+                {
+                    "entity_id": "sensor.battery_soc_1",
+                    "soc": 40,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                }
+            ],
+            "nordpool_prices_today": {"BE": current_window + later_window},
+            "nordpool_prices_tomorrow": None,
+        }
+    )
+
+    assert plan["active"] is True
+    assert plan["export_power"] > 0
+    assert plan["selected_slots_count"] == 4
+    assert plan["dump_price_threshold"] == pytest.approx(0.11, rel=1e-6)
+    assert plan["current_slot_price"] == pytest.approx(0.12, rel=1e-6)
+    assert "Dumping battery to grid until 20% across the selected high-price windows" not in plan["reason"]
+    assert "Arbitrage export active at 0.120€/kWh" in plan["reason"]
+
+
+def test_battery_dump_plan_falls_back_when_total_eligible_duration_is_insufficient(fake_hass, monkeypatch):
+    """If there are too few eligible slots, the planner should still arm the best available threshold."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_BATTERY_DUMP_TARGET_SOC: 20,
+            "feedin_adjustment_multiplier": 1.0,
+            "feedin_adjustment_offset": 0.0,
+            "feedin_price_threshold": 0.05,
+            "max_battery_power": 2000,
+            "max_grid_power": 6000,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._manual_overrides["battery_dump_to_grid"] = {
+        "value": True,
+        "reason": "Dump mode",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    # 5 kWh available above target needs 2.5h at 2kW, but only 2h total is eligible.
+    first_window = [
+        _make_price_interval(base_time + timedelta(minutes=15 * slot), 80.0)
+        for slot in range(4)
+    ]
+    second_window = [
+        _make_price_interval(base_time + timedelta(hours=2, minutes=15 * slot), 120.0)
+        for slot in range(4)
+    ]
+
+    plan = coordinator._calculate_battery_dump_plan(
+        {
+            "battery_details": [
+                {
+                    "entity_id": "sensor.battery_soc_1",
+                    "soc": 70,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                }
+            ],
+            "nordpool_prices_today": {"BE": first_window + second_window},
+            "nordpool_prices_tomorrow": None,
+        }
+    )
+
+    assert plan["slots_cover_full_dump"] is False
+    assert plan["selected_slots_count"] == 8
+    assert plan["dump_price_threshold"] == pytest.approx(0.08, rel=1e-6)
+    assert plan["active"] is True
+    assert "using the best available slots" in plan["reason"]
+
+
+def test_battery_dump_plan_uses_whole_slots_without_partial_truncation(fake_hass, monkeypatch):
+    """The planner should select whole slots rather than truncating the last interval."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_BATTERY_DUMP_TARGET_SOC: 20,
+            "feedin_adjustment_multiplier": 1.0,
+            "feedin_adjustment_offset": 0.0,
+            "feedin_price_threshold": 0.05,
+            "max_battery_power": 4500,
+            "max_grid_power": 6000,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._manual_overrides["battery_dump_to_grid"] = {
+        "value": True,
+        "reason": "Dump mode",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    # 5.0 kWh above target needs ~1.11h at 4.5kW, so whole-slot selection should use 5x15min = 1.25h.
+    slots = [
+        _make_price_interval(base_time + timedelta(minutes=15 * slot), 100.0)
+        for slot in range(8)
+    ]
+
+    plan = coordinator._calculate_battery_dump_plan(
+        {
+            "battery_details": [
+                {
+                    "entity_id": "sensor.battery_soc_1",
+                    "soc": 70,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                }
+            ],
+            "nordpool_prices_today": {"BE": slots},
+            "nordpool_prices_tomorrow": None,
+        }
+    )
+
+    assert plan["selected_slots_count"] == 5
+    assert len(plan["selected_slots"]) == 5
+    parsed_end = dt_util.parse_datetime(plan["selected_slots"][-1]["end"])
+    assert dt_util.as_utc(parsed_end) == base_time + timedelta(hours=1, minutes=15)
+
+
+def test_battery_dump_plan_targets_same_day_deadline_before_cutoff(fake_hass, monkeypatch):
+    """Before the cutoff, dump planning should target today's configured deadline."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_BATTERY_DUMP_TARGET_SOC: 20,
+            CONF_BATTERY_DUMP_DEADLINE_HOUR: 9,
+            "feedin_adjustment_multiplier": 1.0,
+            "feedin_adjustment_offset": 0.0,
+            "feedin_price_threshold": 0.05,
+            "max_battery_power": 2000,
+            "max_grid_power": 6000,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._manual_overrides["battery_dump_to_grid"] = {
+        "value": True,
+        "reason": "Dump mode",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    before_deadline = [
+        _make_price_interval(base_time + timedelta(minutes=15 * slot), 90.0)
+        for slot in range(4)
+    ]
+    after_deadline = [
+        _make_price_interval(base_time + timedelta(hours=1, minutes=15 * slot), 150.0)
+        for slot in range(4)
+    ]
+
+    plan = coordinator._calculate_battery_dump_plan(
+        {
+            "battery_details": [
+                {
+                    "entity_id": "sensor.battery_soc_1",
+                    "soc": 28,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                }
+            ],
+            "nordpool_prices_today": {"BE": before_deadline},
+            "nordpool_prices_tomorrow": {"BE": after_deadline},
+        }
+    )
+
+    assert plan["dump_price_threshold"] == pytest.approx(0.09, rel=1e-6)
+    parsed_deadline = dt_util.parse_datetime(plan["deadline"])
+    parsed_last_end = dt_util.parse_datetime(plan["selected_slots"][-1]["end"])
+    assert dt_util.as_local(parsed_deadline).hour == 9
+    assert dt_util.as_utc(parsed_deadline) == base_time + timedelta(hours=1)
+    assert parsed_last_end <= parsed_deadline
+
+
+def test_battery_dump_plan_rolls_to_next_day_after_cutoff(fake_hass, monkeypatch):
+    """After the cutoff, dump planning should target the next day's configured deadline."""
+    base_time = datetime(2025, 10, 14, 9, 30, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_BATTERY_DUMP_TARGET_SOC: 20,
+            CONF_BATTERY_DUMP_DEADLINE_HOUR: 9,
+            "feedin_adjustment_multiplier": 1.0,
+            "feedin_adjustment_offset": 0.0,
+            "feedin_price_threshold": 0.05,
+            "max_battery_power": 2000,
+            "max_grid_power": 6000,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._manual_overrides["battery_dump_to_grid"] = {
+        "value": True,
+        "reason": "Dump mode",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    before_next_deadline = [
+        _make_price_interval(base_time + timedelta(hours=14, minutes=15 * slot), 90.0)
+        for slot in range(4)
+    ]
+    after_next_deadline = [
+        _make_price_interval(base_time + timedelta(days=1, hours=1, minutes=15 * slot), 150.0)
+        for slot in range(4)
+    ]
+
+    plan = coordinator._calculate_battery_dump_plan(
+        {
+            "battery_details": [
+                {
+                    "entity_id": "sensor.battery_soc_1",
+                    "soc": 28,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                }
+            ],
+            "nordpool_prices_today": {"BE": before_next_deadline},
+            "nordpool_prices_tomorrow": {"BE": after_next_deadline},
+        }
+    )
+
+    parsed_deadline = dt_util.parse_datetime(plan["deadline"])
+    parsed_last_end = dt_util.parse_datetime(plan["selected_slots"][-1]["end"])
+    assert dt_util.as_local(parsed_deadline).hour == 9
+    assert dt_util.as_utc(parsed_deadline) == datetime(2025, 10, 15, 9, 0, tzinfo=timezone.utc)
+    assert parsed_last_end <= parsed_deadline
+
+
+def test_battery_dump_deadline_skips_nonexistent_local_hour_on_dst_start(fake_hass, monkeypatch):
+    """A missing local cutoff hour should move to the first valid instant after the gap."""
+    base_time = datetime(2026, 3, 29, 0, 30, tzinfo=timezone.utc)  # 01:30 local Brussels
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config[CONF_BATTERY_DUMP_DEADLINE_HOUR] = 2
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
+
+    try:
+        deadline = coordinator._battery_dump_deadline(base_time)
+        deadline_local = dt_util.as_local(deadline)
+    finally:
+        dt_util.set_default_time_zone(original_tz)
+
+    assert deadline == datetime(2026, 3, 29, 1, 0, tzinfo=timezone.utc)
+    assert deadline_local.hour == 3
+    assert deadline_local.minute == 0
+
+
+def test_battery_dump_deadline_uses_first_ambiguous_local_hour_on_dst_end(fake_hass, monkeypatch):
+    """A repeated local cutoff hour should resolve to the earliest matching instant."""
+    base_time = datetime(2026, 10, 24, 23, 30, tzinfo=timezone.utc)  # 01:30 local Brussels
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config[CONF_BATTERY_DUMP_DEADLINE_HOUR] = 2
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
+
+    try:
+        deadline = coordinator._battery_dump_deadline(base_time)
+        deadline_local = dt_util.as_local(deadline)
+    finally:
+        dt_util.set_default_time_zone(original_tz)
+
+    assert deadline == datetime(2026, 10, 25, 0, 0, tzinfo=timezone.utc)
+    assert deadline_local.hour == 2
+    assert deadline_local.minute == 0
+    assert deadline_local.utcoffset() == timedelta(hours=2)
 
 
 def test_forecast_summary_uses_price_timeline(fake_hass, monkeypatch):

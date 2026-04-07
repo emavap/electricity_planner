@@ -30,6 +30,8 @@ from .const import (
     CONF_BATTERY_SOC_ENTITIES,
     CONF_BATTERY_CAPACITIES,
     CONF_BATTERY_PHASE_ASSIGNMENTS,
+    CONF_BATTERY_DUMP_TARGET_SOC,
+    CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
     CONF_SOLAR_PRODUCTION_ENTITY,
     CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_CAR_CHARGING_POWER_ENTITY,
@@ -46,6 +48,7 @@ from .const import (
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
     CONF_PRICE_THRESHOLD,
+    CONF_BATTERY_DUMP_DEADLINE_HOUR,
     CONF_EMERGENCY_SOC_THRESHOLD,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
@@ -71,6 +74,7 @@ from .const import (
     CONF_USE_AVERAGE_THRESHOLD,
     CONF_MIN_CAR_CHARGING_DURATION,
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+    CONF_CAR_USE_BATTERY_ARBITRAGE,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -78,6 +82,8 @@ from .const import (
     CONF_SOC_PRICE_MULTIPLIER_MAX,
     CONF_SOC_BUFFER_TARGET,
     DEFAULT_MIN_SOC,
+    DEFAULT_BATTERY_DUMP_TARGET_SOC,
+    DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
     DEFAULT_MAX_SOC,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_EMERGENCY_SOC,
@@ -90,6 +96,7 @@ from .const import (
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_BATTERY_DUMP_MAX_EXPORT_POWER,
     DEFAULT_MAX_INVERTER_POWER,
     DEFAULT_INVERTER_EXPORT_LIMIT,
     DEFAULT_INVERTER_EXPORT_DEADBAND,
@@ -100,6 +107,7 @@ from .const import (
     DEFAULT_USE_AVERAGE_THRESHOLD,
     DEFAULT_MIN_CAR_CHARGING_DURATION,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+    DEFAULT_CAR_USE_BATTERY_ARBITRAGE,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
@@ -116,6 +124,7 @@ from .const import (
     DEFAULT_ENERGY_COST_GSC,
     DEFAULT_ENERGY_COST_WKK,
 )
+from .helpers import coerce_integral_range
 from .migrations import CURRENT_VERSION
 
 _LOGGER = logging.getLogger(__name__)
@@ -654,6 +663,28 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             ),
             vol.Optional(
+                CONF_BATTERY_DUMP_TARGET_SOC,
+                default=self.data.get(
+                    CONF_BATTERY_DUMP_TARGET_SOC,
+                    DEFAULT_BATTERY_DUMP_TARGET_SOC,
+                )
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=100, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
+                CONF_BATTERY_DUMP_DEADLINE_HOUR,
+                default=self.data.get(
+                    CONF_BATTERY_DUMP_DEADLINE_HOUR,
+                    DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
+                )
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=23, step=1, unit_of_measurement="hour", mode="slider"
+                )
+            ),
+            vol.Optional(
                 CONF_SOLAR_FORECAST_START_HOUR,
                 default=self.data.get(CONF_SOLAR_FORECAST_START_HOUR, DEFAULT_SOLAR_FORECAST_START_HOUR)
             ): selector.NumberSelector(
@@ -797,6 +828,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     min=1.1, max=1.5, step=0.1, mode="slider"
                 )
             ),
+            vol.Optional(
+                CONF_CAR_USE_BATTERY_ARBITRAGE,
+                default=self.data.get(
+                    CONF_CAR_USE_BATTERY_ARBITRAGE,
+                    DEFAULT_CAR_USE_BATTERY_ARBITRAGE,
+                )
+            ): selector.BooleanSelector(),
             vol.Optional(
                 CONF_MAX_INVERTER_POWER,
                 default=self.data.get(CONF_MAX_INVERTER_POWER, DEFAULT_MAX_INVERTER_POWER)
@@ -1004,6 +1042,21 @@ def validate_config_consistency(config: dict[str, Any]) -> list[str]:
         errors.append(
             "sunny_forecast_threshold_kwh "
             f"({sunny_forecast_threshold_kwh}kWh) cannot be negative"
+        )
+
+    battery_dump_deadline_hour = config.get(
+        CONF_BATTERY_DUMP_DEADLINE_HOUR,
+        DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
+    )
+    normalized_deadline_hour = coerce_integral_range(
+        battery_dump_deadline_hour,
+        min_value=0,
+        max_value=23,
+    )
+    if normalized_deadline_hour is None:
+        errors.append(
+            "battery_dump_deadline_hour "
+            f"({battery_dump_deadline_hour}) must be an integer between 0 and 23"
         )
 
     return errors
@@ -1386,6 +1439,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         schema = vol.Schema({
             vol.Optional(CONF_MIN_SOC_THRESHOLD, default=self.data.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")),
             vol.Optional(CONF_MAX_SOC_THRESHOLD, default=self.data.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")),
+            vol.Optional(CONF_BATTERY_DUMP_TARGET_SOC, default=self.data.get(CONF_BATTERY_DUMP_TARGET_SOC, DEFAULT_BATTERY_DUMP_TARGET_SOC)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")),
+            vol.Optional(CONF_BATTERY_DUMP_DEADLINE_HOUR, default=self.data.get(CONF_BATTERY_DUMP_DEADLINE_HOUR, DEFAULT_BATTERY_DUMP_DEADLINE_HOUR)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=23, step=1, unit_of_measurement="hour", mode="slider")),
             vol.Optional(CONF_SOLAR_FORECAST_START_HOUR, default=self.data.get(CONF_SOLAR_FORECAST_START_HOUR, DEFAULT_SOLAR_FORECAST_START_HOUR)): selector.NumberSelector(selector.NumberSelectorConfig(min=12, max=23, step=1, mode="slider")),
             vol.Optional(CONF_MAX_SOC_THRESHOLD_SUNNY, default=self.data.get(CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")),
             vol.Optional(CONF_SUNNY_FORECAST_THRESHOLD_KWH, default=_default_sunny_forecast_threshold_kwh(self.data)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, step=0.5, unit_of_measurement="kWh", mode="slider")),
@@ -1405,6 +1460,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(CONF_USE_AVERAGE_THRESHOLD, default=self.data.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)): selector.BooleanSelector(),
             vol.Optional(CONF_MIN_CAR_CHARGING_DURATION, default=self.data.get(CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION)): selector.NumberSelector(selector.NumberSelectorConfig(min=1, max=6, step=1, unit_of_measurement="hours")),
             vol.Optional(CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER, default=self.data.get(CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER, DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER)): selector.NumberSelector(selector.NumberSelectorConfig(min=1.1, max=1.5, step=0.1, mode="slider")),
+            vol.Optional(CONF_CAR_USE_BATTERY_ARBITRAGE, default=self.data.get(CONF_CAR_USE_BATTERY_ARBITRAGE, DEFAULT_CAR_USE_BATTERY_ARBITRAGE)): selector.BooleanSelector(),
             vol.Optional(CONF_MAX_INVERTER_POWER, default=self.data.get(CONF_MAX_INVERTER_POWER, DEFAULT_MAX_INVERTER_POWER)): selector.NumberSelector(selector.NumberSelectorConfig(min=500, max=50000, step=100, unit_of_measurement="W")),
             vol.Optional(CONF_INVERTER_EXPORT_LIMIT, default=self.data.get(CONF_INVERTER_EXPORT_LIMIT, DEFAULT_INVERTER_EXPORT_LIMIT)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=5000, step=10, unit_of_measurement="W")),
             vol.Optional(CONF_INVERTER_EXPORT_DEADBAND, default=self.data.get(CONF_INVERTER_EXPORT_DEADBAND, DEFAULT_INVERTER_EXPORT_DEADBAND)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=500, step=5, unit_of_measurement="W")),
@@ -1434,6 +1490,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(CONF_MAX_BATTERY_POWER, default=self.data.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)): selector.NumberSelector(selector.NumberSelectorConfig(min=1000, max=10000, step=500, unit_of_measurement="W")),
             vol.Optional(CONF_MAX_CAR_POWER, default=self.data.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)): selector.NumberSelector(selector.NumberSelectorConfig(min=1000, max=22000, step=1000, unit_of_measurement="W")),
             vol.Optional(CONF_MAX_GRID_POWER, default=self.data.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER)): selector.NumberSelector(selector.NumberSelectorConfig(min=3000, max=30000, step=1000, unit_of_measurement="W")),
+            vol.Optional(CONF_BATTERY_DUMP_MAX_EXPORT_POWER, default=self.data.get(CONF_BATTERY_DUMP_MAX_EXPORT_POWER, DEFAULT_BATTERY_DUMP_MAX_EXPORT_POWER)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=50000, step=100, unit_of_measurement="W")),
             vol.Optional(CONF_MIN_CAR_CHARGING_THRESHOLD, default=self.data.get(CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD)): selector.NumberSelector(selector.NumberSelectorConfig(min=50, max=500, step=50, unit_of_measurement="W")),
             vol.Optional(CONF_PREDICTIVE_CHARGING_MIN_SOC, default=self.data.get(CONF_PREDICTIVE_CHARGING_MIN_SOC, DEFAULT_PREDICTIVE_CHARGING_MIN_SOC)): selector.NumberSelector(selector.NumberSelectorConfig(min=20, max=60, unit_of_measurement="%")),
             vol.Optional(CONF_BASE_GRID_SETPOINT, default=self.data.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT)): selector.NumberSelector(selector.NumberSelectorConfig(min=1000, max=10000, step=100, unit_of_measurement="W")),

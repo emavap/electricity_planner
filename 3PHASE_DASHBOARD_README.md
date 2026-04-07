@@ -1,6 +1,7 @@
 # Three-Phase Dashboard for Electricity Planner
 
 This dashboard provides detailed visibility into per-phase power allocations and charging decisions for three-phase electrical systems.
+Three-phase installs also now get the same shared managed dashboard surface automatically; this YAML remains the manual/static variant.
 
 ## Features
 
@@ -29,8 +30,14 @@ Each phase displays:
 2. **ApexCharts Card** – For power distribution visualization  
    `https://github.com/RomRider/apexcharts-card`
 
-3. **Template Entity Row** – For dynamic per-phase data display  
+3. **Button Card** – For manual override actions  
+   `https://github.com/custom-cards/button-card`
+
+4. **Template Entity Row** – For dynamic per-phase data display  
    `https://github.com/thomasloven/lovelace-template-entity-row`
+
+5. **card-mod** – For per-phase card highlighting  
+   `https://github.com/thomasloven/lovelace-card-mod`
 
 ### Setup Steps
 

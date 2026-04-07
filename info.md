@@ -1,6 +1,6 @@
 # Electricity Planner – Project Summary
 
-**Version 4.11.2** | **Config Schema Version 19** | **Home Assistant 2024.4+**
+**Version 4.13.0** | **Config Schema Version 20** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
@@ -18,6 +18,7 @@ A Home Assistant custom integration that analyses live Nord Pool prices, battery
 - **Permissive mode switch** for temporarily relaxed car charging thresholds
 - **Manual override services** to force or block charging for configurable durations
 - **Contract-specific pricing** with multiplier/offset adjustments for consumption and feed-in
+- **Arbitrage mode** with threshold-based export activation and dashboard threshold visibility
 - **Comprehensive diagnostics** with 20 sensors and 7 binary sensors
 
 ## Entities Overview
@@ -28,14 +29,14 @@ A Home Assistant custom integration that analyses live Nord Pool prices, battery
 | Binary Sensors (Diagnostic) | 3 | Low Price, Solar Production, Data Availability |
 | Sensors (Automation) | 3 | Car Charger Limit, Grid Setpoint, Inverter Derating Target |
 | Sensors (Diagnostic) | 17 | Decision Diagnostics, Price/Threshold sensors, SOC Average |
-| Switch | 2 | Car Permissive Mode, Disable Battery Charging |
+| Switch | 3 | Car Permissive Mode, Arbitrage Mode, Disable Battery Charging |
 | Services | 2 | Set/Clear Manual Override |
 
 ## Documentation
 
 - [README](README.md) – Complete documentation with installation, configuration, decision pipeline, all entities, automation examples, and troubleshooting
 - [DASHBOARD](DASHBOARD.md) – Lovelace visualisation examples (ApexCharts, Gauge Card Pro, Button Card)
-- [Release Notes](RELEASE_NOTES_4.11.2.md) – Latest release summary and upgrade notes
+- [Release Notes](RELEASE_NOTES_4.13.0.md) – Latest release summary and upgrade notes
 - [CLAUDE](CLAUDE.md) – Developer guide for AI coding assistants
 
 ## Quick Installation

@@ -21,6 +21,8 @@
                         "data": {
                             "min_soc_threshold": "Minimum SOC Threshold",
                             "max_soc_threshold": "Maximum SOC Threshold",
+                            "battery_dump_target_soc": "Arbitrage Reserve SOC",
+                            "battery_dump_deadline_hour": "Arbitrage Deadline Hour",
                             "emergency_soc_threshold": "Emergency SOC Threshold",
                             "soc_buffer_target": "SOC Buffer Target",
                             "soc_price_multiplier_max": "SOC Price Multiplier (Max)"
@@ -28,6 +30,8 @@
                         "data_description": {
                             "min_soc_threshold": "Minimum battery charge level to maintain (%)",
                             "max_soc_threshold": "Maximum battery charge level target (%)",
+                            "battery_dump_target_soc": "Minimum reserve SOC kept in the battery during arbitrage mode (%)",
+                            "battery_dump_deadline_hour": "Local hour of the next dump cutoff. Before it the planner targets today; after it, tomorrow",
                             "emergency_soc_threshold": "SOC level below which emergency charging is triggered regardless of price (%)",
                             "soc_buffer_target": "SOC level above which no price relaxation is applied. Below this, the price threshold is gradually relaxed (%)",
                             "soc_price_multiplier_max": "Maximum price threshold multiplier when battery is at/below emergency SOC (1.3 = accept 30% higher prices)"
@@ -82,11 +86,13 @@
                         "description": "These values only affect EV charging behavior and how permissive the planner can be when deciding to start.",
                         "data": {
                             "min_car_charging_duration": "Min Car Charging Duration",
-                            "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier"
+                            "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier",
+                            "car_use_battery_arbitrage": "Use Arbitrage Power For EV"
                         },
                         "data_description": {
                             "min_car_charging_duration": "Minimum consecutive hours of low prices required before starting car charging",
-                            "car_permissive_threshold_multiplier": "Multiplier applied to car charging threshold when permissive mode is active (1.2 = +20% higher threshold)"
+                            "car_permissive_threshold_multiplier": "Multiplier applied to car charging threshold when permissive mode is active (1.2 = +20% higher threshold)",
+                            "car_use_battery_arbitrage": "When arbitrage export is active, let the EV consume that power locally before the remainder is exported to grid"
                         }
                     },
                     "inverter_strategy": {
@@ -111,6 +117,8 @@
                 "data": {
                     "min_soc_threshold": "Minimum SOC Threshold",
                     "max_soc_threshold": "Maximum SOC Threshold",
+                    "battery_dump_target_soc": "Arbitrage Reserve SOC",
+                    "battery_dump_deadline_hour": "Arbitrage Deadline Hour",
                     "solar_forecast_start_hour": "Forecast Start Hour",
                     "max_soc_threshold_sunny": "Max SOC Grid Charge (Sunny Day)",
                     "sunny_forecast_threshold_kwh": "Sunny Forecast Trigger (kWh)",
@@ -130,6 +138,7 @@
                     "use_average_threshold": "Use Average Threshold",
                     "min_car_charging_duration": "Min Car Charging Duration",
                     "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier",
+                    "car_use_battery_arbitrage": "Use Arbitrage Power For EV",
                     "max_inverter_power": "Max Inverter Power",
                     "inverter_export_limit": "Inverter Export Target",
                     "inverter_export_deadband": "Inverter Export Deadband",
@@ -139,6 +148,8 @@
                 "data_description": {
                     "min_soc_threshold": "Minimum battery charge level to maintain (%)",
                     "max_soc_threshold": "Maximum battery charge level target (%)",
+                    "battery_dump_target_soc": "Minimum reserve SOC kept in the battery during arbitrage mode (%)",
+                    "battery_dump_deadline_hour": "Local hour of the next dump cutoff. Before it the planner targets today; after it, tomorrow",
                     "solar_forecast_start_hour": "Hour of the day (12-23) when the system starts reading tomorrow's solar forecast. Earlier = more time to react, later = more accurate forecast. Default: 20 (8 PM)",
                     "max_soc_threshold_sunny": "Max SOC for grid charging when tomorrow is sunny (%). Grid charging stops at this level to leave room for free solar energy",
                     "sunny_forecast_threshold_kwh": "Solar forecast threshold in kWh that activates sunny-day grid charging mode",
@@ -158,6 +169,7 @@
                     "use_average_threshold": "Use 24-hour rolling average of future prices as the charging threshold",
                     "min_car_charging_duration": "Minimum consecutive hours of low prices required before starting car charging",
                     "car_permissive_threshold_multiplier": "Multiplier applied to car charging threshold when permissive mode is active (1.2 = +20% higher threshold)",
+                    "car_use_battery_arbitrage": "When arbitrage export is active, let the EV consume that power locally before the remainder is exported to grid",
                     "max_inverter_power": "Maximum inverter output used when feed-in is allowed and as the upper cap for derating guidance (W)",
                     "inverter_export_limit": "Grid export target used while feed-in is blocked. The planner aims to keep net export around this value, for example 80W (W)",
                     "inverter_export_deadband": "Allowed deviation around the export target before the planner changes derating. With the default 40W deadband and 80W target, the planner holds steady between 40W and 120W export (W)",
@@ -362,12 +374,14 @@
                             "max_battery_power": "Max Battery Power",
                             "max_car_power": "Max Car Power",
                             "max_grid_power": "Max Grid Power",
+                            "battery_dump_max_export_power": "Arbitrage Max Export Power",
                             "base_grid_setpoint": "Base Grid Setpoint"
                         },
                         "data_description": {
                             "max_battery_power": "Maximum power limit for battery charging/discharging (W)",
                             "max_car_power": "Maximum power limit for car charging (W)",
                             "max_grid_power": "Maximum power limit from grid — safety limit (W)",
+                            "battery_dump_max_export_power": "Maximum export power used during arbitrage mode. Set to 0 to use the automatic cap from the battery and grid limits (W)",
                             "base_grid_setpoint": "Base minimum grid setpoint when no monthly peak data available (W)"
                         }
                     },
@@ -388,6 +402,7 @@
                     "max_battery_power": "Max Battery Power",
                     "max_car_power": "Max Car Power",
                     "max_grid_power": "Max Grid Power",
+                    "battery_dump_max_export_power": "Arbitrage Max Export Power",
                     "min_car_charging_threshold": "Min Car Charging Threshold",
                     "predictive_charging_min_soc": "Predictive Charging Min SOC",
                     "base_grid_setpoint": "Base Grid Setpoint"
@@ -396,6 +411,7 @@
                     "max_battery_power": "Maximum power limit for battery charging/discharging (W)",
                     "max_car_power": "Maximum power limit for car charging (W)",
                     "max_grid_power": "Maximum power limit from grid — safety limit (W)",
+                    "battery_dump_max_export_power": "Maximum export power used during arbitrage mode. Set to 0 to use the automatic cap from the battery and grid limits (W)",
                     "min_car_charging_threshold": "Minimum power to consider car as actively charging (W)",
                     "predictive_charging_min_soc": "Minimum SOC for predictive charging logic (%)",
                     "base_grid_setpoint": "Base minimum grid setpoint when no monthly peak data available (W)"
@@ -600,11 +616,13 @@
                         "description": "Settings that affect EV charging windows and permissive mode behavior.",
                         "data": {
                             "min_car_charging_duration": "Min Car Charging Duration",
-                            "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier"
+                            "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier",
+                            "car_use_battery_arbitrage": "Use Arbitrage Power For EV"
                         },
                         "data_description": {
                             "min_car_charging_duration": "Minimum consecutive hours of low prices required before starting car charging",
-                            "car_permissive_threshold_multiplier": "Multiplier applied to car charging threshold when permissive mode is active (1.2 = +20% higher threshold)"
+                            "car_permissive_threshold_multiplier": "Multiplier applied to car charging threshold when permissive mode is active (1.2 = +20% higher threshold)",
+                            "car_use_battery_arbitrage": "When arbitrage export is active, let the EV consume that power locally before the remainder is exported to grid"
                         }
                     },
                     "power_limits": {
@@ -729,6 +747,7 @@
                     "use_average_threshold": "Use Average Threshold",
                     "min_car_charging_duration": "Min Car Charging Duration",
                     "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier",
+                    "car_use_battery_arbitrage": "Use Arbitrage Power For EV",
                     "max_battery_power": "Max Battery Power",
                     "max_car_power": "Max Car Power",
                     "max_grid_power": "Max Grid Power",
@@ -840,6 +859,8 @@
                 "data": {
                     "min_soc_threshold": "Minimum SOC Threshold",
                     "max_soc_threshold": "Maximum SOC Threshold",
+                    "battery_dump_target_soc": "Arbitrage Reserve SOC",
+                    "battery_dump_deadline_hour": "Arbitrage Deadline Hour",
                     "solar_forecast_start_hour": "Forecast Start Hour",
                     "max_soc_threshold_sunny": "Max SOC Grid Charge (Sunny Day)",
                     "sunny_forecast_threshold_kwh": "Sunny Forecast Trigger (kWh)",
@@ -868,6 +889,8 @@
                 "data_description": {
                     "min_soc_threshold": "Minimum battery charge level to maintain (%)",
                     "max_soc_threshold": "Maximum battery charge level target (%)",
+                    "battery_dump_target_soc": "Minimum reserve SOC kept in the battery during arbitrage mode (%)",
+                    "battery_dump_deadline_hour": "Local hour of the next dump cutoff. Before it the planner targets today; after it, tomorrow",
                     "solar_forecast_start_hour": "Hour of the day (12-23) when the system starts reading tomorrow's solar forecast. Earlier = more time to react, later = more accurate forecast. Default: 20 (8 PM)",
                     "max_soc_threshold_sunny": "Max SOC for grid charging when tomorrow is sunny (%). Grid charging stops at this level to leave room for free solar energy",
                     "sunny_forecast_threshold_kwh": "Solar forecast threshold in kWh that activates sunny-day grid charging mode",
@@ -887,6 +910,7 @@
                     "use_average_threshold": "Use 24-hour rolling average of future prices as the charging threshold",
                     "min_car_charging_duration": "Minimum consecutive hours of low prices required before starting car charging",
                     "car_permissive_threshold_multiplier": "Multiplier applied to car charging threshold when permissive mode is active (1.2 = +20% higher threshold)",
+                    "car_use_battery_arbitrage": "When arbitrage export is active, let the EV consume that power locally before the remainder is exported to grid",
                     "max_inverter_power": "Maximum inverter output used when feed-in is allowed and as the upper cap for derating guidance (W)",
                     "inverter_export_limit": "Grid export target used while feed-in is blocked. The planner aims to keep net export around this value, for example 80W (W)",
                     "inverter_export_deadband": "Allowed deviation around the export target before the planner changes derating. With the default 40W deadband and 80W target, the planner holds steady between 40W and 120W export (W)",
@@ -901,6 +925,7 @@
                     "max_battery_power": "Max Battery Power",
                     "max_car_power": "Max Car Power",
                     "max_grid_power": "Max Grid Power",
+                    "battery_dump_max_export_power": "Arbitrage Max Export Power",
                     "min_car_charging_threshold": "Min Car Charging Threshold",
                     "predictive_charging_min_soc": "Predictive Charging Min SOC",
                     "base_grid_setpoint": "Base Grid Setpoint"
@@ -909,6 +934,7 @@
                     "max_battery_power": "Maximum power limit for battery charging/discharging (W)",
                     "max_car_power": "Maximum power limit for car charging (W)",
                     "max_grid_power": "Maximum power limit from grid — safety limit (W)",
+                    "battery_dump_max_export_power": "Maximum export power used during arbitrage mode. Set to 0 to use the automatic cap from the battery and grid limits (W)",
                     "min_car_charging_threshold": "Minimum power to consider car as actively charging (W)",
                     "predictive_charging_min_soc": "Minimum SOC for predictive charging logic (%)",
                     "base_grid_setpoint": "Base minimum grid setpoint when no monthly peak data available (W)"

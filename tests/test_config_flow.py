@@ -5,12 +5,19 @@ import pytest
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.electricity_planner.config_flow import OptionsFlowHandler
+from custom_components.electricity_planner.config_flow import (
+    OptionsFlowHandler,
+    validate_config_consistency,
+)
 from custom_components.electricity_planner.const import (
     CONF_BATTERY_CAPACITIES,
+    CONF_BATTERY_DUMP_DEADLINE_HOUR,
+    CONF_BATTERY_DUMP_TARGET_SOC,
+    CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
     CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_BASE_GRID_SETPOINT,
+    CONF_CAR_USE_BATTERY_ARBITRAGE,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     CONF_EMERGENCY_SOC_THRESHOLD,
@@ -39,11 +46,16 @@ from custom_components.electricity_planner.const import (
     CONF_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
     CONF_SOLAR_PRODUCTION_ENTITY,
+    CONF_SOLAR_FORECAST_START_HOUR,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     CONF_USE_AVERAGE_THRESHOLD,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_CAR_USE_BATTERY_ARBITRAGE,
+    DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
+    DEFAULT_BATTERY_DUMP_TARGET_SOC,
+    DEFAULT_BATTERY_DUMP_MAX_EXPORT_POWER,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_EMERGENCY_SOC,
     DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
@@ -128,6 +140,8 @@ async def test_options_flow_is_multistep_and_returns_updated_options():
     settings_input = {
         CONF_MIN_SOC_THRESHOLD: DEFAULT_MIN_SOC,
         CONF_MAX_SOC_THRESHOLD: DEFAULT_MAX_SOC,
+        CONF_BATTERY_DUMP_TARGET_SOC: 25,
+        CONF_BATTERY_DUMP_DEADLINE_HOUR: 9,
         CONF_PRICE_THRESHOLD: 0.123,
         CONF_PRICE_ADJUSTMENT_MULTIPLIER: DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
         CONF_PRICE_ADJUSTMENT_OFFSET: DEFAULT_PRICE_ADJUSTMENT_OFFSET,
@@ -139,6 +153,7 @@ async def test_options_flow_is_multistep_and_returns_updated_options():
         CONF_DYNAMIC_THRESHOLD_CONFIDENCE: DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
         CONF_USE_AVERAGE_THRESHOLD: DEFAULT_USE_AVERAGE_THRESHOLD,
         CONF_MIN_CAR_CHARGING_DURATION: DEFAULT_MIN_CAR_CHARGING_DURATION,
+        CONF_CAR_USE_BATTERY_ARBITRAGE: False,
         CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
         CONF_INVERTER_EXPORT_LIMIT: 120,
         CONF_INVERTER_EXPORT_DEADBAND: 35,
@@ -148,6 +163,7 @@ async def test_options_flow_is_multistep_and_returns_updated_options():
         CONF_MAX_BATTERY_POWER: DEFAULT_MAX_BATTERY_POWER,
         CONF_MAX_CAR_POWER: DEFAULT_MAX_CAR_POWER,
         CONF_MAX_GRID_POWER: DEFAULT_MAX_GRID_POWER,
+        CONF_BATTERY_DUMP_MAX_EXPORT_POWER: 4500,
         CONF_MIN_CAR_CHARGING_THRESHOLD: DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
         CONF_PREDICTIVE_CHARGING_MIN_SOC: DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
         CONF_BASE_GRID_SETPOINT: DEFAULT_BASE_GRID_SETPOINT,
@@ -166,11 +182,15 @@ async def test_options_flow_is_multistep_and_returns_updated_options():
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_PRICE_THRESHOLD] == pytest.approx(0.123)
+    assert result["data"][CONF_BATTERY_DUMP_TARGET_SOC] == 25
+    assert result["data"][CONF_BATTERY_DUMP_DEADLINE_HOUR] == 9
     assert result["data"][CONF_USE_DYNAMIC_THRESHOLD] is True
+    assert result["data"][CONF_CAR_USE_BATTERY_ARBITRAGE] is False
     assert result["data"][CONF_SUNNY_FORECAST_THRESHOLD_KWH] == pytest.approx(7.5)
     assert result["data"][CONF_INVERTER_EXPORT_LIMIT] == 120
     assert result["data"][CONF_INVERTER_EXPORT_DEADBAND] == 35
     assert result["data"][CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES] == 7
+    assert result["data"][CONF_BATTERY_DUMP_MAX_EXPORT_POWER] == 4500
     assert result["data"][CONF_BATTERY_CAPACITIES] == {battery_entity: 12.5}
 
 
@@ -190,6 +210,8 @@ async def test_options_flow_defaults_reflect_existing_options():
         },
         options={
             CONF_PRICE_THRESHOLD: 0.321,
+            CONF_BATTERY_DUMP_TARGET_SOC: 27,
+            CONF_BATTERY_DUMP_MAX_EXPORT_POWER: 4200,
             CONF_BATTERY_SOC_ENTITIES: [battery_entity],
             CONF_BATTERY_CAPACITIES: {battery_entity: 11.5},
         },
@@ -211,13 +233,135 @@ async def test_options_flow_defaults_reflect_existing_options():
 
     schema = result["data_schema"]
     assert _default_for(schema, CONF_PRICE_THRESHOLD) == pytest.approx(0.321)
+    assert _default_for(schema, CONF_BATTERY_DUMP_TARGET_SOC) == pytest.approx(27)
     assert _default_for(schema, CONF_SUNNY_FORECAST_THRESHOLD_KWH) == pytest.approx(5.8)
     assert _default_for(schema, CONF_INVERTER_EXPORT_LIMIT) == DEFAULT_INVERTER_EXPORT_LIMIT
     assert _default_for(schema, CONF_INVERTER_EXPORT_DEADBAND) == DEFAULT_INVERTER_EXPORT_DEADBAND
+    assert _default_for(schema, CONF_CAR_USE_BATTERY_ARBITRAGE) == DEFAULT_CAR_USE_BATTERY_ARBITRAGE
     assert (
         _default_for(schema, CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES)
         == DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES
     )
+
+    safety_result = await handler.async_step_settings(
+        {
+            CONF_MIN_SOC_THRESHOLD: _default_for(schema, CONF_MIN_SOC_THRESHOLD),
+            CONF_MAX_SOC_THRESHOLD: _default_for(schema, CONF_MAX_SOC_THRESHOLD),
+            CONF_BATTERY_DUMP_TARGET_SOC: _default_for(schema, CONF_BATTERY_DUMP_TARGET_SOC),
+            CONF_BATTERY_DUMP_DEADLINE_HOUR: _default_for(schema, CONF_BATTERY_DUMP_DEADLINE_HOUR),
+            CONF_SOLAR_FORECAST_START_HOUR: _default_for(schema, CONF_SOLAR_FORECAST_START_HOUR),
+            CONF_MAX_SOC_THRESHOLD_SUNNY: _default_for(schema, CONF_MAX_SOC_THRESHOLD_SUNNY),
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: _default_for(schema, CONF_SUNNY_FORECAST_THRESHOLD_KWH),
+            CONF_PRICE_THRESHOLD: _default_for(schema, CONF_PRICE_THRESHOLD),
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER: _default_for(schema, CONF_PRICE_ADJUSTMENT_MULTIPLIER),
+            CONF_PRICE_ADJUSTMENT_OFFSET: _default_for(schema, CONF_PRICE_ADJUSTMENT_OFFSET),
+            CONF_EMERGENCY_SOC_THRESHOLD: _default_for(schema, CONF_EMERGENCY_SOC_THRESHOLD),
+            CONF_VERY_LOW_PRICE_THRESHOLD: _default_for(schema, CONF_VERY_LOW_PRICE_THRESHOLD),
+            CONF_SIGNIFICANT_SOLAR_THRESHOLD: _default_for(schema, CONF_SIGNIFICANT_SOLAR_THRESHOLD),
+            CONF_USE_DYNAMIC_THRESHOLD: _default_for(schema, CONF_USE_DYNAMIC_THRESHOLD),
+            CONF_DYNAMIC_THRESHOLD_CONFIDENCE: _default_for(schema, CONF_DYNAMIC_THRESHOLD_CONFIDENCE),
+            CONF_USE_AVERAGE_THRESHOLD: _default_for(schema, CONF_USE_AVERAGE_THRESHOLD),
+            CONF_MIN_CAR_CHARGING_DURATION: _default_for(schema, CONF_MIN_CAR_CHARGING_DURATION),
+            CONF_CAR_USE_BATTERY_ARBITRAGE: _default_for(schema, CONF_CAR_USE_BATTERY_ARBITRAGE),
+            CONF_INVERTER_EXPORT_LIMIT: _default_for(schema, CONF_INVERTER_EXPORT_LIMIT),
+            CONF_INVERTER_EXPORT_DEADBAND: _default_for(schema, CONF_INVERTER_EXPORT_DEADBAND),
+            CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES: _default_for(schema, CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES),
+        }
+    )
+    assert safety_result["step_id"] == "safety_limits"
+    safety_schema = safety_result["data_schema"]
+    assert _default_for(safety_schema, CONF_BATTERY_DUMP_MAX_EXPORT_POWER) == pytest.approx(4200)
+
+
+@pytest.mark.asyncio
+async def test_options_flow_settings_defaults_battery_dump_target_soc():
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={
+            CONF_BATTERY_DUMP_TARGET_SOC: 33,
+            CONF_BATTERY_DUMP_DEADLINE_HOUR: 7,
+        },
+    )
+    handler = _make_handler(entry)
+
+    result = await handler.async_step_settings()
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "settings"
+    assert _default_for(result["data_schema"], CONF_BATTERY_DUMP_TARGET_SOC) == pytest.approx(33)
+    assert _default_for(result["data_schema"], CONF_BATTERY_DUMP_DEADLINE_HOUR) == 7
+    assert _default_for(result["data_schema"], CONF_CAR_USE_BATTERY_ARBITRAGE) == DEFAULT_CAR_USE_BATTERY_ARBITRAGE
+
+
+@pytest.mark.asyncio
+async def test_options_flow_settings_uses_default_battery_dump_settings_when_unset():
+    entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
+    handler = _make_handler(entry)
+
+    result = await handler.async_step_settings()
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "settings"
+    assert _default_for(result["data_schema"], CONF_BATTERY_DUMP_TARGET_SOC) == pytest.approx(
+        DEFAULT_BATTERY_DUMP_TARGET_SOC
+    )
+    assert _default_for(result["data_schema"], CONF_CAR_USE_BATTERY_ARBITRAGE) == DEFAULT_CAR_USE_BATTERY_ARBITRAGE
+    assert _default_for(result["data_schema"], CONF_BATTERY_DUMP_DEADLINE_HOUR) == (
+        DEFAULT_BATTERY_DUMP_DEADLINE_HOUR
+    )
+
+
+@pytest.mark.asyncio
+async def test_options_flow_safety_limits_defaults_battery_dump_export_cap():
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    handler = _make_handler(entry)
+
+    await _go_to_entities(
+        handler,
+        phase_mode=PHASE_MODE_SINGLE,
+    )
+    result = await handler.async_step_entities(
+        {
+            CONF_CURRENT_PRICE_ENTITY: "sensor.current_price",
+            CONF_HIGHEST_PRICE_ENTITY: "sensor.highest_price",
+            CONF_LOWEST_PRICE_ENTITY: "sensor.lowest_price",
+            CONF_NEXT_PRICE_ENTITY: "sensor.next_price",
+            CONF_BATTERY_SOC_ENTITIES: ["sensor.main_battery"],
+        }
+    )
+    assert result["step_id"] == "battery_capacities"
+    result = await handler.async_step_battery_capacities(
+        {"capacity_sensor_main_battery": 12.5}
+    )
+    assert result["step_id"] == "settings"
+
+    result = await handler.async_step_settings(
+        {
+            CONF_MIN_SOC_THRESHOLD: DEFAULT_MIN_SOC,
+            CONF_MAX_SOC_THRESHOLD: DEFAULT_MAX_SOC,
+            CONF_SOLAR_FORECAST_START_HOUR: 20,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 35,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 5.0,
+            CONF_PRICE_THRESHOLD: 0.15,
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER: DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
+            CONF_PRICE_ADJUSTMENT_OFFSET: DEFAULT_PRICE_ADJUSTMENT_OFFSET,
+            CONF_EMERGENCY_SOC_THRESHOLD: DEFAULT_EMERGENCY_SOC,
+            CONF_VERY_LOW_PRICE_THRESHOLD: 30,
+            CONF_SIGNIFICANT_SOLAR_THRESHOLD: 1000,
+            CONF_USE_DYNAMIC_THRESHOLD: DEFAULT_USE_DYNAMIC_THRESHOLD,
+            CONF_DYNAMIC_THRESHOLD_CONFIDENCE: DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
+            CONF_USE_AVERAGE_THRESHOLD: DEFAULT_USE_AVERAGE_THRESHOLD,
+            CONF_MIN_CAR_CHARGING_DURATION: DEFAULT_MIN_CAR_CHARGING_DURATION,
+            CONF_INVERTER_EXPORT_LIMIT: DEFAULT_INVERTER_EXPORT_LIMIT,
+            CONF_INVERTER_EXPORT_DEADBAND: DEFAULT_INVERTER_EXPORT_DEADBAND,
+            CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES: DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+        }
+    )
+
+    assert result["step_id"] == "safety_limits"
+    safety_schema = result["data_schema"]
+    assert _default_for(safety_schema, CONF_BATTERY_DUMP_MAX_EXPORT_POWER) == DEFAULT_BATTERY_DUMP_MAX_EXPORT_POWER
 
 
 @pytest.mark.asyncio
@@ -566,3 +710,15 @@ async def test_options_flow_can_clear_existing_phase_entities():
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_PHASE_MODE] == PHASE_MODE_THREE
     assert result["data"][CONF_PHASES] == {}
+
+
+@pytest.mark.parametrize("deadline_value", [9.5, "9.5", "abc", -1, 24, True])
+def test_validate_config_rejects_non_integral_or_out_of_range_deadline(deadline_value):
+    """Deadline hour must remain an integer wall-clock hour."""
+    errors = validate_config_consistency(
+        {
+            CONF_BATTERY_DUMP_DEADLINE_HOUR: deadline_value,
+        }
+    )
+
+    assert any("battery_dump_deadline_hour" in error for error in errors)

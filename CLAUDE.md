@@ -23,8 +23,8 @@ This is a Home Assistant custom integration called "Electricity Planner" - a sma
 - **Config Flow** (`config_flow.py`): UI-based configuration for entity selection and thresholds
   - Multi-step setup wizard (entities → capacities → thresholds → safety limits)
   - Options flow defaults merge `entry.data` + `entry.options` so users always see their latest selections
-  - Version 13 config schema with migration support
-- **Migrations** (`migrations.py`): Handles configuration upgrades from v1→v13
+  - Version 20 config schema with migration support
+- **Migrations** (`migrations.py`): Handles configuration upgrades from v1→v20
   - Automatic migration on integration load
   - Safe removal of deprecated options
 - **Sensors** (`sensor.py`): Comprehensive analysis sensors
@@ -154,10 +154,10 @@ custom_components/electricity_planner/
 ├── coordinator.py       # Data coordination and state management
 ├── decision_engine.py   # Core charging decision algorithms
 ├── strategies.py        # Decision strategies (8 strategy classes)
-├── config_flow.py       # UI configuration + options flow (multi-step wizard, schema v13)
+├── config_flow.py       # UI configuration + options flow (multi-step wizard, schema v20)
 ├── sensor.py           # Analysis sensors (price, battery, power, diagnostics)
 ├── binary_sensor.py    # Main boolean outputs for charging decisions
-├── migrations.py       # Configuration migration system (v1→v13)
+├── migrations.py       # Configuration migration system (v1→v20)
 ├── manifest.json       # Integration metadata and dependencies
 └── strings.json        # UI text and translations
 ```
@@ -191,9 +191,9 @@ The integration is designed for dynamic electricity markets:
 ## Configuration System
 
 ### Current Version
-- **Integration Version**: 4.10.3
-- **Config Schema Version**: 13
-- **Migration Path**: Automatic v1→v13 migration
+- **Integration Version**: 4.12.8
+- **Config Schema Version**: 20
+- **Migration Path**: Automatic v1→v20 migration
 
 ### Configuration Categories
 1. **Entity Selection**: Nord Pool, battery, solar, car, power flow, solar forecast entities

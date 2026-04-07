@@ -62,7 +62,7 @@ from .const import (
     INTEGRATION_VERSION,
 )
 from .coordinator import ElectricityPlannerCoordinator
-from .helpers import extract_price_from_interval
+from .helpers import extract_price_from_interval, is_in_month_peak_transition_window
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -565,7 +565,11 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
             monthly_peak_value = max(0, int(float(monthly_peak or 0)))
         except (TypeError, ValueError):
             monthly_peak_value = 0
-        controlling_peak = max(monthly_peak_value, base_grid_setpoint)
+        month_peak_transition_active = is_in_month_peak_transition_window(
+            now=dt_util.utcnow()
+        )
+        applied_monthly_peak = 0 if month_peak_transition_active else monthly_peak_value
+        controlling_peak = max(applied_monthly_peak, base_grid_setpoint)
         peak_based_grid_setpoint = int(
             controlling_peak * DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN
         )
@@ -583,6 +587,8 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
                 self.coordinator.data.get("battery_dump_plan", {}).get("configured_export_cap_w")
             ),
             "monthly_grid_peak": monthly_peak,
+            "applied_monthly_grid_peak": applied_monthly_peak,
+            "month_peak_transition_active": month_peak_transition_active,
             "base_grid_setpoint": base_grid_setpoint,
             "controlling_peak": controlling_peak,
             "peak_based_grid_setpoint": peak_based_grid_setpoint,

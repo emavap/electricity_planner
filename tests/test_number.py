@@ -16,7 +16,6 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner import coordinator as coordinator_module
 from custom_components.electricity_planner.const import (
-    CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
     CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_CURRENT_PRICE_ENTITY,
@@ -33,7 +32,6 @@ from custom_components.electricity_planner.const import (
 )
 from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
 from custom_components.electricity_planner.number import (
-    BatteryDumpMaxExportPowerNumber,
     BatteryDumpTargetSocNumber,
     MaxSocThresholdNumber,
     MaxSocThresholdSunnyNumber,
@@ -135,12 +133,11 @@ async def test_number_setup_always_adds_standard_and_sunny_entities(fake_hass, m
     entities = []
     await async_setup_entry(fake_hass, entry, entities.extend)
 
-    assert len(entities) == 5
+    assert len(entities) == 4
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
     assert isinstance(entities[2], SunnyForecastThresholdNumber)
     assert isinstance(entities[3], BatteryDumpTargetSocNumber)
-    assert isinstance(entities[4], BatteryDumpMaxExportPowerNumber)
 
 
 @pytest.mark.asyncio
@@ -162,12 +159,11 @@ async def test_number_setup_with_forecast_entity_keeps_same_three_entities(fake_
     entities = []
     await async_setup_entry(fake_hass, entry, entities.extend)
 
-    assert len(entities) == 5
+    assert len(entities) == 4
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
     assert isinstance(entities[2], SunnyForecastThresholdNumber)
     assert isinstance(entities[3], BatteryDumpTargetSocNumber)
-    assert isinstance(entities[4], BatteryDumpMaxExportPowerNumber)
 
 
 @pytest.mark.asyncio
@@ -193,8 +189,6 @@ async def test_number_entities_use_stable_dashboard_friendly_entity_ids(fake_has
     sunny_entity = MaxSocThresholdSunnyNumber(coordinator, entry)
     forecast_entity = SunnyForecastThresholdNumber(coordinator, entry)
     dump_entity = BatteryDumpTargetSocNumber(coordinator, entry)
-    dump_power_entity = BatteryDumpMaxExportPowerNumber(coordinator, entry)
-
     assert max_entity.entity_id == "number.electricity_planner_max_soc_threshold"
     assert sunny_entity.entity_id == "number.electricity_planner_max_soc_threshold_sunny"
     assert (
@@ -204,10 +198,6 @@ async def test_number_entities_use_stable_dashboard_friendly_entity_ids(fake_has
     assert (
         dump_entity.entity_id
         == "number.electricity_planner_battery_dump_target_soc"
-    )
-    assert (
-        dump_power_entity.entity_id
-        == "number.electricity_planner_battery_dump_max_export_power"
     )
 
 
@@ -305,8 +295,8 @@ async def test_battery_dump_target_update_persists_in_options(fake_hass, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_battery_dump_max_export_power_update_persists_in_options(fake_hass, monkeypatch):
-    """Dump max export power should persist like the other live number controls."""
+async def test_battery_dump_target_attributes_show_threshold_state_not_windows(fake_hass, monkeypatch):
+    """Dump target number attributes should reflect threshold-based planning state."""
     config = _base_config()
     entry = MockConfigEntry(domain=DOMAIN, data=config, options={})
 
@@ -316,20 +306,30 @@ async def test_battery_dump_max_export_power_update_persists_in_options(fake_has
         lambda self: None,
     )
 
-    fake_hass.config_entries._entries[entry.entry_id] = entry
     coordinator = ElectricityPlannerCoordinator(fake_hass, entry)
-    coordinator.decision_engine.refresh_settings = Mock()
-    coordinator.async_request_refresh = AsyncMock()
+    coordinator.data = {
+        "battery_analysis": {"average_soc": 54.2},
+        "battery_dump_plan": {
+            "enabled": True,
+            "dump_price_threshold": 0.1123,
+            "current_slot_price": 0.1456,
+            "selected_slots_count": 5,
+            "slots_cover_full_dump": True,
+        },
+    }
 
-    entity = BatteryDumpMaxExportPowerNumber(coordinator, entry)
-    entity.hass = fake_hass
+    entity = BatteryDumpTargetSocNumber(coordinator, entry)
+    attrs = entity.extra_state_attributes
 
-    await entity.async_set_native_value(4500)
-
-    assert entry.options[CONF_BATTERY_DUMP_MAX_EXPORT_POWER] == 4500
-    assert coordinator.config[CONF_BATTERY_DUMP_MAX_EXPORT_POWER] == 4500
-    coordinator.decision_engine.refresh_settings.assert_called_once_with(coordinator.config)
-    coordinator.async_request_refresh.assert_awaited_once()
+    assert attrs["dump_mode_enabled"] is True
+    assert attrs["current_battery_soc"] == "54.2%"
+    assert attrs["available_to_dump_percent"] == "14.2%"
+    assert attrs["dump_price_threshold"] == 0.1123
+    assert attrs["current_slot_price"] == 0.1456
+    assert attrs["selected_slots_count"] == 5
+    assert attrs["slots_cover_full_dump"] is True
+    assert "scheduled_window_start" not in attrs
+    assert "scheduled_window_end" not in attrs
 
 
 @pytest.mark.asyncio

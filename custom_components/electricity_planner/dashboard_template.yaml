@@ -154,7 +154,7 @@ views:
                   action: more-info
               - type: button
                 entity: switch.electricity_planner_battery_dump_to_grid
-                name: Dump battery
+                name: Arbitrage mode
                 icon: mdi:battery-arrow-down-outline
                 icon_height: 60px
                 show_name: true
@@ -191,20 +191,14 @@ views:
                 name: "Grid Max SOC (high solar)"
                 icon: mdi:weather-sunny
               - entity: number.electricity_planner_battery_dump_target_soc
-                name: "Dump Target SOC"
+                name: "Arbitrage Reserve SOC"
                 icon: mdi:battery-arrow-down-outline
-              - entity: number.electricity_planner_battery_dump_max_export_power
-                name: "Dump Max Export Power"
-                icon: mdi:transmission-tower-export
               - entity: number.electricity_planner_sunny_forecast_threshold_kwh
                 name: "Sunny Forecast Trigger"
                 icon: mdi:weather-partly-cloudy
               - entity: switch.electricity_planner_disable_battery_charging
                 name: Disable Battery Charging
                 icon: mdi:battery-off
-              - entity: switch.electricity_planner_battery_dump_to_grid
-                name: Dump Battery To Grid
-                icon: mdi:transmission-tower-export
 
           - type: entities
             title: Decisions
@@ -260,13 +254,19 @@ views:
             apex_config:
               chart:
                 height: 350
-                stacked: true
               tooltip:
                 enabled: false
               xaxis:
                 labels:
                   datetimeFormatter:
                     hour: "HH:mm"
+              annotations:
+                yaxis:
+                  - y: 0
+                    borderColor: "#7f8c8d"
+                    strokeDashArray: 4
+                    label:
+                      text: Break-even
               yaxis:
                 decimalsInFloat: 4
                 tickAmount: 20
@@ -276,68 +276,69 @@ views:
                       return value.toFixed(4) + ' €/kWh';
                     }
             series:
-              # Transport cost column - shows the network/transport component of the buy price
               - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
                 name: Transport cost
-                type: column
-                color: "#95a5a6"
+                type: line
+                stroke_width: 1
+                color: "#b9770e"
+                curve: straight
+                opacity: 0.85
                 data_generator: |
-                  return entity.attributes.data.map((interval) => {
-                    const transport = interval.transport_cost ?? 0;
-                    return [new Date(interval.start).getTime(), transport];
+                  const intervals = entity.attributes.data ?? [];
+                  return intervals.map((interval) => {
+                    return [new Date(interval.start).getTime(), interval.transport_cost ?? 0];
                   });
                 show:
                   legend_value: false
-              # Contract energy column - shows the buy-side energy component before transport
               - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
                 name: Contract energy price
-                type: column
-                color: "#3498db"
+                type: line
+                stroke_width: 2
+                color: "#148f77"
+                curve: straight
                 data_generator: |
-                  return entity.attributes.data.map((interval) => {
+                  const intervals = entity.attributes.data ?? [];
+                  return intervals.map((interval) => {
                     return [new Date(interval.start).getTime(), interval.adjusted_energy_price ?? 0];
                   });
                 show:
                   legend_value: false
-              # Raw market line - shows the unadjusted market reference separately from the buy-price stack
               - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
                 name: Raw market price
                 type: line
                 stroke_width: 1
-                color: "#1f78d1"
+                color: "#566573"
                 curve: straight
                 opacity: 0.8
                 show:
                   legend_value: false
                 data_generator: |
-                  return entity.attributes.data.map((interval) => {
+                  const intervals = entity.attributes.data ?? [];
+                  return intervals.map((interval) => {
                     return [new Date(interval.start).getTime(), interval.raw_price ?? 0];
                   });
-              # Total price line - shows complete price including all components
               - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
-                name: Total price
+                name: Total buy price
                 type: line
-                stroke_width: 2
-                color: "#2ecc71"
+                stroke_width: 3
+                color: "#1f618d"
                 curve: straight
                 show:
                   legend_value: false
                 data_generator: |
-                  // Plot the complete total price per interval
-                  return entity.attributes.data.map((interval) => {
+                  const intervals = entity.attributes.data ?? [];
+                  return intervals.map((interval) => {
                     return [new Date(interval.start).getTime(), interval.price ?? 0];
                   });
-              # Max threshold line - shows the configured or average threshold
               - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
                 name: Max Threshold
                 type: line
                 stroke_width: 2
-                color: "#e74c3c"
+                color: "#c0392b"
                 curve: straight
                 show:
                   legend_value: false
                 data_generator: |
-                  // Determine the active decision threshold used by the pricing logic
                   const currentPriceEntity = hass.states['sensor.electricity_planner_current_electricity_price'];
                   const diagnosticsEntity = hass.states['sensor.electricity_planner_decision_diagnostics'] ?? hass.states['sensor.electricity_planner_decision_diagnostics_diagnostic'];
                   const priceAnalysis = diagnosticsEntity?.attributes?.price_analysis;
@@ -368,28 +369,24 @@ views:
                     [startTime, maxThreshold],
                     [endTime, maxThreshold]
                   ];
-              # Dynamic threshold line - shows temporary threshold adjustments
               - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
                 name: Dynamic Threshold
                 type: line
                 stroke_width: 3
-                color: "#f39c12"
+                color: "#e67e22"
                 curve: straight
                 show:
                   legend_value: false
                 data_generator: |
-                  // Display dynamic threshold when active (typically more restrictive than max)
                   const currentPriceEntity = hass.states['sensor.electricity_planner_current_electricity_price'];
                   const dynamicThreshold = currentPriceEntity?.attributes?.dynamic_threshold;
 
-                  // Hide this line if no dynamic threshold is currently active
                   if (dynamicThreshold == null || dynamicThreshold === undefined) {
                     return [];
                   }
 
                   const threshold = parseFloat(dynamicThreshold);
 
-                  // Draw horizontal line across the entire time range
                   if (!entity.attributes.data || entity.attributes.data.length === 0) {
                     return [];
                   }
@@ -402,6 +399,123 @@ views:
                   return [
                     [startTime, threshold],
                     [endTime, threshold]
+                  ];
+          - type: custom:apexcharts-card
+            header:
+              title: Electricity Sell Prices (History + Future)
+              show: true
+            graph_span: 38h
+            span:
+              start: hour
+              offset: -2h
+            now:
+              show: true
+              label: Now
+            apex_config:
+              chart:
+                height: 300
+              tooltip:
+                enabled: false
+              xaxis:
+                labels:
+                  datetimeFormatter:
+                    hour: "HH:mm"
+              annotations:
+                yaxis:
+                  - y: 0
+                    borderColor: "#7f8c8d"
+                    strokeDashArray: 4
+                    label:
+                      text: Break-even
+              yaxis:
+                decimalsInFloat: 4
+                tickAmount: 16
+                labels:
+                  formatter: |
+                    EVAL:function(value) {
+                      return value.toFixed(4) + ' €/kWh';
+                    }
+            series:
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Raw market price
+                type: line
+                stroke_width: 1
+                color: "#566573"
+                curve: straight
+                opacity: 0.8
+                show:
+                  legend_value: false
+                data_generator: |
+                  const intervals = entity.attributes.data ?? [];
+                  return intervals.map((interval) => {
+                    return [new Date(interval.start).getTime(), interval.raw_price ?? 0];
+                  });
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Net feed-in price
+                type: line
+                stroke_width: 3
+                color: "#1d8348"
+                curve: straight
+                show:
+                  legend_value: false
+                data_generator: |
+                  const feedInEntity = hass.states['sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price'];
+                  const multiplier = parseFloat(feedInEntity?.attributes?.feedin_multiplier ?? 1);
+                  const offset = parseFloat(feedInEntity?.attributes?.feedin_offset ?? 0);
+                  const intervals = entity.attributes.data ?? [];
+                  return intervals.map((interval) => {
+                    const rawPrice = interval.raw_price ?? 0;
+                    return [new Date(interval.start).getTime(), (rawPrice * multiplier) + offset];
+                  });
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Feed-in Threshold
+                type: line
+                stroke_width: 2
+                color: "#d4ac0d"
+                curve: straight
+                show:
+                  legend_value: false
+                data_generator: |
+                  const thresholdEntity = hass.states['sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold'];
+                  const threshold = thresholdEntity ? parseFloat(thresholdEntity.state) : null;
+                  if (threshold == null || Number.isNaN(threshold)) {
+                    return [];
+                  }
+                  if (!entity.attributes.data || entity.attributes.data.length === 0) {
+                    return [];
+                  }
+                  const intervals = entity.attributes.data;
+                  const startTime = new Date(intervals[0].start).getTime();
+                  const lastInterval = intervals[intervals.length - 1];
+                  const endTime = new Date(lastInterval.end ?? lastInterval.start).getTime();
+                  return [
+                    [startTime, threshold],
+                    [endTime, threshold]
+                  ];
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Arbitrage Threshold
+                type: line
+                stroke_width: 2
+                color: "#7d3c98"
+                curve: straight
+                show:
+                  legend_value: false
+                data_generator: |
+                  const dumpSwitch = hass.states['switch.electricity_planner_battery_dump_to_grid'];
+                  const threshold = dumpSwitch?.attributes?.dump_price_threshold;
+                  if (dumpSwitch?.state !== 'on' || threshold == null || threshold === undefined) {
+                    return [];
+                  }
+                  if (!entity.attributes.data || entity.attributes.data.length === 0) {
+                    return [];
+                  }
+                  const intervals = entity.attributes.data;
+                  const startTime = new Date(intervals[0].start).getTime();
+                  const lastInterval = intervals[intervals.length - 1];
+                  const endTime = new Date(lastInterval.end ?? lastInterval.start).getTime();
+                  return [
+                    [startTime, parseFloat(threshold)],
+                    [endTime, parseFloat(threshold)]
                   ];
 
           - type: markdown

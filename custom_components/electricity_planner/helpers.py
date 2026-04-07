@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+import re
+from datetime import date, datetime, timedelta, timezone as dt_timezone
 from functools import lru_cache
 from typing import Any, NamedTuple
 
@@ -15,6 +16,7 @@ except ImportError:  # pragma: no cover - Home Assistant test env provides pytz
     AmbiguousTimeError = NonExistentTimeError = ValueError
 
 from .const import (
+    MONTH_PEAK_TRANSITION_LEAD_MINUTES,
     POWER_ALLOCATION_TOLERANCE,
     POWER_ALLOCATION_PRECISION,
     PRICE_POSITION_CACHE_SIZE,
@@ -23,6 +25,7 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+_INTEGER_RE = re.compile(r"^[+-]?\d+$")
 
 
 def extract_price_from_interval(interval: dict[str, Any]) -> float | None:
@@ -62,18 +65,149 @@ class PriceInterval(NamedTuple):
     price: float
 
 
-def _coerce_local_datetime(naive_local: datetime) -> datetime:
-    """Attach Home Assistant's local timezone to a naive wall-clock datetime."""
+def coerce_integral_range(
+    value: Any,
+    *,
+    min_value: int,
+    max_value: int,
+) -> int | None:
+    """Return an integral value within range, or ``None`` if invalid."""
+    parsed: int
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, float):
+        if not value.is_integer():
+            return None
+        parsed = int(value)
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if not stripped or _INTEGER_RE.match(stripped) is None:
+            return None
+        parsed = int(stripped)
+    else:
+        return None
+
+    if not min_value <= parsed <= max_value:
+        return None
+    return parsed
+
+
+def _coerce_local_wall_clock(
+    naive_local: datetime,
+    *,
+    prefer_earliest_ambiguous: bool = True,
+) -> datetime:
+    """Attach the Home Assistant timezone to a wall-clock datetime deterministically."""
     timezone = dt_util.DEFAULT_TIME_ZONE
     if hasattr(timezone, "localize"):
         try:
             return timezone.localize(naive_local, is_dst=None)
         except NonExistentTimeError:
-            # Preserve the intended local tariff slot by moving through spring-forward gaps.
-            return timezone.localize(naive_local, is_dst=False)
+            for minutes in range(1, 181):
+                shifted_local = naive_local + timedelta(minutes=minutes)
+                try:
+                    return timezone.localize(shifted_local, is_dst=None)
+                except NonExistentTimeError:
+                    continue
+                except AmbiguousTimeError:
+                    return timezone.localize(
+                        shifted_local,
+                        is_dst=prefer_earliest_ambiguous,
+                    )
         except AmbiguousTimeError:
-            return timezone.localize(naive_local, is_dst=False)
-    return naive_local.replace(tzinfo=timezone)
+            return timezone.localize(
+                naive_local,
+                is_dst=prefer_earliest_ambiguous,
+            )
+
+    candidates: list[datetime] = []
+    for fold in (0, 1):
+        candidate = naive_local.replace(tzinfo=timezone, fold=fold)
+        round_tripped = (
+            candidate.astimezone(dt_timezone.utc)
+            .astimezone(timezone)
+            .replace(tzinfo=None)
+        )
+        if round_tripped == naive_local:
+            candidates.append(candidate)
+
+    if candidates:
+        return min(
+            candidates,
+            key=lambda candidate: candidate.astimezone(dt_timezone.utc),
+        ) if prefer_earliest_ambiguous else max(
+            candidates,
+            key=lambda candidate: candidate.astimezone(dt_timezone.utc),
+        )
+
+    for minutes in range(1, 181):
+        shifted_local = naive_local + timedelta(minutes=minutes)
+        for fold in (0, 1):
+            candidate = shifted_local.replace(tzinfo=timezone, fold=fold)
+            round_tripped = (
+                candidate.astimezone(dt_timezone.utc)
+                .astimezone(timezone)
+                .replace(tzinfo=None)
+            )
+            if round_tripped == shifted_local:
+                return candidate
+
+    raise ValueError(f"Unable to localize wall-clock time {naive_local.isoformat()}")
+
+
+def _coerce_local_datetime(naive_local: datetime) -> datetime:
+    """Attach Home Assistant's local timezone to a naive wall-clock datetime."""
+    return _coerce_local_wall_clock(naive_local, prefer_earliest_ambiguous=True)
+
+
+def resolve_local_deadline(
+    local_date: date,
+    hour: int,
+    *,
+    minute: int = 0,
+) -> datetime:
+    """Return the first valid local instant at or after a wall-clock deadline."""
+    naive_local = datetime(
+        local_date.year,
+        local_date.month,
+        local_date.day,
+        hour,
+        minute,
+    )
+    return _coerce_local_wall_clock(naive_local, prefer_earliest_ambiguous=True)
+
+
+def is_in_month_peak_transition_window(
+    now: datetime | None = None,
+    *,
+    lead_minutes: int = MONTH_PEAK_TRANSITION_LEAD_MINUTES,
+) -> bool:
+    """Return whether month-boundary protection should ignore the current peak sensor.
+
+    The protection starts shortly before local month end and remains active for the
+    same grace period after local month start. This prevents a stale monthly peak
+    sensor from briefly reapplying the previous month's higher peak right after
+    midnight before the source entity resets.
+    """
+    reference_now = now or dt_util.utcnow()
+    local_now = dt_util.as_local(reference_now)
+    current_month_start = resolve_local_deadline(
+        date(local_now.year, local_now.month, 1), 0
+    )
+
+    if local_now < current_month_start + timedelta(minutes=lead_minutes):
+        return True
+
+    if local_now.month == 12:
+        next_month_date = date(local_now.year + 1, 1, 1)
+    else:
+        next_month_date = date(local_now.year, local_now.month + 1, 1)
+
+    next_month_start = resolve_local_deadline(next_month_date, 0)
+    return local_now >= next_month_start - timedelta(minutes=lead_minutes)
 
 
 def _same_local_time_last_week(target_time_utc: datetime) -> datetime:

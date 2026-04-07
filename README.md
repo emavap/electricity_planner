@@ -1,6 +1,6 @@
 # Electricity Planner
 
-**Version 4.12.0** | **Config Schema Version 19** | **Home Assistant 2024.4+**
+**Version 4.13.0** | **Config Schema Version 20** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
@@ -211,22 +211,35 @@ You can configure a second grid SOC limit for high-solar days:
 This allows overnight charging to stop earlier on days with strong expected production,
 leaving battery headroom for free solar.
 
-### Holiday / Monetization Mode
+### Arbitrage Mode
 
-Enable the **Dump Battery To Grid** switch when you want the planner to optimize for
-solar monetization during periods of low and stable home consumption, such as holidays.
+Enable the **Arbitrage Mode** switch when you want the planner to optimize for
+solar monetization during periods of low and stable home consumption.
 
 When enabled:
 
 - Solar can still charge the battery normally
-- The planner does **not** force discharge outside the selected export window
-- The planner selects the best eligible high-price feed-in window and recommends export there
+- The planner does **not** force discharge outside profitable dump moments
+- The planner calculates how many 15-minute export slots are needed from the dumpable battery energy and configured export power
+- The planner selects the highest-priced eligible feed-in slots before the next occurrence of the configured local cutoff hour
+- It derives a single arbitrage threshold from those selected slots and exports whenever the current feed-in price is at or above that threshold
+- The planner only considers eligible slots that finish before that next cutoff, so after the cutoff it automatically targets the following day
 - Export only uses energy above the configured dump target SOC
 - Grid charging is blocked while the mode is enabled unless the current price is negative
-- If no long enough continuous window exists, the planner falls back to the best shorter eligible window and monetizes what it can
+- If there are not enough eligible slots to complete the full dump, the planner still uses the best available slots and monetizes what it can
 
 The export recommendation appears as a **negative** `sensor.electricity_planner_grid_setpoint`.
 For example, `-4500 W` means “target roughly 4.5 kW export to grid”.
+
+The managed dashboard now draws an **Arbitrage Threshold** line on the price graph whenever
+arbitrage mode is enabled, so you can see the current feed-in price against the threshold that activates export.
+
+The dump export cap is configured in **Settings → Devices & Services → Electricity Planner → Configure → Safety Limits**.
+It is no longer exposed as a live dashboard number. The dashboards keep the arbitrage-specific controls
+(`Arbitrage mode`, `Arbitrage Reserve SOC`, and the `Arbitrage Threshold` line) alongside the normal
+battery controls (`Grid Max SOC`, `Grid Max SOC (high solar)`, `Sunny Forecast Trigger`, and
+`Disable Battery Charging`). `battery_dump_deadline_hour` remains an options-flow setting and is not
+currently exposed as a dashboard entity.
 
 ---
 
@@ -333,7 +346,7 @@ data:
 | `charger_limit` | 0–50000 | Optional manual EV charger limit override |
 | `grid_setpoint` | 0–50000 | Optional manual import setpoint override |
 
-`target: battery_dump` enables the persistent holiday monetization mode. It does not use `action` or `duration`.
+`target: battery_dump` enables the persistent arbitrage mode. It does not use `action` or `duration`.
 
 #### `electricity_planner.clear_manual_override`
 
@@ -361,9 +374,9 @@ data:
 
 | Entity | Purpose | Key Attributes |
 |--------|---------|----------------|
-| `binary_sensor.electricity_planner_battery_grid_charging` | Should batteries charge from grid? | `reason`, `strategy`, `phase_results` |
-| `binary_sensor.electricity_planner_car_grid_charging` | Should EV charge from grid? | `reason`, `strategy`, `phase_results` |
-| `binary_sensor.electricity_planner_feedin_solar` | Should solar be exported to grid? | `feedin_threshold`, `current_price` |
+| `binary_sensor.electricity_planner_battery_charge_from_grid` | Should batteries charge from grid? | `reason`, `phase_results` |
+| `binary_sensor.electricity_planner_car_charge_from_grid` | Should EV charge from grid? | `reason`, `phase_results` |
+| `binary_sensor.electricity_planner_solar_feed_in_grid` | Should solar be exported to grid? | `feedin_threshold`, `current_price` |
 
 ### Binary Sensors (Diagnostic)
 
@@ -371,7 +384,7 @@ data:
 |--------|---------|----------------|
 | `binary_sensor.electricity_planner_low_price` | Is current price below threshold? | `price_threshold`, `current_price` |
 | `binary_sensor.electricity_planner_solar_production` | Is solar currently producing? | `solar_production_w` |
-| `binary_sensor.electricity_planner_data_availability` | Is all required data available? | `missing_entities`, `last_update` |
+| `binary_sensor.electricity_planner_data_nord_pool_available` | Is all required data available? | `last_successful_update`, `data_unavailable_since` |
 
 ### Sensors (Automation)
 
@@ -391,13 +404,14 @@ data:
 | `sensor.electricity_planner_data_unavailable_duration` | Time since data became unavailable | s |
 | `sensor.electricity_planner_entity_status` | Entity availability summary | - |
 | `sensor.electricity_planner_nord_pool_prices` | All Nord Pool price data | €/kWh |
-| `sensor.electricity_planner_price_threshold` | Current effective price threshold | €/kWh |
-| `sensor.electricity_planner_feedin_threshold` | Current feed-in threshold | €/kWh |
-| `sensor.electricity_planner_dynamic_threshold` | Dynamic threshold value | €/kWh |
-| `sensor.electricity_planner_average_threshold` | 24h rolling average threshold | €/kWh |
+| `sensor.electricity_planner_price_threshold` | Configured buy threshold | €/kWh |
+| `sensor.electricity_planner_feed_in_price_threshold` | Configured feed-in threshold | €/kWh |
+| `sensor.electricity_planner_current_feed_in_price` | Effective feed-in price used for decisions | €/kWh |
+| `sensor.electricity_planner_buy_price_margin` | Current buy-price vs threshold status | - |
+| `sensor.electricity_planner_feed_in_price_margin` | Current feed-in price vs threshold status | - |
 | `sensor.electricity_planner_very_low_price_threshold` | Very low price cutoff | €/kWh |
-| `sensor.electricity_planner_soc_price_multiplier` | Current SOC-based multiplier | × |
-| `sensor.electricity_planner_effective_threshold` | Final threshold after all adjustments | €/kWh |
+| `sensor.electricity_planner_significant_solar_threshold` | Significant solar cutoff | W |
+| `sensor.electricity_planner_emergency_soc_threshold` | Emergency SOC cutoff | % |
 | `sensor.electricity_planner_car_charging_window` | Remaining low-price window | min |
 | `sensor.electricity_planner_next_low_price_window` | Time until next charging window | min |
 
@@ -407,7 +421,7 @@ data:
 |--------|---------|
 | `switch.electricity_planner_car_permissive_mode` | Toggle permissive car charging mode |
 | `switch.electricity_planner_disable_battery_charging` | Persistently block battery charging from grid |
-| `switch.electricity_planner_battery_dump_to_grid` | Enable holiday / monetization mode for battery export |
+| `switch.electricity_planner_battery_dump_to_grid` | Enable arbitrage mode for battery export |
 
 ### Numbers
 
@@ -416,8 +430,7 @@ data:
 | `number.electricity_planner_max_soc_threshold` | Normal grid-charging battery SOC ceiling | % |
 | `number.electricity_planner_max_soc_threshold_sunny` | High-solar-day grid-charging SOC ceiling | % |
 | `number.electricity_planner_sunny_forecast_threshold_kwh` | Solar forecast trigger for sunny mode | kWh |
-| `number.electricity_planner_battery_dump_target_soc` | Minimum reserve SOC used by holiday monetization mode | % |
-| `number.electricity_planner_battery_dump_max_export_power` | Export cap used by holiday monetization mode (`0` = automatic) | W |
+| `number.electricity_planner_battery_dump_target_soc` | Minimum reserve SOC used by arbitrage mode | % |
 
 ### Decision Diagnostics Attributes
 
@@ -496,7 +509,8 @@ phase_results:
 | `min_soc_threshold` | 20% | 5–50% | Minimum battery SOC |
 | `max_soc_threshold` | 70% | 50–100% | Maximum battery SOC |
 | `max_soc_threshold_sunny` | 35% | 0–100% | Grid-charging max SOC on high-solar days |
-| `battery_dump_target_soc` | 20% | 0–100% | Reserve floor for holiday monetization mode |
+| `battery_dump_target_soc` | 40% | 0–100% | Reserve floor for arbitrage mode |
+| `battery_dump_deadline_hour` | 12 | 0–23 | Local cutoff hour; before it the planner targets today, after it the planner targets tomorrow |
 | `emergency_soc_threshold` | 15% | 5–30% | Force charging below this |
 | `predictive_charging_soc` | 30% | 10–50% | SOC for predictive logic |
 | `soc_buffer_target` | 50% | 20–80% | SOC above which no price relaxation |
@@ -524,7 +538,7 @@ phase_results:
 | `max_battery_power` | 5000 W | 500–50000 | Max battery charging power |
 | `max_car_power` | 11000 W | 1000–22000 | Max EV charging power |
 | `max_grid_power` | 10000 W | 1000–50000 | Max grid import power |
-| `battery_dump_max_export_power` | 0 W | 0–50000 | Holiday export cap (`0` = automatic min of battery/grid limits) |
+| `battery_dump_max_export_power` | 0 W | 0–50000 | Arbitrage export cap (`0` = automatic min of battery/grid limits); configured via the options flow Safety Limits step |
 | `base_grid_setpoint` | 5000 W | 1000–15000 | Base grid setpoint |
 | `min_car_charging_power` | 1400 W | 500–3000 | Min power to detect EV charging |
 | `min_car_charging_duration` | 2 h | 0.5–8 | Min charging window for hysteresis |
@@ -556,12 +570,12 @@ automation:
   - alias: "Battery Grid Charging Control"
     trigger:
       - platform: state
-        entity_id: binary_sensor.electricity_planner_battery_grid_charging
+        entity_id: binary_sensor.electricity_planner_battery_charge_from_grid
     action:
       - choose:
           - conditions:
               - condition: state
-                entity_id: binary_sensor.electricity_planner_battery_grid_charging
+                entity_id: binary_sensor.electricity_planner_battery_charge_from_grid
                 state: "on"
             sequence:
               - service: number.set_value
@@ -571,7 +585,7 @@ automation:
                   value: "{{ states('sensor.electricity_planner_grid_setpoint') | int }}"
           - conditions:
               - condition: state
-                entity_id: binary_sensor.electricity_planner_battery_grid_charging
+                entity_id: binary_sensor.electricity_planner_battery_charge_from_grid
                 state: "off"
             sequence:
               - service: number.set_value
@@ -588,12 +602,12 @@ automation:
   - alias: "EV Charging Control"
     trigger:
       - platform: state
-        entity_id: binary_sensor.electricity_planner_car_grid_charging
+        entity_id: binary_sensor.electricity_planner_car_charge_from_grid
     action:
       - choose:
           - conditions:
               - condition: state
-                entity_id: binary_sensor.electricity_planner_car_grid_charging
+                entity_id: binary_sensor.electricity_planner_car_charge_from_grid
                 state: "on"
             sequence:
               - service: switch.turn_on
@@ -606,7 +620,7 @@ automation:
                   value: "{{ (states('sensor.electricity_planner_car_charger_limit') | int / 230) | round(0) }}"
           - conditions:
               - condition: state
-                entity_id: binary_sensor.electricity_planner_car_grid_charging
+                entity_id: binary_sensor.electricity_planner_car_charge_from_grid
                 state: "off"
             sequence:
               - service: switch.turn_off
@@ -653,14 +667,14 @@ automation:
         target:
           entity_id: switch.electricity_planner_car_permissive_mode
 
-### Holiday Monetization Mode
+### Arbitrage Mode
 
 ```yaml
 automation:
-  - alias: "Enable Holiday Monetization Mode"
+  - alias: "Enable Arbitrage Mode"
     trigger:
       - platform: state
-        entity_id: input_boolean.holiday_mode
+        entity_id: input_boolean.arbitrage_mode
         to: "on"
     action:
       - service: switch.turn_on
@@ -671,11 +685,6 @@ automation:
           entity_id: number.electricity_planner_battery_dump_target_soc
         data:
           value: 20
-      - service: number.set_value
-        target:
-          entity_id: number.electricity_planner_battery_dump_max_export_power
-        data:
-          value: 4500
 ```
 ```
 
@@ -692,16 +701,28 @@ Install these HACS frontend cards:
 | [**Gauge Card Pro**](https://github.com/benjamin-dcs/gauge-card-pro) | Dynamic price threshold gauges | HACS → Frontend → Search "Gauge Card Pro" |
 | [**ApexCharts Card**](https://github.com/RomRider/apexcharts-card) | Historical price charts | HACS → Frontend → Search "ApexCharts Card" |
 | [**Button Card**](https://github.com/custom-cards/button-card) | Manual override controls | HACS → Frontend → Search "Button Card" |
+| [**Template Entity Row**](https://github.com/thomasloven/lovelace-template-entity-row) | Three-phase phase detail rows | HACS → Frontend → Search "Template Entity Row" |
+| [**card-mod**](https://github.com/thomasloven/lovelace-card-mod) | Three-phase phase card highlighting | HACS → Frontend → Search "card-mod" |
 
 ### Dashboard Template
 
+The integration creates a managed dashboard automatically for both single-phase and three-phase
+installations. The managed dashboard is the canonical layout and uses the shared template in
+`custom_components/electricity_planner/dashboard_template.yaml`, with extra managed three-phase
+detail cards appended automatically when the entry topology is three-phase.
+
+The bundled YAML files in the repository are release snapshots:
+- `electricity_planner_dashboard.yaml`: static single-phase example
+- `electricity_planner_3phase_dashboard.yaml`: static three-phase example with the same shared sections plus per-phase details
+
+If you want to maintain your own manual dashboard:
 1. Download `dashboard_template.yaml` from the [latest release](https://github.com/emavap/electricity_planner/releases/latest)
 2. Settings → Dashboards → Add Dashboard
 3. Type: "Panel (1 card)"
 4. Paste the template YAML
 5. Replace placeholder entity IDs with your actual sensor names
 
-See [DASHBOARD.md](DASHBOARD.md) for detailed dashboard configuration.
+See [DASHBOARD.md](DASHBOARD.md) for the current dashboard structure and card requirements.
 
 ---
 
@@ -711,7 +732,7 @@ See [DASHBOARD.md](DASHBOARD.md) for detailed dashboard configuration.
 
 #### "Data unavailable" warnings
 
-**Symptoms:** `binary_sensor.electricity_planner_data_availability` is `off`
+**Symptoms:** `binary_sensor.electricity_planner_data_nord_pool_available` is `off`
 
 **Solutions:**
 1. Check `sensor.electricity_planner_entity_status` for missing entities
@@ -722,7 +743,7 @@ See [DASHBOARD.md](DASHBOARD.md) for detailed dashboard configuration.
 #### Charging not starting despite low prices
 
 **Check:**
-1. Is `binary_sensor.electricity_planner_battery_grid_charging` actually `on`?
+1. Is `binary_sensor.electricity_planner_battery_charge_from_grid` actually `on`?
 2. Check the `reason` attribute for explanation
 3. Verify SOC is below `max_soc_threshold`
 4. Check if solar surplus is blocking grid charging
@@ -827,7 +848,7 @@ custom_components/electricity_planner/
 
 ### Q: What happens if Nord Pool data is unavailable?
 
-**A:** The integration falls back to safe defaults (no charging) and sets `binary_sensor.electricity_planner_data_availability` to `off`. Check `sensor.electricity_planner_data_unavailable_duration` for how long data has been missing.
+**A:** The integration falls back to safe defaults (no charging) and sets `binary_sensor.electricity_planner_data_nord_pool_available` to `off`. Check `sensor.electricity_planner_data_unavailable_duration` for how long data has been missing.
 
 ### Q: Can I use multiple instances for different systems?
 

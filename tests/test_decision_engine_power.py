@@ -2,10 +2,13 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
+import pytz
 import pytest
+from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner.const import (
     CONF_BASE_GRID_SETPOINT,
+    CONF_CAR_USE_BATTERY_ARBITRAGE,
     CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
     CONF_INVERTER_EXPORT_DEADBAND,
@@ -45,6 +48,27 @@ def _engine(config=None):
     if config:
         base_config.update(config)
     return ChargingDecisionEngine(hass=None, config=base_config)
+
+
+def _arbitrage_battery_analysis(average_soc=95, max_soc_threshold=90):
+    return {
+        "average_soc": average_soc,
+        "max_soc_threshold": max_soc_threshold,
+    }
+
+
+def _arbitrage_battery_dump_data(**overrides):
+    data = {
+        "car_charging_power": 2000,
+        "car_grid_charging": True,
+        "car_grid_import_allowed": False,
+        "battery_grid_charging": False,
+        "battery_dump_to_grid_active": True,
+        "battery_dump_export_power": 3000,
+        "monthly_grid_peak": 0,
+    }
+    data.update(overrides)
+    return data
 
 
 def test_grid_setpoint_without_battery_data():
@@ -188,6 +212,304 @@ def test_grid_setpoint_exports_battery_during_dump_window():
     assert "3500W export" in result["grid_setpoint_reason"]
 
 
+def test_car_decision_allows_arbitrage_charging_without_grid_import():
+    engine = _engine()
+
+    result = engine._decide_car_grid_charging(
+        price_analysis={
+            "data_available": True,
+            "current_price": 0.30,
+            "price_threshold": 0.10,
+            "is_low_price": False,
+            "very_low_price": False,
+        },
+        battery_analysis=_arbitrage_battery_analysis(),
+        power_allocation={},
+        data={
+            "previous_car_charging": False,
+            "has_min_charging_window": False,
+            "battery_dump_to_grid_active": True,
+            "battery_dump_export_power": 3000,
+        },
+    )
+
+    assert result["car_grid_charging"] is True
+    assert result["car_grid_import_allowed"] is False
+    assert "Arbitrage mode active" in result["car_grid_charging_reason"]
+
+
+def test_car_decision_skips_arbitrage_when_local_use_disabled():
+    engine = _engine({CONF_CAR_USE_BATTERY_ARBITRAGE: False})
+
+    result = engine._decide_car_grid_charging(
+        price_analysis={
+            "data_available": True,
+            "current_price": 0.30,
+            "price_threshold": 0.10,
+            "is_low_price": False,
+            "very_low_price": False,
+        },
+        battery_analysis=_arbitrage_battery_analysis(),
+        power_allocation={},
+        data={
+            "previous_car_charging": False,
+            "has_min_charging_window": False,
+            "battery_dump_to_grid_active": True,
+            "battery_dump_export_power": 3000,
+        },
+    )
+
+    assert result["car_grid_charging"] is False
+    assert result["car_grid_import_allowed"] is False
+
+
+def test_car_decision_arbitrage_allows_grid_import_on_low_price_without_window():
+    """When arbitrage is already charging the car and the price is low, grid
+    import should be allowed even without a minimum charging window."""
+    engine = _engine()
+
+    result = engine._decide_car_grid_charging(
+        price_analysis={
+            "data_available": True,
+            "current_price": 0.10,
+            "price_threshold": 0.15,
+            "is_low_price": True,
+            "very_low_price": False,
+        },
+        battery_analysis=_arbitrage_battery_analysis(),
+        power_allocation={},
+        data={
+            "previous_car_charging": False,
+            "has_min_charging_window": False,
+            "battery_dump_to_grid_active": True,
+            "battery_dump_export_power": 3000,
+        },
+    )
+
+    assert result["car_grid_charging"] is True
+    assert result["car_grid_import_allowed"] is True
+    assert "allowed grid import" in result["car_grid_charging_reason"]
+
+
+@pytest.mark.asyncio
+async def test_single_phase_passes_current_battery_decision_to_car_logic(monkeypatch):
+    engine = _engine()
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "custom_components.electricity_planner.decision_engine.TimeContext.get_current_context",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        engine,
+        "_analyze_comprehensive_pricing",
+        lambda data: {"data_available": True},
+    )
+    monkeypatch.setattr(
+        engine,
+        "_analyze_battery_status",
+        lambda battery_soc: {
+            "average_soc": 95,
+            "max_soc_threshold": 90,
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+        },
+    )
+    monkeypatch.setattr(engine, "_analyze_power_flow", lambda data: {"solar_surplus": 0})
+    monkeypatch.setattr(engine, "_analyze_solar_production", lambda data: {})
+    monkeypatch.setattr(engine, "_allocate_solar_power", lambda power_analysis, battery_analysis: {})
+    monkeypatch.setattr(engine.power_validator, "validate_allocation", lambda *args: (True, None))
+    monkeypatch.setattr(engine, "_apply_sunny_day_grid_limit", lambda battery_analysis, data: battery_analysis)
+    monkeypatch.setattr(
+        engine,
+        "_decide_battery_grid_charging",
+        lambda *args: {
+            "battery_grid_charging": True,
+            "battery_grid_charging_reason": "Battery charging now",
+            "strategy_trace": [],
+        },
+    )
+    monkeypatch.setattr(engine.strategy_manager, "get_dynamic_threshold", lambda context: None)
+
+    def capture_car_decision(price_analysis, battery_analysis, power_allocation, data):
+        seen["battery_grid_charging"] = data.get("battery_grid_charging")
+        return {
+            "car_grid_charging": False,
+            "car_grid_import_allowed": False,
+            "car_grid_charging_reason": "Car off",
+        }
+
+    monkeypatch.setattr(engine, "_decide_car_grid_charging", capture_car_decision)
+    monkeypatch.setattr(
+        engine,
+        "_calculate_charger_limit",
+        lambda *args: {"charger_limit": 0, "charger_limit_reason": "No charging"},
+    )
+    monkeypatch.setattr(
+        engine,
+        "_calculate_grid_setpoint",
+        lambda *args: {
+            "grid_setpoint": 0,
+            "grid_setpoint_reason": "No grid power",
+            "grid_components": {"battery": 0, "car": 0},
+        },
+    )
+    monkeypatch.setattr(
+        engine,
+        "_decide_feedin_solar",
+        lambda *args: {
+            "feedin_solar": False,
+            "feedin_solar_reason": "No feed-in",
+            "feedin_effective_price": None,
+        },
+    )
+    monkeypatch.setattr(
+        engine,
+        "_calculate_inverter_derating_target",
+        lambda *args: {
+            "inverter_derating_target": None,
+            "inverter_derating_reason": "No derating",
+            "inverter_derating_alarm": False,
+            "inverter_derating_alarm_reason": "No alarm",
+        },
+    )
+
+    result = await engine._evaluate_single_phase(
+        {
+            "current_price": 0.30,
+            "battery_grid_charging": False,
+            "battery_dump_to_grid_active": True,
+            "battery_dump_export_power": 3000,
+        }
+    )
+
+    assert seen["battery_grid_charging"] is True
+    assert result["battery_grid_charging"] is True
+
+
+def test_charger_limit_adds_arbitrage_power_to_allowed_grid():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis=_arbitrage_battery_analysis(),
+        power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
+        data=_arbitrage_battery_dump_data(
+            car_charging_power=5000,
+            car_grid_import_allowed=True,
+        ),
+    )
+
+    assert result["charger_limit"] == 5700
+    assert "3000W battery arbitrage" in result["charger_limit_reason"]
+    assert "2700W grid" in result["charger_limit_reason"]
+
+
+def test_charger_limit_uses_arbitrage_power_without_grid_import():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis=_arbitrage_battery_analysis(),
+        power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
+        data=_arbitrage_battery_dump_data(),
+    )
+
+    assert result["charger_limit"] == 3000
+    assert "3000W battery arbitrage" in result["charger_limit_reason"]
+    assert "grid" not in result["charger_limit_reason"]
+
+
+def test_charger_limit_prefers_keeping_battery_energy_below_soc_threshold():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis=_arbitrage_battery_analysis(average_soc=60),
+        power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
+        data=_arbitrage_battery_dump_data(),
+    )
+
+    assert result["charger_limit"] == 0
+    assert "keeping arbitrage energy in the battery" in result["charger_limit_reason"]
+
+
+def test_grid_setpoint_nets_remaining_export_after_supplying_ev_from_battery():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_grid_setpoint(
+        price_analysis={},
+        battery_analysis=_arbitrage_battery_analysis(),
+        power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
+        data=_arbitrage_battery_dump_data(
+            battery_dump_to_grid_reason="Arbitrage mode active"
+        ),
+        charger_limit=3000,
+    )
+
+    assert result["grid_setpoint"] == -1000
+    assert result["grid_components"]["battery"] == -1000
+    assert result["grid_components"]["car"] == 0
+    assert "battery supplying car 2000W" in result["grid_setpoint_reason"]
+    assert "battery exporting 1000W" in result["grid_setpoint_reason"]
+
+
+def test_grid_setpoint_combines_arbitrage_battery_with_allowed_grid_import():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_grid_setpoint(
+        price_analysis={},
+        battery_analysis=_arbitrage_battery_analysis(),
+        power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
+        data=_arbitrage_battery_dump_data(
+            car_charging_power=5000,
+            car_grid_import_allowed=True,
+            battery_dump_to_grid_reason="Arbitrage mode active",
+        ),
+        charger_limit=5700,
+    )
+
+    assert result["grid_setpoint"] == 2000
+    assert result["grid_components"]["battery"] == 0
+    assert result["grid_components"]["car"] == 2000
+    assert "battery supplying car 3000W" in result["grid_setpoint_reason"]
+    assert "car pulling 2000W" in result["grid_setpoint_reason"]
+
+
+def test_recalculate_after_car_override_clears_stale_arbitrage_state():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine.recalculate_after_override(
+        baseline_data={
+            **_arbitrage_battery_dump_data(),
+            "car_grid_import_allowed": False,
+        },
+        decision={
+            "price_analysis": {},
+            "battery_analysis": _arbitrage_battery_analysis(),
+            "power_allocation": {
+                "remaining_solar": 0,
+                "solar_for_car": 0,
+                "car_current_solar_usage": 0,
+            },
+            "car_grid_charging": False,
+            "car_grid_import_allowed": True,
+            "car_solar_only": False,
+            "charger_limit": 5700,
+            "grid_setpoint": 2000,
+        },
+        override_targets={"car_grid_charging"},
+    )
+
+    assert result["car_grid_import_allowed"] is False
+    assert result["car_solar_only"] is False
+    assert result["charger_limit"] == 0
+    assert result["grid_setpoint"] == -3000
+    assert result["grid_components"]["car"] == 0
+    assert result["grid_components"]["battery"] == -3000
+
+
 def test_battery_dump_mode_blocks_positive_price_grid_charging():
     engine = _engine()
 
@@ -296,6 +618,42 @@ def test_safe_grid_setpoint_uses_current_month_peak_when_already_above_configure
     engine = _engine({CONF_BASE_GRID_SETPOINT: 5000})
 
     assert engine._get_safe_grid_setpoint(5100) == 4590
+
+
+def test_safe_grid_setpoint_switches_to_next_month_baseline_before_month_end(monkeypatch):
+    engine = _engine({CONF_BASE_GRID_SETPOINT: 5000})
+    base_time = datetime(2025, 10, 31, 22, 35, tzinfo=timezone.utc)  # 23:35 local Brussels
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
+
+    try:
+        monkeypatch.setattr(
+            "custom_components.electricity_planner.decision_engine.dt_util.utcnow",
+            lambda: base_time,
+        )
+
+        assert engine._get_safe_grid_setpoint(8000) == 4500
+    finally:
+        dt_util.set_default_time_zone(original_tz)
+
+
+def test_safe_grid_setpoint_stays_on_new_month_baseline_after_midnight_until_sensor_resets(
+    monkeypatch,
+):
+    engine = _engine({CONF_BASE_GRID_SETPOINT: 5000})
+    base_time = datetime(2025, 10, 31, 23, 10, tzinfo=timezone.utc)  # 00:10 local Brussels
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
+
+    try:
+        monkeypatch.setattr(
+            "custom_components.electricity_planner.decision_engine.dt_util.utcnow",
+            lambda: base_time,
+        )
+
+        assert engine._get_safe_grid_setpoint(8000) == 4500
+    finally:
+        dt_util.set_default_time_zone(original_tz)
 
 
 @pytest.mark.parametrize(

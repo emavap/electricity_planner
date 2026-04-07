@@ -15,7 +15,6 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
 
 from .const import (
-    CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
     CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
@@ -23,7 +22,6 @@ from .const import (
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_SOLAR_FORECAST_TODAY_ENTITY,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
-    DEFAULT_BATTERY_DUMP_MAX_EXPORT_POWER,
     DEFAULT_BATTERY_DUMP_TARGET_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_MAX_SOC_SUNNY,
@@ -36,7 +34,6 @@ from .coordinator import ElectricityPlannerCoordinator
 _LOGGER = logging.getLogger(__name__)
 _NUMERIC_PREFIX_RE = re.compile(r"^\s*([-+]?\d+(?:[.,]\d+)?)")
 _LIVE_NUMBER_OPTION_KEYS = (
-    CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
     CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
@@ -147,7 +144,6 @@ async def async_setup_entry(
         MaxSocThresholdSunnyNumber(coordinator, entry),
         SunnyForecastThresholdNumber(coordinator, entry),
         BatteryDumpTargetSocNumber(coordinator, entry),
-        BatteryDumpMaxExportPowerNumber(coordinator, entry),
     ]
 
     async_add_entities(entities)
@@ -256,17 +252,17 @@ class MaxSocThresholdNumber(CoordinatorEntity, NumberEntity):
 
 
 class BatteryDumpTargetSocNumber(CoordinatorEntity, NumberEntity):
-    """Number entity controlling the target SOC for dump-to-grid mode."""
+    """Number entity controlling the reserve SOC for arbitrage mode."""
 
     def __init__(
         self,
         coordinator: ElectricityPlannerCoordinator,
         entry: ConfigEntry,
     ) -> None:
-        """Initialize the battery dump target SOC number."""
+        """Initialize the arbitrage reserve SOC number."""
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = f"{entry.title} Battery Dump Target SOC"
+        self._attr_name = f"{entry.title} Arbitrage Reserve SOC"
         self._attr_unique_id = f"{entry.entry_id}_battery_dump_target_soc"
         self.entity_id = (
             f"number.{slugify(entry.title or 'electricity_planner')}_battery_dump_target_soc"
@@ -297,8 +293,9 @@ class BatteryDumpTargetSocNumber(CoordinatorEntity, NumberEntity):
         """Return additional state attributes."""
         attrs = {
             "description": (
-                "When dump-to-grid mode is enabled, the planner will export "
-                "battery energy until the average SOC reaches this target."
+                "When arbitrage mode is enabled, the planner exports the portion of "
+                "battery energy above this reserve target while the current feed-in price "
+                "is at or above the derived arbitrage threshold."
             ),
         }
 
@@ -311,15 +308,17 @@ class BatteryDumpTargetSocNumber(CoordinatorEntity, NumberEntity):
 
         if dump_plan:
             attrs["dump_mode_enabled"] = dump_plan.get("enabled", False)
-            attrs["scheduled_window_start"] = dump_plan.get("window_start")
-            attrs["scheduled_window_end"] = dump_plan.get("window_end")
+            attrs["dump_price_threshold"] = dump_plan.get("dump_price_threshold")
+            attrs["current_slot_price"] = dump_plan.get("current_slot_price")
+            attrs["selected_slots_count"] = dump_plan.get("selected_slots_count", 0)
+            attrs["slots_cover_full_dump"] = dump_plan.get("slots_cover_full_dump", False)
 
         return attrs
 
     async def async_set_native_value(self, value: float) -> None:
-        """Persist and apply the battery dump target SOC immediately."""
+        """Persist and apply the arbitrage reserve SOC immediately."""
         new_value = int(value)
-        _LOGGER.info("Updating battery dump target SOC to %d%%", new_value)
+        _LOGGER.info("Updating arbitrage reserve SOC to %d%%", new_value)
 
         self._entry, new_options = _build_updated_number_options(
             self.hass,
@@ -335,82 +334,6 @@ class BatteryDumpTargetSocNumber(CoordinatorEntity, NumberEntity):
         )
 
         self.coordinator.config[CONF_BATTERY_DUMP_TARGET_SOC] = new_value
-        self.coordinator.decision_engine.refresh_settings(self.coordinator.config)
-        await self.coordinator.async_request_refresh()
-
-
-class BatteryDumpMaxExportPowerNumber(CoordinatorEntity, NumberEntity):
-    """Number entity controlling the export power cap for dump-to-grid mode."""
-
-    def __init__(
-        self,
-        coordinator: ElectricityPlannerCoordinator,
-        entry: ConfigEntry,
-    ) -> None:
-        """Initialize the battery dump max export power number."""
-        super().__init__(coordinator)
-        self._entry = entry
-        self._attr_name = f"{entry.title} Battery Dump Max Export Power"
-        self._attr_unique_id = f"{entry.entry_id}_battery_dump_max_export_power"
-        self.entity_id = (
-            f"number.{slugify(entry.title or 'electricity_planner')}_battery_dump_max_export_power"
-        )
-        self._attr_icon = "mdi:transmission-tower-export"
-        self._attr_native_unit_of_measurement = "W"
-        self._attr_mode = NumberMode.BOX
-        self._attr_native_min_value = 0
-        self._attr_native_max_value = 50000
-        self._attr_native_step = 100
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": entry.title,
-            "manufacturer": "Electricity Planner",
-            "model": "Smart Charging Controller",
-        }
-
-    @property
-    def native_value(self) -> float:
-        """Return the configured max export power (0 means automatic)."""
-        return self.coordinator.config.get(
-            CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
-            DEFAULT_BATTERY_DUMP_MAX_EXPORT_POWER,
-        )
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional state attributes."""
-        dump_plan = self.coordinator.data.get("battery_dump_plan", {}) if self.coordinator.data else {}
-        configured_value = int(self.native_value)
-        effective_cap = dump_plan.get("configured_export_cap_w")
-
-        return {
-            "description": (
-                "Maximum export power used during dump-to-grid mode. "
-                "Set to 0 to use the automatic cap from the battery and grid limits."
-            ),
-            "automatic_mode": configured_value == 0,
-            "effective_export_cap_w": effective_cap,
-        }
-
-    async def async_set_native_value(self, value: float) -> None:
-        """Persist and apply the dump export cap immediately."""
-        new_value = int(value)
-        _LOGGER.info("Updating battery dump max export power to %dW", new_value)
-
-        self._entry, new_options = _build_updated_number_options(
-            self.hass,
-            self._entry,
-            self.coordinator,
-            CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
-            new_value,
-        )
-
-        self.hass.config_entries.async_update_entry(
-            self._entry,
-            options=new_options,
-        )
-
-        self.coordinator.config[CONF_BATTERY_DUMP_MAX_EXPORT_POWER] = new_value
         self.coordinator.decision_engine.refresh_settings(self.coordinator.config)
         await self.coordinator.async_request_refresh()
 

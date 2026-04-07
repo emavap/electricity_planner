@@ -207,16 +207,16 @@ class BatteryChargingDisableSwitch(CoordinatorEntity, SwitchEntity):
 
 
 class BatteryDumpToGridSwitch(CoordinatorEntity, SwitchEntity):
-    """Switch to enable persistent battery dump-to-grid mode."""
+    """Switch to enable persistent arbitrage mode."""
 
     def __init__(
         self,
         coordinator: ElectricityPlannerCoordinator,
         entry: ConfigEntry,
     ) -> None:
-        """Initialize the battery dump switch."""
+        """Initialize the arbitrage mode switch."""
         super().__init__(coordinator)
-        self._attr_name = f"{entry.title} Dump Battery To Grid"
+        self._attr_name = f"{entry.title} Arbitrage Mode"
         self._attr_unique_id = f"{entry.entry_id}_battery_dump_to_grid"
         self._attr_icon = "mdi:battery-arrow-down-outline"
         self._attr_device_info = {
@@ -228,7 +228,7 @@ class BatteryDumpToGridSwitch(CoordinatorEntity, SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        """Return true if dump-to-grid mode is enabled."""
+        """Return true if arbitrage mode is enabled."""
         override = self.coordinator.get_manual_override("battery_dump_to_grid")
         return bool(override and override.get("value") is True)
 
@@ -244,29 +244,32 @@ class BatteryDumpToGridSwitch(CoordinatorEntity, SwitchEntity):
             "reason": dump_plan.get("reason") or (override.get("reason") if override else None),
             "target_soc": dump_plan.get("target_soc"),
             "currently_dumping": dump_plan.get("active", False),
-            "scheduled_window_start": dump_plan.get("window_start"),
-            "scheduled_window_end": dump_plan.get("window_end"),
-            "scheduled_window_average_price": dump_plan.get("window_average_price"),
+            "dump_price_threshold": dump_plan.get("dump_price_threshold"),
+            "current_slot_price": dump_plan.get("current_slot_price"),
+            "slots_cover_full_dump": dump_plan.get("slots_cover_full_dump"),
+            "selected_slots_count": dump_plan.get("selected_slots_count", 0),
+            "selected_slots": dump_plan.get("selected_slots", []),
+            "deadline": dump_plan.get("deadline"),
             "export_power": dump_plan.get("export_power"),
             "configured_export_cap_w": dump_plan.get("configured_export_cap_w"),
             "available_energy_kwh": dump_plan.get("available_energy_kwh"),
             "set_at": set_at.isoformat() if set_at else None,
             "description": (
-                "When enabled, the planner selects the best feed-in price window "
-                "and exports battery energy until the dump target SOC is reached."
+                "When enabled, the planner derives an arbitrage price threshold from the highest "
+                "eligible feed-in slots and exports while the current feed-in price is at or above that threshold."
             ),
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn on dump-to-grid mode."""
-        _LOGGER.info("Enabling battery dump-to-grid mode")
+        """Turn on arbitrage mode."""
+        _LOGGER.info("Enabling arbitrage mode")
         await self.coordinator.async_set_battery_dump_mode(
-            reason="Manual battery dump via dashboard switch",
+            reason="Manual arbitrage mode via dashboard switch",
         )
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn off dump-to-grid mode."""
-        _LOGGER.info("Clearing battery dump-to-grid mode")
+        """Turn off arbitrage mode."""
+        _LOGGER.info("Clearing arbitrage mode")
         await self.coordinator.async_clear_battery_dump_mode()
         await self.coordinator.async_request_refresh()

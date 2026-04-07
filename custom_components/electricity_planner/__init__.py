@@ -21,7 +21,7 @@ from .const import (
     ATTR_GRID_SETPOINT_OVERRIDE,
     ATTR_REASON,
     ATTR_TARGET,
-    CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
+    CONF_BATTERY_DUMP_DEADLINE_HOUR,
     CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
@@ -49,7 +49,6 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH, Platform.NUMBER]
 
 NUMBER_ENTITY_ID_SUFFIXES: dict[str, str] = {
-    "battery_dump_max_export_power": "battery_dump_max_export_power",
     "battery_dump_target_soc": "battery_dump_target_soc",
     "max_soc_threshold": "max_soc_threshold",
     "max_soc_threshold_sunny": "max_soc_threshold_sunny",
@@ -181,7 +180,7 @@ async def _async_migrate_number_entity_ids(hass: HomeAssistant, entry: ConfigEnt
 # Options that can be updated without requiring a full reload
 # These are applied immediately via coordinator.config and decision_engine.refresh_settings()
 LIVE_UPDATE_OPTIONS = {
-    CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
+    CONF_BATTERY_DUMP_DEADLINE_HOUR,
     CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
