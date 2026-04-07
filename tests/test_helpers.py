@@ -221,11 +221,9 @@ def test_documented_versions_match_integration_version():
 
 
 def test_info_release_notes_link_matches_existing_file():
-    """Published info doc should point at an existing release notes file."""
+    """Published info doc should link to the GitHub releases page."""
     repo_root = Path(__file__).parent.parent
     info_content = (repo_root / "info.md").read_text(encoding="utf-8")
-    match = re.search(r"\[Release Notes\]\((RELEASE_NOTES_[0-9.]+\.md)\)", info_content)
-
-    assert match is not None, "info.md should link to a concrete release notes file"
-    release_notes = repo_root / match.group(1)
-    assert release_notes.exists(), f"Linked release notes file is missing: {release_notes.name}"
+    assert (
+        "[Releases](https://github.com/emavap/electricity_planner/releases)" in info_content
+    ), "info.md should link to the GitHub releases page"

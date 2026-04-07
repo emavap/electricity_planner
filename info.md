@@ -4,6 +4,8 @@
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
+> Upgrade note for v5.0.0: the arbitrage switch entity id is now `switch.electricity_planner_arbitrage_mode`. Managed dashboards are regenerated automatically, but custom automations and manual dashboards must update the old switch reference.
+
 ## Key Features
 
 - **Multi-battery support** with capacity-weighted SOC averaging and per-battery configuration
@@ -37,6 +39,7 @@ A Home Assistant custom integration that analyses live Nord Pool prices, battery
 - [README](README.md) – Complete documentation with installation, configuration, decision pipeline, all entities, automation examples, and troubleshooting
 - [DASHBOARD](DASHBOARD.md) – Lovelace visualisation examples (ApexCharts, Gauge Card Pro, Button Card)
 - [CLAUDE](CLAUDE.md) – Developer guide for AI coding assistants
+- [Releases](https://github.com/emavap/electricity_planner/releases) – Published versions and upgrade notes
 
 ## Quick Installation
 

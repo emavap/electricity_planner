@@ -4,6 +4,8 @@
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
+> Upgrade note for v5.0.0: the arbitrage switch entity id was renamed from `switch.electricity_planner_battery_dump_to_grid` to `switch.electricity_planner_arbitrage_mode`. Managed dashboards migrate automatically, but custom automations, scripts, and manually maintained dashboards must update that entity id.
+
 ---
 
 ## Table of Contents
@@ -421,7 +423,7 @@ data:
 |--------|---------|
 | `switch.electricity_planner_car_permissive_mode` | Toggle permissive car charging mode |
 | `switch.electricity_planner_disable_battery_charging` | Persistently block battery charging from grid |
-| `switch.electricity_planner_battery_dump_to_grid` | Enable arbitrage mode for battery export |
+| `switch.electricity_planner_arbitrage_mode` | Enable arbitrage mode for battery export |
 
 ### Numbers
 
@@ -679,7 +681,7 @@ automation:
     action:
       - service: switch.turn_on
         target:
-          entity_id: switch.electricity_planner_battery_dump_to_grid
+          entity_id: switch.electricity_planner_arbitrage_mode
       - service: number.set_value
         target:
           entity_id: number.electricity_planner_battery_dump_target_soc

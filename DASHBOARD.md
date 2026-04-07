@@ -34,7 +34,7 @@ Three-phase managed and bundled dashboards additionally require:
 
 The current arbitrage-related dashboard surface is:
 
-- `switch.electricity_planner_battery_dump_to_grid` as `Arbitrage mode`
+- `switch.electricity_planner_arbitrage_mode` as `Arbitrage mode`
 - `number.electricity_planner_battery_dump_target_soc` as `Arbitrage Reserve SOC`
 - `Arbitrage Threshold` line on the price chart when arbitrage mode is active
 
@@ -64,7 +64,7 @@ These are the primary entity IDs referenced by the shipped dashboard YAML:
 - `number.electricity_planner_max_soc_threshold`
 - `number.electricity_planner_max_soc_threshold_sunny`
 - `number.electricity_planner_sunny_forecast_threshold_kwh`
-- `switch.electricity_planner_battery_dump_to_grid`
+- `switch.electricity_planner_arbitrage_mode`
 - `switch.electricity_planner_car_permissive_mode`
 - `switch.electricity_planner_disable_battery_charging`
 
