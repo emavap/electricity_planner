@@ -55,10 +55,6 @@ NUMBER_ENTITY_ID_SUFFIXES: tuple[tuple[str, str], ...] = (
     ("sunny_forecast_threshold_kwh", "sunny_forecast_threshold_kwh"),
 )
 
-SWITCH_ENTITY_ID_SUFFIXES: tuple[tuple[str, str], ...] = (
-    ("battery_dump_to_grid", "arbitrage_mode"),
-)
-
 MANUAL_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_ENTRY_ID): str,
@@ -144,8 +140,51 @@ async def _async_migrate_number_entity_ids(hass: HomeAssistant, entry: ConfigEnt
 
 
 async def _async_migrate_switch_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Rename switch entities to stable IDs used by dashboard templates."""
-    await _async_migrate_entity_ids(hass, entry, "switch", SWITCH_ENTITY_ID_SUFFIXES)
+    """Rename arbitrage switch entity IDs and unique IDs to the new internal key."""
+    registry = er.async_get(hass)
+    title_slug = slugify(entry.title or "electricity_planner")
+    old_unique_id = f"{entry.entry_id}_battery_dump_to_grid"
+    new_unique_id = f"{entry.entry_id}_arbitrage_mode"
+    current_entity_id = registry.async_get_entity_id("switch", DOMAIN, old_unique_id)
+    if not current_entity_id:
+        return
+
+    target_entity_id = f"switch.{title_slug}_arbitrage_mode"
+    existing_new_entry_id = registry.async_get_entity_id("switch", DOMAIN, new_unique_id)
+    if existing_new_entry_id and existing_new_entry_id != current_entity_id:
+        _LOGGER.warning(
+            "Skipping switch unique ID migration for %s because %s already exists",
+            current_entity_id,
+            existing_new_entry_id,
+        )
+        return
+
+    update_kwargs: dict[str, str] = {"new_unique_id": new_unique_id}
+    if current_entity_id != target_entity_id:
+        if registry.async_get(target_entity_id) is not None:
+            _LOGGER.warning(
+                "Skipping switch entity ID migration for %s -> %s because target already exists",
+                current_entity_id,
+                target_entity_id,
+            )
+        else:
+            update_kwargs["new_entity_id"] = target_entity_id
+
+    try:
+        registry.async_update_entity(current_entity_id, **update_kwargs)
+        _LOGGER.info(
+            "Migrated switch registry entry for %s: %s -> %s",
+            old_unique_id,
+            current_entity_id,
+            update_kwargs.get("new_entity_id", current_entity_id),
+        )
+    except ValueError as err:
+        _LOGGER.warning(
+            "Failed to migrate switch registry entry for %s: %s (%s)",
+            old_unique_id,
+            current_entity_id,
+            err,
+        )
 
 
 async def _async_migrate_entity_ids(

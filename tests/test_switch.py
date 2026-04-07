@@ -23,7 +23,7 @@ from custom_components.electricity_planner.const import (
 )
 from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
 from custom_components.electricity_planner.switch import (
-    BatteryDumpToGridSwitch,
+    ArbitrageModeSwitch,
     CarPermissiveModeSwitch,
 )
 
@@ -136,7 +136,7 @@ async def test_battery_dump_switch_uses_persistent_override(fake_hass, monkeypat
     """Dump switch should delegate persistence to the coordinator override store."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
-    entity = BatteryDumpToGridSwitch(coordinator, entry)
+    entity = ArbitrageModeSwitch(coordinator, entry)
 
     coordinator.async_set_battery_dump_mode = AsyncMock()
     coordinator.async_clear_battery_dump_mode = AsyncMock()

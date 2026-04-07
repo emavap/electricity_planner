@@ -1569,7 +1569,7 @@ class ChargingDecisionEngine:
                 "strategy_trace": [],
             }
 
-        if data.get("battery_dump_to_grid_enabled"):
+        if data.get("arbitrage_mode_enabled"):
             current_price = _safe_optional_float(price_analysis.get("current_price"))
             if current_price is None or current_price >= 0:
                 return {
@@ -2406,7 +2406,7 @@ class ChargingDecisionEngine:
         and only when the normal battery-protection logic is not trying to keep that
         energy in the battery.
 
-        NOTE: This method reads ``battery_dump_to_grid_active`` from the
+        NOTE: This method reads ``arbitrage_mode_active`` from the
         coordinator data and expects ``battery_grid_charging`` in ``data`` to
         already reflect the current-cycle battery decision before the car
         decision runs.
@@ -2414,7 +2414,7 @@ class ChargingDecisionEngine:
         if not self._settings.car_use_battery_arbitrage:
             return 0
 
-        if not data.get("battery_dump_to_grid_active"):
+        if not data.get("arbitrage_mode_active"):
             return 0
 
         export_power = max(
@@ -2487,7 +2487,7 @@ class ChargingDecisionEngine:
 
         if not car_grid_import_allowed and car_arbitrage_power <= 0:
             if (
-                data.get("battery_dump_to_grid_active")
+                data.get("arbitrage_mode_active")
                 and average_soc is not None
                 and average_soc < max_soc_threshold
             ):
@@ -2640,7 +2640,7 @@ class ChargingDecisionEngine:
         grid_setpoint_parts = []
         car_grid_need = 0
         car_battery_need = 0
-        battery_dump_active = bool(data.get("battery_dump_to_grid_active", False))
+        battery_dump_active = bool(data.get("arbitrage_mode_active", False))
         battery_dump_export_power = max(
             0,
             int(_safe_optional_float(data.get("battery_dump_export_power")) or 0),
@@ -2699,12 +2699,12 @@ class ChargingDecisionEngine:
             if grid_setpoint < 0:
                 reason = (
                     f"Grid export scheduled for {components_text} = {int(abs(grid_setpoint))}W export"
-                    f" | {data.get('battery_dump_to_grid_reason', 'Arbitrage mode active')}"
+                    f" | {data.get('arbitrage_mode_reason', 'Arbitrage mode active')}"
                 )
             elif grid_setpoint == 0:
                 reason = (
                     f"Battery export fully offset by local EV load ({components_text})"
-                    f" | {data.get('battery_dump_to_grid_reason', 'Arbitrage mode active')}"
+                    f" | {data.get('arbitrage_mode_reason', 'Arbitrage mode active')}"
                 )
             else:
                 reason = (

@@ -63,7 +63,7 @@ def _arbitrage_battery_dump_data(**overrides):
         "car_grid_charging": True,
         "car_grid_import_allowed": False,
         "battery_grid_charging": False,
-        "battery_dump_to_grid_active": True,
+        "arbitrage_mode_active": True,
         "battery_dump_export_power": 3000,
         "monthly_grid_peak": 0,
     }
@@ -191,9 +191,9 @@ def test_grid_setpoint_exports_battery_during_dump_window():
         "car_charging_power": 0,
         "car_grid_charging": False,
         "battery_grid_charging": False,
-        "battery_dump_to_grid_active": True,
+        "arbitrage_mode_active": True,
         "battery_dump_export_power": 3500,
-        "battery_dump_to_grid_reason": "High-price export window is active",
+        "arbitrage_mode_reason": "High-price export window is active",
         "monthly_grid_peak": 4000,
     }
 
@@ -228,7 +228,7 @@ def test_car_decision_allows_arbitrage_charging_without_grid_import():
         data={
             "previous_car_charging": False,
             "has_min_charging_window": False,
-            "battery_dump_to_grid_active": True,
+            "arbitrage_mode_active": True,
             "battery_dump_export_power": 3000,
         },
     )
@@ -254,7 +254,7 @@ def test_car_decision_skips_arbitrage_when_local_use_disabled():
         data={
             "previous_car_charging": False,
             "has_min_charging_window": False,
-            "battery_dump_to_grid_active": True,
+            "arbitrage_mode_active": True,
             "battery_dump_export_power": 3000,
         },
     )
@@ -281,7 +281,7 @@ def test_car_decision_arbitrage_allows_grid_import_on_low_price_without_window()
         data={
             "previous_car_charging": False,
             "has_min_charging_window": False,
-            "battery_dump_to_grid_active": True,
+            "arbitrage_mode_active": True,
             "battery_dump_export_power": 3000,
         },
     )
@@ -379,7 +379,7 @@ async def test_single_phase_passes_current_battery_decision_to_car_logic(monkeyp
         {
             "current_price": 0.30,
             "battery_grid_charging": False,
-            "battery_dump_to_grid_active": True,
+            "arbitrage_mode_active": True,
             "battery_dump_export_power": 3000,
         }
     )
@@ -443,7 +443,7 @@ def test_grid_setpoint_nets_remaining_export_after_supplying_ev_from_battery():
         battery_analysis=_arbitrage_battery_analysis(),
         power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
         data=_arbitrage_battery_dump_data(
-            battery_dump_to_grid_reason="Arbitrage mode active"
+            arbitrage_mode_reason="Arbitrage mode active"
         ),
         charger_limit=3000,
     )
@@ -465,7 +465,7 @@ def test_grid_setpoint_combines_arbitrage_battery_with_allowed_grid_import():
         data=_arbitrage_battery_dump_data(
             car_charging_power=5000,
             car_grid_import_allowed=True,
-            battery_dump_to_grid_reason="Arbitrage mode active",
+            arbitrage_mode_reason="Arbitrage mode active",
         ),
         charger_limit=5700,
     )
@@ -525,8 +525,8 @@ def test_battery_dump_mode_blocks_positive_price_grid_charging():
         power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
         time_context={},
         data={
-            "battery_dump_to_grid_enabled": True,
-            "battery_dump_to_grid_reason": "Scheduled export window",
+            "arbitrage_mode_enabled": True,
+            "arbitrage_mode_reason": "Scheduled export window",
         },
     )
 
@@ -551,7 +551,7 @@ def test_battery_dump_mode_still_allows_negative_price_strategy():
         power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
         time_context={},
         data={
-            "battery_dump_to_grid_enabled": True,
+            "arbitrage_mode_enabled": True,
         },
     )
 

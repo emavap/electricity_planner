@@ -190,7 +190,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Manual override tracking
         self._manual_overrides: dict[str, dict[str, Any] | None] = {
             "battery_grid_charging": None,
-            "battery_dump_to_grid": None,
+            "arbitrage_mode": None,
             "car_grid_charging": None,
             "charger_limit": None,
             "grid_setpoint": None,
@@ -251,13 +251,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
     def is_battery_dump_mode_enabled(self) -> bool:
         """Return whether persistent arbitrage mode is enabled."""
-        override = self.get_manual_override("battery_dump_to_grid")
+        override = self.get_manual_override("arbitrage_mode")
         return bool(override and override.get("value") is True)
 
     async def async_set_battery_dump_mode(self, reason: str | None = None) -> None:
         """Persistently enable arbitrage mode."""
         now = dt_util.utcnow()
-        self._manual_overrides["battery_dump_to_grid"] = {
+        self._manual_overrides["arbitrage_mode"] = {
             "value": True,
             "reason": reason or "Arbitrage mode enabled",
             "expires_at": None,
@@ -268,9 +268,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
     async def async_clear_battery_dump_mode(self) -> None:
         """Disable persistent arbitrage mode."""
-        if self._manual_overrides.get("battery_dump_to_grid"):
+        if self._manual_overrides.get("arbitrage_mode"):
             _LOGGER.info("Arbitrage mode cleared")
-        self._manual_overrides["battery_dump_to_grid"] = None
+        self._manual_overrides["arbitrage_mode"] = None
         await self._async_persist_manual_overrides()
 
     async def _async_load_manual_overrides(self) -> None:
@@ -299,6 +299,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         }
 
         for key, payload in serialized_overrides.items():
+            if key == "battery_dump_to_grid":
+                key = "arbitrage_mode"
+                overrides_changed = True
             if key not in loaded_overrides or not isinstance(payload, dict):
                 overrides_changed = True
                 continue
@@ -610,14 +613,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         """
         mapping = {
             "battery": ("battery_grid_charging",),
-            "battery_dump": ("battery_dump_to_grid",),
+            "battery_dump": ("arbitrage_mode",),
             "car": ("car_grid_charging",),
             "both": ("battery_grid_charging", "car_grid_charging"),
             "charger_limit": ("charger_limit",),
             "grid_setpoint": ("grid_setpoint",),
             "all": (
                 "battery_grid_charging",
-                "battery_dump_to_grid",
+                "arbitrage_mode",
                 "car_grid_charging",
                 "charger_limit",
                 "grid_setpoint",
@@ -915,7 +918,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             override_value = override["value"]
             manual_reason: str = override.get("reason", "Manual override")
 
-            if coordinator_key == "battery_dump_to_grid":
+            if coordinator_key == "arbitrage_mode":
                 overrides_info[coordinator_key] = {
                     "value": override_value,
                     "reason": manual_reason,
@@ -1613,9 +1616,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
             battery_dump_plan = self._calculate_battery_dump_plan(data)
             data["battery_dump_plan"] = battery_dump_plan
-            data["battery_dump_to_grid_enabled"] = battery_dump_plan.get("enabled", False)
-            data["battery_dump_to_grid_active"] = battery_dump_plan.get("active", False)
-            data["battery_dump_to_grid_reason"] = battery_dump_plan.get("reason")
+            data["arbitrage_mode_enabled"] = battery_dump_plan.get("enabled", False)
+            data["arbitrage_mode_active"] = battery_dump_plan.get("active", False)
+            data["arbitrage_mode_reason"] = battery_dump_plan.get("reason")
             data["battery_dump_target_soc"] = battery_dump_plan.get("target_soc")
             data["battery_dump_export_power"] = battery_dump_plan.get("export_power", 0)
 

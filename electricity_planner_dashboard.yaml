@@ -736,8 +736,14 @@ views:
               {% set overrides = decisions.manual_overrides if decisions else state_attr(diag_entity, 'manual_overrides') %}
               {% if overrides %}
               {% for key, value in overrides.items() %}
-              {% set target_name = key | replace('_', ' ') | title %}
-              {% set mode = 'charging' if value.value else 'waiting' %}
+              {% set target_name = {
+                'battery_grid_charging': 'Battery charging',
+                'arbitrage_mode': 'Arbitrage mode',
+                'car_grid_charging': 'Car charging',
+                'charger_limit': 'Charger limit',
+                'grid_setpoint': 'Grid setpoint'
+              }.get(key, key | replace('_', ' ') | title) %}
+              {% set mode = 'enabled' if key == 'arbitrage_mode' else ('charging' if value.value else 'waiting') %}
               {% set until = value.expires_at | default(None) %}
               {% set reason = value.reason | default('') %}
               **{{ target_name }}:** {{ mode }}{% if until %} (until {{ as_datetime(until).astimezone().strftime('%H:%M') }}){% endif %}{% if reason %} — {{ reason }}{% endif %}

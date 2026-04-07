@@ -33,7 +33,7 @@ async def async_setup_entry(
     entities = [
         CarPermissiveModeSwitch(coordinator, entry),
         BatteryChargingDisableSwitch(coordinator, entry),
-        BatteryDumpToGridSwitch(coordinator, entry),
+        ArbitrageModeSwitch(coordinator, entry),
     ]
 
     async_add_entities(entities)
@@ -206,7 +206,7 @@ class BatteryChargingDisableSwitch(CoordinatorEntity, SwitchEntity):
         await self.coordinator.async_request_refresh()
 
 
-class BatteryDumpToGridSwitch(CoordinatorEntity, SwitchEntity):
+class ArbitrageModeSwitch(CoordinatorEntity, SwitchEntity):
     """Switch to enable persistent arbitrage mode."""
 
     def __init__(
@@ -217,7 +217,7 @@ class BatteryDumpToGridSwitch(CoordinatorEntity, SwitchEntity):
         """Initialize the arbitrage mode switch."""
         super().__init__(coordinator)
         self._attr_name = f"{entry.title} Arbitrage Mode"
-        self._attr_unique_id = f"{entry.entry_id}_battery_dump_to_grid"
+        self._attr_unique_id = f"{entry.entry_id}_arbitrage_mode"
         self._attr_icon = "mdi:battery-arrow-down-outline"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
@@ -229,14 +229,14 @@ class BatteryDumpToGridSwitch(CoordinatorEntity, SwitchEntity):
     @property
     def is_on(self) -> bool:
         """Return true if arbitrage mode is enabled."""
-        override = self.coordinator.get_manual_override("battery_dump_to_grid")
+        override = self.coordinator.get_manual_override("arbitrage_mode")
         return bool(override and override.get("value") is True)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
         dump_plan = self.coordinator.data.get("battery_dump_plan", {}) if self.coordinator.data else {}
-        override = self.coordinator.get_manual_override("battery_dump_to_grid")
+        override = self.coordinator.get_manual_override("arbitrage_mode")
         set_at = override.get("set_at") if override else None
 
         return {

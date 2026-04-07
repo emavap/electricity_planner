@@ -209,10 +209,12 @@ async def test_async_migrate_number_entity_ids_renames_legacy_number_ids(monkeyp
         def async_get(self, entity_id):
             return object() if entity_id in self.existing else None
 
-        def async_update_entity(self, entity_id, *, new_entity_id):
-            self.calls.append((entity_id, new_entity_id))
+        def async_update_entity(self, entity_id, **kwargs):
+            self.calls.append((entity_id, kwargs))
             self.existing.discard(entity_id)
-            self.existing.add(new_entity_id)
+            new_entity_id = kwargs.get("new_entity_id")
+            if new_entity_id:
+                self.existing.add(new_entity_id)
 
     fake_registry = FakeRegistry()
     monkeypatch.setattr(
@@ -224,15 +226,15 @@ async def test_async_migrate_number_entity_ids_renames_legacy_number_ids(monkeyp
 
     assert (
         "number.electricity_planner_battery_max_soc_threshold",
-        "number.electricity_planner_max_soc_threshold",
+        {"new_entity_id": "number.electricity_planner_max_soc_threshold"},
     ) in fake_registry.calls
     assert (
         "number.electricity_planner_battery_max_soc_threshold_high_solar",
-        "number.electricity_planner_max_soc_threshold_sunny",
+        {"new_entity_id": "number.electricity_planner_max_soc_threshold_sunny"},
     ) in fake_registry.calls
     assert (
         "number.electricity_planner_sunny_forecast_trigger",
-        "number.electricity_planner_sunny_forecast_threshold_kwh",
+        {"new_entity_id": "number.electricity_planner_sunny_forecast_threshold_kwh"},
     ) in fake_registry.calls
 
 
@@ -257,10 +259,12 @@ async def test_async_migrate_switch_entity_ids_renames_legacy_arbitrage_switch(m
         def async_get(self, entity_id):
             return object() if entity_id in self.existing else None
 
-        def async_update_entity(self, entity_id, *, new_entity_id):
-            self.calls.append((entity_id, new_entity_id))
+        def async_update_entity(self, entity_id, **kwargs):
+            self.calls.append((entity_id, kwargs))
             self.existing.discard(entity_id)
-            self.existing.add(new_entity_id)
+            new_entity_id = kwargs.get("new_entity_id")
+            if new_entity_id:
+                self.existing.add(new_entity_id)
 
     fake_registry = FakeRegistry()
     monkeypatch.setattr(
@@ -272,7 +276,10 @@ async def test_async_migrate_switch_entity_ids_renames_legacy_arbitrage_switch(m
 
     assert (
         "switch.electricity_planner_battery_dump_to_grid",
-        "switch.electricity_planner_arbitrage_mode",
+        {
+            "new_unique_id": f"{entry.entry_id}_arbitrage_mode",
+            "new_entity_id": "switch.electricity_planner_arbitrage_mode",
+        },
     ) in fake_registry.calls
 
 

@@ -1191,7 +1191,7 @@ async def test_battery_dump_mode_persists_across_restart(fake_hass, monkeypatch)
 
     await restored._async_load_manual_overrides()
 
-    override = restored.get_manual_override("battery_dump_to_grid")
+    override = restored.get_manual_override("arbitrage_mode")
     assert override is not None
     assert override["value"] is True
     assert override["reason"] == "persisted dump"
@@ -1214,7 +1214,7 @@ def test_battery_dump_plan_prefers_highest_export_slots(fake_hass, monkeypatch):
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["battery_dump_to_grid"] = {
+    coordinator._manual_overrides["arbitrage_mode"] = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1271,7 +1271,7 @@ def test_battery_dump_plan_honors_configured_export_cap(fake_hass, monkeypatch):
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["battery_dump_to_grid"] = {
+    coordinator._manual_overrides["arbitrage_mode"] = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1318,7 +1318,7 @@ def test_battery_dump_plan_derives_threshold_from_selected_slots(fake_hass, monk
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["battery_dump_to_grid"] = {
+    coordinator._manual_overrides["arbitrage_mode"] = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1375,7 +1375,7 @@ def test_battery_dump_plan_activates_during_current_selected_window(fake_hass, m
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["battery_dump_to_grid"] = {
+    coordinator._manual_overrides["arbitrage_mode"] = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1432,7 +1432,7 @@ def test_battery_dump_plan_falls_back_when_total_eligible_duration_is_insufficie
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["battery_dump_to_grid"] = {
+    coordinator._manual_overrides["arbitrage_mode"] = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1488,7 +1488,7 @@ def test_battery_dump_plan_uses_whole_slots_without_partial_truncation(fake_hass
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["battery_dump_to_grid"] = {
+    coordinator._manual_overrides["arbitrage_mode"] = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1540,7 +1540,7 @@ def test_battery_dump_plan_targets_same_day_deadline_before_cutoff(fake_hass, mo
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["battery_dump_to_grid"] = {
+    coordinator._manual_overrides["arbitrage_mode"] = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1597,7 +1597,7 @@ def test_battery_dump_plan_rolls_to_next_day_after_cutoff(fake_hass, monkeypatch
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["battery_dump_to_grid"] = {
+    coordinator._manual_overrides["arbitrage_mode"] = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
