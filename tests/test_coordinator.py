@@ -1197,6 +1197,30 @@ async def test_battery_dump_mode_persists_across_restart(fake_hass, monkeypatch)
     assert override["reason"] == "persisted dump"
 
 
+@pytest.mark.asyncio
+async def test_battery_dump_mode_normalizes_legacy_dashboard_reason_on_restore(fake_hass, monkeypatch):
+    """Legacy dashboard wording should be normalized when overrides are restored."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    coordinator._manual_override_store = _MemoryOverrideStore(
+        {
+            "overrides": {
+                "battery_dump_to_grid": {
+                    "value": True,
+                    "reason": "Manual battery dump via dashboard switch",
+                    "expires_at": None,
+                    "set_at": datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc).isoformat(),
+                }
+            }
+        }
+    )
+
+    await coordinator._async_load_manual_overrides()
+
+    override = coordinator.get_manual_override("battery_dump_to_grid")
+    assert override is not None
+    assert override["reason"] == "Manual arbitrage mode via dashboard switch"
+
+
 def test_battery_dump_plan_prefers_highest_export_slots(fake_hass, monkeypatch):
     """Battery dump planner should derive its threshold from the highest-value eligible slots."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
