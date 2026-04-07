@@ -107,10 +107,12 @@ def test_dashboard_template_splits_buy_and_sell_price_graphs():
     assert "attributes?.price_threshold" in template
     assert "lastInterval.end ?? lastInterval.start" in template
     assert "interval.raw_price ?? 0" in template
-    assert "interval.adjusted_energy_price ?? 0" in template
-    assert "name: Contract energy price" in template
+    assert "interval.adjusted_energy_price ?? 0" not in template
+    assert "name: Contract energy price" not in template
     assert "name: Raw market price" in template
     assert "type: column" not in template
+    assert "name: Buy price" in template
+    assert "name: Sell price" in template
 
 
 def test_dashboard_template_keeps_dump_threshold_on_sell_graph():

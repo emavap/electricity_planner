@@ -191,7 +191,7 @@ The integration is designed for dynamic electricity markets:
 ## Configuration System
 
 ### Current Version
-- **Integration Version**: 4.12.8
+- **Integration Version**: 5.0.0
 - **Config Schema Version**: 20
 - **Migration Path**: Automatic v1→v20 migration
 
