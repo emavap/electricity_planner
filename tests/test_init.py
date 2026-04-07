@@ -9,6 +9,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.electricity_planner import (
     _async_migrate_number_entity_ids,
+    _async_migrate_switch_entity_ids,
     async_reload_entry,
 )
 from custom_components.electricity_planner.const import (
@@ -232,6 +233,46 @@ async def test_async_migrate_number_entity_ids_renames_legacy_number_ids(monkeyp
     assert (
         "number.electricity_planner_sunny_forecast_trigger",
         "number.electricity_planner_sunny_forecast_threshold_kwh",
+    ) in fake_registry.calls
+
+
+@pytest.mark.asyncio
+async def test_async_migrate_switch_entity_ids_renames_legacy_arbitrage_switch(monkeypatch):
+    """Legacy arbitrage switch ID should be migrated to the new dashboard-friendly ID."""
+    entry = MockConfigEntry(domain=DOMAIN, title="Electricity Planner", data={}, options={})
+    unique_id_to_entity_id = {
+        f"{entry.entry_id}_battery_dump_to_grid": "switch.electricity_planner_battery_dump_to_grid",
+    }
+
+    class FakeRegistry:
+        def __init__(self):
+            self.calls: list[tuple[str, str]] = []
+            self.existing = set(unique_id_to_entity_id.values())
+
+        def async_get_entity_id(self, domain, platform, unique_id):
+            assert domain == "switch"
+            assert platform == DOMAIN
+            return unique_id_to_entity_id.get(unique_id)
+
+        def async_get(self, entity_id):
+            return object() if entity_id in self.existing else None
+
+        def async_update_entity(self, entity_id, *, new_entity_id):
+            self.calls.append((entity_id, new_entity_id))
+            self.existing.discard(entity_id)
+            self.existing.add(new_entity_id)
+
+    fake_registry = FakeRegistry()
+    monkeypatch.setattr(
+        "custom_components.electricity_planner.er.async_get",
+        lambda hass: fake_registry,
+    )
+
+    await _async_migrate_switch_entity_ids(SimpleNamespace(), entry)
+
+    assert (
+        "switch.electricity_planner_battery_dump_to_grid",
+        "switch.electricity_planner_arbitrage_mode",
     ) in fake_registry.calls
 
 

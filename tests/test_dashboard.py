@@ -178,8 +178,8 @@ def test_bundled_dashboards_keep_dump_toggle_but_not_export_cap_number():
     single_phase = (Path(__file__).parent.parent / "electricity_planner_dashboard.yaml").read_text(encoding="utf-8")
     three_phase = (Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml").read_text(encoding="utf-8")
 
-    assert "switch.electricity_planner_battery_dump_to_grid" in single_phase
-    assert "switch.electricity_planner_battery_dump_to_grid" in three_phase
+    assert "switch.electricity_planner_arbitrage_mode" in single_phase
+    assert "switch.electricity_planner_arbitrage_mode" in three_phase
     assert "name: Arbitrage Threshold" in single_phase
     assert "name: Arbitrage Threshold" in three_phase
     single_phase_buy_section = single_phase.split("title: Electricity Buy Prices (History + Future)", 1)[1].split(

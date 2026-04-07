@@ -36,7 +36,7 @@ from .const import CONF_PHASE_MODE, DOMAIN, PHASE_MODE_SINGLE, PHASE_MODE_THREE
 _LOGGER = logging.getLogger(__name__)
 
 MANAGED_KEY = "electricity_planner_managed"
-MANAGED_VERSION = 22  # Bumped: phase-aware managed dashboards now append three-phase detail cards
+MANAGED_VERSION = 23  # Bumped: arbitrage switch now uses the renamed entity ID in managed dashboards
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 THREE_PHASE_APPENDIX_FILENAME = "dashboard_template_3phase_appendix.yaml"
 
@@ -86,7 +86,7 @@ ENTITY_REFERENCES: tuple[EntityReference, ...] = (
     EntityReference("sensor.electricity_planner_diagnostics_monitoring_emergency_soc_threshold", "emergency_soc_threshold"),
     EntityReference("sensor.electricity_planner_diagnostics_monitoring_entity_status", "entity_status"),
     EntityReference("switch.electricity_planner_car_permissive_mode", "car_permissive_mode"),
-    EntityReference("switch.electricity_planner_battery_dump_to_grid", "battery_dump_to_grid"),
+    EntityReference("switch.electricity_planner_arbitrage_mode", "battery_dump_to_grid"),
     EntityReference("switch.electricity_planner_disable_battery_charging", "disable_battery_charging"),
     EntityReference("number.electricity_planner_battery_dump_target_soc", "battery_dump_target_soc"),
     EntityReference("number.electricity_planner_max_soc_threshold", "max_soc_threshold"),

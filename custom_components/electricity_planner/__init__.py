@@ -48,12 +48,16 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH, Platform.NUMBER]
 
-NUMBER_ENTITY_ID_SUFFIXES: dict[str, str] = {
-    "battery_dump_target_soc": "battery_dump_target_soc",
-    "max_soc_threshold": "max_soc_threshold",
-    "max_soc_threshold_sunny": "max_soc_threshold_sunny",
-    "sunny_forecast_threshold_kwh": "sunny_forecast_threshold_kwh",
-}
+NUMBER_ENTITY_ID_SUFFIXES: tuple[tuple[str, str], ...] = (
+    ("battery_dump_target_soc", "battery_dump_target_soc"),
+    ("max_soc_threshold", "max_soc_threshold"),
+    ("max_soc_threshold_sunny", "max_soc_threshold_sunny"),
+    ("sunny_forecast_threshold_kwh", "sunny_forecast_threshold_kwh"),
+)
+
+SWITCH_ENTITY_ID_SUFFIXES: tuple[tuple[str, str], ...] = (
+    ("battery_dump_to_grid", "arbitrage_mode"),
+)
 
 MANUAL_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
     {
@@ -113,6 +117,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await _async_migrate_number_entity_ids(hass, entry)
+    await _async_migrate_switch_entity_ids(hass, entry)
     hass.async_create_task(async_setup_or_update_dashboard(hass, entry))
 
     # Register listener for options updates to trigger reload
@@ -135,16 +140,31 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_migrate_number_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Rename number entities to stable IDs used by dashboard templates."""
+    await _async_migrate_entity_ids(hass, entry, "number", NUMBER_ENTITY_ID_SUFFIXES)
+
+
+async def _async_migrate_switch_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Rename switch entities to stable IDs used by dashboard templates."""
+    await _async_migrate_entity_ids(hass, entry, "switch", SWITCH_ENTITY_ID_SUFFIXES)
+
+
+async def _async_migrate_entity_ids(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    platform: str,
+    migrations: tuple[tuple[str, str], ...],
+) -> None:
+    """Rename entities to stable IDs used by dashboard templates."""
     registry = er.async_get(hass)
     title_slug = slugify(entry.title or "electricity_planner")
 
-    for unique_suffix, object_suffix in NUMBER_ENTITY_ID_SUFFIXES.items():
+    for unique_suffix, object_suffix in migrations:
         unique_id = f"{entry.entry_id}_{unique_suffix}"
-        current_entity_id = registry.async_get_entity_id("number", DOMAIN, unique_id)
+        current_entity_id = registry.async_get_entity_id(platform, DOMAIN, unique_id)
         if not current_entity_id:
             continue
 
-        target_entity_id = f"number.{title_slug}_{object_suffix}"
+        target_entity_id = f"{platform}.{title_slug}_{object_suffix}"
         if current_entity_id == target_entity_id:
             continue
 
@@ -162,14 +182,16 @@ async def _async_migrate_number_entity_ids(hass: HomeAssistant, entry: ConfigEnt
                 new_entity_id=target_entity_id,
             )
             _LOGGER.info(
-                "Migrated entity ID for %s: %s -> %s",
+                "Migrated %s entity ID for %s: %s -> %s",
+                platform,
                 unique_id,
                 current_entity_id,
                 target_entity_id,
             )
         except ValueError as err:
             _LOGGER.warning(
-                "Failed to migrate entity ID for %s: %s -> %s (%s)",
+                "Failed to migrate %s entity ID for %s: %s -> %s (%s)",
+                platform,
                 unique_id,
                 current_entity_id,
                 target_entity_id,

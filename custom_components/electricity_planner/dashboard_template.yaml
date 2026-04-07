@@ -153,7 +153,7 @@ views:
                 hold_action:
                   action: more-info
               - type: button
-                entity: switch.electricity_planner_battery_dump_to_grid
+                entity: switch.electricity_planner_arbitrage_mode
                 name: Arbitrage mode
                 icon: mdi:battery-arrow-down-outline
                 icon_height: 60px
@@ -488,7 +488,7 @@ views:
                 show:
                   legend_value: false
                 data_generator: |
-                  const dumpSwitch = hass.states['switch.electricity_planner_battery_dump_to_grid'];
+                  const dumpSwitch = hass.states['switch.electricity_planner_arbitrage_mode'];
                   const threshold = dumpSwitch?.attributes?.dump_price_threshold;
                   if (dumpSwitch?.state !== 'on' || threshold == null || threshold === undefined) {
                     return [];
