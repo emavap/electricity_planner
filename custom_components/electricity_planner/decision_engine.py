@@ -1237,7 +1237,7 @@ class ChargingDecisionEngine:
         
         # Allocate to batteries
         solar_for_batteries = self._calculate_battery_solar_allocation(
-            available_solar, battery_analysis, significant_solar_threshold, self._settings
+            available_solar, battery_analysis, self._settings
         )
         available_solar = max(0, available_solar - solar_for_batteries)
         
@@ -1322,7 +1322,6 @@ class ChargingDecisionEngine:
         self,
         available_solar: float,
         battery_analysis: dict[str, Any],
-        significant_threshold: float,
         settings: EngineSettings,
     ) -> int:
         """Calculate solar allocation for batteries."""
