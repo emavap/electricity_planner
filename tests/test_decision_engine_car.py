@@ -241,6 +241,28 @@ def test_solar_not_allocated_to_car_until_batteries_high_soc():
     assert allocation["solar_for_car"] == 0
 
 
+def test_solar_allocation_to_batteries_is_not_capped_by_significant_threshold():
+    """Battery solar allocation should not stop at the significant-solar trigger."""
+    engine = _create_engine()
+
+    power_analysis = {"solar_surplus": 4000, "car_charging_power": 0}
+    battery_analysis = {
+        "average_soc": 50,
+        "min_soc": 48,
+        "max_soc_threshold": 90,
+        "batteries_full": False,
+    }
+
+    allocation = engine._allocate_solar_power(
+        power_analysis=power_analysis,
+        battery_analysis=battery_analysis,
+    )
+
+    assert allocation["solar_for_batteries"] == 3000
+    assert allocation["solar_for_car"] == 0
+    assert allocation["remaining_solar"] == 1000
+
+
 def test_solar_allocated_to_car_when_batteries_full():
     """Solar can go to the car once every battery is close to full."""
     engine = _create_engine()

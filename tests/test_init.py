@@ -1,18 +1,24 @@
 """Tests for integration setup/reload helpers in __init__.py."""
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.electricity_planner import (
     _async_migrate_number_entity_ids,
     _async_migrate_switch_entity_ids,
+    MANUAL_OVERRIDE_SERVICE_SCHEMA,
     async_reload_entry,
+    _register_services_once,
 )
+from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
 from custom_components.electricity_planner.const import (
+    ATTR_TARGET,
     CONF_BATTERY_CAPACITIES,
     CONF_BATTERY_DUMP_DEADLINE_HOUR,
     CONF_CURRENT_PRICE_ENTITY,
@@ -44,9 +50,38 @@ from custom_components.electricity_planner.const import (
     DEFAULT_ENERGY_TAX_BIJDRAGE,
     DEFAULT_TRANSPORT_COST_DAY,
     DEFAULT_TRANSPORT_COST_NIGHT,
+    ATTR_GRID_SETPOINT_OVERRIDE,
+    MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
+    MANUAL_OVERRIDE_TARGET_GRID_SETPOINT,
+    SERVICE_SET_MANUAL_OVERRIDE,
     DOMAIN,
 )
 from custom_components.electricity_planner.migrations import async_migrate_entry
+
+
+class FakeServices:
+    def __init__(self):
+        self.registered: dict[tuple[str, str], dict[str, object]] = {}
+
+    def async_register(self, domain, service, handler, schema=None):
+        self.registered[(domain, service)] = {
+            "handler": handler,
+            "schema": schema,
+        }
+
+
+class FakeHass:
+    def __init__(self):
+        self.loop = asyncio.get_event_loop()
+        self.data: dict = {}
+        self.services = FakeServices()
+        self.config_entries = SimpleNamespace(_entries={})
+
+    def async_create_task(self, coro):
+        return self.loop.create_task(coro)
+
+    async def async_add_executor_job(self, func, *args, **kwargs):
+        return func(*args, **kwargs)
 
 
 @pytest.mark.asyncio
@@ -182,6 +217,82 @@ async def test_async_reload_entry_skips_when_live_change_already_applied():
     refresh_settings.assert_not_called()
     coordinator.async_request_refresh.assert_not_awaited()
     hass.config_entries.async_reload.assert_not_called()
+
+
+def test_manual_override_service_schema_accepts_negative_grid_setpoint():
+    """Grid setpoint overrides should allow export values."""
+    data = MANUAL_OVERRIDE_SERVICE_SCHEMA(
+        {
+            ATTR_TARGET: MANUAL_OVERRIDE_TARGET_GRID_SETPOINT,
+            ATTR_GRID_SETPOINT_OVERRIDE: -4500,
+        }
+    )
+
+    assert data[ATTR_GRID_SETPOINT_OVERRIDE] == -4500
+
+
+@pytest.mark.asyncio
+async def test_manual_override_service_requires_numeric_payload_for_numeric_target(monkeypatch):
+    """Numeric-only override calls should fail fast when the payload is missing."""
+    hass = FakeHass()
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_CURRENT_PRICE_ENTITY: "sensor.price"}, options={})
+    monkeypatch.setattr(
+        ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+    coordinator = ElectricityPlannerCoordinator(hass, entry)
+    coordinator.async_set_manual_override = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+    hass.data = {DOMAIN: {entry.entry_id: coordinator}}
+
+    _register_services_once(hass)
+    handler = hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
+
+    with pytest.raises(HomeAssistantError, match="charger_limit is required"):
+        await handler(SimpleNamespace(data={ATTR_TARGET: MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT}))
+
+    coordinator.async_set_manual_override.assert_not_awaited()
+    coordinator.async_request_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_manual_override_service_applies_negative_grid_setpoint(monkeypatch):
+    """Negative grid setpoints should be passed through for export control."""
+    hass = FakeHass()
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_CURRENT_PRICE_ENTITY: "sensor.price"}, options={})
+
+    monkeypatch.setattr(
+        ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+    coordinator = ElectricityPlannerCoordinator(hass, entry)
+    coordinator.async_set_manual_override = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+    hass.data = {DOMAIN: {entry.entry_id: coordinator}}
+
+    _register_services_once(hass)
+    handler = hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
+
+    await handler(
+        SimpleNamespace(
+            data={
+                ATTR_TARGET: MANUAL_OVERRIDE_TARGET_GRID_SETPOINT,
+                ATTR_GRID_SETPOINT_OVERRIDE: -4500,
+            }
+        )
+    )
+
+    coordinator.async_set_manual_override.assert_awaited_once_with(
+        MANUAL_OVERRIDE_TARGET_GRID_SETPOINT,
+        None,
+        None,
+        None,
+        None,
+        -4500,
+    )
+    coordinator.async_request_refresh.assert_awaited_once()
 
 
 @pytest.mark.asyncio

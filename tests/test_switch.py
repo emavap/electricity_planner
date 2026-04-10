@@ -64,6 +64,17 @@ class FakeHass:
         return func(*args, **kwargs)
 
 
+class _MemoryStore:
+    def __init__(self, initial_data: dict | None = None):
+        self.data = initial_data
+
+    async def async_load(self):
+        return self.data
+
+    async def async_save(self, data):
+        self.data = data
+
+
 @pytest.fixture
 def fake_hass():
     return FakeHass()
@@ -129,6 +140,30 @@ async def test_car_permissive_switch_skips_restore_when_no_last_state(fake_hass,
 
     assert coordinator._car_permissive_mode_active is False
     coordinator.async_request_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_car_permissive_switch_persists_state_before_refresh(fake_hass, monkeypatch):
+    """Toggling permissive mode should persist via the coordinator store immediately."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    coordinator._car_permissive_mode_store = _MemoryStore()
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entity = CarPermissiveModeSwitch(coordinator, entry)
+    coordinator.async_request_refresh = AsyncMock()
+
+    await entity.async_turn_on()
+
+    assert coordinator._car_permissive_mode_active is True
+    assert coordinator._car_permissive_mode_store.data["enabled"] is True
+    coordinator.async_request_refresh.assert_awaited_once()
+
+    coordinator.async_request_refresh.reset_mock()
+
+    await entity.async_turn_off()
+
+    assert coordinator._car_permissive_mode_active is False
+    assert coordinator._car_permissive_mode_store.data["enabled"] is False
+    coordinator.async_request_refresh.assert_awaited_once()
 
 
 @pytest.mark.asyncio

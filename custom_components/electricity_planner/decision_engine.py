@@ -1341,7 +1341,6 @@ class ChargingDecisionEngine:
             estimated_need = min(
                 available_solar,
                 int(soc_deficit * DEFAULT_POWER_ESTIMATES.per_soc_percent),
-                significant_threshold,
                 settings.max_battery_power
             )
             return max(0, estimated_need)
@@ -2620,6 +2619,11 @@ class ChargingDecisionEngine:
 
         min_threshold = self._settings.min_car_charging_threshold
         significant_car_charging = car_charging_power >= min_threshold
+        solar_only_note = (
+            "Solar-only car charging detected - car grid import blocked"
+            if significant_car_charging and car_solar_only
+            else None
+        )
 
         # Handle unavailable battery data
         if average_soc is None:
@@ -2646,17 +2650,7 @@ class ChargingDecisionEngine:
                 ),
                 "grid_components": {"battery": 0, "car": 0},
             }
-        
-        # Solar-only car charging
-        if significant_car_charging and car_solar_only:
-            return {
-                "grid_setpoint": 0,
-                "grid_setpoint_reason": (
-                    f"Solar-only car charging detected - grid setpoint 0W | {peak_context_reason}"
-                ),
-                "grid_components": {"battery": 0, "car": 0},
-            }
-        
+
         # Calculate grid needs
         max_setpoint = peak_context.effective_max_setpoint
         
@@ -2681,7 +2675,9 @@ class ChargingDecisionEngine:
             residual_car_need = max(0.0, effective_car_power - car_available_solar)
             car_battery_need = min(residual_car_need, car_arbitrage_power)
             residual_car_need = max(0.0, residual_car_need - car_battery_need)
-            if car_grid_import_allowed:
+            if car_solar_only:
+                car_battery_need = 0
+            if car_grid_import_allowed and not car_solar_only:
                 car_grid_need = max(0, min(residual_car_need, max_setpoint))
             if car_grid_need > 0:
                 grid_setpoint_parts.append(f"car pulling {int(car_grid_need)}W")
@@ -2743,6 +2739,8 @@ class ChargingDecisionEngine:
                     f"Grid import reserved for {components_text} = {int(grid_setpoint)}W"
                     f" | {peak_context_reason}"
                 )
+        if solar_only_note:
+            reason = f"{reason} | {solar_only_note}"
 
         return {
             "grid_setpoint": int(grid_setpoint),
@@ -2802,7 +2800,10 @@ class ChargingDecisionEngine:
             decision.update(charger_limit_decision)
             combined_data.update(charger_limit_decision)
 
-        if override_targets.intersection({"battery_grid_charging", "car_grid_charging"}):
+        if (
+            "grid_setpoint" not in override_targets
+            and override_targets.intersection({"battery_grid_charging", "car_grid_charging", "charger_limit"})
+        ):
             charger_limit = decision.get("charger_limit", 0)
             grid_setpoint_decision = self._calculate_grid_setpoint(
                 price_analysis,
@@ -2812,5 +2813,16 @@ class ChargingDecisionEngine:
                 charger_limit,
             )
             decision.update(grid_setpoint_decision)
+            combined_data.update(grid_setpoint_decision)
+
+        if (
+            combined_data.get("phase_mode") == PHASE_MODE_THREE
+            and combined_data.get("phase_details")
+            and override_targets.intersection(
+                {"battery_grid_charging", "car_grid_charging", "charger_limit", "grid_setpoint"}
+            )
+        ):
+            phase_results = self._distribute_phase_decisions(decision, combined_data)
+            decision["phase_results"] = phase_results
 
         return decision

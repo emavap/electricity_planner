@@ -80,7 +80,14 @@ class CarPermissiveModeSwitch(CoordinatorEntity, RestoreEntity, SwitchEntity):
             "Restored car permissive charging mode to %s",
             "on" if restored_state else "off",
         )
-        self.coordinator._car_permissive_mode_active = restored_state
+        if restored_state:
+            await self.coordinator.async_set_car_permissive_mode(
+                reason="Restored car permissive mode from entity state"
+            )
+        else:
+            await self.coordinator.async_clear_car_permissive_mode(
+                reason="Restored car permissive mode from entity state"
+            )
         await self.coordinator.async_request_refresh()
 
     @property
@@ -108,7 +115,9 @@ class CarPermissiveModeSwitch(CoordinatorEntity, RestoreEntity, SwitchEntity):
             **kwargs: Additional keyword arguments (unused)
         """
         _LOGGER.info("Enabling car permissive charging mode")
-        self.coordinator._car_permissive_mode_active = True
+        await self.coordinator.async_set_car_permissive_mode(
+            reason="Manual permissive mode via dashboard switch"
+        )
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -118,7 +127,9 @@ class CarPermissiveModeSwitch(CoordinatorEntity, RestoreEntity, SwitchEntity):
             **kwargs: Additional keyword arguments (unused)
         """
         _LOGGER.info("Disabling car permissive charging mode")
-        self.coordinator._car_permissive_mode_active = False
+        await self.coordinator.async_clear_car_permissive_mode(
+            reason="Manual permissive mode via dashboard switch"
+        )
         await self.coordinator.async_request_refresh()
 
 

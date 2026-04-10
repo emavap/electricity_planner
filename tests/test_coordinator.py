@@ -30,6 +30,8 @@ from custom_components.electricity_planner.const import (
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     CONF_HIGHEST_PRICE_ENTITY,
     CONF_HOUSE_CONSUMPTION_ENTITY,
+    CONF_GRID_POWER_ENTITY,
+    CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_PHASE_MODE,
     CONF_PHASES,
     CONF_PHASE_SOLAR_ENTITY,
@@ -568,6 +570,57 @@ async def test_handle_entity_change_includes_three_phase_entities(fake_hass, mon
 
 
 @pytest.mark.asyncio
+async def test_handle_entity_change_triggers_for_peak_and_tariff_entities(fake_hass, monkeypatch):
+    """Tracked non-power entities should refresh immediately on state changes."""
+    config = _base_config()
+    config[CONF_MONTHLY_GRID_PEAK_ENTITY] = "sensor.monthly_peak"
+    config[CONF_GRID_POWER_ENTITY] = "sensor.grid_power"
+    config[CONF_P1_TARIFF_ENTITY] = "sensor.p1_tariff"
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    base_time = datetime(2024, 2, 1, 8, 0, tzinfo=timezone.utc)
+    clock = {"now": base_time}
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: clock["now"], raising=False
+    )
+
+    coordinator.async_request_refresh = AsyncMock()
+    tasks: list[asyncio.Task] = []
+    original_create_task = fake_hass.async_create_task
+
+    def capture_task(coro):
+        task = original_create_task(coro)
+        tasks.append(task)
+        return task
+
+    fake_hass.async_create_task = capture_task
+
+    coordinator._handle_entity_change(_event_for(config[CONF_GRID_POWER_ENTITY]))
+    coordinator._handle_entity_change(_event_for(config[CONF_P1_TARIFF_ENTITY]))
+    for task in tasks:
+        await task
+
+    assert len(tasks) == 2
+    assert coordinator.async_request_refresh.await_count == 1
+
+
+def test_get_current_price_interval_start_uses_active_timeline(fake_hass, monkeypatch):
+    """Stable-threshold snapshots should follow the real Nord Pool interval start."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    base_time = datetime(2025, 10, 14, 8, 35, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    coordinator._last_price_timeline = [
+        (datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc), datetime(2025, 10, 14, 9, 0, tzinfo=timezone.utc), 0.10),
+        (datetime(2025, 10, 14, 9, 0, tzinfo=timezone.utc), datetime(2025, 10, 14, 10, 0, tzinfo=timezone.utc), 0.12),
+    ]
+
+    assert coordinator._get_current_price_interval_start() == datetime(
+        2025, 10, 14, 8, 0, tzinfo=timezone.utc
+    )
+
+
+@pytest.mark.asyncio
 async def test_nordpool_fetch_prices_calls_service(fake_hass, monkeypatch):
     """Test that Nord Pool service is called correctly."""
     from custom_components.electricity_planner.const import CONF_NORDPOOL_CONFIG_ENTRY
@@ -922,6 +975,8 @@ def test_check_minimum_charging_window(fake_hass, monkeypatch, use_average):
     prices_today = {"BE": intervals}
 
     average = coordinator._calculate_average_threshold(prices_today, None, transport_lookup)
+    if use_average:
+        coordinator._average_threshold_enabled = True
 
     # Average threshold ≈ 0.075 -> qualifies when using average, fails fixed (0.07)
     result = coordinator._check_minimum_charging_window(
@@ -936,6 +991,81 @@ def test_check_minimum_charging_window(fake_hass, monkeypatch, use_average):
         assert result is True
     else:
         assert result is False
+
+
+def test_check_minimum_charging_window_ignores_average_until_enabled(fake_hass, monkeypatch):
+    """Average-threshold warm-up should not affect window checks until enabled."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_USE_AVERAGE_THRESHOLD: True,
+            CONF_PRICE_THRESHOLD: 0.07,
+            "price_adjustment_multiplier": 1.0,
+            "price_adjustment_offset": 0.0,
+            CONF_TRANSPORT_COST_ENTITY: "sensor.transport_cost",
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    transport_lookup = [
+        {"start": "2025-10-07T08:00:00+00:00", "cost": 0.01},
+        {"start": "2025-10-07T09:00:00+00:00", "cost": 0.01},
+    ]
+    prices_today = {
+        "BE": [
+            _make_price_interval(base_time + timedelta(minutes=15 * i), 65.0)
+            for i in range(8)
+        ]
+    }
+
+    average = coordinator._calculate_average_threshold(prices_today, None, transport_lookup)
+
+    assert coordinator._average_threshold_enabled is False
+    assert average is not None
+    assert coordinator._check_minimum_charging_window(
+        prices_today,
+        None,
+        transport_lookup,
+        None,
+        average,
+    ) is False
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_masks_average_threshold_until_enabled(fake_hass, monkeypatch):
+    """Decision payload should not activate average threshold during hysteresis warm-up."""
+    config = _base_config()
+    config.update(
+        {
+            CONF_USE_AVERAGE_THRESHOLD: True,
+            CONF_PRICE_THRESHOLD: 0.12,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    coordinator._fetch_all_data = AsyncMock(
+        return_value={
+            "average_threshold": 0.05,
+            "battery_details": [],
+            "battery_soc": [],
+            "current_price": 0.10,
+            "highest_price": 0.20,
+            "lowest_price": 0.05,
+            "next_price": 0.09,
+        }
+    )
+    coordinator.decision_engine.evaluate_charging_decision = AsyncMock(return_value={})
+    coordinator._check_data_availability = AsyncMock()
+
+    await coordinator._async_update_data()
+
+    decision_input = coordinator.decision_engine.evaluate_charging_decision.await_args.args[0]
+    assert decision_input["average_threshold"] is None
+    assert decision_input["average_threshold_candidate"] == pytest.approx(0.05, rel=1e-6)
+    assert decision_input["average_threshold_active"] is False
 
 
 def test_check_minimum_charging_window_respects_duration(fake_hass, monkeypatch):
@@ -1195,6 +1325,26 @@ async def test_battery_dump_mode_persists_across_restart(fake_hass, monkeypatch)
     assert override is not None
     assert override["value"] is True
     assert override["reason"] == "persisted dump"
+
+
+@pytest.mark.asyncio
+async def test_car_permissive_mode_persists_across_restart(fake_hass, monkeypatch):
+    """Car permissive mode should be restored from coordinator persistence."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    store = _MemoryOverrideStore()
+    coordinator._car_permissive_mode_store = store
+
+    await coordinator.async_set_car_permissive_mode(reason="persisted permissive")
+
+    assert coordinator._car_permissive_mode_active is True
+    assert store.data["enabled"] is True
+
+    restored = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    restored._car_permissive_mode_store = _MemoryOverrideStore(store.data)
+
+    await restored._async_load_car_permissive_mode()
+
+    assert restored._car_permissive_mode_active is True
 
 
 def test_battery_dump_plan_prefers_highest_export_slots(fake_hass, monkeypatch):

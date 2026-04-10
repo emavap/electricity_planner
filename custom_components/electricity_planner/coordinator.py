@@ -130,6 +130,7 @@ from .helpers import (
 _LOGGER = logging.getLogger(__name__)
 _NUMERIC_PREFIX_RE = re.compile(r"^\s*([-+]?\d+(?:[.,]\d+)?)")
 _MANUAL_OVERRIDE_STORE_VERSION = 1
+_CAR_PERMISSIVE_MODE_STORE_VERSION = 1
 
 
 class ElectricityPlannerCoordinator(DataUpdateCoordinator):
@@ -159,6 +160,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         # Entity listener unsubscribe callback (set in _setup_entity_tracking)
         self._entity_unsub: callback | None = None
+        self._tracked_entity_ids: set[str] = set()
 
         # Permissive mode state (controlled via switch entity, persisted across updates)
         self._car_permissive_mode_active: bool = False
@@ -188,6 +190,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._last_config_hash: int | None = None  # Track config changes for threshold updates
 
         # Manual override tracking
+        self._car_permissive_mode_store: Store[dict[str, Any]] | None = None
         self._manual_overrides: dict[str, dict[str, Any] | None] = {
             "battery_grid_charging": None,
             "arbitrage_mode": None,
@@ -231,11 +234,17 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
     async def async_initialize_persistent_state(self) -> None:
         """Initialize persisted state used by the coordinator."""
+        self._car_permissive_mode_store = Store(
+            self.hass,
+            _CAR_PERMISSIVE_MODE_STORE_VERSION,
+            f"{DOMAIN}.{self.entry.entry_id}.car_permissive_mode",
+        )
         self._manual_override_store = Store(
             self.hass,
             _MANUAL_OVERRIDE_STORE_VERSION,
             f"{DOMAIN}.{self.entry.entry_id}.manual_overrides",
         )
+        await self._async_load_car_permissive_mode()
         await self._async_load_manual_overrides()
 
     def get_manual_override(self, key: str) -> dict[str, Any] | None:
@@ -253,6 +262,18 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         """Return whether persistent arbitrage mode is enabled."""
         override = self.get_manual_override("arbitrage_mode")
         return bool(override and override.get("value") is True)
+
+    async def async_set_car_permissive_mode(self, reason: str | None = None) -> None:
+        """Persistently enable car permissive charging mode."""
+        self._car_permissive_mode_active = True
+        _LOGGER.info("Car permissive mode enabled")
+        await self._async_persist_car_permissive_mode(reason=reason)
+
+    async def async_clear_car_permissive_mode(self, reason: str | None = None) -> None:
+        """Disable persistent car permissive charging mode."""
+        self._car_permissive_mode_active = False
+        _LOGGER.info("Car permissive mode cleared")
+        await self._async_persist_car_permissive_mode(reason=reason)
 
     async def async_set_battery_dump_mode(self, reason: str | None = None) -> None:
         """Persistently enable arbitrage mode."""
@@ -327,6 +348,60 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         if overrides_changed:
             await self._async_persist_manual_overrides()
+
+    async def _async_load_car_permissive_mode(self) -> None:
+        """Load persisted car permissive mode from storage."""
+        if self._car_permissive_mode_store is None:
+            return
+
+        try:
+            stored = await self._car_permissive_mode_store.async_load()
+        except Exception as err:
+            if isinstance(err, (KeyboardInterrupt, SystemExit)):
+                raise
+            _LOGGER.warning(
+                "Unable to load car permissive mode for %s: %s",
+                self.entry.entry_id,
+                err,
+            )
+            return
+
+        if stored is None:
+            return
+
+        enabled: Any
+        if isinstance(stored, dict):
+            enabled = stored.get("enabled", stored.get("value"))
+        else:
+            enabled = stored
+
+        if enabled is None:
+            return
+
+        self._car_permissive_mode_active = bool(enabled)
+        _LOGGER.debug(
+            "Loaded car permissive mode for %s: %s",
+            self.entry.entry_id,
+            self._car_permissive_mode_active,
+        )
+
+    async def _async_persist_car_permissive_mode(self, reason: str | None = None) -> None:
+        """Persist car permissive mode for restart recovery."""
+        if self._car_permissive_mode_store is None:
+            return
+
+        await self._car_permissive_mode_store.async_save(
+            {
+                "enabled": self._car_permissive_mode_active,
+                "reason": reason
+                or (
+                    "Car permissive mode enabled"
+                    if self._car_permissive_mode_active
+                    else "Car permissive mode disabled"
+                ),
+                "set_at": self._serialize_stored_datetime(dt_util.utcnow()),
+            }
+        )
 
     async def _async_persist_manual_overrides(self) -> None:
         """Persist active manual overrides for restart recovery."""
@@ -490,24 +565,39 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
     def _setup_entity_listeners(self):
         """Set up listeners for entity state changes."""
-        entities_to_track = []
+        entities_to_track = self._collect_tracked_entity_ids()
+        self._tracked_entity_ids = set(entities_to_track)
+        if entities_to_track:
+            self._entity_unsub = async_track_state_change_event(
+                self.hass, entities_to_track, self._handle_entity_change
+            )
 
-        # Price entities
-        for entity_key in [CONF_CURRENT_PRICE_ENTITY, CONF_HIGHEST_PRICE_ENTITY,
-                          CONF_LOWEST_PRICE_ENTITY, CONF_NEXT_PRICE_ENTITY]:
+    def _collect_tracked_entity_ids(self) -> list[str]:
+        """Return all entities that should trigger coordinator refreshes."""
+        entities_to_track: list[str] = []
+
+        for entity_key in [
+            CONF_CURRENT_PRICE_ENTITY,
+            CONF_HIGHEST_PRICE_ENTITY,
+            CONF_LOWEST_PRICE_ENTITY,
+            CONF_NEXT_PRICE_ENTITY,
+        ]:
             if self.config.get(entity_key):
                 entities_to_track.append(self.config[entity_key])
 
-        # Battery entities
         if self.config.get(CONF_BATTERY_SOC_ENTITIES):
             entities_to_track.extend(self.config[CONF_BATTERY_SOC_ENTITIES])
 
-        # Power entities
-        for entity_key in [CONF_SOLAR_PRODUCTION_ENTITY, CONF_HOUSE_CONSUMPTION_ENTITY, CONF_CAR_CHARGING_POWER_ENTITY, CONF_MONTHLY_GRID_PEAK_ENTITY, CONF_GRID_POWER_ENTITY]:
+        for entity_key in [
+            CONF_SOLAR_PRODUCTION_ENTITY,
+            CONF_HOUSE_CONSUMPTION_ENTITY,
+            CONF_CAR_CHARGING_POWER_ENTITY,
+            CONF_MONTHLY_GRID_PEAK_ENTITY,
+            CONF_GRID_POWER_ENTITY,
+        ]:
             if self.config.get(entity_key):
                 entities_to_track.append(self.config[entity_key])
 
-        # P1 tariff entity (for built-in transport cost day/night switching)
         if self.config.get(CONF_P1_TARIFF_ENTITY):
             entities_to_track.append(self.config[CONF_P1_TARIFF_ENTITY])
 
@@ -523,10 +613,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     if phase_entity:
                         entities_to_track.append(phase_entity)
 
-        if entities_to_track:
-            self._entity_unsub = async_track_state_change_event(
-                self.hass, entities_to_track, self._handle_entity_change
-            )
+        return [entity_id for entity_id in entities_to_track if entity_id]
 
     def _has_builtin_transport_cost(self) -> bool:
         """Check if built-in transport cost components are configured."""
@@ -1463,32 +1550,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # The throttling is handled by checking _last_entity_update timestamp
         entity_id = event.data.get("entity_id")
         _LOGGER.debug("Entity changed: %s", entity_id)
-
-        # Trigger immediate updates for critical entities
-        critical_entities = {
-            self.config.get(CONF_CURRENT_PRICE_ENTITY),
-            self.config.get(CONF_SOLAR_PRODUCTION_ENTITY),
-            self.config.get(CONF_HOUSE_CONSUMPTION_ENTITY),
-            self.config.get(CONF_CAR_CHARGING_POWER_ENTITY),
-        }
-
-        if self.phase_mode == PHASE_MODE_THREE and self.phase_configs:
-            for phase_config in self.phase_configs.values():
-                for entity_key in (
-                    CONF_PHASE_SOLAR_ENTITY,
-                    CONF_PHASE_CONSUMPTION_ENTITY,
-                    CONF_PHASE_CAR_ENTITY,
-                ):
-                    phase_entity = phase_config.get(entity_key)
-                    if phase_entity:
-                        critical_entities.add(phase_entity)
-
-        critical_entities.discard(None)
-
-        # Trigger updates for battery SOC changes (any configured battery)
-        battery_entities = self.config.get(CONF_BATTERY_SOC_ENTITIES, [])
-
-        if entity_id in critical_entities or entity_id in battery_entities:
+        tracked_entity_ids = self._tracked_entity_ids or set(self._collect_tracked_entity_ids())
+        if entity_id in tracked_entity_ids:
             # Use async task to avoid blocking the callback
             # Note: Throttling is handled atomically in _async_handle_throttled_update
             # to prevent race conditions from multiple rapid events
@@ -1514,11 +1577,25 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                             entity_id, time_remaining)
 
     def _get_current_price_interval_start(self) -> datetime:
-        """Get the start time of the current 15-minute price interval."""
-        now = dt_util.now()
-        # Round down to nearest 15 minutes
-        minutes = (now.minute // 15) * 15
+        """Get the start time of the active price interval."""
+        now = dt_util.utcnow()
+
+        if self._last_price_timeline:
+            for start, end, _price in self._last_price_timeline:
+                if start <= now < end:
+                    return start
+
+        # Fall back to the legacy fixed-resolution boundary when no timeline is available.
+        minutes = (now.minute // PRICE_INTERVAL_MINUTES) * PRICE_INTERVAL_MINUTES
         return now.replace(minute=minutes, second=0, microsecond=0)
+
+    def _should_use_average_threshold(self, average_threshold: float | None) -> bool:
+        """Return whether the rolling average threshold is active for decisions."""
+        return bool(
+            self.config.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)
+            and average_threshold is not None
+            and self._average_threshold_enabled
+        )
 
     def _clean_expired_nordpool_cache(self) -> None:
         """Remove expired entries from Nord Pool cache based on TTL and size limit.
@@ -1596,10 +1673,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             data = await self._fetch_all_data()
 
             # Determine the current price threshold (with dynamic/average logic)
-            use_average = self.config.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)
             average_threshold = data.get("average_threshold")
+            average_threshold_active = self._should_use_average_threshold(average_threshold)
+            data["average_threshold_active"] = average_threshold_active
+            data["average_threshold_candidate"] = average_threshold
+            if not average_threshold_active:
+                data["average_threshold"] = None
 
-            if use_average and average_threshold is not None:
+            if average_threshold_active:
                 current_threshold = average_threshold
             else:
                 current_threshold = self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
@@ -2669,11 +2750,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         now = dt_util.utcnow()
 
         # Get the threshold (either average or fixed)
-        use_average = self.config.get(
-            CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD
-        )
-
-        if use_average and average_threshold is not None:
+        if self._should_use_average_threshold(average_threshold):
             base_threshold = average_threshold
         else:
             base_threshold = self.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)

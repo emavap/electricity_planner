@@ -562,6 +562,13 @@ class StrategyManager:
                             strategy.__class__.__name__, reason)
                 self._last_trace = trace
                 return True, reason
+            elif isinstance(strategy, SolarPriorityStrategy) and reason:
+                _LOGGER.debug(
+                    "Strategy %s blocked grid charging: %s",
+                    strategy.__class__.__name__, reason,
+                )
+                self._last_trace = trace
+                return False, reason
             elif reason:  # Strategy made a decision not to charge, but continue checking
                 _LOGGER.debug("Strategy %s suggests not charging: %s (continuing evaluation)",
                             strategy.__class__.__name__, reason)

@@ -156,6 +156,64 @@ def test_grid_setpoint_zero_for_solar_only_car():
     assert result["grid_setpoint"] == 0
 
 
+def test_grid_setpoint_preserves_battery_charging_when_car_is_solar_only():
+    engine = _engine()
+    battery_analysis = {"average_soc": 50, "max_soc_threshold": 90}
+    power_allocation = {"solar_for_car": 1000, "car_current_solar_usage": 500}
+    data = {
+        "car_charging_power": 3000,
+        "car_grid_charging": True,
+        "car_grid_import_allowed": False,
+        "battery_grid_charging": True,
+        "car_solar_only": True,
+        "monthly_grid_peak": 8000,
+    }
+
+    result = engine._calculate_grid_setpoint(
+        {},
+        battery_analysis,
+        power_allocation,
+        data,
+        charger_limit=3000,
+    )
+
+    assert result["grid_setpoint"] == 4000
+    assert result["grid_components"]["battery"] == 4000
+    assert result["grid_components"]["car"] == 0
+    assert "battery charging 4000W" in result["grid_setpoint_reason"]
+    assert "Solar-only car charging detected" in result["grid_setpoint_reason"]
+
+
+def test_grid_setpoint_preserves_battery_export_when_car_is_solar_only():
+    engine = _engine()
+    battery_analysis = {"average_soc": 70, "max_soc_threshold": 90}
+    power_allocation = {"solar_for_car": 2500, "car_current_solar_usage": 500}
+    data = {
+        "car_charging_power": 3000,
+        "car_grid_charging": True,
+        "car_grid_import_allowed": False,
+        "car_solar_only": True,
+        "arbitrage_mode_active": True,
+        "battery_dump_export_power": 3500,
+        "arbitrage_mode_reason": "High-price export window is active",
+        "monthly_grid_peak": 4000,
+    }
+
+    result = engine._calculate_grid_setpoint(
+        {},
+        battery_analysis,
+        power_allocation,
+        data,
+        charger_limit=3000,
+    )
+
+    assert result["grid_setpoint"] == -3500
+    assert result["grid_components"]["battery"] == -3500
+    assert result["grid_components"]["car"] == 0
+    assert "Grid export scheduled" in result["grid_setpoint_reason"]
+    assert "Solar-only car charging detected" in result["grid_setpoint_reason"]
+
+
 def test_grid_setpoint_honors_charger_limit_cap():
     engine = _engine()
     battery_analysis = {"average_soc": 80, "max_soc_threshold": 90}
@@ -629,6 +687,58 @@ def test_grid_setpoint_does_not_export_without_scheduled_arbitrage_power():
     assert result["grid_components"]["battery"] == 0
     assert result["grid_components"]["car"] == 0
     assert "No grid charging needed" in result["grid_setpoint_reason"]
+
+
+def test_recalculate_after_charger_limit_override_updates_grid_setpoint_and_phase_results():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine.recalculate_after_override(
+        baseline_data={
+            "phase_mode": PHASE_MODE_THREE,
+            "phase_details": {
+                "phase_1": {
+                    "name": "Phase 1",
+                    "has_car_sensor": True,
+                    "car_charging_power": 6000,
+                }
+            },
+            "phase_capacity_map": {"phase_1": 10.0},
+            "phase_batteries": {
+                "phase_1": [{"entity_id": "sensor.battery_a", "soc": 80, "capacity": 10.0}],
+            },
+            "car_grid_import_allowed": True,
+            "car_solar_only": False,
+            "battery_grid_charging": True,
+            "monthly_grid_peak": 8000,
+        },
+        decision={
+            "price_analysis": {},
+            "battery_analysis": {"average_soc": 80, "max_soc_threshold": 90},
+            "power_allocation": {
+                "remaining_solar": 0,
+                "solar_for_car": 1000,
+                "car_current_solar_usage": 500,
+            },
+            "monthly_grid_peak": 8000,
+            "car_charging_power": 6000,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "car_solar_only": False,
+            "battery_grid_charging": True,
+            "charger_limit": 3000,
+            "grid_setpoint": 7200,
+            "grid_components": {"battery": 2700, "car": 4500},
+        },
+        override_targets={"charger_limit"},
+    )
+
+    assert result["charger_limit"] == 3000
+    assert result["grid_setpoint"] == 5500
+    assert result["grid_components"]["battery"] == 4000
+    assert result["grid_components"]["car"] == 1500
+    assert result["phase_results"]["phase_1"]["grid_setpoint"] == 5500
+    assert result["phase_results"]["phase_1"]["grid_components"]["battery"] == 4000
+    assert result["phase_results"]["phase_1"]["grid_components"]["car"] == 1500
 
 
 def test_recalculate_after_car_override_clears_stale_arbitrage_state():

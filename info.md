@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 5.0.1** | **Config Schema Version 20** | **Home Assistant 2024.4+**
+**Version 5.0.2** | **Config Schema Version 20** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Release note for v5.0.1: arbitrage mode now respects the configured reserve SOC across the full battery fleet, and EV charging takes scheduled arbitrage power before any remaining export is sent to the grid.
+> Release note for v5.0.2: battery grid charging and scheduled arbitrage exports are no longer blocked when the car is in solar-only mode, manual overrides accept negative grid setpoints for export control, the car permissive mode switch persists through restarts, and all configured entities (including monthly peak, grid power, P1 tariff, and phase battery power) now trigger immediate coordinator refreshes. Solar priority strategy now hard-blocks grid charging when solar is already allocated, and the rolling-average price threshold is correctly masked during its warm-up window.
 
 ## Key Features
 

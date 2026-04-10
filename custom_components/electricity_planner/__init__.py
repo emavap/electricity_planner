@@ -74,7 +74,7 @@ MANUAL_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_DURATION): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
         vol.Optional(ATTR_REASON): vol.Coerce(str),
         vol.Optional(ATTR_CHARGER_LIMIT_OVERRIDE): vol.All(vol.Coerce(int), vol.Range(min=0, max=50000)),
-        vol.Optional(ATTR_GRID_SETPOINT_OVERRIDE): vol.All(vol.Coerce(int), vol.Range(min=0, max=50000)),
+        vol.Optional(ATTR_GRID_SETPOINT_OVERRIDE): vol.All(vol.Coerce(int), vol.Range(min=-50000, max=50000)),
     }
 )
 
@@ -351,6 +351,14 @@ def _register_services_once(hass: HomeAssistant) -> None:
         # For numeric-only targets, action is optional
         # For boolean targets (battery/car/both), action is required
         if target in (MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT, MANUAL_OVERRIDE_TARGET_GRID_SETPOINT):
+            if target == MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT and charger_limit is None:
+                raise HomeAssistantError(
+                    "charger_limit is required when target is charger_limit"
+                )
+            if target == MANUAL_OVERRIDE_TARGET_GRID_SETPOINT and grid_setpoint is None:
+                raise HomeAssistantError(
+                    "grid_setpoint is required when target is grid_setpoint"
+                )
             # Numeric-only override, no boolean value needed
             value = None
         elif action is None:
