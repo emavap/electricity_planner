@@ -16,6 +16,7 @@ from .const import (
     PHASE_IDS,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
+    CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     CONF_PRICE_THRESHOLD,
@@ -49,6 +50,7 @@ from .const import (
     CONF_SOC_BUFFER_TARGET,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
+    DEFAULT_BATTERY_DUMP_TARGET_SOC,
     DEFAULT_MAX_SOC_SUNNY,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
     DEFAULT_PRICE_THRESHOLD,
@@ -245,6 +247,7 @@ class EngineSettings:
     significant_solar_threshold: int
     min_soc_threshold: float
     max_soc_threshold: float
+    battery_dump_target_soc: float
     max_soc_threshold_sunny: float
     sunny_forecast_threshold_kwh: float
     emergency_soc_threshold: float
@@ -376,6 +379,11 @@ class EngineSettings:
         max_soc_threshold = extractor.get_float(
             CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC, "max_soc_threshold"
         )
+        battery_dump_target_soc = extractor.get_float(
+            CONF_BATTERY_DUMP_TARGET_SOC,
+            DEFAULT_BATTERY_DUMP_TARGET_SOC,
+            "battery_dump_target_soc",
+        )
         max_soc_threshold_sunny = extractor.get_float(
             CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY,
             "max_soc_threshold_sunny"
@@ -447,6 +455,7 @@ class EngineSettings:
             significant_solar_threshold=significant_solar_threshold,
             min_soc_threshold=min_soc_threshold,
             max_soc_threshold=max_soc_threshold,
+            battery_dump_target_soc=battery_dump_target_soc,
             max_soc_threshold_sunny=max_soc_threshold_sunny,
             sunny_forecast_threshold_kwh=sunny_forecast_threshold_kwh,
             emergency_soc_threshold=emergency_soc_threshold,
@@ -2428,11 +2437,18 @@ class ChargingDecisionEngine:
         if average_soc is None:
             return 0
 
-        max_soc_threshold = battery_analysis.get("max_soc_threshold", DEFAULT_MAX_SOC)
-        if average_soc < max_soc_threshold:
+        arbitrage_reserve_soc = self._get_arbitrage_reserve_soc(data)
+        if average_soc < arbitrage_reserve_soc:
             return 0
 
         return export_power
+
+    def _get_arbitrage_reserve_soc(self, data: dict[str, Any]) -> float:
+        """Return the SOC floor that arbitrage discharge must preserve."""
+        reserve_soc = _safe_optional_float(data.get("battery_dump_target_soc"))
+        if reserve_soc is None:
+            reserve_soc = self._settings.battery_dump_target_soc
+        return max(0.0, min(100.0, float(reserve_soc)))
 
     def _calculate_charger_limit(
         self,
@@ -2484,17 +2500,18 @@ class ChargingDecisionEngine:
         # At this point: car_grid_charging=True and not solar_only
         average_soc = battery_analysis.get("average_soc")
         max_soc_threshold = battery_analysis.get("max_soc_threshold", DEFAULT_MAX_SOC)
+        arbitrage_reserve_soc = self._get_arbitrage_reserve_soc(data)
 
         if not car_grid_import_allowed and car_arbitrage_power <= 0:
             if (
                 data.get("arbitrage_mode_active")
                 and average_soc is not None
-                and average_soc < max_soc_threshold
+                and average_soc < arbitrage_reserve_soc
             ):
                 return {
                     "charger_limit": 0,
                     "charger_limit_reason": (
-                        f"Battery {average_soc:.0f}% < {max_soc_threshold}% - "
+                        f"Battery {average_soc:.0f}% < arbitrage reserve {arbitrage_reserve_soc:.0f}% - "
                         "keeping arbitrage energy in the battery"
                     ),
                 }
@@ -2542,7 +2559,7 @@ class ChargingDecisionEngine:
                 ),
             }, data)
 
-        if average_soc < max_soc_threshold:
+        if average_soc < max_soc_threshold and car_arbitrage_power <= 0:
             limit = min(grid_allowance, car_limit_cap)
             return self._apply_peak_import_limit({
                 "charger_limit": int(limit),
@@ -2563,9 +2580,15 @@ class ChargingDecisionEngine:
         if not source_parts:
             source_parts.append("0W available")
 
+        threshold_context = (
+            f"Battery {average_soc:.0f}% ≥ arbitrage reserve {arbitrage_reserve_soc:.0f}%"
+            if car_arbitrage_power > 0 and average_soc < max_soc_threshold
+            else f"Battery {average_soc:.0f}% ≥ {max_soc_threshold}%"
+        )
+
         return self._apply_peak_import_limit({
             "charger_limit": int(limit),
-            "charger_limit_reason": (f"Battery {average_soc:.0f}% ≥ {max_soc_threshold}% - "
+            "charger_limit_reason": (f"{threshold_context} - "
                                     f"car can use {' + '.join(source_parts)} ({int(limit)}W total)"),
         }, data)
 

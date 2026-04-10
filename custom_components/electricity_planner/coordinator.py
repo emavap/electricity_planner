@@ -1327,12 +1327,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             soc = float(battery.get("soc") or 0.0)
             if capacity <= 0:
                 continue
-            available_energy_kwh += capacity * max(0.0, soc - target_soc) / 100.0
+            # Treat the arbitrage reserve as a fleet-wide floor: batteries already
+            # below the target must offset the excess of batteries above it.
+            available_energy_kwh += capacity * (soc - target_soc) / 100.0
 
+        available_energy_kwh = max(0.0, available_energy_kwh)
         plan["available_energy_kwh"] = round(available_energy_kwh, 3)
         if available_energy_kwh <= 0:
             plan["reason"] = (
-                f"Arbitrage reserve target already reached (average energy above {target_soc:.0f}% is unavailable)"
+                f"Arbitrage reserve target already reached (net energy above {target_soc:.0f}% is unavailable)"
             )
             return plan
 

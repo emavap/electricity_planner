@@ -1358,6 +1358,119 @@ def test_battery_dump_plan_derives_threshold_from_selected_slots(fake_hass, monk
     assert "arbitrage threshold 0.080€/kWh" in plan["reason"]
 
 
+def test_battery_dump_plan_stops_when_fleet_net_energy_is_at_reserve(fake_hass, monkeypatch):
+    """Batteries below reserve must offset those above it when computing dump energy."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_BATTERY_DUMP_TARGET_SOC: 40,
+            "feedin_adjustment_multiplier": 1.0,
+            "feedin_adjustment_offset": 0.0,
+            "feedin_price_threshold": 0.05,
+            "max_battery_power": 2000,
+            "max_grid_power": 6000,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._manual_overrides["arbitrage_mode"] = {
+        "value": True,
+        "reason": "Dump mode",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    slots = [
+        _make_price_interval(base_time + timedelta(minutes=15 * slot), 120.0)
+        for slot in range(8)
+    ]
+
+    plan = coordinator._calculate_battery_dump_plan(
+        {
+            "battery_details": [
+                {
+                    "entity_id": "sensor.battery_soc_1",
+                    "soc": 80,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                },
+                {
+                    "entity_id": "sensor.battery_soc_2",
+                    "soc": 0,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                },
+            ],
+            "nordpool_prices_today": {"BE": slots},
+            "nordpool_prices_tomorrow": None,
+        }
+    )
+
+    assert plan["active"] is False
+    assert plan["available_energy_kwh"] == pytest.approx(0.0, rel=1e-6)
+    assert "reserve target already reached" in plan["reason"]
+
+
+def test_battery_dump_plan_uses_net_fleet_headroom_when_some_batteries_are_below_reserve(
+    fake_hass, monkeypatch
+):
+    """A below-reserve battery should reduce, not erase, dump energy when net headroom remains."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_BATTERY_DUMP_TARGET_SOC: 40,
+            "feedin_adjustment_multiplier": 1.0,
+            "feedin_adjustment_offset": 0.0,
+            "feedin_price_threshold": 0.05,
+            "max_battery_power": 2000,
+            "max_grid_power": 6000,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._manual_overrides["arbitrage_mode"] = {
+        "value": True,
+        "reason": "Dump mode",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    slots = [
+        _make_price_interval(base_time + timedelta(minutes=15 * slot), 120.0)
+        for slot in range(8)
+    ]
+
+    plan = coordinator._calculate_battery_dump_plan(
+        {
+            "battery_details": [
+                {
+                    "entity_id": "sensor.battery_soc_1",
+                    "soc": 80,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                },
+                {
+                    "entity_id": "sensor.battery_soc_2",
+                    "soc": 20,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                },
+            ],
+            "nordpool_prices_today": {"BE": slots},
+            "nordpool_prices_tomorrow": None,
+        }
+    )
+
+    assert plan["active"] is True
+    assert plan["available_energy_kwh"] == pytest.approx(2.0, rel=1e-6)
+    assert plan["required_duration_hours"] == pytest.approx(1.0, rel=1e-6)
+    assert plan["export_power"] == 2000
+
+
 def test_battery_dump_plan_activates_during_current_selected_window(fake_hass, monkeypatch):
     """Export should activate when the current price is at or above the arbitrage threshold."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)

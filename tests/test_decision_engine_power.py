@@ -8,6 +8,7 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner.const import (
     CONF_BASE_GRID_SETPOINT,
+    CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_CAR_USE_BATTERY_ARBITRAGE,
     CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
@@ -64,6 +65,7 @@ def _arbitrage_battery_dump_data(**overrides):
         "car_grid_import_allowed": False,
         "battery_grid_charging": False,
         "arbitrage_mode_active": True,
+        "battery_dump_target_soc": 40,
         "battery_dump_export_power": 3000,
         "monthly_grid_peak": 0,
     }
@@ -238,6 +240,33 @@ def test_car_decision_allows_arbitrage_charging_without_grid_import():
     assert "Arbitrage mode active" in result["car_grid_charging_reason"]
 
 
+def test_car_decision_prioritizes_car_above_arbitrage_reserve_even_below_max_soc():
+    engine = _engine()
+
+    result = engine._decide_car_grid_charging(
+        price_analysis={
+            "data_available": True,
+            "current_price": 0.30,
+            "price_threshold": 0.10,
+            "is_low_price": False,
+            "very_low_price": False,
+        },
+        battery_analysis=_arbitrage_battery_analysis(average_soc=60, max_soc_threshold=90),
+        power_allocation={},
+        data={
+            "previous_car_charging": False,
+            "has_min_charging_window": False,
+            "arbitrage_mode_active": True,
+            "battery_dump_target_soc": 40,
+            "battery_dump_export_power": 3000,
+        },
+    )
+
+    assert result["car_grid_charging"] is True
+    assert result["car_grid_import_allowed"] is False
+    assert "Arbitrage mode active" in result["car_grid_charging_reason"]
+
+
 def test_car_decision_skips_arbitrage_when_local_use_disabled():
     engine = _engine({CONF_CAR_USE_BATTERY_ARBITRAGE: False})
 
@@ -256,6 +285,31 @@ def test_car_decision_skips_arbitrage_when_local_use_disabled():
             "has_min_charging_window": False,
             "arbitrage_mode_active": True,
             "battery_dump_export_power": 3000,
+        },
+    )
+
+    assert result["car_grid_charging"] is False
+    assert result["car_grid_import_allowed"] is False
+
+
+def test_car_decision_skips_arbitrage_when_no_export_power_is_scheduled():
+    engine = _engine()
+
+    result = engine._decide_car_grid_charging(
+        price_analysis={
+            "data_available": True,
+            "current_price": 0.30,
+            "price_threshold": 0.10,
+            "is_low_price": False,
+            "very_low_price": False,
+        },
+        battery_analysis=_arbitrage_battery_analysis(),
+        power_allocation={},
+        data={
+            "previous_car_charging": False,
+            "has_min_charging_window": False,
+            "arbitrage_mode_active": True,
+            "battery_dump_export_power": 0,
         },
     )
 
@@ -421,7 +475,7 @@ def test_charger_limit_uses_arbitrage_power_without_grid_import():
     assert "grid" not in result["charger_limit_reason"]
 
 
-def test_charger_limit_prefers_keeping_battery_energy_below_soc_threshold():
+def test_charger_limit_uses_arbitrage_power_above_reserve_even_below_max_soc():
     engine = _engine({CONF_MAX_CAR_POWER: 11000})
 
     result = engine._calculate_charger_limit(
@@ -431,7 +485,63 @@ def test_charger_limit_prefers_keeping_battery_energy_below_soc_threshold():
         data=_arbitrage_battery_dump_data(),
     )
 
+    assert result["charger_limit"] == 3000
+    assert "arbitrage reserve 40%" in result["charger_limit_reason"]
+    assert "3000W battery arbitrage" in result["charger_limit_reason"]
+
+
+def test_charger_limit_keeps_arbitrage_energy_below_reserve_floor():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis=_arbitrage_battery_analysis(average_soc=35),
+        power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
+        data=_arbitrage_battery_dump_data(),
+    )
+
     assert result["charger_limit"] == 0
+    assert "Battery 35% < arbitrage reserve 40%" in result["charger_limit_reason"]
+    assert "keeping arbitrage energy in the battery" in result["charger_limit_reason"]
+
+
+def test_charger_limit_falls_back_to_configured_reserve_when_live_target_missing():
+    engine = _engine(
+        {
+            CONF_MAX_CAR_POWER: 11000,
+            CONF_BATTERY_DUMP_TARGET_SOC: 45,
+        }
+    )
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis=_arbitrage_battery_analysis(average_soc=50),
+        power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
+        data=_arbitrage_battery_dump_data(battery_dump_target_soc=None),
+    )
+
+    assert result["charger_limit"] == 3000
+    assert "arbitrage reserve 45%" in result["charger_limit_reason"]
+    assert "3000W battery arbitrage" in result["charger_limit_reason"]
+
+
+def test_charger_limit_blocks_when_configured_reserve_fallback_is_not_met():
+    engine = _engine(
+        {
+            CONF_MAX_CAR_POWER: 11000,
+            CONF_BATTERY_DUMP_TARGET_SOC: 45,
+        }
+    )
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis=_arbitrage_battery_analysis(average_soc=40),
+        power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
+        data=_arbitrage_battery_dump_data(battery_dump_target_soc=None),
+    )
+
+    assert result["charger_limit"] == 0
+    assert "Battery 40% < arbitrage reserve 45%" in result["charger_limit_reason"]
     assert "keeping arbitrage energy in the battery" in result["charger_limit_reason"]
 
 
@@ -444,6 +554,26 @@ def test_grid_setpoint_nets_remaining_export_after_supplying_ev_from_battery():
         power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
         data=_arbitrage_battery_dump_data(
             arbitrage_mode_reason="Arbitrage mode active"
+        ),
+        charger_limit=3000,
+    )
+
+    assert result["grid_setpoint"] == -1000
+    assert result["grid_components"]["battery"] == -1000
+    assert result["grid_components"]["car"] == 0
+    assert "battery supplying car 2000W" in result["grid_setpoint_reason"]
+    assert "battery exporting 1000W" in result["grid_setpoint_reason"]
+
+
+def test_grid_setpoint_nets_ev_load_before_export_above_reserve_even_below_max_soc():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_grid_setpoint(
+        price_analysis={},
+        battery_analysis=_arbitrage_battery_analysis(average_soc=60, max_soc_threshold=90),
+        power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
+        data=_arbitrage_battery_dump_data(
+            arbitrage_mode_reason="Arbitrage mode active",
         ),
         charger_limit=3000,
     )
@@ -475,6 +605,30 @@ def test_grid_setpoint_combines_arbitrage_battery_with_allowed_grid_import():
     assert result["grid_components"]["car"] == 2000
     assert "battery supplying car 3000W" in result["grid_setpoint_reason"]
     assert "car pulling 2000W" in result["grid_setpoint_reason"]
+
+
+def test_grid_setpoint_does_not_export_without_scheduled_arbitrage_power():
+    engine = _engine()
+
+    result = engine._calculate_grid_setpoint(
+        price_analysis={},
+        battery_analysis={"average_soc": 70, "max_soc_threshold": 90},
+        power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
+        data={
+            "car_charging_power": 0,
+            "car_grid_charging": False,
+            "battery_grid_charging": False,
+            "arbitrage_mode_active": True,
+            "battery_dump_export_power": 0,
+            "monthly_grid_peak": 4000,
+        },
+        charger_limit=0,
+    )
+
+    assert result["grid_setpoint"] == 0
+    assert result["grid_components"]["battery"] == 0
+    assert result["grid_components"]["car"] == 0
+    assert "No grid charging needed" in result["grid_setpoint_reason"]
 
 
 def test_recalculate_after_car_override_clears_stale_arbitrage_state():

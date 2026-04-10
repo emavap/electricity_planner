@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 5.0.0** | **Config Schema Version 20** | **Home Assistant 2024.4+**
+**Version 5.0.1** | **Config Schema Version 20** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Upgrade note for v5.0.0: the arbitrage switch entity id is now `switch.electricity_planner_arbitrage_mode`. Managed dashboards are regenerated automatically, but custom automations and manual dashboards must update the old switch reference.
+> Release note for v5.0.1: arbitrage mode now respects the configured reserve SOC across the full battery fleet, and EV charging takes scheduled arbitrage power before any remaining export is sent to the grid.
 
 ## Key Features
 
