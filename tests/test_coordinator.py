@@ -570,6 +570,49 @@ async def test_handle_entity_change_includes_three_phase_entities(fake_hass, mon
 
 
 @pytest.mark.asyncio
+async def test_throttled_update_does_not_retrigger_after_slow_refresh(fake_hass, monkeypatch):
+    """Events that arrive inside the throttle window should stay throttled even if refresh is slow."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    base_time = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    clock = {"now": base_time}
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: clock["now"], raising=False
+    )
+
+    first_refresh_started = asyncio.Event()
+    release_first_refresh = asyncio.Event()
+    refresh_calls = 0
+
+    async def slow_refresh():
+        nonlocal refresh_calls
+        refresh_calls += 1
+        if refresh_calls == 1:
+            first_refresh_started.set()
+            await release_first_refresh.wait()
+
+    coordinator.async_request_refresh = AsyncMock(side_effect=slow_refresh)
+
+    first_task = asyncio.create_task(
+        coordinator._async_handle_throttled_update("sensor.current_price")
+    )
+    await first_refresh_started.wait()
+
+    clock["now"] = base_time + timedelta(seconds=5)
+    second_task = asyncio.create_task(
+        coordinator._async_handle_throttled_update("sensor.current_price")
+    )
+    await asyncio.sleep(0)
+
+    clock["now"] = base_time + timedelta(seconds=15)
+    release_first_refresh.set()
+
+    await asyncio.gather(first_task, second_task)
+
+    assert coordinator.async_request_refresh.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_handle_entity_change_triggers_for_peak_and_tariff_entities(fake_hass, monkeypatch):
     """Tracked non-power entities should refresh immediately on state changes."""
     config = _base_config()
@@ -1269,6 +1312,70 @@ async def test_manual_override_recomputes_gridpoint(fake_hass, monkeypatch):
     assert updated["grid_components"]["battery"] == expected_setpoint
     assert updated["grid_components"]["car"] == 0
     assert "battery" in updated["grid_setpoint_reason"]
+
+
+@pytest.mark.asyncio
+async def test_manual_car_wait_override_recomputes_stale_car_grid_usage(
+    fake_hass, monkeypatch,
+):
+    """An active car wait override must keep derived grid usage clamped to zero."""
+    base_time = datetime(2025, 6, 1, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    await coordinator.async_set_manual_override(
+        target="car",
+        value=False,
+        duration=None,
+        reason="force wait",
+    )
+
+    decision = {
+        "battery_grid_charging": False,
+        "battery_grid_charging_reason": "automatic decision",
+        "car_grid_charging": False,
+        "car_grid_import_allowed": True,
+        "car_solar_only": False,
+        "car_grid_charging_reason": "automatic decision",
+        "grid_setpoint": 3600,
+        "grid_setpoint_reason": "Stale car import reservation",
+        "grid_components": {"battery": 0, "car": 3600},
+        "charger_limit": 3600,
+        "charger_limit_reason": "Stale charger limit",
+        "battery_analysis": {"average_soc": 60, "max_soc_threshold": 80},
+        "price_analysis": {},
+        "power_allocation": {
+            "solar_for_car": 0,
+            "car_current_solar_usage": 0,
+            "remaining_solar": 0,
+        },
+        "strategy_trace": [],
+    }
+
+    baseline_data = {
+        "current_price": 0.3,
+        "monthly_grid_peak": 0,
+        "car_charging_power": 3600,
+        "car_grid_charging": False,
+        "car_grid_import_allowed": True,
+        "car_solar_only": False,
+        "battery_grid_charging": False,
+    }
+
+    overridden, changed = coordinator._apply_manual_overrides(decision)
+    assert changed == {"car_grid_charging"}
+
+    updated = coordinator.decision_engine.recalculate_after_override(
+        baseline_data, overridden, changed
+    )
+
+    assert updated["car_grid_import_allowed"] is False
+    assert updated["car_solar_only"] is False
+    assert updated["charger_limit"] == 0
+    assert updated["grid_setpoint"] == 0
+    assert updated["grid_components"]["battery"] == 0
+    assert updated["grid_components"]["car"] == 0
 
 
 class _MemoryOverrideStore:
@@ -2246,6 +2353,43 @@ async def test_transport_cost_lookup_uses_local_hour(fake_hass, monkeypatch):
         assert change_start.hour == 1
     finally:
         dt_util.set_default_time_zone(original_tz)
+
+
+@pytest.mark.asyncio
+async def test_transport_cost_lookup_refreshes_fallback_when_current_cost_changes(
+    fake_hass, monkeypatch,
+):
+    """Fallback transport lookups should not stay stale for the full cache TTL."""
+    base_time = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config[CONF_TRANSPORT_COST_ENTITY] = "sensor.transport_cost"
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    def fake_history(hass, start_time, end_time, entities):
+        assert entities == ["sensor.transport_cost"]
+        return {}
+
+    fake_recorder = ModuleType("homeassistant.components.recorder")
+    fake_history_module = ModuleType("homeassistant.components.recorder.history")
+    fake_history_module.get_significant_states = fake_history
+    fake_recorder.history = fake_history_module
+
+    monkeypatch.setitem(sys.modules, "homeassistant.components.recorder", fake_recorder)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.recorder.history",
+        fake_history_module,
+    )
+
+    lookup, status = await coordinator._get_transport_cost_lookup(0.05)
+    assert status == "fallback_current"
+    assert lookup[0]["cost"] == pytest.approx(0.05)
+
+    lookup, status = await coordinator._get_transport_cost_lookup(0.07)
+    assert status == "fallback_current"
+    assert lookup[0]["cost"] == pytest.approx(0.07)
 
 
 def test_resolve_transport_cost_matches_local_week_across_dst(fake_hass, monkeypatch):

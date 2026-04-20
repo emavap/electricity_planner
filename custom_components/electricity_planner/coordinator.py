@@ -164,6 +164,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         # Permissive mode state (controlled via switch entity, persisted across updates)
         self._car_permissive_mode_active: bool = False
+        self._car_permissive_mode_has_persisted_state: bool = False
 
         # Update throttling
         self._last_entity_update = None
@@ -256,7 +257,18 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         Returns:
             The override dict if active, None otherwise.
         """
-        return self._manual_overrides.get(key)
+        override = self._manual_overrides.get(key)
+        if not override:
+            return None
+
+        expires_at: datetime | None = override.get("expires_at")
+        if expires_at and expires_at <= dt_util.utcnow():
+            self._manual_overrides[key] = None
+            _LOGGER.debug("Removed expired manual override on read: %s", key)
+            self._schedule_manual_override_persist()
+            return None
+
+        return override
 
     def is_battery_dump_mode_enabled(self) -> bool:
         """Return whether persistent arbitrage mode is enabled."""
@@ -266,12 +278,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
     async def async_set_car_permissive_mode(self, reason: str | None = None) -> None:
         """Persistently enable car permissive charging mode."""
         self._car_permissive_mode_active = True
+        self._car_permissive_mode_has_persisted_state = True
         _LOGGER.info("Car permissive mode enabled")
         await self._async_persist_car_permissive_mode(reason=reason)
 
     async def async_clear_car_permissive_mode(self, reason: str | None = None) -> None:
         """Disable persistent car permissive charging mode."""
         self._car_permissive_mode_active = False
+        self._car_permissive_mode_has_persisted_state = True
         _LOGGER.info("Car permissive mode cleared")
         await self._async_persist_car_permissive_mode(reason=reason)
 
@@ -367,6 +381,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             return
 
         if stored is None:
+            self._car_permissive_mode_has_persisted_state = False
             return
 
         enabled: Any
@@ -376,9 +391,11 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             enabled = stored
 
         if enabled is None:
+            self._car_permissive_mode_has_persisted_state = False
             return
 
         self._car_permissive_mode_active = bool(enabled)
+        self._car_permissive_mode_has_persisted_state = True
         _LOGGER.debug(
             "Loaded car permissive mode for %s: %s",
             self.entry.entry_id,
@@ -850,11 +867,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         """Apply a manual override for battery or car decisions, charger limit, or grid setpoint."""
         now = dt_util.utcnow()
         expires_at = now + duration if duration is not None else None
+        resolved_targets = set(self._resolve_override_targets(target))
 
         # Apply boolean overrides (battery/car charging) only if value is provided
         if value is not None:
             manual_reason = reason or ("force charge" if value else "force wait")
-            for coordinator_key in self._resolve_override_targets(target):
+            for coordinator_key in resolved_targets:
                 # Only apply boolean overrides to actual boolean keys
                 if coordinator_key in ("battery_grid_charging", "car_grid_charging"):
                     self._manual_overrides[coordinator_key] = {
@@ -872,30 +890,42 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         # Apply numeric overrides (charger_limit and grid_setpoint)
         if charger_limit is not None:
-            self._manual_overrides["charger_limit"] = {
-                "value": charger_limit,
-                "reason": reason or "Manual charger limit override",
-                "expires_at": expires_at,
-                "set_at": now,
-            }
-            _LOGGER.info(
-                "Manual override set for charger_limit → %dW (expires %s)",
-                charger_limit,
-                expires_at.isoformat() if expires_at else "never",
-            )
+            if "charger_limit" in resolved_targets:
+                self._manual_overrides["charger_limit"] = {
+                    "value": charger_limit,
+                    "reason": reason or "Manual charger limit override",
+                    "expires_at": expires_at,
+                    "set_at": now,
+                }
+                _LOGGER.info(
+                    "Manual override set for charger_limit → %dW (expires %s)",
+                    charger_limit,
+                    expires_at.isoformat() if expires_at else "never",
+                )
+            else:
+                _LOGGER.debug(
+                    "Ignoring charger_limit override for target %s; use target='charger_limit'",
+                    target,
+                )
 
         if grid_setpoint is not None:
-            self._manual_overrides["grid_setpoint"] = {
-                "value": grid_setpoint,
-                "reason": reason or "Manual grid setpoint override",
-                "expires_at": expires_at,
-                "set_at": now,
-            }
-            _LOGGER.info(
-                "Manual override set for grid_setpoint → %dW (expires %s)",
-                grid_setpoint,
-                expires_at.isoformat() if expires_at else "never",
-            )
+            if "grid_setpoint" in resolved_targets:
+                self._manual_overrides["grid_setpoint"] = {
+                    "value": grid_setpoint,
+                    "reason": reason or "Manual grid setpoint override",
+                    "expires_at": expires_at,
+                    "set_at": now,
+                }
+                _LOGGER.info(
+                    "Manual override set for grid_setpoint → %dW (expires %s)",
+                    grid_setpoint,
+                    expires_at.isoformat() if expires_at else "never",
+                )
+            else:
+                _LOGGER.debug(
+                    "Ignoring grid_setpoint override for target %s; use target='grid_setpoint'",
+                    target,
+                )
 
         await self._async_persist_manual_overrides()
 
@@ -1046,7 +1076,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
                 previous_value = decision.get(coordinator_key)
                 decision[coordinator_key] = override_value
-                if previous_value != override_value:
+                # Boolean overrides affect derived fields such as charger limits,
+                # grid import allowance, and grid setpoints. Recalculate those
+                # dependents on every refresh while the override is active, even
+                # when the automatic boolean already matches the manual value.
+                if previous_value != override_value or coordinator_key in (
+                    "battery_grid_charging",
+                    "car_grid_charging",
+                ):
                     changed_targets.add(coordinator_key)
 
                 reason_key = f"{coordinator_key}_reason"
@@ -1559,6 +1596,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
     async def _async_handle_throttled_update(self, entity_id: str) -> None:
         """Handle entity update with atomic throttling check."""
+        should_refresh = False
         async with self._update_lock:
             now = dt_util.utcnow()
 
@@ -1567,14 +1605,16 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 now - self._last_entity_update >= self._min_update_interval):
 
                 self._last_entity_update = now
-                # Schedule refresh outside the lock to avoid blocking
-                await self.async_request_refresh()
-                _LOGGER.debug("Entity update triggered for %s (throttled to %ds minimum)",
-                            entity_id, self._min_update_interval.total_seconds())
+                should_refresh = True
             else:
                 time_remaining = (self._last_entity_update + self._min_update_interval - now).total_seconds()
                 _LOGGER.debug("Entity update skipped for %s (throttled, %.1fs remaining)",
                             entity_id, time_remaining)
+
+        if should_refresh:
+            await self.async_request_refresh()
+            _LOGGER.debug("Entity update triggered for %s (throttled to %ds minimum)",
+                        entity_id, self._min_update_interval.total_seconds())
 
     def _get_current_price_interval_start(self) -> datetime:
         """Get the start time of the active price interval."""
@@ -3076,7 +3116,16 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             self._transport_cost_lookup_time
             and now - self._transport_cost_lookup_time < timedelta(minutes=30)
         ):
-            return self._transport_cost_lookup, self._transport_cost_status
+            cached_cost = (
+                self._transport_cost_lookup[0].get("cost")
+                if self._transport_cost_lookup
+                else None
+            )
+            if not (
+                self._transport_cost_status in {"fallback_current", "pending_history"}
+                and cached_cost != current_transport_cost
+            ):
+                return self._transport_cost_lookup, self._transport_cost_status
 
         try:
             try:

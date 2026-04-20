@@ -796,18 +796,10 @@ class ChargingDecisionEngine:
             max(phase_capacity_map.get(phase, 0.0), 0.0) for phase in ordered_phases
         )
 
-        grid_components = overall_decision.get("grid_components") or {}
+        grid_components = self._normalize_grid_components(overall_decision)
         total_grid_setpoint = int(overall_decision.get("grid_setpoint", 0) or 0)
-        battery_component = grid_components.get("battery")
-        car_component = grid_components.get("car")
-
-        if battery_component is None:
-            battery_component = total_grid_setpoint if overall_decision.get("battery_grid_charging") else 0
-        if car_component is None:
-            car_component = max(0, total_grid_setpoint - int(battery_component))
-
-        battery_component = int(battery_component or 0)
-        car_component = int(car_component or 0)
+        battery_component = int(grid_components.get("battery", 0) or 0)
+        car_component = int(grid_components.get("car", 0) or 0)
 
         # Determine capacity-weighted distribution for battery power
         # Battery power is allocated proportionally based on each phase's
@@ -859,6 +851,10 @@ class ChargingDecisionEngine:
         )
 
         charger_limit_total = int(overall_decision.get("charger_limit", 0) or 0)
+        if charger_limit_total > 0 and not car_phases:
+            car_phases = ordered_phases
+            car_weight_map = {phase: 1.0 for phase in ordered_phases}
+
         charger_allocations = (
             self._distribute_quantity(
                 charger_limit_total,
@@ -2617,21 +2613,28 @@ class ChargingDecisionEngine:
         )
 
         min_threshold = self._settings.min_car_charging_threshold
+        planned_car_session = car_charging_allowed and charger_limit > 0
         significant_car_charging = car_charging_power >= min_threshold
+        active_or_planned_car_charging = significant_car_charging or planned_car_session
+        requested_car_power = (
+            max(car_charging_power, float(charger_limit))
+            if planned_car_session
+            else car_charging_power
+        )
         solar_only_note = (
             "Solar-only car charging detected - car grid import blocked"
-            if significant_car_charging and car_solar_only
+            if active_or_planned_car_charging and car_solar_only
             else None
         )
 
         # Handle unavailable battery data
         if average_soc is None:
-            if significant_car_charging and car_grid_import_allowed:
+            if active_or_planned_car_charging and car_grid_import_allowed:
                 max_setpoint = peak_context.effective_max_setpoint
                 effective_car_power = (
-                    min(car_charging_power, charger_limit)
+                    min(requested_car_power, charger_limit)
                     if charger_limit > 0
-                    else car_charging_power
+                    else requested_car_power
                 )
                 grid_setpoint = min(effective_car_power, max_setpoint)
                 return {
@@ -2662,14 +2665,14 @@ class ChargingDecisionEngine:
             int(_safe_optional_float(data.get("battery_dump_export_power")) or 0),
         )
 
-        if significant_car_charging and car_charging_allowed:
+        if active_or_planned_car_charging and car_charging_allowed:
             allocated_solar = (_safe_optional_float(power_allocation.get("solar_for_car")) or 0.0)
             car_current_solar = (_safe_optional_float(power_allocation.get("car_current_solar_usage")) or 0.0)
             car_available_solar = allocated_solar + car_current_solar
             effective_car_power = (
-                min(car_charging_power, charger_limit)
+                min(requested_car_power, charger_limit)
                 if charger_limit > 0
-                else car_charging_power
+                else requested_car_power
             )
             residual_car_need = max(0.0, effective_car_power - car_available_solar)
             car_battery_need = min(residual_car_need, car_arbitrage_power)
@@ -2763,6 +2766,62 @@ class ChargingDecisionEngine:
         data["car_solar_only"] = False
         data["car_grid_import_allowed"] = True
 
+    def _normalize_grid_components(
+        self,
+        decision: dict[str, Any],
+    ) -> dict[str, int]:
+        """Return a battery/car split consistent with the current grid setpoint."""
+        total_grid_setpoint = int(_safe_optional_float(decision.get("grid_setpoint")) or 0)
+        if total_grid_setpoint == 0:
+            return {"battery": 0, "car": 0}
+
+        grid_components = decision.get("grid_components")
+        raw_battery = None
+        raw_car = None
+        if isinstance(grid_components, dict):
+            raw_battery = _safe_optional_float(grid_components.get("battery"))
+            raw_car = _safe_optional_float(grid_components.get("car"))
+
+        if total_grid_setpoint > 0:
+            weights: dict[str, float] = {}
+            if raw_battery is not None and raw_battery > 0:
+                weights["battery"] = raw_battery
+            if raw_car is not None and raw_car > 0:
+                weights["car"] = raw_car
+
+            if weights:
+                allocations = self._distribute_quantity(
+                    total_grid_setpoint,
+                    list(weights),
+                    weights,
+                )
+                return {
+                    "battery": int(allocations.get("battery", 0)),
+                    "car": int(allocations.get("car", 0)),
+                }
+
+            battery_enabled = bool(decision.get("battery_grid_charging", False))
+            car_enabled = bool(decision.get("car_grid_charging", False))
+
+            if battery_enabled and not car_enabled:
+                return {"battery": total_grid_setpoint, "car": 0}
+            if car_enabled and not battery_enabled:
+                return {"battery": 0, "car": total_grid_setpoint}
+            if battery_enabled and car_enabled:
+                charger_limit = max(
+                    0,
+                    int(_safe_optional_float(decision.get("charger_limit")) or 0),
+                )
+                if 0 < charger_limit < total_grid_setpoint:
+                    return {
+                        "battery": total_grid_setpoint - charger_limit,
+                        "car": charger_limit,
+                    }
+
+            return {"battery": total_grid_setpoint, "car": 0}
+
+        return {"battery": total_grid_setpoint, "car": 0}
+
     def recalculate_after_override(
         self,
         baseline_data: dict[str, Any],
@@ -2793,11 +2852,21 @@ class ChargingDecisionEngine:
         if "car_grid_charging" in override_targets:
             self._normalize_car_override_state(decision)
             self._normalize_car_override_state(combined_data)
+
+        if (
+            "charger_limit" not in override_targets
+            and override_targets.intersection({"battery_grid_charging", "car_grid_charging"})
+        ):
             charger_limit_decision = self._calculate_charger_limit(
                 price_analysis, battery_analysis, power_allocation, combined_data
             )
             decision.update(charger_limit_decision)
             combined_data.update(charger_limit_decision)
+
+        if "grid_setpoint" in override_targets:
+            normalized_grid_components = self._normalize_grid_components(decision)
+            decision["grid_components"] = normalized_grid_components
+            combined_data["grid_components"] = normalized_grid_components
 
         if (
             "grid_setpoint" not in override_targets

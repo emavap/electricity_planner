@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 5.0.3** | **Config Schema Version 20** | **Home Assistant 2024.4+**
+**Version 5.0.4** | **Config Schema Version 20** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Release note for v5.0.3: internal cleanup release. The battery solar-allocation helper no longer carries the unused significant-solar parameter introduced by the v5.0.2 logic fix. No behavior change is intended.
+> Release note for v5.0.4: bugfix release. Fixes manual-override recalculation edge cases, EV startup grid reservation, permissive-mode restore precedence, throttled entity refresh locking, and related service/output inconsistencies.
 
 ## Key Features
 

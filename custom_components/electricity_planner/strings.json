@@ -438,11 +438,11 @@
                 },
                 "target": {
                     "name": "Target",
-                    "description": "Which system to override: battery, car, or both."
+                    "description": "Which system to override: battery, car, both, charger_limit, grid_setpoint, or battery_dump."
                 },
                 "action": {
                     "name": "Action",
-                    "description": "Force charge (enable charging) or force wait (disable charging)."
+                    "description": "Force charge (enable charging) or force wait (disable charging) for battery, car, or both targets."
                 },
                 "duration": {
                     "name": "Duration",
@@ -451,6 +451,14 @@
                 "reason": {
                     "name": "Reason",
                     "description": "Optional reason for the override (for logging and diagnostics)."
+                },
+                "charger_limit": {
+                    "name": "Charger Limit",
+                    "description": "Manual EV charger limit in watts when target is charger_limit."
+                },
+                "grid_setpoint": {
+                    "name": "Grid Setpoint",
+                    "description": "Manual grid import/export setpoint in watts when target is grid_setpoint."
                 }
             }
         },
@@ -464,7 +472,7 @@
                 },
                 "target": {
                     "name": "Target",
-                    "description": "Which system to clear: battery, car, or both (default: both)."
+                    "description": "Which override to clear: battery, car, both, charger_limit, grid_setpoint, battery_dump, or all."
                 }
             }
         }

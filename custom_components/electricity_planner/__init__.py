@@ -344,6 +344,21 @@ def _register_services_once(hass: HomeAssistant) -> None:
         grid_setpoint = call.data.get(ATTR_GRID_SETPOINT_OVERRIDE)
 
         if target == MANUAL_OVERRIDE_TARGET_BATTERY_DUMP:
+            invalid_fields = [
+                field_name
+                for field_name, field_value in (
+                    ("action", action),
+                    ("duration", duration_minutes),
+                    ("charger_limit", charger_limit),
+                    ("grid_setpoint", grid_setpoint),
+                )
+                if field_value is not None
+            ]
+            if invalid_fields:
+                raise HomeAssistantError(
+                    "battery_dump target does not accept "
+                    + ", ".join(invalid_fields)
+                )
             await coordinator.async_set_battery_dump_mode(reason=reason)
             await coordinator.async_request_refresh()
             return

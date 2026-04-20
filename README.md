@@ -1,10 +1,10 @@
 # Electricity Planner
 
-**Version 5.0.3** | **Config Schema Version 20** | **Home Assistant 2024.4+**
+**Version 5.0.4** | **Config Schema Version 20** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
-> Release note for v5.0.3: internal cleanup release. The battery solar-allocation helper no longer carries the unused significant-solar parameter introduced by the v5.0.2 logic fix. No behavior change is intended.
+> Release note for v5.0.4: bugfix release. Fixes manual-override recalculation edge cases, EV startup grid reservation, permissive-mode restore precedence, throttled entity refresh locking, and related service/output inconsistencies.
 
 ---
 
@@ -345,8 +345,8 @@ data:
 | `target` | `battery`, `car`, `both`, `charger_limit`, `grid_setpoint`, `battery_dump` | Which override to apply |
 | `action` | `force_charge`, `force_wait` | Boolean override action for `battery`, `car`, or `both` |
 | `duration` | 1–1440 | Override duration in minutes |
-| `charger_limit` | 0–50000 | Optional manual EV charger limit override |
-| `grid_setpoint` | 0–50000 | Optional manual import setpoint override |
+| `charger_limit` | 0–50000 | Manual EV charger limit override used with `target: charger_limit` |
+| `grid_setpoint` | 0–50000 | Manual import/export setpoint override used with `target: grid_setpoint` |
 
 `target: battery_dump` enables the persistent arbitrage mode. It does not use `action` or `duration`.
 

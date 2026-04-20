@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+import yaml
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.exceptions import HomeAssistantError
 
@@ -18,6 +20,8 @@ from custom_components.electricity_planner import (
 )
 from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
 from custom_components.electricity_planner.const import (
+    ATTR_ACTION,
+    ATTR_DURATION,
     ATTR_TARGET,
     CONF_BATTERY_CAPACITIES,
     CONF_BATTERY_DUMP_DEADLINE_HOUR,
@@ -51,6 +55,7 @@ from custom_components.electricity_planner.const import (
     DEFAULT_TRANSPORT_COST_DAY,
     DEFAULT_TRANSPORT_COST_NIGHT,
     ATTR_GRID_SETPOINT_OVERRIDE,
+    MANUAL_OVERRIDE_TARGET_BATTERY_DUMP,
     MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
     MANUAL_OVERRIDE_TARGET_GRID_SETPOINT,
     SERVICE_SET_MANUAL_OVERRIDE,
@@ -293,6 +298,54 @@ async def test_manual_override_service_applies_negative_grid_setpoint(monkeypatc
         -4500,
     )
     coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_battery_dump_service_rejects_unsupported_duration(monkeypatch):
+    """battery_dump target should fail fast instead of silently ignoring duration."""
+    hass = FakeHass()
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_CURRENT_PRICE_ENTITY: "sensor.price"}, options={})
+
+    monkeypatch.setattr(
+        ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+    coordinator = ElectricityPlannerCoordinator(hass, entry)
+    coordinator.async_set_battery_dump_mode = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+    hass.data = {DOMAIN: {entry.entry_id: coordinator}}
+
+    _register_services_once(hass)
+    handler = hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
+
+    with pytest.raises(HomeAssistantError, match="battery_dump target does not accept duration"):
+        await handler(
+            SimpleNamespace(
+                data={
+                    ATTR_TARGET: MANUAL_OVERRIDE_TARGET_BATTERY_DUMP,
+                    ATTR_DURATION: 60,
+                }
+            )
+        )
+
+    coordinator.async_set_battery_dump_mode.assert_not_awaited()
+    coordinator.async_request_refresh.assert_not_awaited()
+
+
+def test_services_yaml_allows_negative_grid_setpoint_selector():
+    """The service selector should expose export-capable grid setpoints in the UI."""
+    services_path = (
+        Path(__file__).resolve().parents[1]
+        / "custom_components"
+        / "electricity_planner"
+        / "services.yaml"
+    )
+
+    services_data = yaml.safe_load(services_path.read_text())
+    grid_selector = services_data["set_manual_override"]["fields"]["grid_setpoint"]["selector"]["number"]
+
+    assert grid_selector["min"] == -50000
 
 
 @pytest.mark.asyncio

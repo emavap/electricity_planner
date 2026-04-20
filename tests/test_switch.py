@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -24,6 +25,7 @@ from custom_components.electricity_planner.const import (
 from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
 from custom_components.electricity_planner.switch import (
     ArbitrageModeSwitch,
+    BatteryChargingDisableSwitch,
     CarPermissiveModeSwitch,
 )
 
@@ -143,6 +145,31 @@ async def test_car_permissive_switch_skips_restore_when_no_last_state(fake_hass,
 
 
 @pytest.mark.asyncio
+async def test_car_permissive_switch_prefers_coordinator_persisted_state(fake_hass, monkeypatch):
+    """Entity restore should not overwrite the coordinator's persisted setting."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    coordinator._car_permissive_mode_active = False
+    coordinator._car_permissive_mode_has_persisted_state = True
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entity = CarPermissiveModeSwitch(coordinator, entry)
+    entity.hass = fake_hass
+
+    monkeypatch.setattr(CoordinatorEntity, "async_added_to_hass", AsyncMock())
+    monkeypatch.setattr(
+        entity,
+        "async_get_last_state",
+        AsyncMock(return_value=SimpleNamespace(state=STATE_ON)),
+    )
+    coordinator.async_request_refresh = AsyncMock()
+
+    await entity.async_added_to_hass()
+
+    assert coordinator._car_permissive_mode_active is False
+    entity.async_get_last_state.assert_not_awaited()
+    coordinator.async_request_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_car_permissive_switch_persists_state_before_refresh(fake_hass, monkeypatch):
     """Toggling permissive mode should persist via the coordinator store immediately."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
@@ -188,3 +215,28 @@ async def test_battery_dump_switch_uses_persistent_override(fake_hass, monkeypat
 
     coordinator.async_clear_battery_dump_mode.assert_awaited_once()
     coordinator.async_request_refresh.assert_awaited_once()
+
+
+def test_battery_disable_switch_ignores_expired_override(fake_hass, monkeypatch):
+    """Expired battery overrides should not keep the disable switch ON."""
+    base_time = coordinator_module.dt_util.utcnow()
+    monkeypatch.setattr(
+        coordinator_module.dt_util,
+        "utcnow",
+        lambda: base_time,
+        raising=False,
+    )
+
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    coordinator._manual_overrides["battery_grid_charging"] = {
+        "value": False,
+        "reason": "temporary disable",
+        "expires_at": base_time - timedelta(minutes=1),
+        "set_at": base_time - timedelta(minutes=5),
+    }
+
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entity = BatteryChargingDisableSwitch(coordinator, entry)
+
+    assert entity.is_on is False
+    assert coordinator._manual_overrides["battery_grid_charging"] is None

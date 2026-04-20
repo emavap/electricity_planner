@@ -53,7 +53,7 @@ set_manual_override:
         text:
     charger_limit:
       name: Charger Limit (Watts)
-      description: Optional override for car charger power limit (leave empty to use automatic calculation)
+      description: Manual override for car charger power limit when target is charger_limit
       required: false
       example: 5000
       selector:
@@ -64,12 +64,12 @@ set_manual_override:
           unit_of_measurement: "W"
     grid_setpoint:
       name: Grid Setpoint (Watts)
-      description: Optional override for grid import power setpoint (leave empty to use automatic calculation)
+      description: Manual override for grid import/export power setpoint when target is grid_setpoint
       required: false
       example: 8000
       selector:
         number:
-          min: 0
+          min: -50000
           max: 50000
           step: 100
           unit_of_measurement: "W"

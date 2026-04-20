@@ -68,6 +68,9 @@ class CarPermissiveModeSwitch(CoordinatorEntity, RestoreEntity, SwitchEntity):
         """Restore the last switch state after Home Assistant restarts."""
         await super().async_added_to_hass()
 
+        if self.coordinator._car_permissive_mode_has_persisted_state:
+            return
+
         last_state = await self.async_get_last_state()
         if last_state is None:
             return

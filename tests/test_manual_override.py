@@ -144,6 +144,25 @@ def test_expired_manual_override_is_cleared(fake_hass, monkeypatch):
     assert updated_decision["strategy_trace"] == decision["strategy_trace"]
 
 
+def test_get_manual_override_clears_expired_override(fake_hass, monkeypatch):
+    """Reading an expired override should treat it as inactive immediately."""
+    base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    coordinator._manual_overrides["battery_grid_charging"] = {
+        "value": False,
+        "reason": "temporary disable",
+        "expires_at": base_time - timedelta(minutes=1),
+        "set_at": base_time - timedelta(minutes=5),
+    }
+
+    override = coordinator.get_manual_override("battery_grid_charging")
+
+    assert override is None
+    assert coordinator._manual_overrides["battery_grid_charging"] is None
+
+
 def test_apply_numeric_override_charger_limit(fake_hass, monkeypatch):
     """Ensure charger_limit numeric override updates decisions."""
     base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
@@ -341,3 +360,31 @@ def test_numeric_only_override_does_not_set_boolean(fake_hass, monkeypatch):
     assert updated_decision["battery_grid_charging"] is False
     assert "car_grid_charging" not in changed_targets
     assert "battery_grid_charging" not in changed_targets
+
+
+def test_mixed_boolean_target_ignores_numeric_override_fields(fake_hass, monkeypatch):
+    """Numeric override values should only apply to their dedicated targets."""
+    base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    import asyncio
+    asyncio.run(coordinator.async_set_manual_override(
+        target="car",
+        value=False,
+        duration=timedelta(minutes=60),
+        reason="Pause charging",
+        charger_limit=5000,
+        grid_setpoint=4000,
+    ))
+
+    assert coordinator._manual_overrides["car_grid_charging"]["value"] is False
+    assert coordinator._manual_overrides["charger_limit"] is None
+    assert coordinator._manual_overrides["grid_setpoint"] is None
+
+    asyncio.run(coordinator.async_clear_manual_override("car"))
+
+    assert coordinator._manual_overrides["car_grid_charging"] is None
+    assert coordinator._manual_overrides["charger_limit"] is None
+    assert coordinator._manual_overrides["grid_setpoint"] is None
