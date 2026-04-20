@@ -2616,11 +2616,14 @@ class ChargingDecisionEngine:
         planned_car_session = car_charging_allowed and charger_limit > 0
         significant_car_charging = car_charging_power >= min_threshold
         active_or_planned_car_charging = significant_car_charging or planned_car_session
-        requested_car_power = (
-            max(car_charging_power, float(charger_limit))
-            if planned_car_session
-            else car_charging_power
-        )
+        if significant_car_charging:
+            requested_car_power = car_charging_power
+        elif planned_car_session:
+            # Reserve the planned charger limit only for startup / ramp-up cycles
+            # where the EV has not yet reached a meaningful measured draw.
+            requested_car_power = float(charger_limit)
+        else:
+            requested_car_power = car_charging_power
         solar_only_note = (
             "Solar-only car charging detected - car grid import blocked"
             if active_or_planned_car_charging and car_solar_only

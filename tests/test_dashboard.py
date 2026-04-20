@@ -200,6 +200,15 @@ def test_bundled_dashboards_keep_dump_toggle_but_not_export_cap_number():
     assert "number.electricity_planner_battery_dump_max_export_power" not in three_phase
 
 
+def test_bundled_dashboards_include_arbitrage_reason():
+    """Both bundled dashboards should expose the arbitrage reason line."""
+    single_phase = (Path(__file__).parent.parent / "electricity_planner_dashboard.yaml").read_text(encoding="utf-8")
+    three_phase = (Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml").read_text(encoding="utf-8")
+
+    assert "name: Arbitrage reason" in single_phase
+    assert "name: Arbitrage reason" in three_phase
+
+
 def test_bundled_three_phase_dashboard_includes_shared_single_phase_sections():
     """Three-phase dashboard should include the same shared charts and diagnostics as single-phase."""
     dashboard_path = Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
@@ -534,6 +543,16 @@ async def test_dashboard_template_includes_grid_setpoint_reason():
 
     assert "entity: sensor.electricity_planner_grid_setpoint" in template
     assert "attribute: grid_setpoint_reason" in template
+
+
+@pytest.mark.asyncio
+async def test_dashboard_template_includes_arbitrage_reason():
+    """Bundled dashboard should render the arbitrage mode reason attribute."""
+    template = dashboard._load_template_text()
+
+    assert "entity: switch.electricity_planner_arbitrage_mode" in template
+    assert "attribute: reason" in template
+    assert "name: Arbitrage reason" in template
 
 
 @pytest.mark.asyncio

@@ -217,6 +217,28 @@ async def test_battery_dump_switch_uses_persistent_override(fake_hass, monkeypat
     coordinator.async_request_refresh.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_battery_dump_switch_reflects_persisted_override_after_restart(
+    fake_hass, monkeypatch,
+):
+    """Arbitrage switch should show ON after coordinator restores persisted override."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    coordinator._manual_override_store = _MemoryStore()
+
+    await coordinator.async_set_battery_dump_mode(reason="persisted dump")
+
+    restored = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    restored._manual_override_store = _MemoryStore(coordinator._manual_override_store.data)
+    await restored._async_load_manual_overrides()
+
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entity = ArbitrageModeSwitch(restored, entry)
+
+    assert entity.is_on is True
+    assert entity.extra_state_attributes["override_active"] is True
+    assert entity.extra_state_attributes["reason"] == "persisted dump"
+
+
 def test_battery_disable_switch_ignores_expired_override(fake_hass, monkeypatch):
     """Expired battery overrides should not keep the disable switch ON."""
     base_time = coordinator_module.dt_util.utcnow()

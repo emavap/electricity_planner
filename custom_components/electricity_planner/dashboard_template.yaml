@@ -225,6 +225,13 @@ views:
                 entity: binary_sensor.electricity_planner_solar_feed_in_grid
                 attribute: reason
                 name: Feed-in reason
+              - entity: switch.electricity_planner_arbitrage_mode
+                name: Arbitrage mode
+                secondary_info: last-changed
+              - type: attribute
+                entity: switch.electricity_planner_arbitrage_mode
+                attribute: reason
+                name: Arbitrage reason
               - entity: binary_sensor.electricity_planner_solar_derating_alarm
                 name: Derating alarm
                 secondary_info: last-changed

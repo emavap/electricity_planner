@@ -36,7 +36,7 @@ from .const import CONF_PHASE_MODE, DOMAIN, PHASE_MODE_SINGLE, PHASE_MODE_THREE
 _LOGGER = logging.getLogger(__name__)
 
 MANAGED_KEY = "electricity_planner_managed"
-MANAGED_VERSION = 23  # Bumped: arbitrage switch now uses the renamed entity ID in managed dashboards
+MANAGED_VERSION = 24  # Bumped: dashboard now surfaces an explicit arbitrage reason line
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 THREE_PHASE_APPENDIX_FILENAME = "dashboard_template_3phase_appendix.yaml"
 
