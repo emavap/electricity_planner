@@ -111,6 +111,7 @@ def _arbitrage_battery_dump_data(**overrides: Any) -> dict[str, Any]:
             "No price data available",
         ),
         (
+            # Arbitrage mode must NOT block battery grid charging — strategy runs
             {"data_available": True, "current_price": 0.08},
             {
                 "batteries_count": 1,
@@ -120,8 +121,8 @@ def _arbitrage_battery_dump_data(**overrides: Any) -> dict[str, Any]:
             },
             {"significant_solar_surplus": False, "solar_surplus": 0},
             {"arbitrage_mode_enabled": True},
-            False,
-            "grid charging is blocked unless the current price is negative",
+            True,
+            "strategy path",
         ),
         (
             {"data_available": True, "current_price": 0.01},

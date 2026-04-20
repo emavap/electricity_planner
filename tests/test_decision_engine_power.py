@@ -1172,8 +1172,17 @@ def test_grid_setpoint_stale_solar_only_bypasses_arbitrage_car_power():
     assert result["grid_setpoint"] == -3000
 
 
-def test_battery_dump_mode_blocks_positive_price_grid_charging():
+def test_arbitrage_mode_does_not_block_battery_grid_charging():
+    """Arbitrage mode alone must NOT block battery grid charging.
+
+    Only the explicit 'Disable Battery Charging' switch (manual override
+    value=False on battery_grid_charging) should prevent grid charging.
+    Normal price-based strategy evaluation must always run.
+    """
     engine = _engine()
+    # Stub the strategy to approve charging (e.g. price is below threshold)
+    engine.strategy_manager.evaluate = lambda context: (True, "low price - charge approved")
+    engine.strategy_manager.get_last_trace = lambda: [{"strategy": "Stub"}]
 
     result = engine._decide_battery_grid_charging(
         price_analysis={"data_available": True, "current_price": 0.08},
@@ -1192,33 +1201,35 @@ def test_battery_dump_mode_blocks_positive_price_grid_charging():
         },
     )
 
-    assert result["battery_grid_charging"] is False
-    assert "grid charging is blocked unless the current price is negative" in result["battery_grid_charging_reason"]
+    # Arbitrage mode alone must not block charging — strategy evaluation wins
+    assert result["battery_grid_charging"] is True
+    assert result["battery_grid_charging_reason"] == "low price - charge approved"
+    assert "blocked" not in result["battery_grid_charging_reason"]
 
 
-def test_battery_dump_mode_still_allows_negative_price_strategy():
+def test_arbitrage_mode_strategy_evaluation_runs_at_any_price():
+    """Strategy manager is always invoked regardless of price sign when arbitrage is active."""
     engine = _engine()
-    engine.strategy_manager.evaluate = lambda context: (True, "negative price strategy")
+    engine.strategy_manager.evaluate = lambda context: (True, "strategy approved")
     engine.strategy_manager.get_last_trace = lambda: [{"strategy": "Stub"}]
 
-    result = engine._decide_battery_grid_charging(
-        price_analysis={"data_available": True, "current_price": -0.01},
-        battery_analysis={
-            "batteries_count": 1,
-            "batteries_available": True,
-            "batteries_full": False,
-            "average_soc": 20,
-        },
-        power_allocation={},
-        power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
-        time_context={},
-        data={
-            "arbitrage_mode_enabled": True,
-        },
-    )
+    for price in (-0.01, 0.0, 0.08, 0.20):
+        result = engine._decide_battery_grid_charging(
+            price_analysis={"data_available": True, "current_price": price},
+            battery_analysis={
+                "batteries_count": 1,
+                "batteries_available": True,
+                "batteries_full": False,
+                "average_soc": 20,
+            },
+            power_allocation={},
+            power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
+            time_context={},
+            data={"arbitrage_mode_enabled": True},
+        )
 
-    assert result["battery_grid_charging"] is True
-    assert result["battery_grid_charging_reason"] == "negative price strategy"
+        assert result["battery_grid_charging"] is True, f"Failed at price={price}"
+        assert result["battery_grid_charging_reason"] == "strategy approved"
 
 
 def test_battery_grid_charging_full_reason_uses_default_max_soc_when_missing():

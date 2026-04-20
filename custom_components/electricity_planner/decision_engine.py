@@ -1581,17 +1581,13 @@ class ChargingDecisionEngine:
                 "strategy_trace": [],
             }
 
-        if data.get("arbitrage_mode_enabled"):
-            current_price = _safe_optional_float(price_analysis.get("current_price"))
-            if current_price is None or current_price >= 0:
-                return {
-                    "battery_grid_charging": False,
-                    "battery_grid_charging_reason": (
-                        "Arbitrage mode active - "
-                        "grid charging is blocked unless the current price is negative"
-                    ),
-                    "strategy_trace": [],
-                }
+        # NOTE: Arbitrage mode does NOT block battery grid charging here.
+        # The normal price-based strategies decide whether to charge.
+        # Only the explicit "Disable Battery Charging" switch (manual override
+        # with value=False on battery_grid_charging) should prevent grid charging.
+        # During active arbitrage export windows the grid-setpoint calculation
+        # gives export priority over charging, so grid charging is naturally
+        # suppressed without an extra block here.
 
         # Early return: If significant solar available + medium/high SOC
         # → Skip grid charging and wait for solar instead (always prefer free solar)
