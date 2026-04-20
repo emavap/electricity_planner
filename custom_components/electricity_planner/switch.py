@@ -251,22 +251,29 @@ class ArbitrageModeSwitch(CoordinatorEntity, SwitchEntity):
         """Return additional state attributes."""
         dump_plan = self.coordinator.data.get("battery_dump_plan", {}) if self.coordinator.data else {}
         override = self.coordinator.get_manual_override("arbitrage_mode")
+        override_active = bool(override and override.get("value") is True)
         set_at = override.get("set_at") if override else None
+        effective_plan = dump_plan if override_active and dump_plan.get("enabled") else {}
+        reason = (
+            effective_plan.get("reason")
+            or (override.get("reason") if override_active and override else None)
+            or "Arbitrage mode disabled"
+        )
 
         return {
-            "override_active": self.is_on,
-            "reason": dump_plan.get("reason") or (override.get("reason") if override else None),
-            "target_soc": dump_plan.get("target_soc"),
-            "currently_dumping": dump_plan.get("active", False),
-            "dump_price_threshold": dump_plan.get("dump_price_threshold"),
-            "current_slot_price": dump_plan.get("current_slot_price"),
-            "slots_cover_full_dump": dump_plan.get("slots_cover_full_dump"),
-            "selected_slots_count": dump_plan.get("selected_slots_count", 0),
-            "selected_slots": dump_plan.get("selected_slots", []),
-            "deadline": dump_plan.get("deadline"),
-            "export_power": dump_plan.get("export_power"),
-            "configured_export_cap_w": dump_plan.get("configured_export_cap_w"),
-            "available_energy_kwh": dump_plan.get("available_energy_kwh"),
+            "override_active": override_active,
+            "reason": reason,
+            "target_soc": effective_plan.get("target_soc"),
+            "currently_dumping": effective_plan.get("active", False),
+            "dump_price_threshold": effective_plan.get("dump_price_threshold"),
+            "current_slot_price": effective_plan.get("current_slot_price"),
+            "slots_cover_full_dump": effective_plan.get("slots_cover_full_dump"),
+            "selected_slots_count": effective_plan.get("selected_slots_count", 0),
+            "selected_slots": effective_plan.get("selected_slots", []),
+            "deadline": effective_plan.get("deadline"),
+            "export_power": effective_plan.get("export_power"),
+            "configured_export_cap_w": effective_plan.get("configured_export_cap_w"),
+            "available_energy_kwh": effective_plan.get("available_energy_kwh"),
             "set_at": set_at.isoformat() if set_at else None,
             "description": (
                 "When enabled, the planner derives an arbitrage price threshold from the highest "

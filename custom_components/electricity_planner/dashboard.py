@@ -161,8 +161,6 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
         _schedule_entity_map_retry(hass, entry, f"missing core entities: {', '.join(missing_core)}")
         return
 
-    _clear_entity_map_retry_state(hass, entry.entry_id)
-
     template_text = await _async_load_template_text(hass, TEMPLATE_FILENAME)
     if not template_text:
         _LOGGER.error("Dashboard template %s missing; skipping creation", TEMPLATE_FILENAME)
@@ -173,6 +171,19 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
     replacements = _build_replacements(entry, entity_map)
     _LOGGER.debug("Built %d entity replacements", len(replacements))
     rendered_template = _apply_replacements(template_text, replacements)
+    unresolved_placeholders = _find_unresolved_placeholders(rendered_template)
+    if unresolved_placeholders:
+        _LOGGER.warning(
+            "Deferring dashboard creation for %s: unresolved entity placeholders %s",
+            entry.entry_id,
+            ", ".join(unresolved_placeholders),
+        )
+        _schedule_entity_map_retry(
+            hass,
+            entry,
+            f"unresolved entity placeholders: {', '.join(unresolved_placeholders)}",
+        )
+        return
 
     try:
         dashboard_config = yaml.safe_load(rendered_template)
@@ -193,6 +204,19 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
             return
 
         rendered_appendix = _apply_replacements(appendix_text, replacements)
+        unresolved_appendix_placeholders = _find_unresolved_placeholders(rendered_appendix)
+        if unresolved_appendix_placeholders:
+            _LOGGER.warning(
+                "Deferring dashboard creation for %s: unresolved appendix placeholders %s",
+                entry.entry_id,
+                ", ".join(unresolved_appendix_placeholders),
+            )
+            _schedule_entity_map_retry(
+                hass,
+                entry,
+                f"unresolved appendix placeholders: {', '.join(unresolved_appendix_placeholders)}",
+            )
+            return
         try:
             appendix_cards = yaml.safe_load(rendered_appendix)
         except yaml.YAMLError as error:
@@ -207,6 +231,7 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
         "entry_id": entry.entry_id,
         "version": MANAGED_VERSION,
     }
+    _clear_entity_map_retry_state(hass, entry.entry_id)
 
     url_path = _dashboard_url_path(entry)
     _LOGGER.debug("Dashboard URL path: %s", url_path)
@@ -611,6 +636,15 @@ def _build_replacements(entry, entity_map: dict[str, str]) -> dict[str, str]:
         if entity_id:
             replacements[ref.placeholder] = entity_id
     return replacements
+
+
+def _find_unresolved_placeholders(rendered_template: str) -> list[str]:
+    """Return any template entity placeholders still present after replacements."""
+    unresolved: list[str] = []
+    for ref in ENTITY_REFERENCES:
+        if ref.placeholder in rendered_template and ref.placeholder not in unresolved:
+            unresolved.append(ref.placeholder)
+    return unresolved
 
 
 def _dashboard_url_path(entry) -> str:

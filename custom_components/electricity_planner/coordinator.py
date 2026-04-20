@@ -292,12 +292,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
     async def async_set_battery_dump_mode(self, reason: str | None = None) -> None:
         """Persistently enable arbitrage mode."""
         now = dt_util.utcnow()
+        effective_reason = reason or "Arbitrage mode enabled"
         self._manual_overrides["arbitrage_mode"] = {
             "value": True,
-            "reason": reason or "Arbitrage mode enabled",
+            "reason": effective_reason,
             "expires_at": None,
             "set_at": now,
         }
+        self._update_runtime_arbitrage_state(enabled=True, reason=effective_reason)
         _LOGGER.info("Arbitrage mode enabled")
         await self._async_persist_manual_overrides()
 
@@ -306,7 +308,45 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         if self._manual_overrides.get("arbitrage_mode"):
             _LOGGER.info("Arbitrage mode cleared")
         self._manual_overrides["arbitrage_mode"] = None
+        self._update_runtime_arbitrage_state(enabled=False, reason="Arbitrage mode disabled")
         await self._async_persist_manual_overrides()
+
+    def _update_runtime_arbitrage_state(self, enabled: bool, reason: str) -> None:
+        """Keep runtime entity state coherent while the next refresh is pending."""
+        if not isinstance(self.data, dict):
+            return
+
+        target_soc = float(
+            self.config.get(
+                CONF_BATTERY_DUMP_TARGET_SOC,
+                DEFAULT_BATTERY_DUMP_TARGET_SOC,
+            )
+        )
+        plan = {
+            "enabled": enabled,
+            "active": False,
+            "reason": reason,
+            "target_soc": round(min(100.0, max(0.0, target_soc)), 1),
+            "configured_export_cap_w": 0,
+            "deadline": None,
+            "available_energy_kwh": 0.0,
+            "required_duration_hours": 0.0,
+            "slots_cover_full_dump": False,
+            "dump_price_threshold": None,
+            "current_slot_price": None,
+            "selected_slots": [],
+            "selected_slots_count": 0,
+            "export_power": 0,
+        }
+
+        updated_data = dict(self.data)
+        updated_data["battery_dump_plan"] = plan
+        updated_data["arbitrage_mode_enabled"] = enabled
+        updated_data["arbitrage_mode_active"] = False
+        updated_data["arbitrage_mode_reason"] = reason
+        updated_data["battery_dump_target_soc"] = plan["target_soc"]
+        updated_data["battery_dump_export_power"] = 0
+        self.async_set_updated_data(updated_data)
 
     async def _async_load_manual_overrides(self) -> None:
         """Load persisted manual overrides from storage."""

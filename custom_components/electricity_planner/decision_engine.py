@@ -962,6 +962,15 @@ class ChargingDecisionEngine:
             "battery_grid_charging": False,
             "car_grid_charging": False,
             "car_grid_import_allowed": False,
+            # car_solar_only MUST be seeded here so that a stale True from a
+            # prior solar-only cycle stored in coordinator state (passed back as
+            # `data`) is overwritten by the current cycle's decision even when
+            # the car-decision path (e.g. arbitrage) does not set the key
+            # explicitly.  Without this seed the stale flag leaks into
+            # decision_data_for_downstream and causes _calculate_charger_limit
+            # and _calculate_grid_setpoint to use the solar-only branch instead
+            # of the arbitrage branch.
+            "car_solar_only": False,
             "battery_grid_charging_reason": "No decision made",
             "car_grid_charging_reason": "No decision made",
             "charger_limit": 0,
@@ -2270,6 +2279,18 @@ class ChargingDecisionEngine:
                 "car_grid_charging_reason": reason,
             }
         else:
+            if context.has_allocated_solar:
+                base_reason = (
+                    f"Very low price ({price:.3f}€/kWh) but less than {context.min_duration}h "
+                    f"of low prices ahead - using solar power only ({context.format_solar_watts()})"
+                )
+                return {
+                    "car_grid_charging": True,
+                    "car_solar_only": True,
+                    "car_grid_charging_reason": self._append_permissive_mode_to_reason(
+                        base_reason, context
+                    ),
+                }
             base_reason = (
                 f"Very low price ({price:.3f}€/kWh) but less than {context.min_duration}h "
                 "of low prices ahead - waiting for longer window"
@@ -2308,6 +2329,16 @@ class ChargingDecisionEngine:
             }
 
         if context.is_low_price_flag:
+            if context.has_allocated_solar:
+                base_reason = (
+                    f"Low price ({context.format_price_comparison()}) but less than {context.min_duration}h "
+                    f"of low prices ahead - using solar power only ({context.format_solar_watts()})"
+                )
+                return {
+                    "car_grid_charging": True,
+                    "car_solar_only": True,
+                    "car_grid_charging_reason": self._append_permissive_mode_to_reason(base_reason, context),
+                }
             base_reason = (
                 f"Low price ({context.format_price_comparison()}) but less than {context.min_duration}h "
                 "of low prices ahead - waiting for longer window"
@@ -2332,6 +2363,17 @@ class ChargingDecisionEngine:
             f"Waiting for low-price window before starting "
             f"({context.format_price_comparison()} floor, {window_requirement})"
         )
+        if context.has_allocated_solar:
+            solar_reason = (
+                f"Waiting for low-price window before starting "
+                f"({context.format_price_comparison()} floor, {window_requirement}) - "
+                f"using solar power only ({context.format_solar_watts()})"
+            )
+            return {
+                "car_grid_charging": True,
+                "car_solar_only": True,
+                "car_grid_charging_reason": self._append_permissive_mode_to_reason(solar_reason, context),
+            }
         return {
             "car_grid_charging": False,
             "car_grid_charging_reason": self._append_permissive_mode_to_reason(base_reason, context),
@@ -2347,6 +2389,15 @@ class ChargingDecisionEngine:
 
         if context.previous_charging:
             self._unlock_car_charging_threshold(data)
+            if context.has_allocated_solar:
+                base_reason = (
+                    f"{high_price_reason} - switching to solar power only ({context.format_solar_watts()})"
+                )
+                return {
+                    "car_grid_charging": True,
+                    "car_solar_only": True,
+                    "car_grid_charging_reason": self._append_permissive_mode_to_reason(base_reason, context),
+                }
             base_reason = (
                 f"{high_price_reason} - stopping car charging"
             )
@@ -2614,13 +2665,25 @@ class ChargingDecisionEngine:
 
         min_threshold = self._settings.min_car_charging_threshold
         planned_car_session = car_charging_allowed and charger_limit > 0
-        significant_car_charging = car_charging_power >= min_threshold
+        significant_car_charging = car_charging_power > min_threshold
         active_or_planned_car_charging = significant_car_charging or planned_car_session
-        if significant_car_charging:
-            requested_car_power = car_charging_power
-        elif planned_car_session:
-            # Reserve the planned charger limit only for startup / ramp-up cycles
-            # where the EV has not yet reached a meaningful measured draw.
+        battery_dump_active = bool(data.get("arbitrage_mode_active", False))
+        previous_car_charging = bool(data.get(_PREVIOUS_CAR_CHARGING_KEY))
+        reserve_planned_limit = (
+            planned_car_session
+            and car_grid_import_allowed
+            and not battery_dump_active
+            and car_arbitrage_power <= 0
+            and not previous_car_charging
+        )
+        if reserve_planned_limit:
+            # On startup/resume the grid setpoint acts as the EV's import
+            # permission, so keep the full allowed headroom reserved until the
+            # session is established.
+            requested_car_power = float(charger_limit)
+        elif planned_car_session and not significant_car_charging:
+            # Fresh starts still need the planned limit until the charger begins
+            # drawing meaningful power.
             requested_car_power = float(charger_limit)
         else:
             requested_car_power = car_charging_power
@@ -2662,7 +2725,6 @@ class ChargingDecisionEngine:
         grid_setpoint_parts = []
         car_grid_need = 0
         car_battery_need = 0
-        battery_dump_active = bool(data.get("arbitrage_mode_active", False))
         battery_dump_export_power = max(
             0,
             int(_safe_optional_float(data.get("battery_dump_export_power")) or 0),
@@ -2815,10 +2877,11 @@ class ChargingDecisionEngine:
                     0,
                     int(_safe_optional_float(decision.get("charger_limit")) or 0),
                 )
-                if 0 < charger_limit < total_grid_setpoint:
+                if charger_limit > 0:
+                    car_allocation = min(charger_limit, total_grid_setpoint)
                     return {
-                        "battery": total_grid_setpoint - charger_limit,
-                        "car": charger_limit,
+                        "battery": total_grid_setpoint - car_allocation,
+                        "car": car_allocation,
                     }
 
             return {"battery": total_grid_setpoint, "car": 0}
@@ -2856,6 +2919,14 @@ class ChargingDecisionEngine:
             self._normalize_car_override_state(decision)
             self._normalize_car_override_state(combined_data)
 
+        # When the user force-enables battery grid charging the arbitrage export
+        # window must not dominate.  Clear the dump flags so that
+        # _calculate_grid_setpoint follows the charging path instead of the
+        # export path.
+        if "battery_grid_charging" in override_targets and decision.get("battery_grid_charging"):
+            combined_data["arbitrage_mode_active"] = False
+            combined_data["battery_dump_export_power"] = 0
+
         if (
             "charger_limit" not in override_targets
             and override_targets.intersection({"battery_grid_charging", "car_grid_charging"})
@@ -2870,6 +2941,11 @@ class ChargingDecisionEngine:
             normalized_grid_components = self._normalize_grid_components(decision)
             decision["grid_components"] = normalized_grid_components
             combined_data["grid_components"] = normalized_grid_components
+            decision["grid_setpoint_reason"] = self._format_manual_grid_setpoint_reason(
+                decision,
+                normalized_grid_components,
+            )
+            combined_data["grid_setpoint_reason"] = decision["grid_setpoint_reason"]
 
         if (
             "grid_setpoint" not in override_targets
@@ -2897,3 +2973,30 @@ class ChargingDecisionEngine:
             decision["phase_results"] = phase_results
 
         return decision
+
+    @staticmethod
+    def _format_manual_grid_setpoint_reason(
+        decision: dict[str, Any],
+        grid_components: dict[str, int],
+    ) -> str:
+        """Describe the effective split of a manual grid-setpoint override."""
+        manual_reason = (
+            decision.get("manual_overrides", {})
+            .get("grid_setpoint", {})
+            .get("reason", "Manual grid setpoint override")
+        )
+        total_setpoint = int(_safe_optional_float(decision.get("grid_setpoint")) or 0)
+        battery_component = int(grid_components.get("battery", 0))
+        car_component = int(grid_components.get("car", 0))
+
+        if total_setpoint < 0:
+            direction = f"{abs(total_setpoint)}W export"
+        elif total_setpoint > 0:
+            direction = f"{total_setpoint}W import"
+        else:
+            direction = "0W neutral flow"
+
+        return (
+            f"Manual override: {manual_reason} "
+            f"({direction}; battery {battery_component}W, car {car_component}W)"
+        )

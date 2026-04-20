@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.electricity_planner.const import DOMAIN
+from custom_components.electricity_planner.binary_sensor import FeedinSolarBinarySensor
 from custom_components.electricity_planner.sensor import (
     EmergencySOCThresholdSensor,
     FeedinPriceThresholdSensor,
@@ -78,6 +79,28 @@ def test_feedin_threshold_sensor_handles_zero_price():
 
     assert attrs["price_above_threshold"] is False
     assert attrs["margin"] == -0.05
+
+
+def test_feedin_binary_sensor_exposes_effective_feed_price():
+    """Feed-in more-info should show the effective price used by the decision."""
+    coordinator = SimpleNamespace(
+        data={
+            "feedin_effective_price": 0.07,
+            "feedin_solar": True,
+            "feedin_solar_reason": "Allowed",
+            "power_allocation": {"remaining_solar": 500, "total_allocated": 1500},
+        },
+        config={"feedin_price_threshold": 0.05},
+        async_add_listener=lambda update_callback, context=None: lambda: None,
+        last_update_success=True,
+    )
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data={})
+
+    sensor = FeedinSolarBinarySensor(coordinator, entry)
+    attrs = sensor.extra_state_attributes
+
+    assert attrs["current_price"] == 0.07
+    assert attrs["feedin_threshold"] == 0.05
 
 
 def test_inverter_derating_target_sensor_exposes_control_context():

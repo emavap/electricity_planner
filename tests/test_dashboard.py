@@ -192,6 +192,7 @@ def test_bundled_dashboards_keep_dump_toggle_but_not_export_cap_number():
     assert "name: Arbitrage Threshold" not in three_phase_buy_section
     assert "name: Net feed-in price" in single_phase
     assert "name: Net feed-in price" in three_phase
+    assert "binary_sensor.electricity_planner_solar_feed_in_grid" in single_phase
     assert "Sunny Forecast Trigger" in single_phase
     assert "Sunny Forecast Trigger" in three_phase
     assert "title: Battery Dump Plan" not in single_phase
@@ -436,6 +437,43 @@ async def test_dashboard_setup_retries_when_core_entities_missing():
         dashboard, "_get_lovelace_handles", return_value=dashboard.DashboardHandles(collection=None, dashboards={})
     ), patch.object(
         dashboard, "_async_wait_for_entity_map", new=AsyncMock(return_value=entity_map)
+    ), patch.object(
+        dashboard, "_ensure_dashboard_record", new=AsyncMock()
+    ) as ensure_mock, patch.object(
+        dashboard, "_schedule_entity_map_retry"
+    ) as retry_mock:
+        await dashboard.async_setup_or_update_dashboard(hass, entry)
+
+    ensure_mock.assert_not_called()
+    retry_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_setup_retries_when_rendered_template_has_unresolved_placeholders():
+    """Dashboard creation should retry instead of saving placeholders as literal entity IDs."""
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner Instance", data={})
+    hass = SimpleNamespace(loop=FakeLoop(), data={})
+    entity_map = {
+        f"{entry.entry_id}_price_analysis": "sensor.custom_price_sensor",
+        f"{entry.entry_id}_battery_grid_charging": "binary_sensor.battery_grid_allowed",
+        f"{entry.entry_id}_car_grid_charging": "binary_sensor.car_grid_allowed",
+        f"{entry.entry_id}_max_soc_threshold": "number.custom_max_soc",
+        f"{entry.entry_id}_max_soc_threshold_sunny": "number.custom_max_soc_sunny",
+        f"{entry.entry_id}_sunny_forecast_threshold_kwh": "number.custom_sunny_forecast_threshold",
+    }
+    template = (
+        "views:\n"
+        "  - cards:\n"
+        "      - entity: sensor.electricity_planner_current_electricity_price\n"
+        "      - entity: binary_sensor.electricity_planner_solar_derating_alarm\n"
+    )
+
+    with patch.object(
+        dashboard, "_get_lovelace_handles", return_value=dashboard.DashboardHandles(collection=None, dashboards={})
+    ), patch.object(
+        dashboard, "_async_wait_for_entity_map", new=AsyncMock(return_value=entity_map)
+    ), patch.object(
+        dashboard, "_async_load_template_text", new=AsyncMock(return_value=template)
     ), patch.object(
         dashboard, "_ensure_dashboard_record", new=AsyncMock()
     ) as ensure_mock, patch.object(

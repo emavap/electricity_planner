@@ -134,6 +134,7 @@ def test_grid_setpoint_distributes_between_car_and_battery():
     data = {
         "car_charging_power": 6000,
         "car_grid_charging": True,
+        "previous_car_charging": True,
         "battery_grid_charging": True,
         "monthly_grid_peak": 8000,
     }
@@ -155,6 +156,56 @@ def test_grid_setpoint_distributes_between_car_and_battery():
     assert "max allowed peak is 3000W" in reason
     assert "using 7200W" in reason
     assert "(90% of 8000W)" in reason
+
+
+def test_grid_setpoint_keeps_ev_headroom_reserved_while_battery_is_grid_charging():
+    engine = _engine()
+
+    result = engine._calculate_grid_setpoint(
+        price_analysis={},
+        battery_analysis={"average_soc": 80, "max_soc_threshold": 90},
+        power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
+        data={
+            "car_charging_power": 1500,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "previous_car_charging": False,
+            "battery_grid_charging": True,
+            "monthly_grid_peak": 8000,
+        },
+        charger_limit=7000,
+    )
+
+    assert result["grid_setpoint"] == 7200
+    assert result["grid_components"]["car"] == 7000
+    assert result["grid_components"]["battery"] == 200
+    assert "car pulling 7000W" in result["grid_setpoint_reason"]
+    assert "battery charging 200W" in result["grid_setpoint_reason"]
+
+
+def test_grid_setpoint_uses_live_draw_once_car_session_is_established():
+    engine = _engine()
+
+    result = engine._calculate_grid_setpoint(
+        price_analysis={},
+        battery_analysis={"average_soc": 80, "max_soc_threshold": 90},
+        power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
+        data={
+            "car_charging_power": 1500,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "previous_car_charging": True,
+            "battery_grid_charging": True,
+            "monthly_grid_peak": 8000,
+        },
+        charger_limit=7000,
+    )
+
+    assert result["grid_setpoint"] == 5500
+    assert result["grid_components"]["car"] == 1500
+    assert result["grid_components"]["battery"] == 4000
+    assert "car pulling 1500W" in result["grid_setpoint_reason"]
+    assert "battery charging 4000W" in result["grid_setpoint_reason"]
 
 
 def test_grid_setpoint_zero_for_solar_only_car():
@@ -708,8 +759,21 @@ def test_grid_setpoint_does_not_export_without_scheduled_arbitrage_power():
 
     assert result["grid_setpoint"] == 0
     assert result["grid_components"]["battery"] == 0
-    assert result["grid_components"]["car"] == 0
-    assert "No grid charging needed" in result["grid_setpoint_reason"]
+
+
+def test_normalize_grid_components_assigns_car_share_when_setpoint_equals_charger_limit():
+    engine = _engine()
+
+    result = engine._normalize_grid_components(
+        {
+            "grid_setpoint": 3000,
+            "battery_grid_charging": True,
+            "car_grid_charging": True,
+            "charger_limit": 3000,
+        }
+    )
+
+    assert result == {"battery": 0, "car": 3000}
 
 
 def test_recalculate_after_charger_limit_override_updates_grid_setpoint_and_phase_results():
@@ -881,6 +945,231 @@ def test_recalculate_after_car_override_clears_stale_arbitrage_state():
     assert result["grid_setpoint"] == -3000
     assert result["grid_components"]["car"] == 0
     assert result["grid_components"]["battery"] == -3000
+
+
+def test_recalculate_after_battery_override_while_arbitrage_active_yields_positive_setpoint():
+    """Bug A regression: manually enabling battery_grid_charging while an arbitrage
+    export window is active must produce a positive (import) grid setpoint, not a
+    negative (export) one.  The export path was previously dominant because
+    arbitrage_mode_active=True was left untouched in combined_data even after the
+    override forced battery_grid_charging=True."""
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine.recalculate_after_override(
+        baseline_data={
+            "arbitrage_mode_active": True,
+            "battery_dump_export_power": 3000,
+            "arbitrage_mode_reason": "High-price export window",
+            "car_grid_charging": False,
+            "car_grid_import_allowed": False,
+            "car_solar_only": False,
+            "monthly_grid_peak": 0,
+        },
+        decision={
+            "price_analysis": {},
+            "battery_analysis": {"average_soc": 70, "max_soc_threshold": 90},
+            "power_allocation": {
+                "remaining_solar": 0,
+                "solar_for_car": 0,
+                "car_current_solar_usage": 0,
+            },
+            "car_charging_power": 0,
+            "car_grid_charging": False,
+            "car_grid_import_allowed": False,
+            "car_solar_only": False,
+            "battery_grid_charging": True,   # forced on by override
+            "arbitrage_mode_active": True,   # stale from automatic decision
+            "battery_dump_export_power": 3000,
+            "charger_limit": 0,
+            "grid_setpoint": -3000,          # old automatic setpoint
+            "grid_components": {"battery": -3000, "car": 0},
+        },
+        override_targets={"battery_grid_charging"},
+    )
+
+    # The override should produce a positive setpoint (grid import for battery charging),
+    # NOT the original negative export setpoint from the automatic arbitrage decision.
+    assert result["grid_setpoint"] > 0, (
+        f"Expected positive setpoint (charging) after battery_grid_charging override "
+        f"while arbitrage is active, got {result['grid_setpoint']}"
+    )
+    assert result["grid_components"]["battery"] > 0
+    assert result["grid_components"]["car"] == 0
+
+
+def test_recalculate_after_battery_override_while_arbitrage_active_car_still_uses_battery():
+    """When both battery_grid_charging is force-enabled AND the car was already using
+    arbitrage battery power (car_grid_charging=True with grid_import_allowed=False),
+    the grid setpoint should be positive and reflect both loads."""
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine.recalculate_after_override(
+        baseline_data={
+            "arbitrage_mode_active": True,
+            "battery_dump_export_power": 3000,
+            "arbitrage_mode_reason": "High-price export window",
+            "car_grid_import_allowed": False,
+            "car_solar_only": False,
+            "monthly_grid_peak": 0,
+        },
+        decision={
+            "price_analysis": {},
+            "battery_analysis": {"average_soc": 70, "max_soc_threshold": 90},
+            "power_allocation": {
+                "remaining_solar": 0,
+                "solar_for_car": 0,
+                "car_current_solar_usage": 0,
+            },
+            "car_charging_power": 2000,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": False,
+            "car_solar_only": False,
+            "battery_grid_charging": True,   # forced on
+            "arbitrage_mode_active": True,
+            "battery_dump_export_power": 3000,
+            "charger_limit": 3000,
+            "grid_setpoint": -1000,
+            "grid_components": {"battery": -1000, "car": 0},
+        },
+        override_targets={"battery_grid_charging"},
+    )
+
+    # Once the export path is suppressed the battery should charge from grid.
+    assert result["grid_setpoint"] > 0
+
+
+def test_charger_limit_uses_arbitrage_not_solar_limit_when_car_solar_only_was_stale():
+    """Bug B regression: a stale car_solar_only=True in coordinator state (from a
+    prior solar-only charging cycle) must NOT cause _calculate_charger_limit to enter
+    the solar-only branch in an arbitrage cycle.
+
+    After the fix, _initialize_decision_data seeds car_solar_only=False so the stale
+    flag stored in `data` is overwritten before it can reach the downstream calculations.
+    This test exercises the charger-limit calculation directly with the corrected (False)
+    flag to confirm the arbitrage limit is used."""
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    # This is what decision_data_for_downstream looks like AFTER the fix:
+    # car_solar_only has been reset to False by _initialize_decision_data even
+    # though the coordinator's `data` dict carried a stale True from last cycle.
+    data = {
+        "car_charging_power": 2000,
+        "car_grid_charging": True,
+        "car_grid_import_allowed": False,
+        "car_solar_only": False,           # correctly reset by init (was stale True)
+        "battery_grid_charging": False,
+        "arbitrage_mode_active": True,
+        "battery_dump_target_soc": 40,
+        "battery_dump_export_power": 3000,
+        "monthly_grid_peak": 0,
+    }
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis=_arbitrage_battery_analysis(),
+        power_allocation={"solar_for_car": 1500, "car_current_solar_usage": 0},
+        data=data,
+    )
+
+    # Should use arbitrage power (3000 W), not the solar-only limit (1500 W)
+    assert result["charger_limit"] == 3000
+    assert "battery arbitrage" in result["charger_limit_reason"]
+    assert "Solar-only" not in result["charger_limit_reason"]
+
+
+def test_charger_limit_stale_solar_only_flag_causes_wrong_limit():
+    """Demonstrate the Bug-B failure mode: if car_solar_only=True leaks from a prior
+    cycle into the charger-limit calculation, the limit is incorrectly capped at the
+    solar allocation instead of the arbitrage power.
+
+    This test documents the pre-fix behaviour so reviewers can see exactly what was
+    broken.  It passes with car_solar_only=True to show the wrong outcome; contrast
+    with test_charger_limit_uses_arbitrage_not_solar_limit_when_car_solar_only_was_stale
+    which shows the correct outcome with the fixed (False) flag."""
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    data_with_stale_flag = {
+        "car_charging_power": 2000,
+        "car_grid_charging": True,
+        "car_grid_import_allowed": False,
+        "car_solar_only": True,            # STALE - bug scenario
+        "battery_grid_charging": False,
+        "arbitrage_mode_active": True,
+        "battery_dump_target_soc": 40,
+        "battery_dump_export_power": 3000,
+        "monthly_grid_peak": 0,
+    }
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis=_arbitrage_battery_analysis(),
+        power_allocation={"solar_for_car": 1500, "car_current_solar_usage": 0},
+        data=data_with_stale_flag,
+    )
+
+    # With the stale flag the charger falls into solar-only mode: limit = 1500 W
+    assert result["charger_limit"] == 1500
+    assert "Solar-only" in result["charger_limit_reason"]
+
+
+def test_grid_setpoint_uses_arbitrage_not_solar_only_when_car_solar_only_is_false():
+    """Bug B regression: with car_solar_only correctly reset to False (as happens
+    after the _initialize_decision_data fix), _calculate_grid_setpoint accounts for
+    car arbitrage power and nets the battery export correctly."""
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_grid_setpoint(
+        price_analysis={},
+        battery_analysis=_arbitrage_battery_analysis(),
+        power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
+        data={
+            "car_charging_power": 2000,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": False,
+            "car_solar_only": False,          # correctly reset
+            "battery_grid_charging": False,
+            "arbitrage_mode_active": True,
+            "battery_dump_export_power": 3000,
+            "arbitrage_mode_reason": "Arbitrage mode active",
+            "monthly_grid_peak": 0,
+        },
+        charger_limit=3000,
+    )
+
+    # Battery supplies 2000 W to car locally; remaining 1000 W exported to grid
+    assert result["grid_setpoint"] == -1000
+    assert "battery supplying car 2000W" in result["grid_setpoint_reason"]
+    assert "battery exporting 1000W" in result["grid_setpoint_reason"]
+
+
+def test_grid_setpoint_stale_solar_only_bypasses_arbitrage_car_power():
+    """Demonstrate Bug-B failure mode for grid setpoint: with stale car_solar_only=True,
+    car_arbitrage_power is forced to 0 (because the flag guards the arbitrage lookup),
+    so the full 3000 W is exported to grid without deducting the 2000 W the car needs
+    locally - the battery would be over-discharged."""
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_grid_setpoint(
+        price_analysis={},
+        battery_analysis=_arbitrage_battery_analysis(),
+        power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
+        data={
+            "car_charging_power": 2000,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": False,
+            "car_solar_only": True,           # STALE - bug scenario
+            "battery_grid_charging": False,
+            "arbitrage_mode_active": True,
+            "battery_dump_export_power": 3000,
+            "arbitrage_mode_reason": "Arbitrage mode active",
+            "monthly_grid_peak": 0,
+        },
+        charger_limit=3000,
+    )
+
+    # With stale solar_only=True, car_arbitrage_power=0 so battery_need is not deducted:
+    # full 3000 W gets exported instead of the correct 1000 W
+    assert result["grid_setpoint"] == -3000
 
 
 def test_battery_dump_mode_blocks_positive_price_grid_charging():

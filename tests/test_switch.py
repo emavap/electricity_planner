@@ -221,7 +221,39 @@ async def test_battery_dump_switch_uses_persistent_override(fake_hass, monkeypat
 async def test_battery_dump_switch_reflects_persisted_override_after_restart(
     fake_hass, monkeypatch,
 ):
-    """Arbitrage switch should show ON after coordinator restores persisted override."""
+    """Arbitrage switch should prefer the live plan reason after restart refresh."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    coordinator._manual_override_store = _MemoryStore()
+
+    await coordinator.async_set_battery_dump_mode(reason="persisted dump")
+
+    restored = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    restored._manual_override_store = _MemoryStore(coordinator._manual_override_store.data)
+    await restored._async_load_manual_overrides()
+    restored.data = {
+        "battery_dump_plan": {
+            "enabled": True,
+            "active": False,
+            "reason": "Arbitrage mode enabled but no battery data is available",
+            "selected_slots_count": 0,
+            "selected_slots": [],
+            "export_power": 0,
+        }
+    }
+
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entity = ArbitrageModeSwitch(restored, entry)
+
+    assert entity.is_on is True
+    assert entity.extra_state_attributes["override_active"] is True
+    assert entity.extra_state_attributes["reason"] == "Arbitrage mode enabled but no battery data is available"
+
+
+@pytest.mark.asyncio
+async def test_battery_dump_switch_uses_override_reason_before_first_refresh(
+    fake_hass, monkeypatch,
+):
+    """Arbitrage switch should fall back to the persisted override reason before plan data exists."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     coordinator._manual_override_store = _MemoryStore()
 
@@ -235,8 +267,41 @@ async def test_battery_dump_switch_reflects_persisted_override_after_restart(
     entity = ArbitrageModeSwitch(restored, entry)
 
     assert entity.is_on is True
-    assert entity.extra_state_attributes["override_active"] is True
     assert entity.extra_state_attributes["reason"] == "persisted dump"
+
+
+def test_battery_dump_switch_ignores_stale_plan_when_override_is_cleared(fake_hass, monkeypatch):
+    """Stale dump-plan data must not leak through after arbitrage mode is turned off."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    coordinator.data = {
+        "battery_dump_plan": {
+            "enabled": True,
+            "active": True,
+            "reason": "Arbitrage export active at 0.120€/kWh",
+            "dump_price_threshold": 0.08,
+            "current_slot_price": 0.12,
+            "selected_slots_count": 3,
+            "selected_slots": [{"start": "x", "end": "y", "price": 0.12}],
+            "deadline": "2026-04-20T21:00:00+02:00",
+            "export_power": 3000,
+            "configured_export_cap_w": 3000,
+            "available_energy_kwh": 5.0,
+        }
+    }
+    coordinator._manual_overrides["arbitrage_mode"] = None
+
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entity = ArbitrageModeSwitch(coordinator, entry)
+    attrs = entity.extra_state_attributes
+
+    assert entity.is_on is False
+    assert attrs["override_active"] is False
+    assert attrs["reason"] == "Arbitrage mode disabled"
+    assert attrs["currently_dumping"] is False
+    assert attrs["dump_price_threshold"] is None
+    assert attrs["selected_slots_count"] == 0
+    assert attrs["selected_slots"] == []
+    assert attrs["export_power"] is None
 
 
 def test_battery_disable_switch_ignores_expired_override(fake_hass, monkeypatch):

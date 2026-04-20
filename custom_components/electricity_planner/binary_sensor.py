@@ -301,7 +301,7 @@ class FeedinSolarBinarySensor(ElectricityPlannerBinarySensorBase):
         )
         return {
             "reason": self.coordinator.data.get("feedin_solar_reason", "No reason available"),
-            "current_price": self.coordinator.data.get("current_price"),
+            "current_price": self.coordinator.data.get("feedin_effective_price"),
             "feedin_threshold": feedin_threshold,
             "remaining_solar": power_allocation.get("remaining_solar", 0),
             "total_solar_allocated": power_allocation.get("total_allocated", 0),
