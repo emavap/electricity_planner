@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 5.0.10** | **Config Schema Version 20** | **Home Assistant 2024.4+**
+**Version 5.0.11** | **Config Schema Version 20** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Release note for v5.0.10: grid setpoint now tracks live car draw instead of reserving the full charger limit on session start. Added direction safety nets with warning logs if upstream ever requests unauthorised import or export. The managed dashboard version was bumped so the v5.0.9 Battery Controls / Decisions rearrangement applies automatically on existing installs.
+> Release note for v5.0.11: fixed a managed-dashboard reload regression where canonical entity IDs were incorrectly treated as unresolved placeholders, which could leave the dashboard missing after a planner reload. Regrouped the main dashboard blocks into Status, Battery Controls, and Decisions, and trimmed Nord Pool recorder attributes so 15-minute price timelines stay below Home Assistant's 16 KB attribute limit.
 
 ## Key Features
 

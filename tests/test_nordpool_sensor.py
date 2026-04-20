@@ -361,8 +361,10 @@ def test_extra_state_attributes_combines_prices(fake_coordinator, fake_entry):
     assert attrs["price_range"] == 0.01
     assert attrs["transport_cost_applied"] is None
     assert attrs["transport_cost_status"] == "not_configured"
-    assert set(attrs["data"][0]) == {"start", "end", "price", "transport_cost", "raw_price", "adjusted_energy_price", "contract_adjustment"}
-    assert set(attrs["data"][1]) == {"start", "end", "price", "transport_cost", "raw_price", "adjusted_energy_price", "contract_adjustment"}
+    # Recorder-friendly payload: only fields consumed by the dashboard chart
+    # are published as attributes so we stay under the 16 KB recorder limit.
+    assert set(attrs["data"][0]) == {"start", "price", "raw_price", "transport_cost"}
+    assert set(attrs["data"][1]) == {"start", "price", "raw_price", "transport_cost"}
 
 
 def test_extra_state_attributes_handles_different_price_keys(fake_coordinator, fake_entry):
@@ -451,14 +453,67 @@ def test_extra_state_attributes_compacts_interval_payload(fake_coordinator, fake
     assert attrs["data"] == [
         {
             "start": "2025-10-14T10:00:00+00:00",
-            "end": "2025-10-14T10:15:00+00:00",
             "price": 0.1,
-            "transport_cost": 0.0,
             "raw_price": 0.1,
-            "adjusted_energy_price": 0.1,
-            "contract_adjustment": 0.0,
+            "transport_cost": 0.0,
         }
     ]
+
+
+def test_extra_state_attributes_stays_under_recorder_limit(fake_coordinator, fake_entry):
+    """Full 48h of 15-minute Nord Pool intervals must fit under HA's 16 KB
+    recorder attribute limit. Regression guard for the ``State attributes
+    ... exceed maximum size of 16384 bytes`` Recorder warning observed on
+    live installs before the per-interval payload was trimmed.
+    """
+    import json
+    from datetime import datetime, timedelta, timezone
+
+    # Build 192 intervals: 96 per day (15-min) x 2 days.
+    today_intervals = []
+    tomorrow_intervals = []
+    base_today = datetime(2025, 10, 14, 0, 0, tzinfo=timezone.utc)
+    base_tomorrow = datetime(2025, 10, 15, 0, 0, tzinfo=timezone.utc)
+    for i in range(96):
+        start_t = base_today + timedelta(minutes=15 * i)
+        end_t = start_t + timedelta(minutes=15)
+        today_intervals.append(
+            {
+                "start": start_t.isoformat(),
+                "end": end_t.isoformat(),
+                "price": 100.0 + i * 0.5,  # €/MWh
+            }
+        )
+        start_tm = base_tomorrow + timedelta(minutes=15 * i)
+        end_tm = start_tm + timedelta(minutes=15)
+        tomorrow_intervals.append(
+            {
+                "start": start_tm.isoformat(),
+                "end": end_tm.isoformat(),
+                "price": 120.0 + i * 0.5,
+            }
+        )
+
+    fake_coordinator.data = {
+        "nordpool_prices_today": {"BE": today_intervals},
+        "nordpool_prices_tomorrow": {"BE": tomorrow_intervals},
+        "transport_cost_lookup": [],
+        "transport_cost_status": "not_configured",
+    }
+
+    sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
+    attrs = sensor.extra_state_attributes
+
+    payload = json.dumps(attrs)
+    assert len(payload) < 16384, (
+        f"Attribute payload is {len(payload)} bytes - exceeds the 16 KB "
+        "recorder limit. Trim per-interval fields in _compact_price_interval."
+    )
+    # Sanity: the dashboard-critical fields are still present so the chart
+    # keeps working.
+    assert attrs["data"], "At least one interval must survive the history trim"
+    for sample in attrs["data"][:3]:
+        assert set(sample) == {"start", "price", "raw_price", "transport_cost"}
 
 
 def test_extra_state_attributes_skips_invalid_intervals(fake_coordinator, fake_entry):

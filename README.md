@@ -1,10 +1,10 @@
 # Electricity Planner
 
-**Version 5.0.10** | **Config Schema Version 20** | **Home Assistant 2024.4+**
+**Version 5.0.11** | **Config Schema Version 20** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
-> Release note for v5.0.10: grid setpoint no longer reserves the full charger limit when the car is not actually drawing — it now tracks live car draw and only asks the inverter to permit grid import when the car is charging with grid import allowed or battery grid charging is authorised. Added explicit direction safety nets with warning logs if upstream ever requests unauthorised import or export. The managed dashboard version was bumped so the v5.0.9 Battery Controls / Decisions rearrangement applies automatically on existing installs.
+> Release note for v5.0.11: fixed a managed-dashboard reload regression where canonical entity IDs were incorrectly treated as unresolved placeholders, which could leave the dashboard missing after a planner reload. Regrouped the main dashboard blocks into Status, Battery Controls, and Decisions, and trimmed Nord Pool recorder attributes so 15-minute price timelines stay below Home Assistant's 16 KB attribute limit.
 
 ---
 

@@ -66,6 +66,12 @@ from .helpers import extract_price_from_interval, is_in_month_peak_transition_wi
 
 _LOGGER = logging.getLogger(__name__)
 
+# Home Assistant's recorder silently drops state attributes > 16 KB. A trimmed
+# Nord Pool interval (start + 3 floats) is ~95 bytes, so 150 intervals plus
+# ~200 bytes of summary headers stays well under the limit while still giving
+# the dashboard chart 6h of history plus the forward-looking forecast.
+_MAX_RECORDER_INTERVALS = 150
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -1310,8 +1316,12 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             min_price = max_price = avg_price = None
 
         # Trim historical intervals to keep recorder-friendly payload size while
-        # preserving the full forward-looking forecast used by dashboards/thresholds.
-        # Include 6 hours of historical prices for dashboard chart context.
+        # preserving the forward-looking forecast used by dashboards/thresholds.
+        # HA's recorder silently drops state attributes larger than 16 KB, so
+        # we cap both time window (~6h history) and interval count to fit that
+        # budget even for 15-minute Nord Pool data (~180 intervals across two
+        # days otherwise). Dashboard chart only reads the ``data`` array, so
+        # the cap preferentially retains the most recent + forward intervals.
         now = dt_util.now()
         history_cutoff = now - timedelta(hours=6)
         recent_prices: list[dict[str, Any]] = []
@@ -1323,6 +1333,11 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             if start_dt and start_dt >= history_cutoff:
                 recent_prices.append(price_entry)
         limited_prices = recent_prices if recent_prices else combined_prices
+        # Hard ceiling on total intervals (~14 KB worst case with four
+        # fields per interval). Keeps the tail closest to NOW: for forward
+        # forecasts that means dropping the oldest history entries first.
+        if len(limited_prices) > _MAX_RECORDER_INTERVALS:
+            limited_prices = limited_prices[-_MAX_RECORDER_INTERVALS:]
 
         return {
             "data": limited_prices,  # Limited price data for ApexCharts (already in €/kWh)
@@ -1346,7 +1361,14 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         }
 
     def _compact_price_interval(self, interval: dict[str, Any]) -> dict[str, Any] | None:
-        """Return a recorder-friendly interval payload for dashboard rendering."""
+        """Return a recorder-friendly interval payload for dashboard rendering.
+
+        Only fields consumed by the managed dashboard chart are kept so the
+        attribute payload stays under Home Assistant's 16 KB recorder limit
+        even with 48h of 15-minute intervals. Dropped compared to the
+        internal normalized form: ``end``, ``adjusted_energy_price``,
+        ``contract_adjustment`` (none referenced by the dashboard template).
+        """
         start = interval.get("start")
         price = interval.get("price")
         if start is None or price is None:
@@ -1354,16 +1376,11 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
 
         transport_cost = interval.get("transport_cost", 0.0)
         raw_price = interval.get("raw_price", 0.0)
-        adjusted_energy_price = interval.get("adjusted_energy_price", 0.0)
-        contract_adjustment = interval.get("contract_adjustment", 0.0)
         return {
             "start": start,
-            "end": interval.get("end"),
             "price": round(float(price), 6),
-            "transport_cost": round(float(transport_cost), 6),
             "raw_price": round(float(raw_price), 6),
-            "adjusted_energy_price": round(float(adjusted_energy_price), 6),
-            "contract_adjustment": round(float(contract_adjustment), 6),
+            "transport_cost": round(float(transport_cost), 6),
         }
 
     def _normalize_price_interval(self, interval: Any, transport_cost_lookup: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:

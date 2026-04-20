@@ -39,7 +39,7 @@ MANAGED_KEY = "electricity_planner_managed"
 # MUST be bumped whenever dashboard_template.yaml or the 3-phase appendix
 # changes so existing installs re-save on next reload. The deep-diff in
 # _save_dashboard is a defence-in-depth; this stamp is the primary signal.
-MANAGED_VERSION = 25  # Arbitrage switch moved from Decisions into Battery Controls
+MANAGED_VERSION = 26  # Fix placeholder resolution + regroup main dashboard sections
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 THREE_PHASE_APPENDIX_FILENAME = "dashboard_template_3phase_appendix.yaml"
 
@@ -173,8 +173,8 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
 
     replacements = _build_replacements(entry, entity_map)
     _LOGGER.debug("Built %d entity replacements", len(replacements))
+    unresolved_placeholders = _find_unresolved_placeholders(template_text, replacements)
     rendered_template = _apply_replacements(template_text, replacements)
-    unresolved_placeholders = _find_unresolved_placeholders(rendered_template)
     if unresolved_placeholders:
         _LOGGER.warning(
             "Deferring dashboard creation for %s: unresolved entity placeholders %s",
@@ -206,8 +206,10 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
             _LOGGER.error("Dashboard appendix %s missing; skipping creation", THREE_PHASE_APPENDIX_FILENAME)
             return
 
+        unresolved_appendix_placeholders = _find_unresolved_placeholders(
+            appendix_text, replacements
+        )
         rendered_appendix = _apply_replacements(appendix_text, replacements)
-        unresolved_appendix_placeholders = _find_unresolved_placeholders(rendered_appendix)
         if unresolved_appendix_placeholders:
             _LOGGER.warning(
                 "Deferring dashboard creation for %s: unresolved appendix placeholders %s",
@@ -641,11 +643,18 @@ def _build_replacements(entry, entity_map: dict[str, str]) -> dict[str, str]:
     return replacements
 
 
-def _find_unresolved_placeholders(rendered_template: str) -> list[str]:
-    """Return any template entity placeholders still present after replacements."""
+def _find_unresolved_placeholders(
+    template_text: str, replacements: dict[str, str]
+) -> list[str]:
+    """Return placeholders referenced by the template that have no replacement.
+
+    Some installs intentionally keep the canonical entity IDs used by the
+    template, so checking the rendered YAML for placeholder strings produces
+    false positives after reload. Resolve against the replacement map instead.
+    """
     unresolved: list[str] = []
     for ref in ENTITY_REFERENCES:
-        if ref.placeholder in rendered_template and ref.placeholder not in unresolved:
+        if ref.placeholder in template_text and ref.placeholder not in replacements:
             unresolved.append(ref.placeholder)
     return unresolved
 

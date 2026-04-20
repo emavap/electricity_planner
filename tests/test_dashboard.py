@@ -220,7 +220,9 @@ def test_bundled_three_phase_dashboard_includes_shared_single_phase_sections():
     assert "title: Price components" in content
     assert "title: Price adjustments" in content
     assert "title: Thresholds" in content
-    assert "title: Power & status" in content
+    assert "title: Status" in content
+    assert "title: Battery Controls" in content
+    assert "title: Decisions" in content
     assert "title: Algorithm thresholds" in content
     assert "title: Price & Decisions (24h)" in content
     assert "title: Price Forecast Insights" in content
@@ -483,6 +485,49 @@ async def test_dashboard_setup_retries_when_rendered_template_has_unresolved_pla
 
     ensure_mock.assert_not_called()
     retry_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_setup_accepts_canonical_entity_ids_as_resolved_placeholders():
+    """Canonical entity IDs should not be treated as unresolved after replacement."""
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner Instance", data={})
+    hass = SimpleNamespace(loop=FakeLoop(), data={})
+    entity_map = {
+        f"{entry.entry_id}_price_analysis": "sensor.electricity_planner_current_electricity_price",
+        f"{entry.entry_id}_battery_grid_charging": "binary_sensor.electricity_planner_battery_charge_from_grid",
+        f"{entry.entry_id}_car_grid_charging": "binary_sensor.electricity_planner_car_charge_from_grid",
+        f"{entry.entry_id}_max_soc_threshold": "number.electricity_planner_max_soc_threshold",
+        f"{entry.entry_id}_max_soc_threshold_sunny": "number.electricity_planner_max_soc_threshold_sunny",
+        f"{entry.entry_id}_sunny_forecast_threshold_kwh": "number.electricity_planner_sunny_forecast_threshold_kwh",
+    }
+    template = (
+        "views:\n"
+        "  - cards:\n"
+        "      - entity: sensor.electricity_planner_current_electricity_price\n"
+        "      - entity: binary_sensor.electricity_planner_battery_charge_from_grid\n"
+        "      - entity: binary_sensor.electricity_planner_car_charge_from_grid\n"
+        "      - entity: number.electricity_planner_max_soc_threshold\n"
+        "      - entity: number.electricity_planner_max_soc_threshold_sunny\n"
+        "      - entity: number.electricity_planner_sunny_forecast_threshold_kwh\n"
+    )
+    storage = FakeStorage()
+
+    with patch.object(
+        dashboard, "_get_lovelace_handles", return_value=dashboard.DashboardHandles(collection=None, dashboards={})
+    ), patch.object(
+        dashboard, "_async_wait_for_entity_map", new=AsyncMock(return_value=entity_map)
+    ), patch.object(
+        dashboard, "_async_load_template_text", new=AsyncMock(return_value=template)
+    ), patch.object(
+        dashboard, "_ensure_dashboard_record", new=AsyncMock(return_value=storage)
+    ) as ensure_mock, patch.object(
+        dashboard, "_schedule_entity_map_retry"
+    ) as retry_mock:
+        await dashboard.async_setup_or_update_dashboard(hass, entry)
+
+    ensure_mock.assert_called_once()
+    retry_mock.assert_not_called()
+    assert storage.saved is not None
 
 
 @pytest.mark.asyncio

@@ -189,6 +189,25 @@ views:
               _Sunny mode trigger: ≥ {{ states(sunny_forecast_threshold_entity) }} kWh_
 
           - type: entities
+            title: Status
+            show_header_toggle: false
+            entities:
+              - entity: sensor.electricity_planner_diagnostics_monitoring_entity_status
+                name: Entity status
+              - entity: binary_sensor.electricity_planner_data_nord_pool_available
+                name: Data OK
+              - entity: sensor.electricity_planner_data_unavailable_duration
+                name: Data unavailable time
+              - entity: sensor.electricity_planner_battery_soc_average
+                name: Battery SOC
+              - entity: sensor.electricity_planner_solar_surplus_power
+                name: Solar surplus
+              - entity: binary_sensor.electricity_planner_solar_producing_power
+                name: Solar producing
+              - entity: binary_sensor.electricity_planner_price_below_threshold
+                name: Price below threshold
+
+          - type: entities
             title: Battery Controls
             show_header_toggle: false
             entities:
@@ -198,28 +217,28 @@ views:
               - entity: number.electricity_planner_max_soc_threshold_sunny
                 name: Grid Max SOC (high solar)
                 icon: mdi:weather-sunny
-              - entity: number.electricity_planner_battery_dump_target_soc
-                name: Arbitrage Reserve SOC
-                icon: mdi:battery-arrow-down-outline
-              - entity: switch.electricity_planner_arbitrage_mode
-                name: Arbitrage mode
-                icon: mdi:battery-arrow-down-outline
-              - type: attribute
-                entity: switch.electricity_planner_arbitrage_mode
-                attribute: reason
-                name: Arbitrage reason
               - entity: number.electricity_planner_sunny_forecast_threshold_kwh
                 name: Sunny Forecast Trigger
                 icon: mdi:weather-partly-cloudy
+              - entity: number.electricity_planner_battery_dump_target_soc
+                name: Arbitrage Reserve SOC
+                icon: mdi:battery-arrow-down-outline
+              - entity: switch.electricity_planner_car_permissive_mode
+                name: Car permissive
+                icon: mdi:car-electric-outline
+              - entity: switch.electricity_planner_arbitrage_mode
+                name: Arbitrage mode
+                icon: mdi:battery-arrow-down-outline
               - entity: switch.electricity_planner_disable_battery_charging
                 name: Disable Battery Charging
                 icon: mdi:battery-off
 
-          # Overall decisions (aggregated)
           - type: entities
-            title: Overall Decisions (Aggregated)
+            title: Decisions
             show_header_toggle: false
             entities:
+              - entity: sensor.electricity_planner_decision_diagnostics
+                name: Planner decision summary
               - entity: binary_sensor.electricity_planner_battery_charge_from_grid
                 name: Battery charging (any phase)
                 secondary_info: last-changed
@@ -241,6 +260,12 @@ views:
                 entity: binary_sensor.electricity_planner_solar_feed_in_grid
                 attribute: reason
                 name: Feed-in reason
+              - entity: sensor.electricity_planner_car_charger_limit
+                name: Car charger limit
+              - type: attribute
+                entity: sensor.electricity_planner_car_charger_limit
+                attribute: charger_limit_reason
+                name: Charger limit reason
               - entity: binary_sensor.electricity_planner_solar_derating_alarm
                 name: Derating alarm
                 secondary_info: last-changed
@@ -261,6 +286,10 @@ views:
                 entity: sensor.electricity_planner_grid_setpoint
                 attribute: grid_setpoint_reason
                 name: Grid setpoint reason
+              - type: attribute
+                entity: switch.electricity_planner_arbitrage_mode
+                attribute: reason
+                name: Arbitrage reason
 
           - type: custom:apexcharts-card
             header:
@@ -577,27 +606,6 @@ views:
                   **Feed-in threshold:** {{ states('sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold') | float(0) | round(4) }} €/kWh
 
                   _Note: To toggle average threshold mode, go to Settings → Devices & Services → Electricity Planner → Configure_
-
-          - type: entities
-            title: Power & status
-            show_header_toggle: false
-            entities:
-              - entity: sensor.electricity_planner_solar_surplus_power
-                name: Solar surplus
-              - entity: binary_sensor.electricity_planner_solar_producing_power
-                name: Solar producing
-              - entity: binary_sensor.electricity_planner_price_below_threshold
-                name: Price below threshold
-              - entity: sensor.electricity_planner_data_unavailable_duration
-                name: Data unavailable time
-              - entity: sensor.electricity_planner_car_charger_limit
-                name: Car charger limit
-              - entity: sensor.electricity_planner_grid_setpoint
-                name: Grid setpoint
-              - type: attribute
-                entity: sensor.electricity_planner_grid_setpoint
-                attribute: grid_setpoint_reason
-                name: Grid setpoint reason
 
           - type: markdown
             title: Algorithm thresholds
