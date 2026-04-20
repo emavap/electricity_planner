@@ -233,7 +233,7 @@ def test_car_decision_tree_selects_expected_top_level_branch(
     calls: list[str] = []
 
     def _stub(name: str):
-        def _inner(context, raw_data):
+        def _inner(context, ctx, raw_data):
             calls.append(name)
             return {
                 "car_grid_charging": name != "high",

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, TypedDict
 
 from homeassistant.core import HomeAssistant
@@ -469,6 +469,277 @@ class EngineSettings:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class CycleContext:
+    """Read-only snapshot of shared decision inputs for one cycle snapshot.
+
+    Populate it from the raw coordinator/decision data once for the snapshot
+    that a group of decisions should read.
+    Keep every shared signal here so downstream methods stop re-reading the
+    mutable `data` dict.
+    Compute derived flags and thresholds in `from_data`.
+    Rebuild a fresh instance if upstream outputs or manual overrides mutate
+    the underlying data for a later decision step.
+    Never mutate a CycleContext instance.
+    """
+
+    current_price: float | None
+    raw_current_price: float | None
+    highest_price: float | None
+    lowest_price: float | None
+    next_price: float | None
+    average_threshold: float | None
+    transport_cost: float
+    configured_price_threshold: float
+    resolved_price_threshold: float
+    effective_battery_price_threshold: float
+    soc_price_multiplier: float
+    threshold_relaxed: bool
+    locked_car_threshold: float | None
+    car_threshold_floor: float
+    effective_car_price_threshold: float
+    car_permissive_multiplier: float
+    effective_car_permissive_multiplier: float
+    has_price_data: bool
+    battery_analysis: dict[str, Any]
+    battery_average_soc: float | None
+    battery_soc: tuple[dict[str, Any], ...]
+    battery_stable_threshold: float | None
+    solar_production: float
+    solar_surplus: float
+    solar_forecast_production: float | None
+    house_consumption: float
+    current_grid_power: float | None
+    previous_grid_power: float | None
+    monthly_grid_peak: float | None
+    car_charging_power: float
+    car_solar_only: bool
+    car_grid_import_allowed: bool
+    car_permissive_mode_active: bool
+    car_peak_limited: bool
+    previous_car_charging: bool
+    has_min_charging_window: bool
+    battery_grid_charging: bool
+    car_grid_charging: bool
+    charger_limit: int
+    arbitrage_mode_enabled: bool
+    arbitrage_mode_active: bool
+    battery_dump_export_power: int
+    battery_dump_target_soc: float
+    battery_dump_active: bool
+    arbitrage_reserve_soc: float
+    allocated_car_solar: float
+    remaining_solar: float
+    car_arbitrage_power: int
+    phase_mode: str | None
+    phase_batteries_map: dict[str, list[dict[str, Any]]]
+    phase_capacity_map: dict[str, float]
+    phase_details_map: dict[str, dict[str, Any]]
+    previous_inverter_derating_target: float | None
+    previous_inverter_derating_unreached_since: datetime | None
+    inverter_derating_evaluated_at: datetime | None
+    price_analysis_overrides: dict[str, Any]
+    arbitrage_mode_reason: str | None
+
+    @classmethod
+    def from_data(
+        cls,
+        data: dict[str, Any],
+        settings: EngineSettings,
+        battery_analysis: dict[str, Any],
+        price_analysis: dict[str, Any],
+        power_analysis: dict[str, Any],
+        power_allocation: dict[str, Any],
+    ) -> "CycleContext":
+        """Create an immutable snapshot from the current decision data."""
+        price_analysis = price_analysis or {}
+        battery_analysis = battery_analysis or {}
+        power_analysis = power_analysis or {}
+        power_allocation = power_allocation or {}
+
+        resolved_price_threshold = _safe_optional_float(price_analysis.get("price_threshold"))
+        if resolved_price_threshold is None:
+            resolved_price_threshold = float(settings.price_threshold)
+
+        battery_stable_threshold = _safe_optional_float(data.get("battery_stable_threshold"))
+        battery_threshold_floor = (
+            battery_stable_threshold
+            if battery_stable_threshold is not None
+            else resolved_price_threshold
+        )
+
+        battery_average_soc = _safe_optional_float(battery_analysis.get("average_soc"))
+        if battery_average_soc is not None:
+            soc_price_multiplier = calculate_soc_price_multiplier(
+                current_soc=battery_average_soc,
+                emergency_soc=settings.emergency_soc_threshold,
+                buffer_target_soc=settings.soc_buffer_target,
+                max_multiplier=settings.soc_price_multiplier_max,
+            )
+        else:
+            soc_price_multiplier = 1.0
+        effective_battery_price_threshold = (
+            battery_threshold_floor * soc_price_multiplier
+        )
+
+        previous_car_charging = bool(data.get(_PREVIOUS_CAR_CHARGING_KEY))
+        locked_car_threshold = _safe_optional_float(
+            data.get(_CAR_CHARGING_LOCKED_THRESHOLD_KEY)
+        )
+        car_threshold_floor = (
+            max(locked_car_threshold, resolved_price_threshold)
+            if previous_car_charging and locked_car_threshold is not None
+            else resolved_price_threshold
+        )
+
+        car_permissive_multiplier = settings.car_permissive_threshold_multiplier
+        effective_car_permissive_multiplier = car_permissive_multiplier
+        car_permissive_mode_active = bool(data.get("car_permissive_mode_active", False))
+        effective_car_price_threshold = car_threshold_floor
+        if car_permissive_mode_active and car_permissive_multiplier > 1.0:
+            effective_car_permissive_multiplier = max(
+                PERMISSIVE_MULTIPLIER_MIN,
+                min(car_permissive_multiplier, PERMISSIVE_MULTIPLIER_MAX),
+            )
+            effective_car_price_threshold = (
+                car_threshold_floor * effective_car_permissive_multiplier
+            )
+
+        battery_grid_charging = bool(data.get("battery_grid_charging", False))
+        car_grid_charging = bool(data.get("car_grid_charging", False))
+        battery_dump_export_power = max(
+            0,
+            int(_safe_optional_float(data.get("battery_dump_export_power")) or 0),
+        )
+        battery_dump_target_soc = _safe_optional_float(data.get("battery_dump_target_soc"))
+        if battery_dump_target_soc is None:
+            battery_dump_target_soc = settings.battery_dump_target_soc
+        battery_dump_target_soc = max(0.0, min(100.0, float(battery_dump_target_soc)))
+
+        arbitrage_mode_active = bool(data.get("arbitrage_mode_active"))
+        battery_dump_active = (
+            arbitrage_mode_active and battery_dump_export_power > 0
+        )
+
+        allocated_car_solar = (
+            (_safe_optional_float(power_allocation.get("solar_for_car")) or 0.0)
+            + (_safe_optional_float(power_allocation.get("car_current_solar_usage")) or 0.0)
+        )
+
+        car_arbitrage_power = 0
+        if (
+            settings.car_use_battery_arbitrage
+            and arbitrage_mode_active
+            and battery_dump_export_power > 0
+            and not battery_grid_charging
+            and battery_average_soc is not None
+            and battery_average_soc >= battery_dump_target_soc
+        ):
+            car_arbitrage_power = battery_dump_export_power
+
+        return cls(
+            current_price=_safe_optional_float(price_analysis.get("current_price")),
+            raw_current_price=_safe_optional_float(price_analysis.get("raw_current_price")),
+            highest_price=_safe_optional_float(price_analysis.get("highest_price")),
+            lowest_price=_safe_optional_float(price_analysis.get("lowest_price")),
+            next_price=_safe_optional_float(price_analysis.get("next_price")),
+            average_threshold=_safe_optional_float(data.get("average_threshold")),
+            transport_cost=float(
+                _safe_optional_float(
+                    price_analysis.get("transport_cost", data.get("transport_cost"))
+                )
+                or 0.0
+            ),
+            configured_price_threshold=float(settings.price_threshold),
+            resolved_price_threshold=float(resolved_price_threshold),
+            effective_battery_price_threshold=float(effective_battery_price_threshold),
+            soc_price_multiplier=float(soc_price_multiplier),
+            threshold_relaxed=soc_price_multiplier > 1.0,
+            locked_car_threshold=locked_car_threshold,
+            car_threshold_floor=float(car_threshold_floor),
+            effective_car_price_threshold=float(effective_car_price_threshold),
+            car_permissive_multiplier=float(car_permissive_multiplier),
+            effective_car_permissive_multiplier=float(
+                effective_car_permissive_multiplier
+            ),
+            has_price_data=bool(price_analysis.get("data_available", False)),
+            battery_analysis=dict(battery_analysis),
+            battery_average_soc=battery_average_soc,
+            battery_soc=tuple(data.get("battery_soc", []) or []),
+            battery_stable_threshold=battery_stable_threshold,
+            solar_production=float(
+                _safe_optional_float(
+                    power_analysis.get("solar_production", data.get("solar_production"))
+                )
+                or 0.0
+            ),
+            solar_surplus=float(
+                _safe_optional_float(
+                    power_analysis.get("solar_surplus", data.get("solar_surplus"))
+                )
+                or 0.0
+            ),
+            solar_forecast_production=_safe_optional_float(
+                data.get("solar_forecast_production")
+            ),
+            house_consumption=float(
+                _safe_optional_float(
+                    power_analysis.get("house_consumption", data.get("house_consumption"))
+                )
+                or 0.0
+            ),
+            current_grid_power=_safe_optional_float(data.get("grid_power")),
+            previous_grid_power=_safe_optional_float(data.get("previous_grid_power")),
+            monthly_grid_peak=_safe_optional_float(data.get("monthly_grid_peak")),
+            car_charging_power=float(
+                _safe_optional_float(
+                    power_analysis.get("car_charging_power", data.get("car_charging_power"))
+                )
+                or 0.0
+            ),
+            car_solar_only=bool(data.get("car_solar_only", False)),
+            car_grid_import_allowed=bool(
+                data.get("car_grid_import_allowed", car_grid_charging)
+            ),
+            car_permissive_mode_active=car_permissive_mode_active,
+            car_peak_limited=bool(data.get("car_peak_limited")),
+            previous_car_charging=previous_car_charging,
+            has_min_charging_window=bool(data.get(_HAS_MIN_CHARGING_WINDOW_KEY)),
+            battery_grid_charging=battery_grid_charging,
+            car_grid_charging=car_grid_charging,
+            charger_limit=max(
+                0,
+                int(_safe_optional_float(data.get("charger_limit")) or 0),
+            ),
+            arbitrage_mode_enabled=bool(data.get("arbitrage_mode_enabled")),
+            arbitrage_mode_active=arbitrage_mode_active,
+            battery_dump_export_power=battery_dump_export_power,
+            battery_dump_target_soc=battery_dump_target_soc,
+            battery_dump_active=battery_dump_active,
+            arbitrage_reserve_soc=battery_dump_target_soc,
+            allocated_car_solar=float(allocated_car_solar),
+            remaining_solar=float(
+                _safe_optional_float(power_allocation.get("remaining_solar")) or 0.0
+            ),
+            car_arbitrage_power=car_arbitrage_power,
+            phase_mode=data.get(CONF_PHASE_MODE),
+            phase_batteries_map=dict(data.get("phase_batteries") or {}),
+            phase_capacity_map=dict(data.get("phase_capacity_map") or {}),
+            phase_details_map=dict(data.get("phase_details") or {}),
+            previous_inverter_derating_target=_safe_optional_float(
+                data.get("previous_inverter_derating_target")
+            ),
+            previous_inverter_derating_unreached_since=_safe_optional_datetime(
+                data.get("previous_inverter_derating_unreached_since")
+            ),
+            inverter_derating_evaluated_at=_safe_optional_datetime(
+                data.get("inverter_derating_evaluated_at")
+            ),
+            price_analysis_overrides=dict(data.get("price_analysis_overrides") or {}),
+            arbitrage_mode_reason=data.get("arbitrage_mode_reason"),
+        )
+
+
 @dataclass(frozen=True)
 class GridSetpointContext:
     """Resolved context for grid setpoint limits."""
@@ -673,11 +944,45 @@ class ChargingDecisionEngine:
             != battery_analysis.get("max_soc_threshold")
         )
 
+        cycle_ctx = CycleContext.from_data(
+            {**data, **decision_data},
+            self._settings,
+            grid_battery_analysis,
+            price_analysis,
+            power_analysis,
+            power_allocation,
+        )
+        cycle_ctx_log = asdict(cycle_ctx)
+        for field_name in (
+            "battery_analysis",
+            "phase_batteries_map",
+            "phase_capacity_map",
+            "phase_details_map",
+            "price_analysis_overrides",
+        ):
+            cycle_ctx_log.pop(field_name, None)
+        _LOGGER.debug("Cycle context: %s", cycle_ctx_log)
+
         # Make charging decisions (use grid-specific battery analysis)
         battery_decision = self._decide_battery_grid_charging(
-            price_analysis, grid_battery_analysis, power_allocation, power_analysis, time_context, data
+            price_analysis,
+            grid_battery_analysis,
+            power_allocation,
+            power_analysis,
+            time_context,
+            data,
+            ctx=cycle_ctx,
         )
         decision_data.update(battery_decision)
+
+        cycle_ctx = CycleContext.from_data(
+            {**data, **decision_data},
+            self._settings,
+            grid_battery_analysis,
+            price_analysis,
+            power_analysis,
+            power_allocation,
+        )
 
         # Get dynamic threshold from strategy manager (if dynamic pricing enabled)
         context = {
@@ -688,38 +993,77 @@ class ChargingDecisionEngine:
             "time_context": time_context,
             "config": self.config,
             "settings": self._settings,
+            "battery_stable_threshold": cycle_ctx.battery_stable_threshold,
+            "effective_threshold": cycle_ctx.effective_battery_price_threshold,
+            "soc_price_multiplier": cycle_ctx.soc_price_multiplier,
+            "threshold_relaxed": cycle_ctx.threshold_relaxed,
         }
         dynamic_threshold = self.strategy_manager.get_dynamic_threshold(context)
         if dynamic_threshold is not None:
             price_analysis["dynamic_threshold"] = dynamic_threshold
 
-        car_decision_input = {
-            **data,
-            "battery_grid_charging": battery_decision.get("battery_grid_charging", False),
-        }
+        car_decision_input = {**data, **decision_data}
         car_decision = self._decide_car_grid_charging(
-            price_analysis, grid_battery_analysis, power_allocation, car_decision_input
+            price_analysis,
+            grid_battery_analysis,
+            power_allocation,
+            car_decision_input,
+            ctx=cycle_ctx,
+        )
+        data[_CAR_CHARGING_LOCKED_THRESHOLD_KEY] = car_decision_input.get(
+            _CAR_CHARGING_LOCKED_THRESHOLD_KEY
         )
         decision_data.update(car_decision)
 
-        # Calculate power limits
-        decision_data_for_downstream = {**data, **decision_data}
+        cycle_ctx = CycleContext.from_data(
+            {**data, **decision_data},
+            self._settings,
+            grid_battery_analysis,
+            price_analysis,
+            power_analysis,
+            power_allocation,
+        )
 
         charger_limit_decision = self._calculate_charger_limit(
-            price_analysis, grid_battery_analysis, power_allocation, decision_data_for_downstream
+            price_analysis,
+            grid_battery_analysis,
+            power_allocation,
+            {**data, **decision_data},
+            ctx=cycle_ctx,
         )
         decision_data.update(charger_limit_decision)
-        decision_data_for_downstream.update(charger_limit_decision)
+
+        # Rebuild the context after charger_limit so downstream consumers
+        # (grid_setpoint, feedin) see an up-to-date ctx.charger_limit. Today
+        # neither reads that field — grid_setpoint receives charger_limit as
+        # an explicit argument — but rebuilding here removes an implicit
+        # "don't read ctx.charger_limit" contract that future edits could
+        # easily violate.
+        cycle_ctx = CycleContext.from_data(
+            {**data, **decision_data},
+            self._settings,
+            grid_battery_analysis,
+            price_analysis,
+            power_analysis,
+            power_allocation,
+        )
 
         grid_setpoint_decision = self._calculate_grid_setpoint(
-            price_analysis, grid_battery_analysis, power_allocation, decision_data_for_downstream,
-            decision_data.get("charger_limit", 0)
+            price_analysis,
+            grid_battery_analysis,
+            power_allocation,
+            {**data, **decision_data},
+            decision_data.get("charger_limit", 0),
+            ctx=cycle_ctx,
         )
         decision_data.update(grid_setpoint_decision)
 
-        feedin_decision = self._decide_feedin_solar(price_analysis, power_allocation)
+        feedin_decision = self._decide_feedin_solar(
+            price_analysis, power_allocation, cycle_ctx
+        )
         decision_data.update(feedin_decision)
-        decision_data_for_downstream.update(feedin_decision)
+
+        decision_data_for_downstream = {**data, **decision_data}
 
         inverter_derating_decision = self._calculate_inverter_derating_target(
             decision_data_for_downstream
@@ -971,10 +1315,12 @@ class ChargingDecisionEngine:
             # and _calculate_grid_setpoint to use the solar-only branch instead
             # of the arbitrage branch.
             "car_solar_only": False,
+            "sunny_day_active": False,
             "battery_grid_charging_reason": "No decision made",
             "car_grid_charging_reason": "No decision made",
             "charger_limit": 0,
             "grid_setpoint": 0,
+            "grid_components": {"battery": 0, "car": 0},
             "inverter_derating_target": None,
             "charger_limit_reason": "No decision made",
             "grid_setpoint_reason": "No decision made",
@@ -1463,7 +1809,7 @@ class ChargingDecisionEngine:
 
         Returns a (possibly modified) copy of battery_analysis.
         """
-        solar_forecast = data.get("solar_forecast_production")
+        solar_forecast = _safe_optional_float(data.get("solar_forecast_production"))
         if solar_forecast is None:
             return battery_analysis
 
@@ -1545,8 +1891,19 @@ class ChargingDecisionEngine:
         power_analysis: dict[str, Any],
         time_context: dict[str, Any],
         data: dict[str, Any],
+        ctx: CycleContext | None = None,
     ) -> dict[str, Any]:
         """Decide battery charging using strategy pattern with hysteresis."""
+        if ctx is None:
+            ctx = CycleContext.from_data(
+                data,
+                self._settings,
+                battery_analysis,
+                price_analysis,
+                power_analysis,
+                power_allocation,
+            )
+
         # Safety checks
         if battery_analysis.get("batteries_count", 0) == 0:
             return {
@@ -1574,7 +1931,7 @@ class ChargingDecisionEngine:
                 "strategy_trace": [],
             }
 
-        if not price_analysis.get("data_available", True):
+        if not ctx.has_price_data:
             return {
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": "No price data available",
@@ -1612,8 +1969,6 @@ class ChargingDecisionEngine:
             }
 
         # Get stable threshold snapshot for current interval (prevents fluctuations)
-        stable_threshold = data.get("battery_stable_threshold")
-
         # Create context for strategies
         context = {
             "price_analysis": price_analysis,
@@ -1623,7 +1978,10 @@ class ChargingDecisionEngine:
             "time_context": time_context,
             "config": self.config,
             "settings": self._settings,
-            "battery_stable_threshold": stable_threshold,
+            "battery_stable_threshold": ctx.battery_stable_threshold,
+            "effective_threshold": ctx.effective_battery_price_threshold,
+            "soc_price_multiplier": ctx.soc_price_multiplier,
+            "threshold_relaxed": ctx.threshold_relaxed,
         }
 
         # Use strategy manager
@@ -1642,6 +2000,7 @@ class ChargingDecisionEngine:
         battery_analysis: dict[str, Any],
         power_allocation: dict[str, Any],
         data: dict[str, Any],
+        ctx: CycleContext | None = None,
     ) -> dict[str, Any]:
         """Decide whether to charge car from grid with hysteresis.
 
@@ -1651,18 +2010,28 @@ class ChargingDecisionEngine:
 
         This prevents frequent on/off switching for short low-price periods.
         """
-        if not price_analysis.get("data_available", True):
+        if ctx is None:
+            ctx = CycleContext.from_data(
+                data,
+                self._settings,
+                battery_analysis,
+                price_analysis,
+                {},
+                power_allocation,
+            )
+
+        if not ctx.has_price_data:
             return {
                 "car_grid_charging": False,
                 "car_grid_import_allowed": False,
                 "car_grid_charging_reason": "No price data available",
             }
 
-        context = self._build_car_decision_context(price_analysis, power_allocation, data)
+        context = self._build_car_decision_context(price_analysis, ctx)
         if context.very_low_price and context.effective_low_price:
             # Price is both relatively low (bottom N% of today's range) AND below
             # the user's effective threshold (including any locked-floor adjustment).
-            base_decision = self._car_decision_for_very_low_price(context, data)
+            base_decision = self._car_decision_for_very_low_price(context, ctx, data)
         elif (
             context.is_low_price_flag
             or (
@@ -1671,15 +2040,15 @@ class ChargingDecisionEngine:
             )
             or (context.previous_charging and context.effective_low_price)
         ):
-            base_decision = self._car_decision_for_low_price(context, data)
+            base_decision = self._car_decision_for_low_price(context, ctx, data)
         else:
-            base_decision = self._car_decision_for_high_price(context, data)
+            base_decision = self._car_decision_for_high_price(context, ctx, data)
 
         charging_allowed = bool(base_decision.get("car_grid_charging", False))
         solar_only = bool(base_decision.get("car_solar_only", False))
         grid_import_allowed = charging_allowed and not solar_only
 
-        arbitrage_power = self._get_car_arbitrage_power(battery_analysis, data)
+        arbitrage_power = ctx.car_arbitrage_power
         if arbitrage_power > 0:
             grid_import_allowed = bool(
                 grid_import_allowed
@@ -1709,17 +2078,28 @@ class ChargingDecisionEngine:
         self,
         price_analysis: dict[str, Any],
         power_allocation: dict[str, Any],
+        ctx: CycleContext | None = None,
     ) -> dict[str, Any]:
         """Decide whether to enable solar feed-in."""
-        if not price_analysis.get("data_available", True):
+        if ctx is None:
+            ctx = CycleContext.from_data(
+                {},
+                self._settings,
+                {},
+                price_analysis,
+                {},
+                power_allocation,
+            )
+
+        if not ctx.has_price_data:
             return {
                 "feedin_solar": False,
                 "feedin_solar_reason": "No price data available",
                 "feedin_effective_price": None,
             }
-        
-        current_price = price_analysis.get("current_price")
-        raw_price = price_analysis.get("raw_current_price")
+
+        current_price = ctx.current_price
+        raw_price = ctx.raw_current_price
 
         if current_price is None:
             return {
@@ -1734,7 +2114,7 @@ class ChargingDecisionEngine:
         feed_multiplier = self._settings.feedin_adjustment_multiplier
         feed_offset = self._settings.feedin_adjustment_offset
         feedin_threshold = self._settings.feedin_threshold
-        remaining_solar = power_allocation.get("remaining_solar", 0)
+        remaining_solar = int(ctx.remaining_solar)
         
         adjusted_feed_price = apply_price_adjustment(raw_price, feed_multiplier, feed_offset)
         if adjusted_feed_price is None:
@@ -2066,61 +2446,35 @@ class ChargingDecisionEngine:
     def _build_car_decision_context(
         self,
         price_analysis: dict[str, Any],
-        power_allocation: dict[str, Any],
-        data: dict[str, Any],
+        ctx: CycleContext,
     ) -> CarDecisionContext:
         """Collect immutable inputs for car charging decision making."""
-        base_threshold_raw = price_analysis.get("price_threshold")
-        base_threshold = (
-            float(base_threshold_raw)
-            if base_threshold_raw is not None
-            else float(self._settings.price_threshold)
-        )
-
-        previous_car_charging = bool(data.get(_PREVIOUS_CAR_CHARGING_KEY))
-        locked_threshold = _safe_optional_float(data.get(_CAR_CHARGING_LOCKED_THRESHOLD_KEY))
-
-        # Check if permissive mode is active
-        permissive_mode_active = bool(data.get("car_permissive_mode_active", False))
-        permissive_multiplier = self._settings.car_permissive_threshold_multiplier
-
-        effective_threshold = self._resolve_car_threshold(
-            base_threshold, locked_threshold, previous_car_charging,
-            permissive_mode_active, permissive_multiplier
-        )
-
-        current_price = price_analysis.get("current_price")
-
-        allocated_solar = (
-            (_safe_optional_float(power_allocation.get("solar_for_car")) or 0.0)
-            + (_safe_optional_float(power_allocation.get("car_current_solar_usage")) or 0.0)
-        )
+        base_threshold = ctx.resolved_price_threshold
+        permissive_multiplier = ctx.car_permissive_multiplier
+        effective_threshold = self._resolve_car_threshold(ctx)
+        current_price = ctx.current_price
 
         return CarDecisionContext(
             current_price=current_price,
             base_threshold=base_threshold,
             effective_threshold=effective_threshold,
-            previous_charging=previous_car_charging,
-            has_min_window=bool(data.get(_HAS_MIN_CHARGING_WINDOW_KEY)),
+            previous_charging=ctx.previous_car_charging,
+            has_min_window=ctx.has_min_charging_window,
             min_duration=self._settings.min_car_charging_duration,
-            allocated_solar=allocated_solar,
+            allocated_solar=ctx.allocated_car_solar,
             very_low_price=bool(price_analysis.get("very_low_price")),
             very_low_percent=float(self._settings.very_low_price_threshold_pct),
             is_low_price_flag=bool(price_analysis.get("is_low_price")),
             effective_low_price=(
                 current_price is not None and current_price <= effective_threshold
             ),
-            permissive_mode_active=permissive_mode_active,
+            permissive_mode_active=ctx.car_permissive_mode_active,
             permissive_multiplier=permissive_multiplier,
         )
 
     def _resolve_car_threshold(
         self,
-        current_threshold: float,
-        locked_threshold: float | None,
-        previous_car_charging: bool,
-        permissive_mode_active: bool,
-        permissive_multiplier: float,
+        ctx: CycleContext,
     ) -> float:
         """Apply hysteresis threshold floor while the car is charging, then permissive multiplier if enabled.
 
@@ -2128,71 +2482,60 @@ class ChargingDecisionEngine:
         threshold decreases (e.g., rolling average drops). Allows increases
         to take effect immediately.
 
-        Args:
-            current_threshold: Current price threshold from configuration/calculation
-            locked_threshold: Previously locked threshold (if charging active)
-            previous_car_charging: Whether car was charging in previous cycle
-            permissive_mode_active: Whether permissive mode is enabled
-            permissive_multiplier: Multiplier for permissive mode (e.g., 1.2 = 20% higher)
-
         Returns:
             Effective threshold in €/kWh to use for this decision cycle
         """
-        # First apply locked threshold floor if charging
-        if previous_car_charging and locked_threshold is not None:
-            threshold = max(locked_threshold, current_threshold)
+        if ctx.previous_car_charging and ctx.locked_car_threshold is not None:
             _LOGGER.debug(
                 "Car charging active: using threshold floor %.4f€/kWh (locked=%.4f€/kWh, current=%.4f€/kWh)",
-                threshold,
-                locked_threshold,
-                current_threshold,
+                ctx.car_threshold_floor,
+                ctx.locked_car_threshold,
+                ctx.resolved_price_threshold,
             )
-        else:
-            threshold = current_threshold
 
-        # Then apply permissive multiplier if active (with validation)
-        if permissive_mode_active and permissive_multiplier > 1.0:
-            # Clamp multiplier to safe range to prevent misconfiguration
-            safe_multiplier = max(
-                PERMISSIVE_MULTIPLIER_MIN,
-                min(permissive_multiplier, PERMISSIVE_MULTIPLIER_MAX)
-            )
-            if safe_multiplier != permissive_multiplier:
+        if (
+            ctx.car_permissive_mode_active
+            and ctx.car_permissive_multiplier > 1.0
+        ):
+            if ctx.effective_car_permissive_multiplier != ctx.car_permissive_multiplier:
                 _LOGGER.warning(
                     "Permissive multiplier %.2f outside safe range [%.1f, %.1f], clamping to %.2f",
-                    permissive_multiplier, PERMISSIVE_MULTIPLIER_MIN,
-                    PERMISSIVE_MULTIPLIER_MAX, safe_multiplier
+                    ctx.car_permissive_multiplier, PERMISSIVE_MULTIPLIER_MIN,
+                    PERMISSIVE_MULTIPLIER_MAX, ctx.effective_car_permissive_multiplier
                 )
 
-            permissive_threshold = threshold * safe_multiplier
             _LOGGER.debug(
                 "Permissive mode active: threshold %.4f€/kWh → %.4f€/kWh (+%.0f%%)",
-                threshold,
-                permissive_threshold,
-                (safe_multiplier - 1) * 100,
+                ctx.car_threshold_floor,
+                ctx.effective_car_price_threshold,
+                (ctx.effective_car_permissive_multiplier - 1) * 100,
             )
-            return permissive_threshold
+            return ctx.effective_car_price_threshold
 
-        return threshold
+        return ctx.effective_car_price_threshold
 
     def _lock_car_charging_threshold(
         self,
-        context: CarDecisionContext,
+        ctx: CycleContext,
         data: dict[str, Any],
     ) -> None:
         """Lock the price threshold when starting car charging (OFF→ON transition).
 
         Args:
-            context: Car decision context containing threshold information
+            ctx: Cycle context containing threshold information
             data: Mutable data dictionary to store locked threshold
         """
-        data[_CAR_CHARGING_LOCKED_THRESHOLD_KEY] = context.base_threshold
+        data[_CAR_CHARGING_LOCKED_THRESHOLD_KEY] = ctx.resolved_price_threshold
         _LOGGER.debug(
             "Car charging starting: locking threshold at %.4f€/kWh",
-            context.base_threshold,
+            ctx.resolved_price_threshold,
         )
 
-    def _unlock_car_charging_threshold(self, data: dict[str, Any]) -> None:
+    def _unlock_car_charging_threshold(
+        self,
+        _ctx: CycleContext,
+        data: dict[str, Any],
+    ) -> None:
         """Clear the locked threshold when stopping car charging (ON→OFF transition)."""
         data[_CAR_CHARGING_LOCKED_THRESHOLD_KEY] = None
         _LOGGER.debug("Car charging stopping: clearing locked threshold")
@@ -2246,6 +2589,7 @@ class ChargingDecisionEngine:
     def _car_decision_for_very_low_price(
         self,
         context: CarDecisionContext,
+        ctx: CycleContext,
         data: dict[str, Any],
     ) -> CarChargingDecision:
         """Handle very low price cases."""
@@ -2264,7 +2608,7 @@ class ChargingDecisionEngine:
                 "car_grid_charging_reason": reason,
             }
         elif context.has_min_window:
-            self._lock_car_charging_threshold(context, data)
+            self._lock_car_charging_threshold(ctx, data)
             base_reason = (
                 f"Very low price ({price:.3f}€/kWh) - bottom "
                 f"{context.very_low_percent}% of daily range ({context.min_duration}h+ window available)"
@@ -2303,6 +2647,7 @@ class ChargingDecisionEngine:
     def _car_decision_for_low_price(
         self,
         context: CarDecisionContext,
+        ctx: CycleContext,
         data: dict[str, Any],
     ) -> CarChargingDecision:
         """Handle regular low price cases with hysteresis."""
@@ -2315,7 +2660,7 @@ class ChargingDecisionEngine:
             }
 
         if context.has_min_window:
-            self._lock_car_charging_threshold(context, data)
+            self._lock_car_charging_threshold(ctx, data)
             base_reason = (
                 f"Low price ({context.format_price_comparison()}), "
                 f"{context.min_duration}h+ window available - starting"
@@ -2380,13 +2725,14 @@ class ChargingDecisionEngine:
     def _car_decision_for_high_price(
         self,
         context: CarDecisionContext,
+        ctx: CycleContext,
         data: dict[str, Any],
     ) -> CarChargingDecision:
         """Handle high price cases where charging should pause or fall back to solar."""
         high_price_reason = self._format_high_price_reason(context)
 
         if context.previous_charging:
-            self._unlock_car_charging_threshold(data)
+            self._unlock_car_charging_threshold(ctx, data)
             if context.has_allocated_solar:
                 base_reason = (
                     f"{high_price_reason} - switching to solar power only ({context.format_solar_watts()})"
@@ -2422,10 +2768,10 @@ class ChargingDecisionEngine:
         }
 
     def _apply_peak_import_limit(
-        self, result: dict[str, Any], data: dict[str, Any]
+        self, result: dict[str, Any], ctx: CycleContext
     ) -> dict[str, Any]:
         """Halve charger limit while peak import protection is active."""
-        if not data.get("car_peak_limited"):
+        if not ctx.car_peak_limited:
             return result
 
         limit = result.get("charger_limit", 0)
@@ -2449,8 +2795,7 @@ class ChargingDecisionEngine:
 
     def _get_car_arbitrage_power(
         self,
-        battery_analysis: dict[str, Any],
-        data: dict[str, Any],
+        ctx: CycleContext,
     ) -> int:
         """Return arbitrage discharge power that can be diverted locally to the EV.
 
@@ -2463,35 +2808,11 @@ class ChargingDecisionEngine:
         already reflect the current-cycle battery decision before the car
         decision runs.
         """
-        if not self._settings.car_use_battery_arbitrage:
-            return 0
+        return ctx.car_arbitrage_power
 
-        if not data.get("arbitrage_mode_active"):
-            return 0
-
-        export_power = max(
-            0,
-            int(_safe_optional_float(data.get("battery_dump_export_power")) or 0),
-        )
-        if export_power <= 0 or data.get("battery_grid_charging"):
-            return 0
-
-        average_soc = battery_analysis.get("average_soc")
-        if average_soc is None:
-            return 0
-
-        arbitrage_reserve_soc = self._get_arbitrage_reserve_soc(data)
-        if average_soc < arbitrage_reserve_soc:
-            return 0
-
-        return export_power
-
-    def _get_arbitrage_reserve_soc(self, data: dict[str, Any]) -> float:
+    def _get_arbitrage_reserve_soc(self, ctx: CycleContext) -> float:
         """Return the SOC floor that arbitrage discharge must preserve."""
-        reserve_soc = _safe_optional_float(data.get("battery_dump_target_soc"))
-        if reserve_soc is None:
-            reserve_soc = self._settings.battery_dump_target_soc
-        return max(0.0, min(100.0, float(reserve_soc)))
+        return ctx.arbitrage_reserve_soc
 
     def _calculate_charger_limit(
         self,
@@ -2499,23 +2820,31 @@ class ChargingDecisionEngine:
         battery_analysis: dict[str, Any],
         power_allocation: dict[str, Any],
         data: dict[str, Any],
+        ctx: CycleContext | None = None,
     ) -> dict[str, Any]:
         """Calculate optimal charger power limit."""
-        car_charging_power = _safe_optional_float(data.get("car_charging_power")) or 0.0
+        if ctx is None:
+            ctx = CycleContext.from_data(
+                data,
+                self._settings,
+                battery_analysis,
+                price_analysis,
+                {},
+                power_allocation,
+            )
+
+        car_charging_power = ctx.car_charging_power
         min_threshold = self._settings.min_car_charging_threshold
         car_limit_cap = min(self._settings.max_car_power, DEFAULT_SYSTEM_LIMITS.max_car_charger_power)
-        car_charging_allowed = data.get("car_grid_charging", False)
-        car_grid_import_allowed = data.get("car_grid_import_allowed", car_charging_allowed)
-        car_solar_only = data.get("car_solar_only", False)
+        car_charging_allowed = ctx.car_grid_charging
+        car_grid_import_allowed = ctx.car_grid_import_allowed
+        car_solar_only = ctx.car_solar_only
         car_arbitrage_power = (
-            self._get_car_arbitrage_power(battery_analysis, data)
+            self._get_car_arbitrage_power(ctx)
             if car_charging_allowed and not car_solar_only
             else 0
         )
-        allocated_solar = (
-            (_safe_optional_float(power_allocation.get("solar_for_car")) or 0.0)
-            + (_safe_optional_float(power_allocation.get("car_current_solar_usage")) or 0.0)
-        )
+        allocated_solar = ctx.allocated_car_solar
 
         if car_charging_power <= min_threshold and not (
             car_charging_allowed or car_solar_only or car_arbitrage_power > 0
@@ -2532,7 +2861,7 @@ class ChargingDecisionEngine:
                 return self._apply_peak_import_limit({
                     "charger_limit": int(limit),
                     "charger_limit_reason": f"Solar-only car charging - limited to allocated solar power ({int(limit)}W), no grid usage",
-                }, data)
+                }, ctx)
             else:
                 return {
                     "charger_limit": 0,
@@ -2543,11 +2872,11 @@ class ChargingDecisionEngine:
         # At this point: car_grid_charging=True and not solar_only
         average_soc = battery_analysis.get("average_soc")
         max_soc_threshold = battery_analysis.get("max_soc_threshold", DEFAULT_MAX_SOC)
-        arbitrage_reserve_soc = self._get_arbitrage_reserve_soc(data)
+        arbitrage_reserve_soc = self._get_arbitrage_reserve_soc(ctx)
 
         if not car_grid_import_allowed and car_arbitrage_power <= 0:
             if (
-                data.get("arbitrage_mode_active")
+                ctx.arbitrage_mode_active
                 and average_soc is not None
                 and average_soc < arbitrage_reserve_soc
             ):
@@ -2565,7 +2894,7 @@ class ChargingDecisionEngine:
 
         if average_soc is None:
             # No battery data available - use conservative grid-based limit
-            monthly_peak = data.get("monthly_grid_peak", 0)
+            monthly_peak = ctx.monthly_grid_peak
             grid_allowance = (
                 self._get_safe_grid_setpoint(monthly_peak)
                 if car_grid_import_allowed
@@ -2575,15 +2904,15 @@ class ChargingDecisionEngine:
             return self._apply_peak_import_limit({
                 "charger_limit": int(limit),
                 "charger_limit_reason": f"Battery data unavailable - conservative limit ({int(limit)}W)",
-            }, data)
+            }, ctx)
 
-        monthly_peak = data.get("monthly_grid_peak", 0)
+        monthly_peak = ctx.monthly_grid_peak
         max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
         grid_allowance = max_setpoint if car_grid_import_allowed else 0
 
         # Check for low SOC power sharing: when battery SOC is critically low and both
         # battery and car are charging from grid, limit car to 50% to prioritize battery
-        battery_grid_charging = data.get("battery_grid_charging", False)
+        battery_grid_charging = ctx.battery_grid_charging
         predictive_min_soc = self._settings.predictive_min_soc
 
         if (average_soc < predictive_min_soc and
@@ -2600,7 +2929,7 @@ class ChargingDecisionEngine:
                     f"Low battery SOC ({average_soc:.0f}% < {predictive_min_soc}%) - "
                     f"sharing grid power with batteries (car limited to 50% = {int(limit)}W)"
                 ),
-            }, data)
+            }, ctx)
 
         if average_soc < max_soc_threshold and car_arbitrage_power <= 0:
             limit = min(grid_allowance, car_limit_cap)
@@ -2608,9 +2937,9 @@ class ChargingDecisionEngine:
                 "charger_limit": int(limit),
                 "charger_limit_reason": (f"Battery {average_soc:.0f}% < {max_soc_threshold}% - "
                                         f"car limited to grid setpoint ({int(limit)}W), surplus for batteries"),
-            }, data)
+            }, ctx)
 
-        available_surplus = power_allocation.get("remaining_solar", 0)
+        available_surplus = ctx.remaining_solar
         available_power = available_surplus + car_arbitrage_power + grid_allowance
         limit = min(available_power, car_limit_cap)
         source_parts: list[str] = []
@@ -2633,7 +2962,7 @@ class ChargingDecisionEngine:
             "charger_limit": int(limit),
             "charger_limit_reason": (f"{threshold_context} - "
                                     f"car can use {' + '.join(source_parts)} ({int(limit)}W total)"),
-        }, data)
+        }, ctx)
 
     def _calculate_grid_setpoint(
         self,
@@ -2642,21 +2971,32 @@ class ChargingDecisionEngine:
         power_allocation: dict[str, Any],
         data: dict[str, Any],
         charger_limit: int,
+        ctx: CycleContext | None = None,
     ) -> dict[str, Any]:
         """Calculate grid setpoint based on energy management scenario."""
-        car_charging_power = _safe_optional_float(data.get("car_charging_power")) or 0.0
-        battery_grid_charging = data.get("battery_grid_charging", False)
-        car_charging_allowed = data.get("car_grid_charging", False)
-        car_grid_import_allowed = data.get("car_grid_import_allowed", car_charging_allowed)
-        car_solar_only = data.get("car_solar_only", False)
+        if ctx is None:
+            ctx = CycleContext.from_data(
+                data,
+                self._settings,
+                battery_analysis,
+                price_analysis,
+                {},
+                power_allocation,
+            )
+
+        car_charging_power = ctx.car_charging_power
+        battery_grid_charging = ctx.battery_grid_charging
+        car_charging_allowed = ctx.car_grid_charging
+        car_grid_import_allowed = ctx.car_grid_import_allowed
+        car_solar_only = ctx.car_solar_only
         average_soc = battery_analysis.get("average_soc")
-        monthly_peak = data.get("monthly_grid_peak", 0)
+        monthly_peak = ctx.monthly_grid_peak
         peak_context = self._get_grid_setpoint_context(monthly_peak)
         peak_context_reason = self._format_grid_setpoint_context_reason_from_context(
             peak_context
         )
         car_arbitrage_power = (
-            self._get_car_arbitrage_power(battery_analysis, data)
+            self._get_car_arbitrage_power(ctx)
             if car_charging_allowed and not car_solar_only
             else 0
         )
@@ -2665,8 +3005,8 @@ class ChargingDecisionEngine:
         planned_car_session = car_charging_allowed and charger_limit > 0
         significant_car_charging = car_charging_power > min_threshold
         active_or_planned_car_charging = significant_car_charging or planned_car_session
-        battery_dump_active = bool(data.get("arbitrage_mode_active", False))
-        previous_car_charging = bool(data.get(_PREVIOUS_CAR_CHARGING_KEY))
+        battery_dump_active = ctx.battery_dump_active
+        previous_car_charging = ctx.previous_car_charging
         reserve_planned_limit = (
             planned_car_session
             and car_grid_import_allowed
@@ -2725,15 +3065,10 @@ class ChargingDecisionEngine:
         grid_setpoint_parts = []
         car_grid_need = 0
         car_battery_need = 0
-        battery_dump_export_power = max(
-            0,
-            int(_safe_optional_float(data.get("battery_dump_export_power")) or 0),
-        )
+        battery_dump_export_power = ctx.battery_dump_export_power
 
         if active_or_planned_car_charging and car_charging_allowed:
-            allocated_solar = (_safe_optional_float(power_allocation.get("solar_for_car")) or 0.0)
-            car_current_solar = (_safe_optional_float(power_allocation.get("car_current_solar_usage")) or 0.0)
-            car_available_solar = allocated_solar + car_current_solar
+            car_available_solar = ctx.allocated_car_solar
             effective_car_power = (
                 min(requested_car_power, charger_limit)
                 if charger_limit > 0
@@ -2785,12 +3120,12 @@ class ChargingDecisionEngine:
             if grid_setpoint < 0:
                 reason = (
                     f"Grid export scheduled for {components_text} = {int(abs(grid_setpoint))}W export"
-                    f" | {data.get('arbitrage_mode_reason', 'Arbitrage mode active')}"
+                    f" | {ctx.arbitrage_mode_reason or 'Arbitrage mode active'}"
                 )
             elif grid_setpoint == 0:
                 reason = (
                     f"Battery export fully offset by local EV load ({components_text})"
-                    f" | {data.get('arbitrage_mode_reason', 'Arbitrage mode active')}"
+                    f" | {ctx.arbitrage_mode_reason or 'Arbitrage mode active'}"
                 )
             else:
                 reason = (
@@ -2834,8 +3169,35 @@ class ChargingDecisionEngine:
     def _normalize_grid_components(
         self,
         decision: dict[str, Any],
+        ctx: CycleContext | None = None,
     ) -> dict[str, int]:
         """Return a battery/car split consistent with the current grid setpoint."""
+        if ctx is None:
+            price_analysis = decision.get("price_analysis") or {}
+            if not isinstance(price_analysis, dict):
+                price_analysis = {}
+
+            battery_analysis = decision.get("battery_analysis") or {}
+            if not isinstance(battery_analysis, dict):
+                battery_analysis = {}
+
+            power_analysis = decision.get("power_analysis") or {}
+            if not isinstance(power_analysis, dict):
+                power_analysis = {}
+
+            power_allocation = decision.get("power_allocation") or {}
+            if not isinstance(power_allocation, dict):
+                power_allocation = {}
+
+            ctx = CycleContext.from_data(
+                decision,
+                self._settings,
+                battery_analysis,
+                price_analysis,
+                power_analysis,
+                power_allocation,
+            )
+
         total_grid_setpoint = int(_safe_optional_float(decision.get("grid_setpoint")) or 0)
         if total_grid_setpoint == 0:
             return {"battery": 0, "car": 0}
@@ -2865,8 +3227,8 @@ class ChargingDecisionEngine:
                     "car": int(allocations.get("car", 0)),
                 }
 
-            battery_enabled = bool(decision.get("battery_grid_charging", False))
-            car_enabled = bool(decision.get("car_grid_charging", False))
+            battery_enabled = ctx.battery_grid_charging
+            car_enabled = ctx.car_grid_charging
 
             if battery_enabled and not car_enabled:
                 return {"battery": total_grid_setpoint, "car": 0}
@@ -2875,7 +3237,7 @@ class ChargingDecisionEngine:
             if battery_enabled and car_enabled:
                 charger_limit = max(
                     0,
-                    int(_safe_optional_float(decision.get("charger_limit")) or 0),
+                    int(ctx.charger_limit),
                 )
                 if charger_limit > 0:
                     car_allocation = min(charger_limit, total_grid_setpoint)
@@ -2906,6 +3268,10 @@ class ChargingDecisionEngine:
         if not isinstance(battery_analysis, dict):
             battery_analysis = {}
 
+        power_analysis = decision.get("power_analysis") or {}
+        if not isinstance(power_analysis, dict):
+            power_analysis = {}
+
         power_allocation = decision.get("power_allocation") or {}
         if not isinstance(power_allocation, dict):
             power_allocation = {}
@@ -2927,18 +3293,39 @@ class ChargingDecisionEngine:
             combined_data["arbitrage_mode_active"] = False
             combined_data["battery_dump_export_power"] = 0
 
+        ctx = CycleContext.from_data(
+            combined_data,
+            self._settings,
+            battery_analysis,
+            price_analysis,
+            power_analysis,
+            power_allocation,
+        )
+
         if (
             "charger_limit" not in override_targets
             and override_targets.intersection({"battery_grid_charging", "car_grid_charging"})
         ):
             charger_limit_decision = self._calculate_charger_limit(
-                price_analysis, battery_analysis, power_allocation, combined_data
+                price_analysis,
+                battery_analysis,
+                power_allocation,
+                combined_data,
+                ctx=ctx,
             )
             decision.update(charger_limit_decision)
             combined_data.update(charger_limit_decision)
+            ctx = CycleContext.from_data(
+                combined_data,
+                self._settings,
+                battery_analysis,
+                price_analysis,
+                power_analysis,
+                power_allocation,
+            )
 
         if "grid_setpoint" in override_targets:
-            normalized_grid_components = self._normalize_grid_components(decision)
+            normalized_grid_components = self._normalize_grid_components(decision, ctx)
             decision["grid_components"] = normalized_grid_components
             combined_data["grid_components"] = normalized_grid_components
             decision["grid_setpoint_reason"] = self._format_manual_grid_setpoint_reason(
@@ -2958,6 +3345,7 @@ class ChargingDecisionEngine:
                 power_allocation,
                 combined_data,
                 charger_limit,
+                ctx=ctx,
             )
             decision.update(grid_setpoint_decision)
             combined_data.update(grid_setpoint_decision)

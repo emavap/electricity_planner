@@ -510,7 +510,7 @@ async def test_single_phase_passes_current_battery_decision_to_car_logic(monkeyp
     monkeypatch.setattr(
         engine,
         "_decide_battery_grid_charging",
-        lambda *args: {
+        lambda *args, **kwargs: {
             "battery_grid_charging": True,
             "battery_grid_charging_reason": "Battery charging now",
             "strategy_trace": [],
@@ -518,7 +518,7 @@ async def test_single_phase_passes_current_battery_decision_to_car_logic(monkeyp
     )
     monkeypatch.setattr(engine.strategy_manager, "get_dynamic_threshold", lambda context: None)
 
-    def capture_car_decision(price_analysis, battery_analysis, power_allocation, data):
+    def capture_car_decision(price_analysis, battery_analysis, power_allocation, data, **kwargs):
         seen["battery_grid_charging"] = data.get("battery_grid_charging")
         return {
             "car_grid_charging": False,
@@ -530,12 +530,12 @@ async def test_single_phase_passes_current_battery_decision_to_car_logic(monkeyp
     monkeypatch.setattr(
         engine,
         "_calculate_charger_limit",
-        lambda *args: {"charger_limit": 0, "charger_limit_reason": "No charging"},
+        lambda *args, **kwargs: {"charger_limit": 0, "charger_limit_reason": "No charging"},
     )
     monkeypatch.setattr(
         engine,
         "_calculate_grid_setpoint",
-        lambda *args: {
+        lambda *args, **kwargs: {
             "grid_setpoint": 0,
             "grid_setpoint_reason": "No grid power",
             "grid_components": {"battery": 0, "car": 0},
@@ -544,7 +544,7 @@ async def test_single_phase_passes_current_battery_decision_to_car_logic(monkeyp
     monkeypatch.setattr(
         engine,
         "_decide_feedin_solar",
-        lambda *args: {
+        lambda *args, **kwargs: {
             "feedin_solar": False,
             "feedin_solar_reason": "No feed-in",
             "feedin_effective_price": None,
