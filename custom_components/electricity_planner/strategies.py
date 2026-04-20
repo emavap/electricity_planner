@@ -563,12 +563,27 @@ class StrategyManager:
                 self._last_trace = trace
                 return True, reason
             elif isinstance(strategy, SolarPriorityStrategy) and reason:
-                _LOGGER.debug(
-                    "Strategy %s blocked grid charging: %s",
-                    strategy.__class__.__name__, reason,
-                )
-                self._last_trace = trace
-                return False, reason
+                # At emergency SOC levels grid supplementation is still needed even
+                # when solar is being allocated to the batteries.  Downgrade to an
+                # advisory so that SOCBasedChargingStrategy (and other safety-net
+                # strategies) can still run and override the solar preference.
+                if average_soc is not None and average_soc <= emergency_threshold:
+                    _LOGGER.debug(
+                        "Strategy %s would block grid charging, but SOC %.0f%% ≤ "
+                        "emergency %.0f%% - allowing safety strategies to continue: %s",
+                        strategy.__class__.__name__,
+                        average_soc,
+                        emergency_threshold,
+                        reason,
+                    )
+                    last_reason = reason
+                else:
+                    _LOGGER.debug(
+                        "Strategy %s blocked grid charging: %s",
+                        strategy.__class__.__name__, reason,
+                    )
+                    self._last_trace = trace
+                    return False, reason
             elif reason:  # Strategy made a decision not to charge, but continue checking
                 _LOGGER.debug("Strategy %s suggests not charging: %s (continuing evaluation)",
                             strategy.__class__.__name__, reason)

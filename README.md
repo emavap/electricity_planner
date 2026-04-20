@@ -1,10 +1,10 @@
 # Electricity Planner
 
-**Version 5.0.5** | **Config Schema Version 20** | **Home Assistant 2024.4+**
+**Version 5.0.7** | **Config Schema Version 20** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
-> Release note for v5.0.5: dashboard and arbitrage diagnostics release. Adds a dedicated arbitrage reason line to managed and bundled dashboards, keeps bundled mono/three-phase snapshots in sync, and extends restart coverage for persisted arbitrage mode.
+> Release note for v5.0.7: decision logic bug-fix release. Fixes arbitrage grid setpoint staying at 0 W when no car is physically charging; car charging no longer continues above the effective threshold when the price is only "very low" in relative terms; SolarPriorityStrategy no longer blocks grid charging at emergency SOC levels; float equality comparison for is_lowest_price replaced with tolerance check; average-threshold interval-duration estimation now uses the robust minimum-delta method.
 
 ---
 

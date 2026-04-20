@@ -2681,12 +2681,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("No future price intervals available for average threshold")
             return None
 
-        # Estimate interval resolution (typically 15min or 1h)
-        if len(future_intervals) >= 2:
-            delta = future_intervals[1][0] - future_intervals[0][0]
-            interval_duration = delta if delta > timedelta(0) else infer_interval_resolution()
-        else:
-            interval_duration = infer_interval_resolution()
+        # Estimate interval resolution (typically 15min or 1h).
+        # Always use infer_interval_resolution() which finds the minimum delta
+        # across all intervals.  Using only the first two intervals could give a
+        # wrong estimate at mixed-resolution day boundaries (e.g. today 1h,
+        # tomorrow 15min) leading to an undercount of the required interval count
+        # and premature activation of the average threshold with insufficient data.
+        interval_duration = infer_interval_resolution()
 
         if interval_duration <= timedelta(0):
             interval_duration = timedelta(minutes=15)

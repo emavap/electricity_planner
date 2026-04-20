@@ -1102,7 +1102,7 @@ class ChargingDecisionEngine:
             "transport_cost": transport_cost,
             "price_threshold": price_threshold,
             "is_low_price": current_price <= price_threshold,
-            "is_lowest_price": lowest_price is not None and current_price == lowest_price,
+            "is_lowest_price": lowest_price is not None and abs(current_price - lowest_price) < 1e-6,
             "price_position": price_position,
             "next_price_higher": next_price_higher,
             "price_trend_improving": price_trend_improving,
@@ -1386,7 +1386,7 @@ class ChargingDecisionEngine:
     def _analyze_battery_status(self, battery_soc_data: list[dict[str, Any]]) -> dict[str, Any]:
         """Analyze battery status for all configured batteries."""
         # Validate battery data
-        is_valid, validation_msg = self.validator.validate_battery_data(battery_soc_data)
+        _, validation_msg = self.validator.validate_battery_data(battery_soc_data)
         
         if not battery_soc_data:
             return self._create_no_battery_result()
@@ -1663,7 +1663,9 @@ class ChargingDecisionEngine:
             }
 
         context = self._build_car_decision_context(price_analysis, power_allocation, data)
-        if context.very_low_price:
+        if context.very_low_price and context.effective_low_price:
+            # Price is both relatively low (bottom N% of today's range) AND below
+            # the user's effective threshold (including any locked-floor adjustment).
             base_decision = self._car_decision_for_very_low_price(context, data)
         elif (
             context.is_low_price_flag
@@ -2681,9 +2683,11 @@ class ChargingDecisionEngine:
             # permission, so keep the full allowed headroom reserved until the
             # session is established.
             requested_car_power = float(charger_limit)
-        elif planned_car_session and not significant_car_charging:
+        elif planned_car_session and not significant_car_charging and not battery_dump_active:
             # Fresh starts still need the planned limit until the charger begins
-            # drawing meaningful power.
+            # drawing meaningful power.  Skip in arbitrage mode: the car draws
+            # from battery locally, so there is no grid headroom to reserve and
+            # we must not let a phantom car-power figure absorb the export budget.
             requested_car_power = float(charger_limit)
         else:
             requested_car_power = car_charging_power
