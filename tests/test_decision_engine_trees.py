@@ -470,9 +470,9 @@ def test_charger_limit_decision_tree_branches(
                 "previous_car_charging": False,
             },
             3000,
-            3000,
-            {"battery": 0, "car": 3000},
-            "car pulling 3000W",
+            0,
+            {"battery": 0, "car": 0},
+            "no grid power allocated",
         ),
         (
             {"average_soc": 50, "max_soc_threshold": 90},

@@ -1,10 +1,10 @@
 # Electricity Planner
 
-**Version 5.0.9** | **Config Schema Version 20** | **Home Assistant 2024.4+**
+**Version 5.0.10** | **Config Schema Version 20** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
-> Release note for v5.0.9: internal refactor. The decision engine now threads a frozen `CycleContext` explicitly through every step instead of smuggling it through the `data` dictionary via a private key. Orchestrator rebuilds are reduced and documented, and the dashboard arbitrage/permissive controls have been rearranged. No behavior change — all 416 tests pass unchanged.
+> Release note for v5.0.10: grid setpoint no longer reserves the full charger limit when the car is not actually drawing — it now tracks live car draw and only asks the inverter to permit grid import when the car is charging with grid import allowed or battery grid charging is authorised. Added explicit direction safety nets with warning logs if upstream ever requests unauthorised import or export. The managed dashboard version was bumped so the v5.0.9 Battery Controls / Decisions rearrangement applies automatically on existing installs.
 
 ---
 
@@ -542,7 +542,7 @@ phase_results:
 | `max_grid_power` | 10000 W | 1000–50000 | Max grid import power |
 | `battery_dump_max_export_power` | 0 W | 0–50000 | Arbitrage export cap (`0` = automatic min of battery/grid limits); configured via the options flow Safety Limits step |
 | `base_grid_setpoint` | 5000 W | 1000–15000 | Base grid setpoint |
-| `min_car_charging_power` | 1400 W | 500–3000 | Min power to detect EV charging |
+| `min_car_charging_threshold` | 100 W | 50–500 | Min power to consider the EV "charging" (above EVSE standby) |
 | `min_car_charging_duration` | 2 h | 0.5–8 | Min charging window for hysteresis |
 | `car_permissive_threshold_multiplier` | 1.2 | 1.0–2.0 | Permissive mode multiplier |
 

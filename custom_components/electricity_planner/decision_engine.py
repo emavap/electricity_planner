@@ -3006,27 +3006,11 @@ class ChargingDecisionEngine:
         significant_car_charging = car_charging_power > min_threshold
         active_or_planned_car_charging = significant_car_charging or planned_car_session
         battery_dump_active = ctx.battery_dump_active
-        previous_car_charging = ctx.previous_car_charging
-        reserve_planned_limit = (
-            planned_car_session
-            and car_grid_import_allowed
-            and not battery_dump_active
-            and car_arbitrage_power <= 0
-            and not previous_car_charging
-        )
-        if reserve_planned_limit:
-            # On startup/resume the grid setpoint acts as the EV's import
-            # permission, so keep the full allowed headroom reserved until the
-            # session is established.
-            requested_car_power = float(charger_limit)
-        elif planned_car_session and not significant_car_charging and not battery_dump_active:
-            # Fresh starts still need the planned limit until the charger begins
-            # drawing meaningful power.  Skip in arbitrage mode: the car draws
-            # from battery locally, so there is no grid headroom to reserve and
-            # we must not let a phantom car-power figure absorb the export budget.
-            requested_car_power = float(charger_limit)
-        else:
-            requested_car_power = car_charging_power
+        # Grid setpoint only reserves car headroom when the car is actually
+        # drawing power AND grid import is allowed. The charger limit stays
+        # independent and is advertised to the EVSE regardless.
+        car_draws_from_grid = significant_car_charging and car_grid_import_allowed
+        requested_car_power = car_charging_power
         solar_only_note = (
             "Solar-only car charging detected - car grid import blocked"
             if active_or_planned_car_charging and car_solar_only
@@ -3035,7 +3019,7 @@ class ChargingDecisionEngine:
 
         # Handle unavailable battery data
         if average_soc is None:
-            if active_or_planned_car_charging and car_grid_import_allowed:
+            if car_draws_from_grid:
                 max_setpoint = peak_context.effective_max_setpoint
                 effective_car_power = (
                     min(requested_car_power, charger_limit)
@@ -3067,7 +3051,7 @@ class ChargingDecisionEngine:
         car_battery_need = 0
         battery_dump_export_power = ctx.battery_dump_export_power
 
-        if active_or_planned_car_charging and car_charging_allowed:
+        if significant_car_charging and car_charging_allowed:
             car_available_solar = ctx.allocated_car_solar
             effective_car_power = (
                 min(requested_car_power, charger_limit)
@@ -3111,9 +3095,53 @@ class ChargingDecisionEngine:
         if grid_setpoint > 0:
             max_grid_power = self._get_max_grid_power()
             grid_setpoint = min(grid_setpoint, max_setpoint, max_grid_power)
-        
+
+        # Direction safety nets. The upstream car/battery decision logic is
+        # responsible for producing a correct setpoint; these gates must never
+        # fire under sane inputs. If one does fire, the logs below mark it as
+        # a bug in the decision logic rather than a normal clamp:
+        # - Import (positive) requires significant car draw with grid import
+        #   allowed, or authorised battery grid charging.
+        # - Export (negative) requires an active arbitrage dump window.
+        import_permitted = car_draws_from_grid or battery_grid_charging
+        export_permitted = battery_dump_active
+        gate_reason: str | None = None
+        if grid_setpoint > 0 and not import_permitted:
+            gate_reason = (
+                "Grid import blocked - neither car nor battery charging authorised"
+            )
+            _LOGGER.warning(
+                "Grid setpoint safety net tripped: upstream produced %dW import "
+                "with no authorisation (car_grid_need=%d, battery_grid_need=%d, "
+                "significant_car_charging=%s, car_grid_import_allowed=%s, "
+                "battery_grid_charging=%s). This is a bug in the decision logic.",
+                int(grid_setpoint), int(car_grid_need), int(battery_grid_need),
+                significant_car_charging, car_grid_import_allowed,
+                battery_grid_charging,
+            )
+            grid_setpoint = 0
+            car_grid_need = 0
+            battery_grid_need = 0
+            grid_setpoint_parts = []
+        elif grid_setpoint < 0 and not export_permitted:
+            gate_reason = "Grid export blocked - arbitrage dump not active"
+            _LOGGER.warning(
+                "Grid setpoint safety net tripped: upstream produced %dW export "
+                "without active arbitrage dump (battery_grid_need=%d, "
+                "arbitrage_mode_active=%s, battery_dump_export_power=%d). "
+                "This is a bug in the decision logic.",
+                int(grid_setpoint), int(battery_grid_need),
+                ctx.arbitrage_mode_active, battery_dump_export_power,
+            )
+            grid_setpoint = 0
+            car_grid_need = 0
+            battery_grid_need = 0
+            grid_setpoint_parts = []
+
         # Create reason
-        if not grid_setpoint_parts:
+        if gate_reason is not None:
+            reason = f"{gate_reason} | {peak_context_reason}"
+        elif not grid_setpoint_parts:
             reason = f"No grid charging needed | {peak_context_reason}"
         elif battery_dump_active and battery_grid_need < 0:
             components_text = " + ".join(grid_setpoint_parts)

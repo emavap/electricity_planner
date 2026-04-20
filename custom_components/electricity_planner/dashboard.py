@@ -36,7 +36,10 @@ from .const import CONF_PHASE_MODE, DOMAIN, PHASE_MODE_SINGLE, PHASE_MODE_THREE
 _LOGGER = logging.getLogger(__name__)
 
 MANAGED_KEY = "electricity_planner_managed"
-MANAGED_VERSION = 24  # Bumped: dashboard now surfaces an explicit arbitrage reason line
+# MUST be bumped whenever dashboard_template.yaml or the 3-phase appendix
+# changes so existing installs re-save on next reload. The deep-diff in
+# _save_dashboard is a defence-in-depth; this stamp is the primary signal.
+MANAGED_VERSION = 25  # Arbitrage switch moved from Decisions into Battery Controls
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 THREE_PHASE_APPENDIX_FILENAME = "dashboard_template_3phase_appendix.yaml"
 

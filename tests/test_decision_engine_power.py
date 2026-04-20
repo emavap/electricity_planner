@@ -100,7 +100,7 @@ def test_grid_setpoint_without_battery_data():
     assert "(90% of 4000W)" in result["grid_setpoint_reason"]
 
 
-def test_grid_setpoint_reserves_import_for_planned_ev_start():
+def test_grid_setpoint_stays_zero_when_planned_car_not_drawing_yet():
     engine = _engine()
 
     result = engine._calculate_grid_setpoint(
@@ -117,10 +117,10 @@ def test_grid_setpoint_reserves_import_for_planned_ev_start():
         charger_limit=3000,
     )
 
-    assert result["grid_setpoint"] == 3000
+    assert result["grid_setpoint"] == 0
     assert result["grid_components"]["battery"] == 0
-    assert result["grid_components"]["car"] == 3000
-    assert "car pulling 3000W" in result["grid_setpoint_reason"]
+    assert result["grid_components"]["car"] == 0
+    assert "No grid charging needed" in result["grid_setpoint_reason"]
 
 
 def test_grid_setpoint_distributes_between_car_and_battery():
@@ -158,7 +158,7 @@ def test_grid_setpoint_distributes_between_car_and_battery():
     assert "(90% of 8000W)" in reason
 
 
-def test_grid_setpoint_keeps_ev_headroom_reserved_while_battery_is_grid_charging():
+def test_grid_setpoint_tracks_live_car_draw_even_on_fresh_start():
     engine = _engine()
 
     result = engine._calculate_grid_setpoint(
@@ -176,11 +176,11 @@ def test_grid_setpoint_keeps_ev_headroom_reserved_while_battery_is_grid_charging
         charger_limit=7000,
     )
 
-    assert result["grid_setpoint"] == 7200
-    assert result["grid_components"]["car"] == 7000
-    assert result["grid_components"]["battery"] == 200
-    assert "car pulling 7000W" in result["grid_setpoint_reason"]
-    assert "battery charging 200W" in result["grid_setpoint_reason"]
+    assert result["grid_setpoint"] == 5500
+    assert result["grid_components"]["car"] == 1500
+    assert result["grid_components"]["battery"] == 4000
+    assert "car pulling 1500W" in result["grid_setpoint_reason"]
+    assert "battery charging 4000W" in result["grid_setpoint_reason"]
 
 
 def test_grid_setpoint_uses_live_draw_once_car_session_is_established():
@@ -344,6 +344,124 @@ def test_grid_setpoint_exports_battery_during_dump_window():
     assert result["grid_components"]["car"] == 0
     assert "Grid export scheduled" in result["grid_setpoint_reason"]
     assert "3500W export" in result["grid_setpoint_reason"]
+
+
+def test_grid_setpoint_is_zero_when_nothing_is_authorised():
+    engine = _engine()
+    battery_analysis = {"average_soc": 60, "max_soc_threshold": 90}
+    power_allocation = {"solar_for_car": 0, "car_current_solar_usage": 0}
+    data = {
+        "car_charging_power": 0,
+        "car_grid_charging": False,
+        "car_grid_import_allowed": False,
+        "battery_grid_charging": False,
+        "arbitrage_mode_active": False,
+        "monthly_grid_peak": 4000,
+    }
+
+    result = engine._calculate_grid_setpoint(
+        {},
+        battery_analysis,
+        power_allocation,
+        data,
+        charger_limit=0,
+    )
+
+    assert result["grid_setpoint"] == 0
+    assert result["grid_components"]["battery"] == 0
+    assert result["grid_components"]["car"] == 0
+    assert "No grid charging needed" in result["grid_setpoint_reason"]
+
+
+def test_grid_setpoint_permits_import_for_battery_charging_without_car():
+    engine = _engine()
+    battery_analysis = {"average_soc": 50, "max_soc_threshold": 90}
+    power_allocation = {"solar_for_car": 0, "car_current_solar_usage": 0}
+    data = {
+        "car_charging_power": 0,
+        "car_grid_charging": False,
+        "car_grid_import_allowed": False,
+        "battery_grid_charging": True,
+        "monthly_grid_peak": 4000,
+    }
+
+    result = engine._calculate_grid_setpoint(
+        {},
+        battery_analysis,
+        power_allocation,
+        data,
+        charger_limit=0,
+    )
+
+    assert result["grid_setpoint"] > 0
+    assert result["grid_components"]["car"] == 0
+    assert result["grid_components"]["battery"] == result["grid_setpoint"]
+    assert "battery charging" in result["grid_setpoint_reason"]
+
+
+def test_grid_setpoint_permits_import_for_car_without_battery():
+    engine = _engine()
+    battery_analysis = {"average_soc": 80, "max_soc_threshold": 90}
+    power_allocation = {"solar_for_car": 0, "car_current_solar_usage": 0}
+    data = {
+        "car_charging_power": 2500,
+        "car_grid_charging": True,
+        "car_grid_import_allowed": True,
+        "previous_car_charging": True,
+        "battery_grid_charging": False,
+        "monthly_grid_peak": 4000,
+    }
+
+    result = engine._calculate_grid_setpoint(
+        {},
+        battery_analysis,
+        power_allocation,
+        data,
+        charger_limit=3500,
+    )
+
+    assert result["grid_setpoint"] == 2500
+    assert result["grid_components"]["car"] == 2500
+    assert result["grid_components"]["battery"] == 0
+    assert "car pulling 2500W" in result["grid_setpoint_reason"]
+
+
+def test_grid_setpoint_upstream_ignores_dump_power_when_arbitrage_inactive(caplog):
+    """Upstream correctness check: when arbitrage mode is off, the decision
+    logic must ignore any stale ``battery_dump_export_power`` in ``data``
+    and never request grid export. The direction gate is only a safety net
+    for a bug in the decision logic; a tripped gate here would indicate
+    the upstream invariant is broken.
+    """
+    engine = _engine()
+    battery_analysis = {"average_soc": 90, "max_soc_threshold": 90}
+    power_allocation = {"solar_for_car": 0, "car_current_solar_usage": 0}
+    data = {
+        "car_charging_power": 0,
+        "car_grid_charging": False,
+        "battery_grid_charging": False,
+        "arbitrage_mode_active": False,
+        "battery_dump_export_power": 3500,
+        "monthly_grid_peak": 4000,
+    }
+
+    with caplog.at_level("WARNING", logger="custom_components.electricity_planner.decision_engine"):
+        result = engine._calculate_grid_setpoint(
+            {},
+            battery_analysis,
+            power_allocation,
+            data,
+            charger_limit=0,
+        )
+
+    assert result["grid_setpoint"] == 0
+    assert result["grid_components"]["battery"] == 0
+    assert result["grid_components"]["car"] == 0
+    # Upstream must produce a zero setpoint on its own; the safety-net
+    # warning must not fire. If it does, the decision logic has a bug.
+    assert not any(
+        "safety net tripped" in record.message for record in caplog.records
+    )
 
 
 def test_car_decision_allows_arbitrage_charging_without_grid_import():
