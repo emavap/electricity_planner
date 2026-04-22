@@ -43,12 +43,14 @@
                         "data": {
                             "solar_forecast_start_hour": "Forecast Start Hour",
                             "max_soc_threshold_sunny": "Max SOC Grid Charge (Sunny Day)",
+                            "max_soc_threshold_solar": "Max SOC Solar Charge",
                             "sunny_forecast_threshold_kwh": "Sunny Forecast Trigger (kWh)",
                             "significant_solar_threshold": "Significant Solar Threshold"
                         },
                         "data_description": {
                             "solar_forecast_start_hour": "Hour of the day (12-23) when the system starts reading tomorrow's solar forecast. Earlier = more time to react, later = more accurate forecast. Default: 20 (8 PM)",
                             "max_soc_threshold_sunny": "Max SOC for grid charging when tomorrow is sunny (%). Grid charging stops at this level to leave room for free solar energy",
+                            "max_soc_threshold_solar": "Battery SOC above which solar surplus is diverted to the EV / export instead of being absorbed by the battery (%). Independent from grid charging ceiling.",
                             "sunny_forecast_threshold_kwh": "Solar forecast threshold in kWh that activates sunny-day grid charging mode",
                             "significant_solar_threshold": "Solar surplus power level considered significant enough to prefer over grid (W)"
                         }
@@ -121,6 +123,7 @@
                     "battery_dump_deadline_hour": "Arbitrage Deadline Hour",
                     "solar_forecast_start_hour": "Forecast Start Hour",
                     "max_soc_threshold_sunny": "Max SOC Grid Charge (Sunny Day)",
+                    "max_soc_threshold_solar": "Max SOC Solar Charge",
                     "sunny_forecast_threshold_kwh": "Sunny Forecast Trigger (kWh)",
                     "price_threshold": "Price Threshold",
                     "price_adjustment_multiplier": "Price Adjustment Multiplier",
@@ -152,6 +155,7 @@
                     "battery_dump_deadline_hour": "Local hour of the next arbitrage cutoff. Before it the planner targets today; after it, tomorrow",
                     "solar_forecast_start_hour": "Hour of the day (12-23) when the system starts reading tomorrow's solar forecast. Earlier = more time to react, later = more accurate forecast. Default: 20 (8 PM)",
                     "max_soc_threshold_sunny": "Max SOC for grid charging when tomorrow is sunny (%). Grid charging stops at this level to leave room for free solar energy",
+                    "max_soc_threshold_solar": "Battery SOC above which solar surplus is diverted to the EV / export instead of being absorbed by the battery (%). Independent from grid charging ceiling.",
                     "sunny_forecast_threshold_kwh": "Solar forecast threshold in kWh that activates sunny-day grid charging mode",
                     "price_threshold": "Price threshold for charging decisions (\u20ac/kWh)",
                     "price_adjustment_multiplier": "Multiplier applied to raw price (e.g. 1.04 for the Energie.be dynamic contract). Default: 1.04",
@@ -561,6 +565,7 @@
                             "solar_forecast_today_entity": "Energy Production Today (Optional)",
                             "solar_forecast_start_hour": "Forecast Start Hour",
                             "max_soc_threshold_sunny": "Max SOC Grid Charge (Sunny Day)",
+                            "max_soc_threshold_solar": "Max SOC Solar Charge",
                             "sunny_forecast_threshold_kwh": "Sunny Forecast Trigger (kWh)"
                         },
                         "data_description": {
@@ -568,6 +573,7 @@
                             "solar_forecast_today_entity": "Today's solar production forecast in kWh (e.g. sensor.energy_production_today). Used between midnight and the forecast start hour to validate the cached forecast",
                             "solar_forecast_start_hour": "Hour of the day (12-23) when the system starts reading tomorrow's solar forecast. Earlier = more time to react, later = more accurate forecast. Default: 20 (8 PM)",
                             "max_soc_threshold_sunny": "Max SOC for grid charging when tomorrow is sunny (%). Grid charging stops at this level to leave room for free solar energy",
+                            "max_soc_threshold_solar": "Battery SOC above which solar surplus is diverted to the EV / export instead of being absorbed by the battery (%). Independent from grid charging ceiling.",
                             "sunny_forecast_threshold_kwh": "Solar forecast threshold in kWh that activates sunny-day grid charging mode"
                         }
                     },
@@ -736,6 +742,7 @@
                     "solar_forecast_today_entity": "Energy Production Today (Optional)",
                     "solar_forecast_start_hour": "Forecast Start Hour",
                     "max_soc_threshold_sunny": "Max SOC Grid Charge (Sunny Day)",
+                    "max_soc_threshold_solar": "Max SOC Solar Charge",
                     "sunny_forecast_threshold_kwh": "Sunny Forecast Trigger (kWh)",
                     "min_soc_threshold": "Minimum SOC Threshold",
                     "max_soc_threshold": "Maximum SOC Threshold",
@@ -871,6 +878,7 @@
                     "battery_dump_deadline_hour": "Arbitrage Deadline Hour",
                     "solar_forecast_start_hour": "Forecast Start Hour",
                     "max_soc_threshold_sunny": "Max SOC Grid Charge (Sunny Day)",
+                    "max_soc_threshold_solar": "Max SOC Solar Charge",
                     "sunny_forecast_threshold_kwh": "Sunny Forecast Trigger (kWh)",
                     "price_threshold": "Price Threshold",
                     "price_adjustment_multiplier": "Price Adjustment Multiplier",
@@ -901,6 +909,7 @@
                     "battery_dump_deadline_hour": "Local hour of the next arbitrage cutoff. Before it the planner targets today; after it, tomorrow",
                     "solar_forecast_start_hour": "Hour of the day (12-23) when the system starts reading tomorrow's solar forecast. Earlier = more time to react, later = more accurate forecast. Default: 20 (8 PM)",
                     "max_soc_threshold_sunny": "Max SOC for grid charging when tomorrow is sunny (%). Grid charging stops at this level to leave room for free solar energy",
+                    "max_soc_threshold_solar": "Battery SOC above which solar surplus is diverted to the EV / export instead of being absorbed by the battery (%). Independent from grid charging ceiling.",
                     "sunny_forecast_threshold_kwh": "Solar forecast threshold in kWh that activates sunny-day grid charging mode",
                     "price_threshold": "Price threshold for charging decisions (€/kWh)",
                     "price_adjustment_multiplier": "Multiplier applied to raw price (e.g. 1.04 for the Energie.be dynamic contract). Default: 1.04",

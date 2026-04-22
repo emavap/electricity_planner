@@ -471,7 +471,7 @@ async def test_async_migrate_entry_derives_sunny_threshold_from_option_capacitie
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 20
+    assert entry.version == 21
     assert entry.data[CONF_SUNNY_FORECAST_THRESHOLD_KWH] == pytest.approx(7.0)
     assert entry.data[CONF_MAX_SOC_THRESHOLD] == 90
     assert entry.data[CONF_MAX_SOC_THRESHOLD_SUNNY] == 50
@@ -501,7 +501,7 @@ async def test_async_migrate_entry_preserves_legacy_soc_defaults_for_sparse_v14_
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 20
+    assert entry.version == 21
     assert entry.data[CONF_MAX_SOC_THRESHOLD] == 90
     assert entry.data[CONF_MAX_SOC_THRESHOLD_SUNNY] == 50
 
@@ -530,7 +530,7 @@ async def test_async_migrate_entry_uses_legacy_sunny_default_for_pre_v12_entries
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 20
+    assert entry.version == 21
     assert entry.data[CONF_MAX_SOC_THRESHOLD_SUNNY] == 50
 
 
@@ -561,7 +561,7 @@ async def test_async_migrate_entry_replaces_legacy_transport_cost_sensor():
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 20
+    assert entry.version == 21
     assert CONF_TRANSPORT_COST_ENTITY not in entry.data
     assert entry.data[CONF_TRANSPORT_COST_DAY] == pytest.approx(DEFAULT_TRANSPORT_COST_DAY)
     assert entry.data[CONF_TRANSPORT_COST_NIGHT] == pytest.approx(DEFAULT_TRANSPORT_COST_NIGHT)
@@ -597,7 +597,7 @@ async def test_async_migrate_entry_adds_inverter_derating_defaults_for_v16():
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 20
+    assert entry.version == 21
     assert entry.data[CONF_MAX_INVERTER_POWER] == DEFAULT_MAX_INVERTER_POWER
     assert entry.data[CONF_INVERTER_EXPORT_LIMIT] == DEFAULT_INVERTER_EXPORT_LIMIT
     assert entry.data[CONF_INVERTER_EXPORT_DEADBAND] == DEFAULT_INVERTER_EXPORT_DEADBAND
@@ -637,7 +637,7 @@ async def test_async_migrate_entry_adds_battery_dump_deadline_hour_for_v19():
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 20
+    assert entry.version == 21
     assert entry.data[CONF_BATTERY_DUMP_DEADLINE_HOUR] == DEFAULT_BATTERY_DUMP_DEADLINE_HOUR
 
 
@@ -681,5 +681,5 @@ async def test_async_migrate_entry_normalizes_battery_dump_deadline_hour_for_v19
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 20
+    assert entry.version == 21
     assert entry.data[CONF_BATTERY_DUMP_DEADLINE_HOUR] == expected_value

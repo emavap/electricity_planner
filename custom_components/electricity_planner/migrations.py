@@ -31,6 +31,8 @@ v18 → v19: Added ``inverter_derating_unused_release_minutes`` so the planner
            can release an unused cap after a configurable delay.
 v19 → v20: Added ``battery_dump_deadline_hour`` so the arbitrage mode cutoff can
            be configured instead of always using noon.
+v20 → v21: Added ``max_soc_threshold_solar`` so the solar-charging ceiling is
+           independent from the grid-charging ``max_soc_threshold``.
 """
 from __future__ import annotations
 
@@ -58,6 +60,7 @@ from .const import (
     CONF_SOC_BUFFER_TARGET,
     CONF_BATTERY_DUMP_DEADLINE_HOUR,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
+    CONF_MAX_SOC_THRESHOLD_SOLAR,
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_BATTERY_CAPACITIES,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
@@ -84,6 +87,7 @@ from .const import (
     DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
     DEFAULT_SOC_BUFFER_TARGET,
     DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
+    DEFAULT_MAX_SOC_SOLAR,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
     DEFAULT_TRANSPORT_COST_DAY,
@@ -106,7 +110,7 @@ _LEGACY_DEFAULT_MAX_SOC = 90
 _LEGACY_DEFAULT_MAX_SOC_SUNNY = 50
 
 # Current config version
-CURRENT_VERSION = 20
+CURRENT_VERSION = 21
 
 
 def _validate_numeric_config(
@@ -606,5 +610,32 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
         _LOGGER.info("Migration to version 20 complete")
+
+    if entry.version == 20:
+        new_data = {**entry.data}
+
+        if CONF_MAX_SOC_THRESHOLD_SOLAR not in new_data:
+            new_data[CONF_MAX_SOC_THRESHOLD_SOLAR] = DEFAULT_MAX_SOC_SOLAR
+            _LOGGER.info(
+                "Added max_soc_threshold_solar: %d%%",
+                DEFAULT_MAX_SOC_SOLAR,
+            )
+
+        _validate_numeric_config(
+            new_data,
+            CONF_MAX_SOC_THRESHOLD_SOLAR,
+            0,
+            100,
+            DEFAULT_MAX_SOC_SOLAR,
+            "max_soc_threshold_solar",
+        )
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=21,
+        )
+
+        _LOGGER.info("Migration to version 21 complete")
 
     return True

@@ -59,6 +59,7 @@ CONF_SOLAR_FORECAST_TODAY_ENTITY = "solar_forecast_today_entity"
 CONF_SOLAR_FORECAST_START_HOUR = "solar_forecast_start_hour"
 CONF_SUNNY_FORECAST_THRESHOLD_KWH = "sunny_forecast_threshold_kwh"
 CONF_MAX_SOC_THRESHOLD_SUNNY = "max_soc_threshold_sunny"
+CONF_MAX_SOC_THRESHOLD_SOLAR = "max_soc_threshold_solar"
 
 # Safety Limits Configuration Keys
 CONF_MAX_BATTERY_POWER = "max_battery_power"
@@ -97,6 +98,7 @@ DEFAULT_VERY_LOW_PRICE_THRESHOLD = 30  # Bottom 30% of daily range
 DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD = 1000  # 1kW
 DEFAULT_FEEDIN_PRICE_THRESHOLD = 0.05  # €0.05/kWh - export only above this price
 DEFAULT_MAX_SOC_SUNNY = 35  # Lower grid charge target when sunny day expected
+DEFAULT_MAX_SOC_SOLAR = 50  # Cap solar allocation to batteries above this SOC (diverts rest to EV/export)
 DEFAULT_SOLAR_FORECAST_START_HOUR = 20  # Start reading tomorrow's forecast at 8 PM
 DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH = 5.0  # kWh forecast that enables sunny-day SOC limit
 
@@ -218,4 +220,4 @@ MANUAL_OVERRIDE_TARGET_ALL = "all"
 MAX_POWER_VALIDATION_W = 50000  # Maximum reasonable power for solar/consumption/grid validation
 MAX_CAR_POWER_VALIDATION_W = 22000  # Maximum reasonable car charging power
 
-INTEGRATION_VERSION = "5.0.0"
+INTEGRATION_VERSION = "5.0.1"

@@ -309,6 +309,7 @@ async def test_dashboard_creation_uses_registered_entities():
         f"{entry.entry_id}_car_grid_charging": "binary_sensor.car_grid_allowed",
         f"{entry.entry_id}_max_soc_threshold": "number.custom_max_soc",
         f"{entry.entry_id}_max_soc_threshold_sunny": "number.custom_max_soc_sunny",
+        f"{entry.entry_id}_max_soc_threshold_solar": "number.custom_max_soc_solar",
         f"{entry.entry_id}_sunny_forecast_threshold_kwh": "number.custom_sunny_forecast_threshold",
     }
     template = (
@@ -362,6 +363,7 @@ async def test_dashboard_creation_appends_three_phase_cards_when_enabled():
         f"{entry.entry_id}_car_grid_charging": "binary_sensor.car_grid_allowed",
         f"{entry.entry_id}_max_soc_threshold": "number.custom_max_soc",
         f"{entry.entry_id}_max_soc_threshold_sunny": "number.custom_max_soc_sunny",
+        f"{entry.entry_id}_max_soc_threshold_solar": "number.custom_max_soc_solar",
         f"{entry.entry_id}_sunny_forecast_threshold_kwh": "number.custom_sunny_forecast_threshold",
     }
     base_template = (
@@ -498,6 +500,7 @@ async def test_dashboard_setup_accepts_canonical_entity_ids_as_resolved_placehol
         f"{entry.entry_id}_car_grid_charging": "binary_sensor.electricity_planner_car_charge_from_grid",
         f"{entry.entry_id}_max_soc_threshold": "number.electricity_planner_max_soc_threshold",
         f"{entry.entry_id}_max_soc_threshold_sunny": "number.electricity_planner_max_soc_threshold_sunny",
+        f"{entry.entry_id}_max_soc_threshold_solar": "number.electricity_planner_max_soc_threshold_solar",
         f"{entry.entry_id}_sunny_forecast_threshold_kwh": "number.electricity_planner_sunny_forecast_threshold_kwh",
     }
     template = (

@@ -395,7 +395,7 @@ def test_car_stops_completely_when_price_high_no_solar():
 
 def test_solar_allocation_uses_surplus_above_threshold_for_car_when_battery_needs_charge():
     """Reserve the threshold slice for batteries and give the remainder to the car."""
-    engine = _create_engine({"significant_solar_threshold": 1000})
+    engine = _create_engine({"significant_solar_threshold": 1000, "max_soc_threshold_solar": 90})
 
     power_analysis = {"solar_surplus": 4000, "car_charging_power": 200}
     battery_analysis = {
@@ -417,7 +417,7 @@ def test_solar_allocation_uses_surplus_above_threshold_for_car_when_battery_need
 
 def test_solar_allocation_to_batteries_is_not_capped_by_significant_threshold():
     """When the car is idle, batteries absorb all surplus up to their need."""
-    engine = _create_engine({"significant_solar_threshold": 1500})
+    engine = _create_engine({"significant_solar_threshold": 1500, "max_soc_threshold_solar": 90})
 
     power_analysis = {"solar_surplus": 4000, "car_charging_power": 0}
     battery_analysis = {
@@ -505,7 +505,7 @@ def test_solar_allocation_without_battery_data_routes_surplus_to_car():
 
 def test_solar_allocation_all_to_batteries_when_car_idle():
     """When no car is charging, all solar is reserved for batteries up to their need."""
-    engine = _create_engine({"significant_solar_threshold": 1500})
+    engine = _create_engine({"significant_solar_threshold": 1500, "max_soc_threshold_solar": 90})
 
     allocation = engine._allocate_solar_power(
         power_analysis={"solar_surplus": 4000, "car_charging_power": 0},
@@ -564,7 +564,7 @@ def test_solar_bootstrap_offers_surplus_to_idle_car_when_batteries_near_full():
 
 def test_solar_bootstrap_skipped_when_one_battery_lagging():
     """If any battery is below the near-full gate, leftover stays as remaining_solar."""
-    engine = _create_engine({"significant_solar_threshold": 1500})
+    engine = _create_engine({"significant_solar_threshold": 1500, "max_soc_threshold_solar": 90})
 
     allocation = engine._allocate_solar_power(
         power_analysis={"solar_surplus": 5000, "car_charging_power": 0},
@@ -582,7 +582,7 @@ def test_solar_bootstrap_skipped_when_one_battery_lagging():
 
 
 def test_solar_allocation_below_threshold_reserves_all_surplus_for_battery():
-    engine = _create_engine({"significant_solar_threshold": 1500})
+    engine = _create_engine({"significant_solar_threshold": 1500, "max_soc_threshold_solar": 90})
 
     allocation = engine._allocate_solar_power(
         power_analysis={"solar_surplus": 1200, "car_charging_power": 0},
@@ -600,7 +600,7 @@ def test_solar_allocation_below_threshold_reserves_all_surplus_for_battery():
 
 
 def test_solar_allocation_reserves_threshold_then_leaves_remainder_for_ev():
-    engine = _create_engine({"significant_solar_threshold": 1500})
+    engine = _create_engine({"significant_solar_threshold": 1500, "max_soc_threshold_solar": 90})
 
     allocation = engine._allocate_solar_power(
         power_analysis={"solar_surplus": 2000, "car_charging_power": 200},

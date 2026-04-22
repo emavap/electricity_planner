@@ -18,6 +18,7 @@ from .const import (
     CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
+    CONF_MAX_SOC_THRESHOLD_SOLAR,
     CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_SOLAR_FORECAST_TODAY_ENTITY,
@@ -25,6 +26,7 @@ from .const import (
     DEFAULT_BATTERY_DUMP_TARGET_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_MAX_SOC_SUNNY,
+    DEFAULT_MAX_SOC_SOLAR,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
     DOMAIN,
@@ -37,6 +39,7 @@ _LIVE_NUMBER_OPTION_KEYS = (
     CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
+    CONF_MAX_SOC_THRESHOLD_SOLAR,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
 )
 
@@ -142,6 +145,7 @@ async def async_setup_entry(
     entities = [
         MaxSocThresholdNumber(coordinator, entry),
         MaxSocThresholdSunnyNumber(coordinator, entry),
+        MaxSocThresholdSolarNumber(coordinator, entry),
         SunnyForecastThresholdNumber(coordinator, entry),
         BatteryDumpTargetSocNumber(coordinator, entry),
     ]
@@ -441,6 +445,97 @@ class MaxSocThresholdSunnyNumber(CoordinatorEntity, NumberEntity):
         self.coordinator.decision_engine.refresh_settings(self.coordinator.config)
 
         # Trigger refresh to recalculate decisions with new threshold
+        await self.coordinator.async_request_refresh()
+
+
+class MaxSocThresholdSolarNumber(CoordinatorEntity, NumberEntity):
+    """Number entity controlling the battery SOC ceiling for solar absorption.
+
+    This ceiling is independent of the grid-charging ``max_soc_threshold``:
+    once batteries reach this SOC, further solar surplus is diverted to the
+    EV or exported rather than continuing to fill the battery.
+    """
+
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the solar max SOC threshold number."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = f"{entry.title} Battery Max SOC Threshold (Solar)"
+        self._attr_unique_id = f"{entry.entry_id}_max_soc_threshold_solar"
+        self.entity_id = (
+            f"number.{slugify(entry.title or 'electricity_planner')}_max_soc_threshold_solar"
+        )
+        self._attr_icon = "mdi:solar-power-variant"
+        self._attr_native_unit_of_measurement = "%"
+        self._attr_mode = NumberMode.SLIDER
+        self._attr_native_min_value = 0
+        self._attr_native_max_value = 100
+        self._attr_native_step = 5
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": entry.title,
+            "manufacturer": "Electricity Planner",
+            "model": "Smart Charging Controller",
+        }
+
+    @property
+    def native_value(self) -> float:
+        """Return the current solar max SOC threshold value."""
+        return self.coordinator.config.get(
+            CONF_MAX_SOC_THRESHOLD_SOLAR, DEFAULT_MAX_SOC_SOLAR
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes."""
+        current_value = self.native_value
+        grid_threshold = self.coordinator.config.get(
+            CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC
+        )
+        battery_analysis = (
+            self.coordinator.data.get("battery_analysis", {})
+            if self.coordinator.data
+            else {}
+        )
+        average_soc = battery_analysis.get("average_soc")
+
+        attrs = {
+            "description": (
+                f"Solar is absorbed by the battery until SOC reaches {current_value:.0f}%. "
+                "Above this, surplus is diverted to the EV or exported. "
+                f"Grid charging target is {grid_threshold:.0f}%."
+            ),
+            "grid_threshold": f"{grid_threshold:.0f}%",
+        }
+        if average_soc is not None:
+            attrs["current_battery_soc"] = f"{average_soc:.1f}%"
+            attrs["solar_absorbing"] = average_soc < current_value
+        return attrs
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Update the solar max SOC threshold value."""
+        new_value = int(value)
+        _LOGGER.info("Updating solar max SOC threshold to %d%%", new_value)
+
+        self._entry, new_options = _build_updated_number_options(
+            self.hass,
+            self._entry,
+            self.coordinator,
+            CONF_MAX_SOC_THRESHOLD_SOLAR,
+            new_value,
+        )
+
+        self.hass.config_entries.async_update_entry(
+            self._entry,
+            options=new_options,
+        )
+
+        self.coordinator.config[CONF_MAX_SOC_THRESHOLD_SOLAR] = new_value
+        self.coordinator.decision_engine.refresh_settings(self.coordinator.config)
         await self.coordinator.async_request_refresh()
 
 

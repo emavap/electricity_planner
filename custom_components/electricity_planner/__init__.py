@@ -52,6 +52,7 @@ NUMBER_ENTITY_ID_SUFFIXES: tuple[tuple[str, str], ...] = (
     ("battery_dump_target_soc", "battery_dump_target_soc"),
     ("max_soc_threshold", "max_soc_threshold"),
     ("max_soc_threshold_sunny", "max_soc_threshold_sunny"),
+    ("max_soc_threshold_solar", "max_soc_threshold_solar"),
     ("sunny_forecast_threshold_kwh", "sunny_forecast_threshold_kwh"),
 )
 

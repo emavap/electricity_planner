@@ -94,6 +94,7 @@ ENTITY_REFERENCES: tuple[EntityReference, ...] = (
     EntityReference("number.electricity_planner_battery_dump_target_soc", "battery_dump_target_soc"),
     EntityReference("number.electricity_planner_max_soc_threshold", "max_soc_threshold"),
     EntityReference("number.electricity_planner_max_soc_threshold_sunny", "max_soc_threshold_sunny"),
+    EntityReference("number.electricity_planner_max_soc_threshold_solar", "max_soc_threshold_solar"),
     EntityReference("number.electricity_planner_sunny_forecast_threshold_kwh", "sunny_forecast_threshold_kwh"),
 )
 
@@ -103,6 +104,7 @@ CORE_ENTITY_SUFFIXES: tuple[str, ...] = (
     "price_analysis",
     "max_soc_threshold",
     "max_soc_threshold_sunny",
+    "max_soc_threshold_solar",
     "sunny_forecast_threshold_kwh",
 )
 

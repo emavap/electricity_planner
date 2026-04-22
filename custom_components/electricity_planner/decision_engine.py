@@ -18,6 +18,7 @@ from .const import (
     CONF_MAX_SOC_THRESHOLD,
     CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
+    CONF_MAX_SOC_THRESHOLD_SOLAR,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     CONF_PRICE_THRESHOLD,
     CONF_BATTERY_CAPACITIES,
@@ -52,6 +53,7 @@ from .const import (
     DEFAULT_MAX_SOC,
     DEFAULT_BATTERY_DUMP_TARGET_SOC,
     DEFAULT_MAX_SOC_SUNNY,
+    DEFAULT_MAX_SOC_SOLAR,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
     DEFAULT_PRICE_THRESHOLD,
     DEFAULT_EMERGENCY_SOC,
@@ -249,6 +251,7 @@ class EngineSettings:
     max_soc_threshold: float
     battery_dump_target_soc: float
     max_soc_threshold_sunny: float
+    max_soc_threshold_solar: float
     sunny_forecast_threshold_kwh: float
     emergency_soc_threshold: float
     predictive_min_soc: float
@@ -388,6 +391,11 @@ class EngineSettings:
             CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY,
             "max_soc_threshold_sunny"
         )
+        max_soc_threshold_solar = extractor.get_float(
+            CONF_MAX_SOC_THRESHOLD_SOLAR, DEFAULT_MAX_SOC_SOLAR,
+            "max_soc_threshold_solar"
+        )
+        max_soc_threshold_solar = max(0.0, min(max_soc_threshold_solar, 100.0))
         sunny_forecast_threshold_kwh = extractor.get_float(
             CONF_SUNNY_FORECAST_THRESHOLD_KWH,
             DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
@@ -457,6 +465,7 @@ class EngineSettings:
             max_soc_threshold=max_soc_threshold,
             battery_dump_target_soc=battery_dump_target_soc,
             max_soc_threshold_sunny=max_soc_threshold_sunny,
+            max_soc_threshold_solar=max_soc_threshold_solar,
             sunny_forecast_threshold_kwh=sunny_forecast_threshold_kwh,
             emergency_soc_threshold=emergency_soc_threshold,
             predictive_min_soc=predictive_min_soc,
@@ -1662,19 +1671,27 @@ class ChargingDecisionEngine:
         battery_analysis: dict[str, Any],
         settings: EngineSettings,
     ) -> int:
-        """Calculate solar allocation for batteries."""
-        batteries_full = battery_analysis.get("batteries_full", False)
+        """Calculate solar allocation for batteries.
+
+        Uses ``settings.max_soc_threshold_solar`` as the battery ceiling for
+        solar absorption.  This is independent of the grid-charging
+        ``max_soc_threshold``: solar may stop filling batteries earlier (so
+        surplus is diverted to the EV or exported) or continue higher when
+        configured to.
+        """
         average_soc = battery_analysis.get("average_soc")
-        max_soc = battery_analysis.get("max_soc_threshold", DEFAULT_MAX_SOC)
-        
-        if average_soc is None or max_soc is None:
+        solar_max = settings.max_soc_threshold_solar
+
+        if average_soc is None or solar_max is None:
             return 0
-        
-        if (not batteries_full and
-            average_soc < max_soc - DEFAULT_ALGORITHM_THRESHOLDS.soc_safety_margin and
+
+        solar_full = average_soc >= solar_max
+
+        if (not solar_full and
+            average_soc < solar_max - DEFAULT_ALGORITHM_THRESHOLDS.soc_safety_margin and
             available_solar > 0):
-            
-            soc_deficit = max(0, max_soc - average_soc)
+
+            soc_deficit = max(0, solar_max - average_soc)
             estimated_need = min(
                 available_solar,
                 int(soc_deficit * DEFAULT_POWER_ESTIMATES.per_soc_percent),
@@ -1689,28 +1706,28 @@ class ChargingDecisionEngine:
         battery_analysis: dict[str, Any],
         settings: EngineSettings,
     ) -> int:
-        """Offer leftover solar to an idle car when batteries are near full.
+        """Offer leftover solar to an idle car when batteries are near their
+        solar ceiling.
 
         This enables a solar-only charge bootstrap: the car is not yet drawing
-        power, but batteries are satisfied, so any unabsorbed surplus is
-        reported against ``solar_for_car`` to let the car decision path enter
-        solar-only mode.  Returns 0 when batteries still need the solar.
+        power, but batteries are satisfied against the solar-specific ceiling,
+        so any unabsorbed surplus is reported against ``solar_for_car`` to let
+        the car decision path enter solar-only mode.  Returns 0 when batteries
+        still need the solar.
         """
         if available_solar <= 0:
             return 0
 
-        batteries_full = battery_analysis.get("batteries_full", False)
-        if batteries_full:
+        if battery_analysis.get("batteries_full"):
             return int(min(available_solar, settings.max_car_power))
 
-        average_soc = battery_analysis.get("average_soc")
         min_soc = battery_analysis.get("min_soc")
-        if average_soc is None or min_soc is None:
+        if min_soc is None:
             return 0
 
-        max_soc = battery_analysis.get("max_soc_threshold", DEFAULT_MAX_SOC)
-        solar_ready_threshold = max_soc - DEFAULT_ALGORITHM_THRESHOLDS.soc_buffer
-        if average_soc >= solar_ready_threshold and min_soc >= solar_ready_threshold:
+        solar_max = settings.max_soc_threshold_solar
+        solar_ready_threshold = solar_max - DEFAULT_ALGORITHM_THRESHOLDS.soc_buffer
+        if min_soc >= solar_ready_threshold:
             return int(min(available_solar, settings.max_car_power))
         return 0
 

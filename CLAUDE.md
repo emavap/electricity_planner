@@ -207,18 +207,26 @@ The integration is designed for dynamic electricity markets:
 ## Configuration System
 
 ### Current Version
-- **Integration Version**: 5.0.13
-- **Config Schema Version**: 20
-- **Migration Path**: Automatic v1→v20 migration
+- **Integration Version**: 5.0.1
+- **Config Schema Version**: 21
+- **Migration Path**: Automatic v1→v21 migration
 
 ### Configuration Categories
 1. **Entity Selection**: Nord Pool, battery, solar, car, power flow, solar forecast entities
-2. **SOC Thresholds**: Min/max SOC, sunny day max SOC, emergency overrides, predictive logic thresholds
+2. **SOC Thresholds**: Min/max SOC (grid), sunny-day max SOC (grid), **solar-specific max SOC**, emergency overrides, predictive logic thresholds
 3. **Price Thresholds**: Price threshold, very low price %, feed-in threshold
 4. **Power Limits**: Max battery/car/grid power, charging thresholds
 5. **Solar Parameters**: Significant solar surplus threshold, forecast start hour
 
 ### Recent Changes
+
+**v5.0.1**
+- **Added**: `CONF_MAX_SOC_THRESHOLD_SOLAR` / `DEFAULT_MAX_SOC_SOLAR = 50` — independent battery SOC ceiling for solar absorption, decoupled from grid-charging `max_soc_threshold` and the sunny-day override.
+- **Changed**: `_calculate_battery_solar_allocation` now consults `settings.max_soc_threshold_solar` instead of the grid ceiling, so batteries stop absorbing free PV at 50% (default) and surplus is diverted to the EV or exported while the grid ceiling remains at 70%/35%.
+- **Changed**: `_bootstrap_car_solar_allocation` gate is now strictly `batteries_full OR min_soc ≥ max_soc_threshold_solar − soc_buffer` — removed the previous `average_soc >= solar_max` shortcut that could bypass a lagging battery.
+- **Added**: v20 → v21 migration backfilling `max_soc_threshold_solar = 50` for existing installs.
+- **Added**: Full UI wiring — config-flow/options-flow thresholds step for both single- and three-phase setups, `strings.json` translations, `MaxSocThresholdSolarNumber` live-adjust entity (`number.electricity_planner_max_soc_threshold_solar`), dashboard card, and diagnostic sensor exposure in `configured_limits`.
+- **Tests**: 436 pytest tests passing.
 
 **v5.0.0** (consolidated 5.x release)
 - **Added**: Car-state-aware solar allocation policy in `_allocate_solar_power` — see `### Solar Allocation Policy` above.

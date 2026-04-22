@@ -209,6 +209,9 @@ views:
               - entity: number.electricity_planner_max_soc_threshold_sunny
                 name: "Grid Max SOC (high solar)"
                 icon: mdi:weather-sunny
+              - entity: number.electricity_planner_max_soc_threshold_solar
+                name: "Solar Max SOC"
+                icon: mdi:solar-power-variant
               - entity: number.electricity_planner_sunny_forecast_threshold_kwh
                 name: "Sunny Forecast Trigger"
                 icon: mdi:weather-partly-cloudy

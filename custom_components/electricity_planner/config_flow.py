@@ -58,6 +58,7 @@ from .const import (
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
+    CONF_MAX_SOC_THRESHOLD_SOLAR,
     CONF_MAX_BATTERY_POWER,
     CONF_MAX_CAR_POWER,
     CONF_MAX_GRID_POWER,
@@ -115,6 +116,7 @@ from .const import (
     DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
     DEFAULT_SOC_BUFFER_TARGET,
     DEFAULT_MAX_SOC_SUNNY,
+    DEFAULT_MAX_SOC_SOLAR,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
     DEFAULT_TRANSPORT_COST_DAY,
@@ -701,6 +703,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             ),
             vol.Optional(
+                CONF_MAX_SOC_THRESHOLD_SOLAR,
+                default=self.data.get(CONF_MAX_SOC_THRESHOLD_SOLAR, DEFAULT_MAX_SOC_SOLAR)
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=100, unit_of_measurement="%"
+                )
+            ),
+            vol.Optional(
                 CONF_SUNNY_FORECAST_THRESHOLD_KWH,
                 default=_default_sunny_forecast_threshold_kwh(self.data),
             ): selector.NumberSelector(
@@ -1008,6 +1018,18 @@ def validate_config_consistency(config: dict[str, Any]) -> list[str]:
         errors.append(
             "max_soc_threshold_sunny "
             f"({max_soc_sunny}%) must be less than or equal to max_soc ({max_soc}%)"
+        )
+
+    max_soc_solar = config.get(CONF_MAX_SOC_THRESHOLD_SOLAR, DEFAULT_MAX_SOC_SOLAR)
+    if not 0 <= max_soc_solar <= 100:
+        errors.append(
+            "max_soc_threshold_solar "
+            f"({max_soc_solar}%) must be between 0 and 100"
+        )
+    if max_soc_solar < min_soc:
+        errors.append(
+            "max_soc_threshold_solar "
+            f"({max_soc_solar}%) must be greater than or equal to min_soc ({min_soc}%)"
         )
 
     if emergency_soc > min_soc:
@@ -1443,6 +1465,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(CONF_BATTERY_DUMP_DEADLINE_HOUR, default=self.data.get(CONF_BATTERY_DUMP_DEADLINE_HOUR, DEFAULT_BATTERY_DUMP_DEADLINE_HOUR)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=23, step=1, unit_of_measurement="hour", mode="slider")),
             vol.Optional(CONF_SOLAR_FORECAST_START_HOUR, default=self.data.get(CONF_SOLAR_FORECAST_START_HOUR, DEFAULT_SOLAR_FORECAST_START_HOUR)): selector.NumberSelector(selector.NumberSelectorConfig(min=12, max=23, step=1, mode="slider")),
             vol.Optional(CONF_MAX_SOC_THRESHOLD_SUNNY, default=self.data.get(CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")),
+            vol.Optional(CONF_MAX_SOC_THRESHOLD_SOLAR, default=self.data.get(CONF_MAX_SOC_THRESHOLD_SOLAR, DEFAULT_MAX_SOC_SOLAR)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")),
             vol.Optional(CONF_SUNNY_FORECAST_THRESHOLD_KWH, default=_default_sunny_forecast_threshold_kwh(self.data)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, step=0.5, unit_of_measurement="kWh", mode="slider")),
             vol.Optional(CONF_PRICE_THRESHOLD, default=self.data.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=1, step=0.01, unit_of_measurement="€/kWh")),
             vol.Optional(CONF_PRICE_ADJUSTMENT_MULTIPLIER, default=self.data.get(CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=5, step=0.01)),

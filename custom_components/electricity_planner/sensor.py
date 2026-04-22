@@ -51,6 +51,7 @@ from .const import (
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
     DEFAULT_MAX_SOC,
     DEFAULT_MAX_SOC_SUNNY,
+    DEFAULT_MAX_SOC_SOLAR,
     DEFAULT_EMERGENCY_SOC,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_INVERTER_EXPORT_DEADBAND,
@@ -839,6 +840,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 ),
                 "max_soc_threshold": config.get("max_soc_threshold", DEFAULT_MAX_SOC),
                 "max_soc_threshold_sunny": config.get("max_soc_threshold_sunny", DEFAULT_MAX_SOC_SUNNY),
+                "max_soc_threshold_solar": config.get("max_soc_threshold_solar", DEFAULT_MAX_SOC_SOLAR),
                 "sunny_forecast_threshold_kwh": config.get(
                     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
                     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,

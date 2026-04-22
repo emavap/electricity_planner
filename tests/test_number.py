@@ -34,6 +34,7 @@ from custom_components.electricity_planner.coordinator import ElectricityPlanner
 from custom_components.electricity_planner.number import (
     BatteryDumpTargetSocNumber,
     MaxSocThresholdNumber,
+    MaxSocThresholdSolarNumber,
     MaxSocThresholdSunnyNumber,
     SunnyForecastThresholdNumber,
     async_setup_entry,
@@ -133,11 +134,12 @@ async def test_number_setup_always_adds_standard_and_sunny_entities(fake_hass, m
     entities = []
     await async_setup_entry(fake_hass, entry, entities.extend)
 
-    assert len(entities) == 4
+    assert len(entities) == 5
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
-    assert isinstance(entities[2], SunnyForecastThresholdNumber)
-    assert isinstance(entities[3], BatteryDumpTargetSocNumber)
+    assert isinstance(entities[2], MaxSocThresholdSolarNumber)
+    assert isinstance(entities[3], SunnyForecastThresholdNumber)
+    assert isinstance(entities[4], BatteryDumpTargetSocNumber)
 
 
 @pytest.mark.asyncio
@@ -159,11 +161,12 @@ async def test_number_setup_with_forecast_entity_keeps_same_three_entities(fake_
     entities = []
     await async_setup_entry(fake_hass, entry, entities.extend)
 
-    assert len(entities) == 4
+    assert len(entities) == 5
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
-    assert isinstance(entities[2], SunnyForecastThresholdNumber)
-    assert isinstance(entities[3], BatteryDumpTargetSocNumber)
+    assert isinstance(entities[2], MaxSocThresholdSolarNumber)
+    assert isinstance(entities[3], SunnyForecastThresholdNumber)
+    assert isinstance(entities[4], BatteryDumpTargetSocNumber)
 
 
 @pytest.mark.asyncio
