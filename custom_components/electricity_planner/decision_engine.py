@@ -2855,6 +2855,10 @@ class ChargingDecisionEngine:
             else 0
         )
         allocated_solar = ctx.allocated_car_solar
+        # Total solar headroom the car may claim without stepping on the
+        # batteries' reserved share: anything already allocated to the EV plus
+        # the surplus that would otherwise be exported.
+        solar_headroom = allocated_solar + ctx.remaining_solar
 
         if car_charging_power <= min_threshold and not (
             car_charging_allowed or car_solar_only or car_arbitrage_power > 0
@@ -2910,9 +2914,9 @@ class ChargingDecisionEngine:
                 if car_grid_import_allowed
                 else 0
             )
-            limit = min(allocated_solar + grid_allowance, car_limit_cap)
+            limit = min(solar_headroom + grid_allowance, car_limit_cap)
             sources = self._format_power_sources([
-                (allocated_solar, "allocated solar"),
+                (solar_headroom, "allocated solar"),
                 (grid_allowance, "grid"),
             ])
             return self._apply_peak_import_limit({
@@ -2921,7 +2925,7 @@ class ChargingDecisionEngine:
                     "Battery data unavailable - conservative limit using "
                     f"{sources} ({int(limit)}W total)"
                 ),
-            }, ctx, non_grid_floor=allocated_solar)
+            }, ctx, non_grid_floor=solar_headroom)
 
         monthly_peak = ctx.monthly_grid_peak
         max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
@@ -2936,13 +2940,13 @@ class ChargingDecisionEngine:
             battery_grid_charging and
             car_grid_import_allowed):
             shared_grid_allowance = grid_allowance / 2
-            limit = min(allocated_solar + shared_grid_allowance, car_limit_cap)
+            limit = min(solar_headroom + shared_grid_allowance, car_limit_cap)
             _LOGGER.info(
                 "Low SOC power sharing: battery %.0f%% < %.0f%%, limiting car to 50%% of grid (%dW)",
                 average_soc, predictive_min_soc, int(limit)
             )
             sources = self._format_power_sources([
-                (allocated_solar, "allocated solar"),
+                (solar_headroom, "allocated solar"),
                 (shared_grid_allowance, "shared grid"),
             ])
             return self._apply_peak_import_limit({
@@ -2952,12 +2956,12 @@ class ChargingDecisionEngine:
                     f"sharing grid power with batteries using {sources} "
                     f"({int(limit)}W total)"
                 ),
-            }, ctx, non_grid_floor=allocated_solar)
+            }, ctx, non_grid_floor=solar_headroom)
 
         if average_soc < max_soc_threshold and car_arbitrage_power <= 0:
-            limit = min(allocated_solar + grid_allowance, car_limit_cap)
+            limit = min(solar_headroom + grid_allowance, car_limit_cap)
             sources = self._format_power_sources([
-                (allocated_solar, "allocated solar"),
+                (solar_headroom, "allocated solar"),
                 (grid_allowance, "grid"),
             ])
             return self._apply_peak_import_limit({
@@ -2967,12 +2971,12 @@ class ChargingDecisionEngine:
                     f"car can use {sources} ({int(limit)}W total), "
                     "surplus for batteries"
                 ),
-            }, ctx, non_grid_floor=allocated_solar)
+            }, ctx, non_grid_floor=solar_headroom)
 
-        available_power = allocated_solar + car_arbitrage_power + grid_allowance
+        available_power = solar_headroom + car_arbitrage_power + grid_allowance
         limit = min(available_power, car_limit_cap)
         sources = self._format_power_sources([
-            (allocated_solar, "allocated solar"),
+            (solar_headroom, "allocated solar"),
             (car_arbitrage_power, "battery arbitrage"),
             (grid_allowance, "grid"),
         ])
@@ -2987,7 +2991,7 @@ class ChargingDecisionEngine:
             "charger_limit": int(limit),
             "charger_limit_reason": (f"{threshold_context} - "
                                     f"car can use {sources} ({int(limit)}W total)"),
-        }, ctx, non_grid_floor=allocated_solar + car_arbitrage_power)
+        }, ctx, non_grid_floor=solar_headroom + car_arbitrage_power)
 
     def _calculate_grid_setpoint(
         self,

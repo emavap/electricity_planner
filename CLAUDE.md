@@ -220,6 +220,11 @@ The integration is designed for dynamic electricity markets:
 
 ### Recent Changes
 
+**v5.0.14**
+- **Fixed**: EV charger limit under-reported its headroom whenever batteries had already claimed their reserved slice of solar. `_calculate_charger_limit` counted only `ctx.allocated_car_solar`, so an idle car transitioning to grid charging saw `charger_limit ≈ grid_allowance` even when `ctx.remaining_solar` was simultaneously being exported.
+- **Changed**: All four grid-charging branches (no-battery-data, low-SOC power sharing, below-max-SOC, at-or-above-max-SOC / arbitrage) now use `solar_headroom = allocated_car_solar + remaining_solar`, the watts the car can claim without touching the batteries' reserved share. Solar-only mode intentionally keeps the tighter `allocated_solar` bound. `non_grid_floor` passed to `_apply_peak_import_limit` is widened to the same value so the full non-grid portion survives peak-import reduction.
+- **Added**: 2 tests covering the idle-car / remaining-solar scenario and the low-SOC sharing branch with remaining solar (total 436 tests).
+
 **v5.0.13**
 - **Fixed**: Solar-only bootstrap regression introduced in v5.0.12 — when the car was idle and batteries were near full, the new allocation policy reported `solar_for_car=0` so the car could never enter `car_solar_only` mode. Added `_bootstrap_car_solar_allocation` which offers leftover surplus to an idle car when batteries satisfy the near-full gate (`batteries_full` or every battery's SOC ≥ `max_soc_threshold − soc_buffer`).
 - **Added**: 3 bootstrap tests covering full, near-full, and lagging-battery scenarios (total 434 tests).

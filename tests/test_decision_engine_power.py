@@ -890,6 +890,39 @@ def test_charger_limit_adds_existing_and_remaining_solar_on_top_of_grid_when_bat
     assert "4773W grid" in result["charger_limit_reason"]
 
 
+def test_charger_limit_includes_remaining_solar_when_batteries_took_reserve():
+    """Surplus that would otherwise be exported must raise the EV charger limit.
+
+    Repro: car is idle (so ``solar_for_car`` and ``car_current_solar_usage``
+    are both 0) but batteries have taken their allocated share and left
+    ``remaining_solar`` available for export.  The charger limit should
+    include that leftover on top of the grid allowance, up to the max.
+    """
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis={"average_soc": 71, "max_soc_threshold": 90},
+        power_allocation={
+            "remaining_solar": 2220,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 0,
+        },
+        data={
+            "car_charging_power": 0,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "battery_grid_charging": False,
+            "monthly_grid_peak": 5304,
+        },
+    )
+
+    # remaining_solar (2220) + grid (4773) = 6993
+    assert result["charger_limit"] == 6993
+    assert "2220W allocated solar" in result["charger_limit_reason"]
+    assert "4773W grid" in result["charger_limit_reason"]
+
+
 def test_charger_limit_low_soc_shares_half_grid_and_preserves_allocated_solar():
     engine = _engine({CONF_MAX_CAR_POWER: 11000})
 
@@ -914,6 +947,33 @@ def test_charger_limit_low_soc_shares_half_grid_and_preserves_allocated_solar():
     assert result["charger_limit"] == 6186
     assert "Low battery SOC (20% < 30.0%)" in result["charger_limit_reason"]
     assert "3800W allocated solar" in result["charger_limit_reason"]
+    assert "2386W shared grid" in result["charger_limit_reason"]
+
+
+def test_charger_limit_low_soc_shares_half_grid_and_includes_remaining_solar():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis={"average_soc": 20, "max_soc_threshold": 90},
+        power_allocation={
+            "remaining_solar": 2220,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 3800,
+        },
+        data={
+            "car_charging_power": 4500,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "battery_grid_charging": True,
+            "monthly_grid_peak": 5304,
+        },
+    )
+
+    # solar_headroom (3800 + 2220) + shared grid (4773 / 2 = 2386) = 8406
+    assert result["charger_limit"] == 8406
+    assert "Low battery SOC (20% < 30.0%)" in result["charger_limit_reason"]
+    assert "6020W allocated solar" in result["charger_limit_reason"]
     assert "2386W shared grid" in result["charger_limit_reason"]
 
 

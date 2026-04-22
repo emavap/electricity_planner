@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 5.0.13** | **Config Schema Version 20** | **Home Assistant 2024.4+**
+**Version 5.0.14** | **Config Schema Version 20** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Release note for v5.0.13: fixed a solar-only bootstrap regression introduced in v5.0.12 where an idle car could no longer claim leftover solar when batteries were near-full, leaving free production to export instead of charging the EV. The idle-car branch now delegates the leftover to a new `_bootstrap_car_solar_allocation` gate: if batteries are full or every battery's SOC is at or above `max_soc_threshold − soc_buffer` (10%), the surplus is published as `solar_for_car` so the car decision path can enter `car_solar_only` mode. Batteries-first behaviour from v5.0.12 is preserved when any battery still needs charge.
+> Release note for v5.0.14: fixed the EV charger limit under-reporting its headroom when batteries had already taken their reserved share of solar. Previously the limit only counted `allocated_car_solar` (what the allocator explicitly earmarked for the EV), so an idle car starting a grid-charge session would see `charger_limit ≈ grid_allowance` even while `remaining_solar` was being exported. `_calculate_charger_limit` now uses `solar_headroom = allocated_car_solar + remaining_solar` — the watts the car can claim without touching the batteries' reserved share — across the no-battery-data, low-SOC power sharing, below-max-SOC, and at-or-above-max-SOC branches (solar-only mode intentionally keeps the tighter `allocated_solar` bound). Peak-import protection's `non_grid_floor` is widened to the same value so the full non-grid portion is preserved from the 50% reduction.
 
 ## Key Features
 
