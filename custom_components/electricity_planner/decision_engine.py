@@ -1566,39 +1566,47 @@ class ChargingDecisionEngine:
         power_analysis: dict[str, Any],
         battery_analysis: dict[str, Any],
     ) -> dict[str, Any]:
-        """Hierarchically allocate solar surplus."""
+        """Allocate post-house solar between batteries and the EV.
+
+        When the car is actively charging, batteries get a fixed reserve
+        (``significant_solar_threshold``) and the remainder is offered to the
+        car.  When the car is idle, batteries absorb everything they can and
+        any unabsorbed surplus becomes ``remaining_solar``.
+        """
         solar_surplus = power_analysis.get("solar_surplus", 0)
         significant_solar_threshold = self._settings.significant_solar_threshold
-        
+        car_charging_power = power_analysis.get("car_charging_power", 0) or 0
+        min_car_threshold = self._settings.min_car_charging_threshold
+        car_is_charging = car_charging_power > min_car_threshold
+
         solar_surplus = self.validator.validate_power_value(solar_surplus, name="solar_surplus")
-        
-        # Handle insufficient solar
-        if solar_surplus <= significant_solar_threshold:
-            return self._create_insufficient_solar_allocation(
-                solar_surplus, power_analysis, significant_solar_threshold
-            )
-        
-        # Track car's current solar usage
-        car_current_solar_usage = self._calculate_car_solar_usage(
-            power_analysis, solar_surplus, self._settings
+
+        battery_reserve_pool = (
+            min(solar_surplus, significant_solar_threshold)
+            if car_is_charging
+            else solar_surplus
         )
-        
-        # Available solar after current car consumption
-        available_solar = max(0, solar_surplus - car_current_solar_usage)
-        
-        # Allocate to batteries
         solar_for_batteries = self._calculate_battery_solar_allocation(
-            available_solar, battery_analysis, self._settings
+            battery_reserve_pool, battery_analysis, self._settings
         )
-        available_solar = max(0, available_solar - solar_for_batteries)
-        
-        # Allocate remaining to car if batteries are near full
-        solar_for_car = self._calculate_car_solar_allocation(
-            available_solar, battery_analysis, self._settings
-        )
-        available_solar = max(0, available_solar - solar_for_car)
-        
-        # Validate and scale if needed
+
+        available_for_car = max(0, solar_surplus - solar_for_batteries)
+        if car_is_charging:
+            car_current_solar_usage = self._calculate_car_solar_usage(
+                power_analysis, available_for_car, self._settings
+            )
+            additional_car_headroom = max(
+                0,
+                self._settings.max_car_power - car_current_solar_usage,
+            )
+            solar_for_car = min(
+                max(0, available_for_car - car_current_solar_usage),
+                additional_car_headroom,
+            )
+        else:
+            car_current_solar_usage = 0
+            solar_for_car = 0
+
         total_allocated = solar_for_batteries + solar_for_car + car_current_solar_usage
         if total_allocated > solar_surplus:
             scale_factor = solar_surplus / total_allocated if total_allocated > 0 else 0
@@ -1609,9 +1617,9 @@ class ChargingDecisionEngine:
                 "Power allocation %dW exceeds available solar %dW - scaled down",
                 total_allocated, solar_surplus
             )
-        
+
         remaining_solar = max(0, solar_surplus - solar_for_batteries - solar_for_car - car_current_solar_usage)
-        
+
         return {
             "solar_for_batteries": solar_for_batteries,
             "solar_for_car": solar_for_car,
@@ -1628,31 +1636,6 @@ class ChargingDecisionEngine:
                     "total": f"{solar_surplus}W"
                 }
             )
-        }
-
-    def _create_insufficient_solar_allocation(
-        self,
-        solar_surplus: float,
-        power_analysis: dict[str, Any],
-        threshold: float
-    ) -> dict[str, Any]:
-        """Create allocation for insufficient solar."""
-        car_charging_power = power_analysis.get("car_charging_power", 0)
-        min_car_threshold = self._settings.min_car_charging_threshold
-        
-        car_current_solar_usage = 0
-        if car_charging_power > min_car_threshold:
-            car_current_solar_usage = min(car_charging_power, solar_surplus)
-        
-        remaining_solar = max(0, solar_surplus - car_current_solar_usage)
-        
-        return {
-            "solar_for_batteries": 0,
-            "solar_for_car": 0,
-            "car_current_solar_usage": car_current_solar_usage,
-            "remaining_solar": remaining_solar,
-            "total_allocated": car_current_solar_usage,
-            "allocation_reason": f"Insufficient solar ({solar_surplus}W ≤ {threshold}W) - car using {car_current_solar_usage}W, {remaining_solar}W remaining"
         }
 
     def _calculate_car_solar_usage(
@@ -1694,39 +1677,6 @@ class ChargingDecisionEngine:
                 settings.max_battery_power
             )
             return max(0, estimated_need)
-        return 0
-
-    def _calculate_car_solar_allocation(
-        self,
-        available_solar: float,
-        battery_analysis: dict[str, Any],
-        settings: EngineSettings,
-    ) -> int:
-        """Calculate solar allocation for car."""
-        if available_solar <= 0:
-            return 0
-        
-        max_soc = battery_analysis.get("max_soc_threshold", DEFAULT_MAX_SOC)
-        average_soc = battery_analysis.get("average_soc")
-        min_soc = battery_analysis.get("min_soc")
-        batteries_full = battery_analysis.get("batteries_full", False)
-        
-        # Treat solar as a bonus: only allocate it to the car when every battery is already near full.
-        solar_ready_threshold = max_soc - DEFAULT_ALGORITHM_THRESHOLDS.soc_buffer
-        if batteries_full:
-            return min(
-                available_solar,
-                settings.max_car_power
-            )
-        
-        if average_soc is None or min_soc is None:
-            return 0
-        
-        if average_soc >= solar_ready_threshold and min_soc >= solar_ready_threshold:
-            return min(
-                available_solar,
-                settings.max_car_power
-            )
         return 0
 
     def _analyze_battery_status(self, battery_soc_data: list[dict[str, Any]]) -> dict[str, Any]:
@@ -2767,10 +2717,27 @@ class ChargingDecisionEngine:
             "car_grid_charging_reason": self._append_permissive_mode_to_reason(high_price_reason, context),
         }
 
+    @staticmethod
+    def _format_power_sources(sources: list[tuple[float, str]]) -> str:
+        """Join positive (amount, label) power sources into a reason fragment."""
+        parts = [f"{int(amount)}W {label}" for amount, label in sources if amount > 0]
+        if not parts:
+            parts.append("0W available")
+        return " + ".join(parts)
+
     def _apply_peak_import_limit(
-        self, result: dict[str, Any], ctx: CycleContext
+        self,
+        result: dict[str, Any],
+        ctx: CycleContext,
+        *,
+        non_grid_floor: float = 0.0,
     ) -> dict[str, Any]:
-        """Halve charger limit while peak import protection is active."""
+        """Reduce charger limit while peak import protection is active.
+
+        ``non_grid_floor`` represents watts sourced from non-grid inputs that
+        should be preserved from the reduction, since peak-import protection
+        only targets grid draw.
+        """
         if not ctx.car_peak_limited:
             return result
 
@@ -2778,9 +2745,17 @@ class ChargingDecisionEngine:
         if limit <= 0:
             return result
 
-        reduced_limit = limit // 2  # Integer division
+        preserved = max(0, min(int(non_grid_floor), limit))
+        grid_portion = limit - preserved
+        reduced_limit = preserved + grid_portion // 2
+
+        if reduced_limit >= limit:
+            return result  # Nothing to reduce (limit is already all solar)
+
         existing_reason = result.get("charger_limit_reason", "")
-        peak_reason = f"Peak import exceeded - halved to {reduced_limit}W for 15min"
+        peak_reason = (
+            f"Peak import exceeded - reduced to {reduced_limit}W for 15min"
+        )
 
         result["charger_limit"] = reduced_limit
         result["charger_limit_reason"] = (
@@ -2788,8 +2763,8 @@ class ChargingDecisionEngine:
         )
 
         _LOGGER.info(
-            "Peak import protection: reducing charger limit from %dW to %dW",
-            limit, reduced_limit
+            "Peak import protection: reducing charger limit from %dW to %dW (preserved non-grid %dW)",
+            limit, reduced_limit, preserved
         )
         return result
 
@@ -2861,7 +2836,7 @@ class ChargingDecisionEngine:
                 return self._apply_peak_import_limit({
                     "charger_limit": int(limit),
                     "charger_limit_reason": f"Solar-only car charging - limited to allocated solar power ({int(limit)}W), no grid usage",
-                }, ctx)
+                }, ctx, non_grid_floor=allocated_solar)
             else:
                 return {
                     "charger_limit": 0,
@@ -2900,11 +2875,18 @@ class ChargingDecisionEngine:
                 if car_grid_import_allowed
                 else 0
             )
-            limit = min(grid_allowance, car_limit_cap)
+            limit = min(allocated_solar + grid_allowance, car_limit_cap)
+            sources = self._format_power_sources([
+                (allocated_solar, "allocated solar"),
+                (grid_allowance, "grid"),
+            ])
             return self._apply_peak_import_limit({
                 "charger_limit": int(limit),
-                "charger_limit_reason": f"Battery data unavailable - conservative limit ({int(limit)}W)",
-            }, ctx)
+                "charger_limit_reason": (
+                    "Battery data unavailable - conservative limit using "
+                    f"{sources} ({int(limit)}W total)"
+                ),
+            }, ctx, non_grid_floor=allocated_solar)
 
         monthly_peak = ctx.monthly_grid_peak
         max_setpoint = self._get_safe_grid_setpoint(monthly_peak)
@@ -2918,39 +2900,47 @@ class ChargingDecisionEngine:
         if (average_soc < predictive_min_soc and
             battery_grid_charging and
             car_grid_import_allowed):
-            limit = min(grid_allowance / 2, car_limit_cap)
+            shared_grid_allowance = grid_allowance / 2
+            limit = min(allocated_solar + shared_grid_allowance, car_limit_cap)
             _LOGGER.info(
                 "Low SOC power sharing: battery %.0f%% < %.0f%%, limiting car to 50%% of grid (%dW)",
                 average_soc, predictive_min_soc, int(limit)
             )
+            sources = self._format_power_sources([
+                (allocated_solar, "allocated solar"),
+                (shared_grid_allowance, "shared grid"),
+            ])
             return self._apply_peak_import_limit({
                 "charger_limit": int(limit),
                 "charger_limit_reason": (
                     f"Low battery SOC ({average_soc:.0f}% < {predictive_min_soc}%) - "
-                    f"sharing grid power with batteries (car limited to 50% = {int(limit)}W)"
+                    f"sharing grid power with batteries using {sources} "
+                    f"({int(limit)}W total)"
                 ),
-            }, ctx)
+            }, ctx, non_grid_floor=allocated_solar)
 
         if average_soc < max_soc_threshold and car_arbitrage_power <= 0:
-            limit = min(grid_allowance, car_limit_cap)
+            limit = min(allocated_solar + grid_allowance, car_limit_cap)
+            sources = self._format_power_sources([
+                (allocated_solar, "allocated solar"),
+                (grid_allowance, "grid"),
+            ])
             return self._apply_peak_import_limit({
                 "charger_limit": int(limit),
-                "charger_limit_reason": (f"Battery {average_soc:.0f}% < {max_soc_threshold}% - "
-                                        f"car limited to grid setpoint ({int(limit)}W), surplus for batteries"),
-            }, ctx)
+                "charger_limit_reason": (
+                    f"Battery {average_soc:.0f}% < {max_soc_threshold}% - "
+                    f"car can use {sources} ({int(limit)}W total), "
+                    "surplus for batteries"
+                ),
+            }, ctx, non_grid_floor=allocated_solar)
 
-        available_surplus = ctx.remaining_solar
-        available_power = available_surplus + car_arbitrage_power + grid_allowance
+        available_power = allocated_solar + car_arbitrage_power + grid_allowance
         limit = min(available_power, car_limit_cap)
-        source_parts: list[str] = []
-        if available_surplus > 0:
-            source_parts.append(f"{available_surplus}W solar")
-        if car_arbitrage_power > 0:
-            source_parts.append(f"{car_arbitrage_power}W battery arbitrage")
-        if grid_allowance > 0:
-            source_parts.append(f"{grid_allowance}W grid")
-        if not source_parts:
-            source_parts.append("0W available")
+        sources = self._format_power_sources([
+            (allocated_solar, "allocated solar"),
+            (car_arbitrage_power, "battery arbitrage"),
+            (grid_allowance, "grid"),
+        ])
 
         threshold_context = (
             f"Battery {average_soc:.0f}% ≥ arbitrage reserve {arbitrage_reserve_soc:.0f}%"
@@ -2961,8 +2951,8 @@ class ChargingDecisionEngine:
         return self._apply_peak_import_limit({
             "charger_limit": int(limit),
             "charger_limit_reason": (f"{threshold_context} - "
-                                    f"car can use {' + '.join(source_parts)} ({int(limit)}W total)"),
-        }, ctx)
+                                    f"car can use {sources} ({int(limit)}W total)"),
+        }, ctx, non_grid_floor=allocated_solar + car_arbitrage_power)
 
     def _calculate_grid_setpoint(
         self,

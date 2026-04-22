@@ -795,6 +795,182 @@ def test_charger_limit_blocks_when_configured_reserve_fallback_is_not_met():
     assert "keeping arbitrage energy in the battery" in result["charger_limit_reason"]
 
 
+def test_charger_limit_preserves_allocated_solar_while_reserving_extra_surplus_for_batteries():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis={"average_soc": 60, "max_soc_threshold": 90},
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 3800,
+        },
+        data={
+            "car_charging_power": 4500,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "battery_grid_charging": False,
+            "monthly_grid_peak": 5304,
+        },
+    )
+
+    assert result["charger_limit"] == 8573
+    assert "3800W allocated solar" in result["charger_limit_reason"]
+    assert "4773W grid" in result["charger_limit_reason"]
+    assert "surplus for batteries" in result["charger_limit_reason"]
+
+
+def test_threshold_battery_reserve_leaves_remaining_surplus_for_ev_and_grid():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    charger_limit = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis={"average_soc": 60, "max_soc_threshold": 90},
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 500,
+            "car_current_solar_usage": 0,
+        },
+        data={
+            "car_charging_power": 4500,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "battery_grid_charging": False,
+            "monthly_grid_peak": 4445,
+        },
+    )
+
+    assert charger_limit["charger_limit"] == 4500
+
+    grid_setpoint = engine._calculate_grid_setpoint(
+        price_analysis={},
+        battery_analysis={"average_soc": 60, "max_soc_threshold": 90},
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 500,
+            "car_current_solar_usage": 0,
+        },
+        data={
+            "car_charging_power": 4500,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "battery_grid_charging": False,
+            "monthly_grid_peak": 4445,
+        },
+        charger_limit=charger_limit["charger_limit"],
+    )
+
+    assert grid_setpoint["grid_setpoint"] == 4000
+    assert "car pulling 4000W" in grid_setpoint["grid_setpoint_reason"]
+
+
+def test_charger_limit_adds_existing_and_remaining_solar_on_top_of_grid_when_batteries_ready():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis={"average_soc": 95, "max_soc_threshold": 90},
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 1200,
+            "car_current_solar_usage": 3800,
+        },
+        data={
+            "car_charging_power": 4500,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "battery_grid_charging": False,
+            "monthly_grid_peak": 5304,
+        },
+    )
+
+    assert result["charger_limit"] == 9773
+    assert "5000W allocated solar" in result["charger_limit_reason"]
+    assert "4773W grid" in result["charger_limit_reason"]
+
+
+def test_charger_limit_low_soc_shares_half_grid_and_preserves_allocated_solar():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis={"average_soc": 20, "max_soc_threshold": 90},
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 3800,
+        },
+        data={
+            "car_charging_power": 4500,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "battery_grid_charging": True,
+            "monthly_grid_peak": 5304,
+        },
+    )
+
+    # allocated_solar (3800) + shared grid (4773 / 2 = 2386) = 6186
+    assert result["charger_limit"] == 6186
+    assert "Low battery SOC (20% < 30.0%)" in result["charger_limit_reason"]
+    assert "3800W allocated solar" in result["charger_limit_reason"]
+    assert "2386W shared grid" in result["charger_limit_reason"]
+
+
+def test_charger_limit_no_battery_data_includes_allocated_solar_in_conservative_limit():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis={"average_soc": None},
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 3800,
+        },
+        data={
+            "car_charging_power": 4500,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "battery_grid_charging": False,
+            "monthly_grid_peak": 5304,
+        },
+    )
+
+    # allocated_solar (3800) + grid (4773) = 8573
+    assert result["charger_limit"] == 8573
+    assert "Battery data unavailable" in result["charger_limit_reason"]
+    assert "3800W allocated solar" in result["charger_limit_reason"]
+    assert "4773W grid" in result["charger_limit_reason"]
+
+
+def test_charger_limit_peak_import_preserves_allocated_solar_and_halves_grid():
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis={"average_soc": 60, "max_soc_threshold": 90},
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 3800,
+        },
+        data={
+            "car_charging_power": 4500,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "battery_grid_charging": False,
+            "monthly_grid_peak": 5304,
+            "car_peak_limited": True,
+        },
+    )
+
+    # solar (3800) preserved + grid (4773) halved (2386) = 6186
+    assert result["charger_limit"] == 6186
+    assert "Peak import exceeded - reduced to 6186W" in result["charger_limit_reason"]
+    assert "3800W allocated solar" in result["charger_limit_reason"]
+
+
 def test_grid_setpoint_nets_remaining_export_after_supplying_ev_from_battery():
     engine = _engine({CONF_MAX_CAR_POWER: 11000})
 
@@ -1189,8 +1365,10 @@ def test_charger_limit_uses_arbitrage_not_solar_limit_when_car_solar_only_was_st
         data=data,
     )
 
-    # Should use arbitrage power (3000 W), not the solar-only limit (1500 W)
-    assert result["charger_limit"] == 3000
+    # Should use arbitrage power on top of the already allocated solar, not
+    # fall back to the stale solar-only limit.
+    assert result["charger_limit"] == 4500
+    assert "1500W allocated solar" in result["charger_limit_reason"]
     assert "battery arbitrage" in result["charger_limit_reason"]
     assert "Solar-only" not in result["charger_limit_reason"]
 

@@ -393,11 +393,11 @@ def test_car_stops_completely_when_price_high_no_solar():
     assert data["car_charging_locked_threshold"] is None
 
 
-def test_solar_not_allocated_to_car_until_batteries_high_soc():
-    """Ensure solar allocation skips the car until batteries are nearly full."""
-    engine = _create_engine()
+def test_solar_allocation_uses_surplus_above_threshold_for_car_when_battery_needs_charge():
+    """Reserve the threshold slice for batteries and give the remainder to the car."""
+    engine = _create_engine({"significant_solar_threshold": 1000})
 
-    power_analysis = {"solar_surplus": 4000, "car_charging_power": 0}
+    power_analysis = {"solar_surplus": 4000, "car_charging_power": 200}
     battery_analysis = {
         "average_soc": 60,
         "min_soc": 58,
@@ -410,12 +410,14 @@ def test_solar_not_allocated_to_car_until_batteries_high_soc():
         battery_analysis=battery_analysis,
     )
 
-    assert allocation["solar_for_car"] == 0
+    assert allocation["solar_for_batteries"] == 1000
+    assert allocation["car_current_solar_usage"] == 200
+    assert allocation["solar_for_car"] == 2800
 
 
 def test_solar_allocation_to_batteries_is_not_capped_by_significant_threshold():
-    """Battery solar allocation should not stop at the significant-solar trigger."""
-    engine = _create_engine()
+    """When the car is idle, batteries absorb all surplus up to their need."""
+    engine = _create_engine({"significant_solar_threshold": 1500})
 
     power_analysis = {"solar_surplus": 4000, "car_charging_power": 0}
     battery_analysis = {
@@ -436,10 +438,10 @@ def test_solar_allocation_to_batteries_is_not_capped_by_significant_threshold():
 
 
 def test_solar_allocated_to_car_when_batteries_full():
-    """Solar can go to the car once every battery is close to full."""
-    engine = _create_engine()
+    """When batteries are full, the full surplus can go to the car."""
+    engine = _create_engine({"significant_solar_threshold": 1500})
 
-    power_analysis = {"solar_surplus": 4000, "car_charging_power": 0}
+    power_analysis = {"solar_surplus": 4000, "car_charging_power": 200}
     battery_analysis = {
         "average_soc": 92,
         "min_soc": 91,
@@ -452,14 +454,16 @@ def test_solar_allocated_to_car_when_batteries_full():
         battery_analysis=battery_analysis,
     )
 
-    assert allocation["solar_for_car"] > 0
+    assert allocation["solar_for_batteries"] == 0
+    assert allocation["car_current_solar_usage"] == 200
+    assert allocation["solar_for_car"] == 3800
 
 
 def test_solar_allocation_requires_all_batteries_high():
-    """Solar stays with batteries if any unit is below the near-full buffer."""
-    engine = _create_engine()
+    """The battery reserve depends on battery demand, not on a near-full gate."""
+    engine = _create_engine({"significant_solar_threshold": 1500})
 
-    power_analysis = {"solar_surplus": 5000, "car_charging_power": 0}
+    power_analysis = {"solar_surplus": 5000, "car_charging_power": 200}
     battery_analysis = {
         "average_soc": 92,
         "min_soc": 75,  # One battery lagging behind
@@ -472,14 +476,16 @@ def test_solar_allocation_requires_all_batteries_high():
         battery_analysis=battery_analysis,
     )
 
-    assert allocation["solar_for_car"] == 0
+    assert allocation["solar_for_batteries"] == 0
+    assert allocation["car_current_solar_usage"] == 200
+    assert allocation["solar_for_car"] == 4800
 
 
-def test_solar_allocation_without_battery_data_skips_car():
-    """No battery telemetry means solar should not be diverted to the car."""
-    engine = _create_engine()
+def test_solar_allocation_without_battery_data_routes_surplus_to_car():
+    """Without battery telemetry the active EV gets the surplus because no reserve applies."""
+    engine = _create_engine({"significant_solar_threshold": 1500})
 
-    power_analysis = {"solar_surplus": 4500, "car_charging_power": 0}
+    power_analysis = {"solar_surplus": 4500, "car_charging_power": 200}
     battery_analysis = {
         "average_soc": None,
         "min_soc": None,
@@ -492,4 +498,63 @@ def test_solar_allocation_without_battery_data_skips_car():
         battery_analysis=battery_analysis,
     )
 
+    assert allocation["solar_for_batteries"] == 0
+    assert allocation["car_current_solar_usage"] == 200
+    assert allocation["solar_for_car"] == 4300
+
+
+def test_solar_allocation_all_to_batteries_when_car_idle():
+    """When no car is charging, all solar is reserved for batteries up to their need."""
+    engine = _create_engine({"significant_solar_threshold": 1500})
+
+    allocation = engine._allocate_solar_power(
+        power_analysis={"solar_surplus": 4000, "car_charging_power": 0},
+        battery_analysis={
+            "average_soc": 60,
+            "min_soc": 58,
+            "max_soc_threshold": 90,
+            "batteries_full": False,
+        },
+    )
+
+    assert allocation["solar_for_batteries"] == 3000
     assert allocation["solar_for_car"] == 0
+    assert allocation["car_current_solar_usage"] == 0
+    assert allocation["remaining_solar"] == 1000
+
+
+def test_solar_allocation_below_threshold_reserves_all_surplus_for_battery():
+    engine = _create_engine({"significant_solar_threshold": 1500})
+
+    allocation = engine._allocate_solar_power(
+        power_analysis={"solar_surplus": 1200, "car_charging_power": 0},
+        battery_analysis={
+            "average_soc": 50,
+            "min_soc": 48,
+            "max_soc_threshold": 90,
+            "batteries_full": False,
+        },
+    )
+
+    assert allocation["solar_for_batteries"] == 1200
+    assert allocation["solar_for_car"] == 0
+    assert allocation["remaining_solar"] == 0
+
+
+def test_solar_allocation_reserves_threshold_then_leaves_remainder_for_ev():
+    engine = _create_engine({"significant_solar_threshold": 1500})
+
+    allocation = engine._allocate_solar_power(
+        power_analysis={"solar_surplus": 2000, "car_charging_power": 200},
+        battery_analysis={
+            "average_soc": 60,
+            "min_soc": 58,
+            "max_soc_threshold": 90,
+            "batteries_full": False,
+        },
+    )
+
+    assert allocation["solar_for_batteries"] == 1500
+    assert allocation["car_current_solar_usage"] == 200
+    assert allocation["solar_for_car"] == 300
+    assert allocation["remaining_solar"] == 0
