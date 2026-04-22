@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 5.0.14** | **Config Schema Version 20** | **Home Assistant 2024.4+**
+**Version 5.0.0** | **Config Schema Version 20** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Release note for v5.0.14: fixed the EV charger limit under-reporting its headroom when batteries had already taken their reserved share of solar. Previously the limit only counted `allocated_car_solar` (what the allocator explicitly earmarked for the EV), so an idle car starting a grid-charge session would see `charger_limit ≈ grid_allowance` even while `remaining_solar` was being exported. `_calculate_charger_limit` now uses `solar_headroom = allocated_car_solar + remaining_solar` — the watts the car can claim without touching the batteries' reserved share — across the no-battery-data, low-SOC power sharing, below-max-SOC, and at-or-above-max-SOC branches (solar-only mode intentionally keeps the tighter `allocated_solar` bound). Peak-import protection's `non_grid_floor` is widened to the same value so the full non-grid portion is preserved from the 50% reduction.
+> Release note for v5.0.0: consolidated 5.x release that ships the car-state-aware solar allocation policy (`_allocate_solar_power` reserves a fixed `significant_solar_threshold` slice for batteries when the car is actively charging, and routes surplus fully to batteries when the car is idle), the solar-only bootstrap path (`_bootstrap_car_solar_allocation` offers leftover surplus to an idle car when batteries are full or within `soc_buffer` of `max_soc_threshold`), and `_calculate_charger_limit` using `solar_headroom = allocated_car_solar + remaining_solar` across all grid-charging branches so the EV's limit includes exportable surplus on top of the grid allowance. Peak-import protection preserves the full non-grid portion via `non_grid_floor`, and reason strings go through a shared `_format_power_sources` helper for consistency.
 
 ## Key Features
 
