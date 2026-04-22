@@ -1,10 +1,10 @@
 # Electricity Planner
 
-**Version 5.0.12** | **Config Schema Version 20** | **Home Assistant 2024.4+**
+**Version 5.0.13** | **Config Schema Version 20** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
-> Release note for v5.0.12: refined the solar allocation policy so that when no car is charging, all solar surplus is reserved for batteries up to their demand (anything left becomes `remaining_solar`); when the car is actively charging, batteries still receive a fixed `significant_solar_threshold` slice and the remainder is offered to the EV. Peak-import protection now preserves non-grid power (allocated solar and battery arbitrage) from the 50% reduction and only halves the grid portion. Charger-limit reason strings use a shared `_format_power_sources` helper for consistent `<W> <label>` fragments.
+> Release note for v5.0.13: fixed a solar-only bootstrap regression introduced in v5.0.12 where an idle car could no longer claim leftover solar when batteries were near-full, leaving free production to export instead of charging the EV. The idle-car branch now delegates the leftover to a new `_bootstrap_car_solar_allocation` gate: if batteries are full or every battery's SOC is at or above `max_soc_threshold − soc_buffer` (10%), the surplus is published as `solar_for_car` so the car decision path can enter `car_solar_only` mode. Batteries-first behaviour from v5.0.12 is preserved when any battery still needs charge.
 
 ---
 

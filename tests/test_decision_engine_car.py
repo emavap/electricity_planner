@@ -523,6 +523,64 @@ def test_solar_allocation_all_to_batteries_when_car_idle():
     assert allocation["remaining_solar"] == 1000
 
 
+def test_solar_bootstrap_offers_surplus_to_idle_car_when_batteries_full():
+    """Batteries full + idle car → leftover is offered to the car so solar-only can start."""
+    engine = _create_engine({"significant_solar_threshold": 1500})
+
+    allocation = engine._allocate_solar_power(
+        power_analysis={"solar_surplus": 3000, "car_charging_power": 0},
+        battery_analysis={
+            "average_soc": 95,
+            "min_soc": 94,
+            "max_soc_threshold": 90,
+            "batteries_full": True,
+        },
+    )
+
+    assert allocation["solar_for_batteries"] == 0
+    assert allocation["car_current_solar_usage"] == 0
+    assert allocation["solar_for_car"] == 3000
+    assert allocation["remaining_solar"] == 0
+
+
+def test_solar_bootstrap_offers_surplus_to_idle_car_when_batteries_near_full():
+    """Batteries above safety margin + idle car → leftover offered to car for bootstrap."""
+    engine = _create_engine({"significant_solar_threshold": 1500})
+
+    allocation = engine._allocate_solar_power(
+        power_analysis={"solar_surplus": 2500, "car_charging_power": 0},
+        battery_analysis={
+            "average_soc": 86,  # > 90 - 5 (safety margin) → batteries take nothing
+            "min_soc": 85,      # >= 90 - 10 (soc_buffer) → bootstrap gate passes
+            "max_soc_threshold": 90,
+            "batteries_full": False,
+        },
+    )
+
+    assert allocation["solar_for_batteries"] == 0
+    assert allocation["solar_for_car"] == 2500
+    assert allocation["remaining_solar"] == 0
+
+
+def test_solar_bootstrap_skipped_when_one_battery_lagging():
+    """If any battery is below the near-full gate, leftover stays as remaining_solar."""
+    engine = _create_engine({"significant_solar_threshold": 1500})
+
+    allocation = engine._allocate_solar_power(
+        power_analysis={"solar_surplus": 5000, "car_charging_power": 0},
+        battery_analysis={
+            "average_soc": 92,
+            "min_soc": 75,  # < 90 - 10 → bootstrap gate fails
+            "max_soc_threshold": 90,
+            "batteries_full": False,
+        },
+    )
+
+    assert allocation["solar_for_batteries"] == 0
+    assert allocation["solar_for_car"] == 0
+    assert allocation["remaining_solar"] == 5000
+
+
 def test_solar_allocation_below_threshold_reserves_all_surplus_for_battery():
     engine = _create_engine({"significant_solar_threshold": 1500})
 

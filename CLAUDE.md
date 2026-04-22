@@ -43,6 +43,22 @@ The integration uses **price positioning** within daily range (0-100%) rather th
 - Battery SOC: Different logic for batteries above/below 30% SOC
 - Price trends: Considers next hour price improvements for timing
 
+### Solar Allocation Policy (v5.0.12+)
+
+`_allocate_solar_power()` in `decision_engine.py` splits post-house solar surplus between batteries, the EV, and exported leftover using a **car-state-aware** policy:
+
+**Car actively charging (`car_charging_power > min_car_charging_threshold`, default 100W):**
+- Batteries get a fixed reserve slice capped at `significant_solar_threshold` (default 1000W)
+- Remaining surplus is offered to the EV (`car_current_solar_usage` + `solar_for_car` bonus)
+
+**Car idle:**
+- Batteries absorb the full surplus up to their demand, **uncapped** by `significant_solar_threshold`
+- Any leftover triggers the solar-only **bootstrap path** (`_bootstrap_car_solar_allocation`):
+  - If `batteries_full=True` or every battery's SOC is `≥ max_soc_threshold − soc_buffer` (10%), the leftover is published as `solar_for_car` so the car decision engine can enter `car_solar_only` mode
+  - Otherwise the leftover becomes `remaining_solar` (available for feed-in / export)
+
+The `allocated_car_solar = solar_for_car + car_current_solar_usage` value is exposed via `CycleContext` and consumed by `_calculate_charger_limit` as the **non-grid floor** passed to `_apply_peak_import_limit`, so solar (and battery arbitrage) portions are preserved when peak-import protection halves the grid share.
+
 ### Average Threshold Calculation
 
 When dynamic threshold mode is enabled, the integration calculates a 24-hour rolling average:
@@ -191,7 +207,7 @@ The integration is designed for dynamic electricity markets:
 ## Configuration System
 
 ### Current Version
-- **Integration Version**: 5.0.0
+- **Integration Version**: 5.0.13
 - **Config Schema Version**: 20
 - **Migration Path**: Automatic v1→v20 migration
 
@@ -202,7 +218,19 @@ The integration is designed for dynamic electricity markets:
 4. **Power Limits**: Max battery/car/grid power, charging thresholds
 5. **Solar Parameters**: Significant solar surplus threshold, forecast start hour
 
-### Recent Changes (v4.10.x)
+### Recent Changes
+
+**v5.0.13**
+- **Fixed**: Solar-only bootstrap regression introduced in v5.0.12 — when the car was idle and batteries were near full, the new allocation policy reported `solar_for_car=0` so the car could never enter `car_solar_only` mode. Added `_bootstrap_car_solar_allocation` which offers leftover surplus to an idle car when batteries satisfy the near-full gate (`batteries_full` or every battery's SOC ≥ `max_soc_threshold − soc_buffer`).
+- **Added**: 3 bootstrap tests covering full, near-full, and lagging-battery scenarios (total 434 tests).
+
+**v5.0.12**
+- **Added**: Car-state-aware solar allocation policy — see `### Solar Allocation Policy` above.
+- **Added**: `non_grid_floor` parameter to `_apply_peak_import_limit` so allocated solar and battery-arbitrage power are preserved from the 50% grid reduction.
+- **Added**: `_format_power_sources` helper for consistent charger-limit reason strings.
+- **Removed**: Obsolete `_create_insufficient_solar_allocation` and `_calculate_car_solar_allocation` helpers (merged into the unified flow).
+
+**v4.10.x**
 - **Added**: Sunny day feature — reduces grid charging max SOC when solar forecast is high
 - **Added**: Solar forecast caching with configurable start hour (12-23, default 20)
 - **Added**: Optional "today" forecast entity for overnight validation

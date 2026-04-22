@@ -1570,8 +1570,10 @@ class ChargingDecisionEngine:
 
         When the car is actively charging, batteries get a fixed reserve
         (``significant_solar_threshold``) and the remainder is offered to the
-        car.  When the car is idle, batteries absorb everything they can and
-        any unabsorbed surplus becomes ``remaining_solar``.
+        car.  When the car is idle, batteries absorb everything they can
+        (uncapped by the threshold) and any leftover is offered to the car
+        only if batteries are already near full, enabling a solar-only
+        bootstrap; otherwise it becomes ``remaining_solar``.
         """
         solar_surplus = power_analysis.get("solar_surplus", 0)
         significant_solar_threshold = self._settings.significant_solar_threshold
@@ -1605,7 +1607,9 @@ class ChargingDecisionEngine:
             )
         else:
             car_current_solar_usage = 0
-            solar_for_car = 0
+            solar_for_car = self._bootstrap_car_solar_allocation(
+                available_for_car, battery_analysis, self._settings
+            )
 
         total_allocated = solar_for_batteries + solar_for_car + car_current_solar_usage
         if total_allocated > solar_surplus:
@@ -1677,6 +1681,37 @@ class ChargingDecisionEngine:
                 settings.max_battery_power
             )
             return max(0, estimated_need)
+        return 0
+
+    def _bootstrap_car_solar_allocation(
+        self,
+        available_solar: float,
+        battery_analysis: dict[str, Any],
+        settings: EngineSettings,
+    ) -> int:
+        """Offer leftover solar to an idle car when batteries are near full.
+
+        This enables a solar-only charge bootstrap: the car is not yet drawing
+        power, but batteries are satisfied, so any unabsorbed surplus is
+        reported against ``solar_for_car`` to let the car decision path enter
+        solar-only mode.  Returns 0 when batteries still need the solar.
+        """
+        if available_solar <= 0:
+            return 0
+
+        batteries_full = battery_analysis.get("batteries_full", False)
+        if batteries_full:
+            return int(min(available_solar, settings.max_car_power))
+
+        average_soc = battery_analysis.get("average_soc")
+        min_soc = battery_analysis.get("min_soc")
+        if average_soc is None or min_soc is None:
+            return 0
+
+        max_soc = battery_analysis.get("max_soc_threshold", DEFAULT_MAX_SOC)
+        solar_ready_threshold = max_soc - DEFAULT_ALGORITHM_THRESHOLDS.soc_buffer
+        if average_soc >= solar_ready_threshold and min_soc >= solar_ready_threshold:
+            return int(min(available_solar, settings.max_car_power))
         return 0
 
     def _analyze_battery_status(self, battery_soc_data: list[dict[str, Any]]) -> dict[str, Any]:
