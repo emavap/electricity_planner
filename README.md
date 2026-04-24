@@ -123,6 +123,7 @@ The integration processes data through a multi-stage pipeline every 30 seconds (
 ### PriceThresholdGuard
 
 Before strategies run, the **PriceThresholdGuard** enforces:
+
 - **Price ceiling**: Blocks charging when price exceeds threshold (with SOC-based relaxation)
 - **Emergency override**: Forces charging when SOC ≤ emergency threshold regardless of price
 - **SOC price multiplier**: Relaxes threshold when battery is low (configurable 1.0–1.3×)
@@ -176,6 +177,7 @@ Configure price adjustments to account for taxes, fees, or currency conversion:
 ### Solar Priority
 
 When solar surplus exceeds house consumption:
+
 1. **Batteries first** – Solar charges batteries before considering grid
 2. **EV bonus** – Once batteries approach target SOC, excess solar goes to EV
 3. **Grid charging blocked** – No grid charging while significant solar available
@@ -191,12 +193,14 @@ When battery SOC is low, the integration relaxes price requirements to prevent p
 | Between | Linear interpolation | Gradual relaxation |
 
 Configure via:
+
 - **`soc_price_multiplier_max`** (default: 1.3) – Maximum multiplier at emergency SOC
 - **`soc_buffer_target`** (default: 50%) – SOC above which no relaxation applies
 
 ### Multi-Battery Support
 
 The integration supports multiple batteries with:
+
 - **Capacity-weighted average SOC** – Larger batteries have more influence
 - **Per-battery capacity configuration** – Set kWh for each battery sensor
 - **Phase assignments** (three-phase mode) – Assign batteries to L1/L2/L3
@@ -269,6 +273,7 @@ Enable three-phase mode for installations with phase-specific batteries or inver
 ### Phase Attributes
 
 Binary sensors expose `phase_results` attribute containing:
+
 - Per-phase grid setpoints
 - Component breakdowns
 - Reasons per phase
@@ -283,6 +288,7 @@ Binary sensors expose `phase_results` attribute containing:
 Car charging implements strict hysteresis to prevent short charging cycles:
 
 **OFF → ON Transition:**
+
 1. Current price must be below threshold
 2. Minimum charging window validation:
    - Checks next N hours (configurable via `min_car_charging_duration`, default 2h)
@@ -293,12 +299,14 @@ Car charging implements strict hysteresis to prevent short charging cycles:
    - Returns true only if accumulated duration ≥ configured minimum
 
 **ON → OFF Transition:**
+
 - Immediately when current price exceeds threshold
 - No window check needed
 
 ### Threshold Floor Pattern
 
 When car charging starts (OFF→ON):
+
 1. **Lock** – Current price threshold is locked
 2. **During charging** – Uses `max(locked_threshold, current_threshold)` as effective threshold
 3. **Effect** – Prevents threshold decreases from stopping mid-session
@@ -318,6 +326,7 @@ Enable the **Car Permissive Mode** switch to temporarily relax car charging requ
 ### Peak Import Limiting
 
 When configured with a grid power sensor and monthly peak entity:
+
 - Monitors real-time grid import
 - Reduces car charging power to stay below peak threshold
 - Exposes `car_peak_limited` and `car_peak_limit_threshold_w` in power analysis
@@ -668,8 +677,9 @@ automation:
       - service: switch.turn_on
         target:
           entity_id: switch.electricity_planner_car_permissive_mode
+```
 
-### Arbitrage Mode
+### Arbitrage Mode Automation
 
 ```yaml
 automation:
@@ -687,7 +697,6 @@ automation:
           entity_id: number.electricity_planner_battery_dump_target_soc
         data:
           value: 20
-```
 ```
 
 ---
@@ -714,10 +723,12 @@ installations. The managed dashboard is the canonical layout and uses the shared
 detail cards appended automatically when the entry topology is three-phase.
 
 The bundled YAML files in the repository are release snapshots:
+
 - `electricity_planner_dashboard.yaml`: static single-phase example
 - `electricity_planner_3phase_dashboard.yaml`: static three-phase example with the same shared sections plus per-phase details
 
 If you want to maintain your own manual dashboard:
+
 1. Download `dashboard_template.yaml` from the [latest release](https://github.com/emavap/electricity_planner/releases/latest)
 2. Settings → Dashboards → Add Dashboard
 3. Type: "Panel (1 card)"
@@ -737,6 +748,7 @@ See [DASHBOARD.md](DASHBOARD.md) for the current dashboard structure and card re
 **Symptoms:** `binary_sensor.electricity_planner_data_nord_pool_available` is `off`
 
 **Solutions:**
+
 1. Check `sensor.electricity_planner_entity_status` for missing entities
 2. Verify Nord Pool integration is working
 3. Ensure all configured sensors are available
@@ -745,6 +757,7 @@ See [DASHBOARD.md](DASHBOARD.md) for the current dashboard structure and card re
 #### Charging not starting despite low prices
 
 **Check:**
+
 1. Is `binary_sensor.electricity_planner_battery_charge_from_grid` actually `on`?
 2. Check the `reason` attribute for explanation
 3. Verify SOC is below `max_soc_threshold`
@@ -754,11 +767,13 @@ See [DASHBOARD.md](DASHBOARD.md) for the current dashboard structure and card re
 #### Car charging stops unexpectedly
 
 **Possible causes:**
+
 1. Price exceeded threshold (check `reason` attribute)
 2. Minimum charging window not met (hysteresis protection)
 3. Peak import limiting activated (check `car_peak_limited` attribute)
 
 **Solutions:**
+
 1. Enable permissive mode for less strict thresholds
 2. Increase `min_car_charging_duration` for longer windows
 3. Adjust `price_threshold` or enable dynamic threshold
@@ -768,6 +783,7 @@ See [DASHBOARD.md](DASHBOARD.md) for the current dashboard structure and card re
 **Symptoms:** Uneven power distribution across phases
 
 **Solutions:**
+
 1. Verify battery phase assignments are correct
 2. Check per-phase entity configuration
 3. Review `phase_results` attribute for per-phase decisions
@@ -814,7 +830,7 @@ docker run --rm -v "$PWD":/app -w /app -e PYTHONPATH=/app electricity-planner-te
 
 ### Code Structure
 
-```
+```text
 custom_components/electricity_planner/
 ├── __init__.py           # Integration setup, service registration
 ├── const.py              # Constants, configuration keys (65+ CONF_ constants)
@@ -879,6 +895,7 @@ Contributions are welcome! Please:
 ### Reporting Issues
 
 When reporting issues, please include:
+
 - Home Assistant version
 - Integration version (check `manifest.json`)
 - Relevant log entries (with debug logging enabled)

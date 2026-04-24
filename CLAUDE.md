@@ -38,6 +38,7 @@ This is a Home Assistant custom integration called "Electricity Planner" - a sma
 ### Key Decision Logic
 
 The integration uses **price positioning** within daily range (0-100%) rather than simple thresholds:
+
 - Very low prices: Bottom 30% of daily range → Charge recommended
 - Solar surplus: Always preferred over grid charging for batteries
 - Battery SOC: Different logic for batteries above/below 30% SOC
@@ -48,10 +49,12 @@ The integration uses **price positioning** within daily range (0-100%) rather th
 `_allocate_solar_power()` in `decision_engine.py` splits post-house solar surplus between batteries, the EV, and exported leftover using a **car-state-aware** policy:
 
 **Car actively charging (`car_charging_power > min_car_charging_threshold`, default 100W):**
+
 - Batteries get a fixed reserve slice capped at `significant_solar_threshold` (default 1000W)
 - Remaining surplus is offered to the EV (`car_current_solar_usage` + `solar_for_car` bonus)
 
 **Car idle:**
+
 - Batteries absorb the full surplus up to their demand, **uncapped** by `significant_solar_threshold`
 - Any leftover triggers the solar-only **bootstrap path** (`_bootstrap_car_solar_allocation`):
   - If `batteries_full=True` or every battery's SOC is `≥ max_soc_threshold − soc_buffer` (10%), the leftover is published as `solar_for_car` so the car decision engine can enter `car_solar_only` mode
@@ -62,6 +65,7 @@ The `allocated_car_solar = solar_for_car + car_current_solar_usage` value is exp
 ### Average Threshold Calculation
 
 When dynamic threshold mode is enabled, the integration calculates a 24-hour rolling average:
+
 - **Minimum window**: Forces at least 24 hours of data for stable threshold
 - **Future preference**: Uses future Nord Pool prices when available
 - **Past backfill**: When future < 24h, backfills with recent past prices
@@ -76,6 +80,7 @@ This prevents late-evening threshold spikes from sparse data and provides more s
 The car charging logic implements strict hysteresis to prevent short charging cycles:
 
 **OFF → ON Transition:**
+
 - Current price must be below threshold
 - `_check_minimum_charging_window()` validates next N hours (configurable via `CONF_MIN_CAR_CHARGING_DURATION`, default 2h)
 - Method performs:
@@ -87,10 +92,12 @@ The car charging logic implements strict hysteresis to prevent short charging cy
   6. Returns True only if accumulated duration ≥ configured minimum
 
 **ON → OFF Transition:**
+
 - Immediately when current price exceeds threshold
 - No window check needed
 
 **Threshold Floor Pattern:**
+
 - Locks price threshold when charging starts (OFF→ON)
 - During active charging: uses `max(locked_threshold, current_threshold)` as effective threshold
 - Prevents threshold decreases from stopping mid-session (e.g., when 24h rolling average drops)
@@ -99,6 +106,7 @@ The car charging logic implements strict hysteresis to prevent short charging cy
 - Critical for charging continuity when using dynamic thresholds
 
 **Implementation:**
+
 - Window validation: `coordinator.py:528-817` (`_check_minimum_charging_window`)
 - Threshold floor: `decision_engine.py:808-819` (threshold floor logic), `coordinator.py:250` (state storage)
 
@@ -107,17 +115,20 @@ The car charging logic implements strict hysteresis to prevent short charging cy
 Reduces the grid-charging Max SOC threshold when high solar production is forecast, preserving battery capacity for free solar energy.
 
 **How it works:**
+
 - `_resolve_solar_forecast()` in `coordinator.py` reads `energy_production_tomorrow` after the configurable start hour (default 20:00) and caches the value hourly
 - `_apply_sunny_day_grid_limit()` in `decision_engine.py` compares forecast against `total_battery_capacity / 2`
 - If sunny: `max_soc_threshold` is overridden by `max_soc_threshold_sunny` for grid charging only
 
 **Midnight flip handling:**
+
 - After midnight, the "tomorrow" entity flips to the *next* day (wrong day for overnight decisions)
 - If an optional "today" entity (`energy_production_today`) is configured, it's used live between midnight and the start hour
 - Otherwise, the cached value from the previous evening is used
 - If no cache and no "today" entity: returns `None` (feature safely disabled until start hour)
 
 **Configuration:**
+
 - `solar_forecast_entity`: Tomorrow's forecast sensor (e.g., `sensor.energy_production_tomorrow`)
 - `solar_forecast_today_entity`: Today's forecast sensor (optional, recommended)
 - `solar_forecast_start_hour`: Hour (12-23) to start reading forecast, default 20
@@ -128,17 +139,21 @@ Reduces the grid-charging Max SOC threshold when high solar production is foreca
 ### Entity Dependencies
 
 **Required Nord Pool entities** (4 price entities):
+
 - Current price, highest price today, lowest price today, next hour price
 
 **Battery entities**:
+
 - Battery SOC sensors (%) - supports multiple batteries
 - Battery capacity sensors (kWh) - optional but recommended
 
 **Power flow entities**:
+
 - House consumption (W)
 - Solar surplus = production - consumption (W)
 
 **Solar forecast entities** (optional):
+
 - Energy production tomorrow (kWh) - primary forecast source
 - Energy production today (kWh) - overnight validation/fallback
 
@@ -147,14 +162,17 @@ Reduces the grid-charging Max SOC threshold when high solar production is foreca
 This is a Home Assistant custom integration. Recommended development workflow:
 
 1. **Run automated tests (preferred)** – via Docker (no local Python deps required):
+
    ```bash
    docker build -f Dockerfile.tests -t electricity-planner-tests .
    docker run --rm -v "$PWD":/app -w /app -e PYTHONPATH=/app electricity-planner-tests pytest
    ```
+
 2. **Install in Home Assistant**: Copy `custom_components/electricity_planner/` to HA config
 3. **Restart Home Assistant**: Required after code changes
 4. **Reload integration**: Through HA UI for configuration changes
 5. **Debug logging**: Add to `configuration.yaml`:
+
    ```yaml
    logger:
      logs:
@@ -163,7 +181,7 @@ This is a Home Assistant custom integration. Recommended development workflow:
 
 ## File Structure
 
-```
+```text
 custom_components/electricity_planner/
 ├── __init__.py           # Integration setup and platform registration
 ├── const.py             # Constants and configuration keys (35 CONF_ constants)
@@ -188,6 +206,7 @@ custom_components/electricity_planner/
 ## Dynamic Market Focus
 
 The integration is designed for dynamic electricity markets:
+
 - Nord Pool pricing integration (and similar dynamic pricing markets)
 - Solar feed-in tariff considerations and export optimization
 - Configurable safety limits for residential battery storage
@@ -207,11 +226,13 @@ The integration is designed for dynamic electricity markets:
 ## Configuration System
 
 ### Current Version
+
 - **Integration Version**: 6.0.0
 - **Config Schema Version**: 21
 - **Migration Path**: Automatic v1→v21 migration
 
 ### Configuration Categories
+
 1. **Entity Selection**: Nord Pool, battery, solar, car, power flow, solar forecast entities
 2. **SOC Thresholds**: Min/max SOC (grid), sunny-day max SOC (grid), **solar-specific max SOC**, emergency overrides, predictive logic thresholds
 3. **Price Thresholds**: Price threshold, very low price %, feed-in threshold
@@ -221,6 +242,7 @@ The integration is designed for dynamic electricity markets:
 ### Recent Changes
 
 **v6.0.0** (major internal refactor — no behavior change)
+
 - **Refactor**: Decomposed `ChargingDecisionEngine` (~3100 LOC) and `ElectricityPlannerCoordinator` (~3415 LOC) into 22 focused collaborator modules. Final sizes: `decision_engine.py` 1472 LOC (−52%), `coordinator.py` 1356 LOC (−60%).
 - **New modules — engine-side**: `inverter_derating.py`, `feedin_decision.py`, `battery_analysis.py`, `price_analysis.py`, `threshold_calculator.py`, `charging_window.py`, `car_charging.py`, `battery_charging.py`, `solar_allocation.py`, `grid_setpoint.py`, `charger_limit.py`, `override_recalculator.py`, `phase_distributor.py`.
 - **New modules — coordinator-side**: `price_timeline.py`, `transport_cost.py`, `nordpool_service.py`, `battery_dump.py`, `forecast_summary.py`, `solar_forecast.py`, `entity_status.py`, `manual_overrides.py`, `runtime_modes.py`.
@@ -230,12 +252,14 @@ The integration is designed for dynamic electricity markets:
 - **Compatibility**: No config-schema change (still v21), no user-facing behavior change, no migration required. Drop-in replacement.
 
 **v5.0.2**
+
 - **Added**: Immediate cap-reopen path in `_calculate_inverter_derating_target` (inside the `export_below_band` branch) for when feed-in is blocked and the site is actively importing from grid (`grid_power_w > 0`). Raises the target to `min(max_inverter_power, solar_production + grid_import + export_limit)` so the inverter can promptly reclaim output instead of creeping up 100W/tick via `should_relax_cap_upward()` while grid power is being paid for.
 - **Complements**: The existing `house_consumption > solar_production` fast path — new branch runs when house-consumption data is unavailable or when imports are driven by battery/EV draw rather than house load.
 - **Safety**: Only opens upward (`previous_target_w is None or operating_point_target_w > previous_target_w`); bounded by `max_inverter_power`; clears `inverter_derating_unreached_since` via `**no_alarm`. Feed-in allowed, export-in-band, and low-SOC bypass paths are unchanged.
 - **Tests**: 437 pytest tests passing (added `test_inverter_derating_recalculates_immediately_when_site_is_importing` in `tests/test_decision_engine_power.py`).
 
 **v5.0.1**
+
 - **Added**: `CONF_MAX_SOC_THRESHOLD_SOLAR` / `DEFAULT_MAX_SOC_SOLAR = 50` — independent battery SOC ceiling for solar absorption, decoupled from grid-charging `max_soc_threshold` and the sunny-day override.
 - **Changed**: `_calculate_battery_solar_allocation` now consults `settings.max_soc_threshold_solar` instead of the grid ceiling, so batteries stop absorbing free PV at 50% (default) and surplus is diverted to the EV or exported while the grid ceiling remains at 70%/35%.
 - **Changed**: `_bootstrap_car_solar_allocation` gate is now strictly `batteries_full OR min_soc ≥ max_soc_threshold_solar − soc_buffer` — removed the previous `average_soc >= solar_max` shortcut that could bypass a lagging battery.
@@ -244,6 +268,7 @@ The integration is designed for dynamic electricity markets:
 - **Tests**: 436 pytest tests passing.
 
 **v5.0.0** (consolidated 5.x release)
+
 - **Added**: Car-state-aware solar allocation policy in `_allocate_solar_power` — see `### Solar Allocation Policy` above.
 - **Added**: `_bootstrap_car_solar_allocation` — offers leftover surplus to an idle car when batteries satisfy the near-full gate (`batteries_full` or every battery's SOC ≥ `max_soc_threshold − soc_buffer`), enabling solar-only mode to start without the car already drawing power.
 - **Added**: `solar_headroom = allocated_car_solar + remaining_solar` used across all four grid-charging branches of `_calculate_charger_limit` (no-battery-data, low-SOC power sharing, below-max-SOC, at-or-above-max-SOC / arbitrage) so the EV's limit includes exportable surplus on top of the grid allowance. Solar-only mode intentionally keeps the tighter `allocated_solar` bound.
@@ -253,6 +278,7 @@ The integration is designed for dynamic electricity markets:
 - **Tests**: 436 pytest tests passing.
 
 **v4.10.x**
+
 - **Added**: Sunny day feature — reduces grid charging max SOC when solar forecast is high
 - **Added**: Solar forecast caching with configurable start hour (12-23, default 20)
 - **Added**: Optional "today" forecast entity for overnight validation
