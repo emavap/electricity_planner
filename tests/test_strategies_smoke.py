@@ -557,6 +557,181 @@ def test_strategy_manager_no_relaxation_at_high_soc():
     assert "exceeds maximum threshold" in reason
 
 
+# ---------------------------------------------------------------------------
+# StrategyManager.evaluate() - fallback/advisory branches
+# ---------------------------------------------------------------------------
+
+
+def test_solar_priority_downgrade_at_emergency_soc_allows_safety_net_to_charge():
+    """At emergency SOC, SolarPriority's "use solar" block is downgraded to advisory
+    so SOCBasedChargingStrategy can still force grid charging."""
+    # Dynamic pricing disabled so DynamicPriceStrategy doesn't interfere.
+    manager = StrategyManager(use_dynamic_threshold=False)
+    context = {
+        "battery_analysis": {"average_soc": 10, "max_soc_threshold": 90},
+        "price_analysis": {
+            "current_price": 0.05,
+            "price_threshold": 0.15,
+            "highest_price": 0.3,
+            "lowest_price": 0.05,
+            "is_low_price": True,
+        },
+        "power_allocation": {"solar_for_batteries": 2000, "remaining_solar": 0},
+        "power_analysis": {"significant_solar_surplus": False, "solar_surplus": 0},
+        "config": {"emergency_soc_threshold": 15},
+    }
+
+    should_charge, reason = manager.evaluate(context)
+    assert should_charge is True
+    assert "Low SOC" in reason
+
+    trace = manager.get_last_trace()
+    strategies_seen = [e["strategy"] for e in trace]
+    assert "SolarPriorityStrategy" in strategies_seen  # downgrade path exercised
+    assert "SOCBasedChargingStrategy" in strategies_seen  # safety net continued
+    # SolarPriority entry was False (downgraded), final safety-net entry was True
+    solar_entry = next(e for e in trace if e["strategy"] == "SolarPriorityStrategy")
+    socbased_entry = next(e for e in trace if e["strategy"] == "SOCBasedChargingStrategy")
+    assert solar_entry["should_charge"] is False
+    assert socbased_entry["should_charge"] is True
+
+
+def test_evaluate_returns_last_advisory_reason_when_no_strategy_charges():
+    """When only advisory False reasons are produced, last reason is returned."""
+    manager = StrategyManager(use_dynamic_threshold=False)
+    context = {
+        "battery_analysis": {"average_soc": 55, "max_soc_threshold": 90},
+        "price_analysis": {
+            "current_price": 0.10,
+            "price_threshold": 0.15,
+            "highest_price": 0.3,
+            "lowest_price": 0.05,
+            "is_low_price": True,
+            "significant_price_drop": True,
+            "next_price": 0.05,
+        },
+        "power_allocation": {"solar_for_batteries": 0, "remaining_solar": 0},
+        "power_analysis": {"significant_solar_surplus": False, "solar_surplus": 0},
+        "config": {"emergency_soc_threshold": 15},
+    }
+
+    should_charge, reason = manager.evaluate(context)
+    assert should_charge is False
+    assert "waiting for significant price drop" in reason
+
+    trace = manager.get_last_trace()
+    # The final entry should be the AdvisoryReason marker appended by evaluate().
+    assert trace[-1]["strategy"] == "AdvisoryReason"
+    assert trace[-1]["should_charge"] is False
+    assert trace[-1]["reason"] == reason
+
+
+def test_evaluate_default_decision_when_no_strategy_votes():
+    """All strategies silent (no reasons) → default 'price not favorable' reason."""
+    manager = StrategyManager(use_dynamic_threshold=False)
+    context = {
+        "battery_analysis": {"average_soc": 55, "max_soc_threshold": 90},
+        "price_analysis": {
+            "current_price": 0.10,
+            "price_threshold": 0.15,
+            "highest_price": 0.3,
+            "lowest_price": 0.05,
+            "price_position": 0.5,
+            "is_low_price": False,
+        },
+        "power_allocation": {"solar_for_batteries": 0, "remaining_solar": 0},
+        "power_analysis": {"significant_solar_surplus": False, "solar_surplus": 0},
+        "config": {"emergency_soc_threshold": 15},
+    }
+
+    should_charge, reason = manager.evaluate(context)
+    assert should_charge is False
+    assert "Price not favorable" in reason
+    assert "0.100€/kWh" in reason
+    assert "50% of daily range" in reason
+    assert "SOC 55%" in reason
+
+    trace = manager.get_last_trace()
+    assert trace[-1]["strategy"] == "DefaultDecision"
+    assert trace[-1]["priority"] == 999
+
+
+def test_get_last_trace_returns_a_copy_not_internal_list():
+    """Callers must not be able to mutate internal trace via get_last_trace()."""
+    manager = StrategyManager(use_dynamic_threshold=False)
+    manager.evaluate({
+        "battery_analysis": {"average_soc": 55, "max_soc_threshold": 90},
+        "price_analysis": {
+            "current_price": 0.10,
+            "price_threshold": 0.15,
+            "is_low_price": False,
+        },
+        "power_allocation": {},
+        "power_analysis": {},
+        "config": {"emergency_soc_threshold": 15},
+    })
+
+    trace = manager.get_last_trace()
+    original_len = len(trace)
+    trace.append({"strategy": "Hacked"})
+    assert len(manager.get_last_trace()) == original_len
+
+
+# ---------------------------------------------------------------------------
+# StrategyManager.get_dynamic_threshold() - None paths
+# ---------------------------------------------------------------------------
+
+
+def test_get_dynamic_threshold_returns_none_when_dynamic_pricing_disabled():
+    """use_dynamic_threshold=False → dynamic_price_strategy is None → returns None."""
+    manager = StrategyManager(use_dynamic_threshold=False)
+    assert manager.dynamic_price_strategy is None
+    assert manager.get_dynamic_threshold({"price_analysis": {"current_price": 0.1}}) is None
+
+
+def test_get_dynamic_threshold_returns_none_when_analyzer_not_initialized():
+    """Before first evaluate() call, the DynamicPriceStrategy has no analyzer."""
+    manager = StrategyManager(use_dynamic_threshold=True)
+    assert manager.dynamic_price_strategy is not None
+    assert manager.dynamic_price_strategy.dynamic_analyzer is None
+    context = {
+        "price_analysis": {
+            "current_price": 0.10,
+            "highest_price": 0.30,
+            "lowest_price": 0.05,
+        }
+    }
+    assert manager.get_dynamic_threshold(context) is None
+
+
+def test_get_dynamic_threshold_returns_none_when_prices_missing():
+    """After analyzer is initialized, missing current/highest/lowest → None."""
+    manager = StrategyManager(use_dynamic_threshold=True)
+    # First run evaluate() to initialize the analyzer.
+    manager.evaluate({
+        "battery_analysis": {"average_soc": 50, "max_soc_threshold": 90},
+        "price_analysis": {
+            "current_price": 0.10,
+            "price_threshold": 0.15,
+            "highest_price": 0.3,
+            "lowest_price": 0.05,
+        },
+        "power_allocation": {},
+        "power_analysis": {},
+        "config": {"emergency_soc_threshold": 15},
+    })
+    assert manager.dynamic_price_strategy.dynamic_analyzer is not None
+
+    # Missing current_price
+    assert manager.get_dynamic_threshold({"price_analysis": {"highest_price": 0.3, "lowest_price": 0.05}}) is None
+    # Missing highest_price
+    assert manager.get_dynamic_threshold({"price_analysis": {"current_price": 0.1, "lowest_price": 0.05}}) is None
+    # Missing lowest_price
+    assert manager.get_dynamic_threshold({"price_analysis": {"current_price": 0.1, "highest_price": 0.3}}) is None
+
+
+
+
 if __name__ == "__main__":
     # Run smoke tests
     test_emergency_guard_triggers_when_soc_low()

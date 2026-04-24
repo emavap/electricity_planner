@@ -207,7 +207,7 @@ The integration is designed for dynamic electricity markets:
 ## Configuration System
 
 ### Current Version
-- **Integration Version**: 5.0.2
+- **Integration Version**: 6.0.0
 - **Config Schema Version**: 21
 - **Migration Path**: Automatic v1→v21 migration
 
@@ -219,6 +219,15 @@ The integration is designed for dynamic electricity markets:
 5. **Solar Parameters**: Significant solar surplus threshold, forecast start hour
 
 ### Recent Changes
+
+**v6.0.0** (major internal refactor — no behavior change)
+- **Refactor**: Decomposed `ChargingDecisionEngine` (~3100 LOC) and `ElectricityPlannerCoordinator` (~3415 LOC) into 22 focused collaborator modules. Final sizes: `decision_engine.py` 1472 LOC (−52%), `coordinator.py` 1356 LOC (−60%).
+- **New modules — engine-side**: `inverter_derating.py`, `feedin_decision.py`, `battery_analysis.py`, `price_analysis.py`, `threshold_calculator.py`, `charging_window.py`, `car_charging.py`, `battery_charging.py`, `solar_allocation.py`, `grid_setpoint.py`, `charger_limit.py`, `override_recalculator.py`, `phase_distributor.py`.
+- **New modules — coordinator-side**: `price_timeline.py`, `transport_cost.py`, `nordpool_service.py`, `battery_dump.py`, `forecast_summary.py`, `solar_forecast.py`, `entity_status.py`, `manual_overrides.py`, `runtime_modes.py`.
+- **Patterns**: Collaborators receive an `EngineSettings` snapshot or share a `CycleContext` per decision cycle. Public API of `ChargingDecisionEngine` and `ElectricityPlannerCoordinator` is unchanged; only the load-bearing orchestration methods remain on the parent classes.
+- **Cleanup**: Removed 32 dead private delegator methods (unreachable after extraction) and 5 unused imports. No test churn — all existing monkeypatch / attribute access call-sites still resolve correctly.
+- **Tests**: 456 pytest tests passing (433 lines of new test coverage in `tests/test_decision_engine_power.py` and `tests/test_strategies_smoke.py`).
+- **Compatibility**: No config-schema change (still v21), no user-facing behavior change, no migration required. Drop-in replacement.
 
 **v5.0.2**
 - **Added**: Immediate cap-reopen path in `_calculate_inverter_derating_target` (inside the `export_below_band` branch) for when feed-in is blocked and the site is actively importing from grid (`grid_power_w > 0`). Raises the target to `min(max_inverter_power, solar_production + grid_import + export_limit)` so the inverter can promptly reclaim output instead of creeping up 100W/tick via `should_relax_cap_upward()` while grid power is being paid for.

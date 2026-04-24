@@ -1,10 +1,10 @@
 # Electricity Planner
 
-**Version 5.0.2** | **Config Schema Version 21** | **Home Assistant 2024.4+**
+**Version 6.0.0** | **Config Schema Version 21** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
-> Release note for v5.0.2: adds an immediate cap-reopen path to `_calculate_inverter_derating_target` for the case where feed-in is blocked, the inverter is held at a low derating cap, and the site is actively importing from the grid (`grid_power > 0`). The new branch raises the target to `min(max_inverter_power, solar_production + grid_import + export_limit)` — complementing the existing house-exceeds-PV fast path when house-consumption data is unavailable or when imports are driven by battery/EV draw, and replacing the slow 100W/tick step-release during active imports so the inverter can promptly reclaim output instead of continuing to pay for grid power. Only opens upward (guarded by `previous_target_w`); feed-in allowed, export-in-band, and low-SOC bypass paths are unchanged.
+> Release note for v6.0.0: major internal refactor. The two monolithic classes `ChargingDecisionEngine` (~3100 LOC) and `ElectricityPlannerCoordinator` (~3415 LOC) are decomposed into 22 focused collaborator modules — `inverter_derating`, `feedin_decision`, `battery_analysis`, `price_analysis`, `threshold_calculator`, `charging_window`, `price_timeline`, `transport_cost`, `nordpool_service`, `battery_dump`, `forecast_summary`, `solar_forecast`, `entity_status`, `manual_overrides`, `runtime_modes`, `car_charging`, `battery_charging`, `solar_allocation`, `grid_setpoint`, `charger_limit`, `override_recalculator`, `phase_distributor`. Net result: `decision_engine.py` is now 1472 LOC (−52%) and `coordinator.py` is 1356 LOC (−60%), while the full public API, config schema, and decision behavior are unchanged. 456/456 tests still passing — no user-facing changes, no migration required.
 
 ---
 

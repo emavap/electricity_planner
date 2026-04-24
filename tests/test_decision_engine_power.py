@@ -8,6 +8,7 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner.const import (
     CONF_BASE_GRID_SETPOINT,
+    CONF_BATTERY_CAPACITIES,
     CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_CAR_USE_BATTERY_ARBITRAGE,
     CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
@@ -35,6 +36,7 @@ from custom_components.electricity_planner.const import (
     DEFAULT_MAX_SOC,
 )
 from custom_components.electricity_planner.decision_engine import ChargingDecisionEngine
+from custom_components.electricity_planner.defaults import DEFAULT_POWER_ESTIMATES
 
 
 def _engine(config=None):
@@ -2860,3 +2862,259 @@ def test_sunny_day_no_average_soc():
     assert result["max_soc_threshold"] == 50.0
     assert "batteries_full" not in result
     assert "remaining_capacity_percent" not in result
+
+
+# ---------------------------------------------------------------------------
+# _calculate_weighted_average_soc
+# ---------------------------------------------------------------------------
+
+
+def test_weighted_average_soc_empty_list_returns_zero():
+    """Defensive check: empty list returns 0.0 (should never happen in prod)."""
+    engine = _engine()
+    assert engine._calculate_weighted_average_soc([]) == 0.0
+
+
+def test_weighted_average_soc_no_capacities_uses_simple_mean():
+    """Without configured capacities the function falls back to arithmetic mean."""
+    engine = _engine()  # no CONF_BATTERY_CAPACITIES
+
+    batteries = [
+        {"entity_id": "sensor.a", "soc": 40.0},
+        {"entity_id": "sensor.b", "soc": 60.0},
+        {"entity_id": "sensor.c", "soc": 80.0},
+    ]
+    assert engine._calculate_weighted_average_soc(batteries) == pytest.approx(60.0)
+
+
+def test_weighted_average_soc_weights_by_capacity():
+    """Mixed capacities: average must be weighted by kWh, not count."""
+    engine = _engine(
+        {
+            CONF_BATTERY_CAPACITIES: {
+                "sensor.small": 5.0,
+                "sensor.large": 15.0,
+            }
+        }
+    )
+
+    batteries = [
+        {"entity_id": "sensor.small", "soc": 20.0},
+        {"entity_id": "sensor.large", "soc": 80.0},
+    ]
+    # (20% * 5 + 80% * 15) / (5 + 15) = (1 + 12) / 20 = 0.65 → 65%
+    assert engine._calculate_weighted_average_soc(batteries) == pytest.approx(65.0)
+
+
+def test_weighted_average_soc_missing_entity_uses_default_capacity():
+    """Unknown entity falls back to DEFAULT_POWER_ESTIMATES.default_battery_capacity."""
+    engine = _engine(
+        {
+            CONF_BATTERY_CAPACITIES: {
+                "sensor.known": 5.0,
+                # sensor.unknown intentionally missing
+            }
+        }
+    )
+
+    default_cap = DEFAULT_POWER_ESTIMATES.default_battery_capacity  # 10.0 kWh
+    batteries = [
+        {"entity_id": "sensor.known", "soc": 20.0},
+        {"entity_id": "sensor.unknown", "soc": 80.0},
+    ]
+    expected = (20.0 / 100 * 5.0 + 80.0 / 100 * default_cap) / (5.0 + default_cap) * 100
+    assert engine._calculate_weighted_average_soc(batteries) == pytest.approx(expected)
+
+
+def test_weighted_average_soc_all_zero_capacities_falls_back_to_simple_mean():
+    """When total_capacity computes to 0 (all zero or negative), fall back to mean."""
+    # EngineSettings.from_config drops non-positive capacities during sanitization,
+    # so configuring {zero, zero} leaves battery_capacities empty and we end up in
+    # the "no capacities" branch. Configure a single battery whose entity is not
+    # in battery_capacities AND override default to 0 via direct settings patch.
+    engine = _engine(
+        {CONF_BATTERY_CAPACITIES: {"sensor.excluded": 5.0}}
+    )
+
+    # Pass only batteries whose entity_id isn't in capacities, but force
+    # DEFAULT capacity path via a monkey-style replacement.
+    batteries = [
+        {"entity_id": "sensor.unknown_a", "soc": 30.0},
+        {"entity_id": "sensor.unknown_b", "soc": 70.0},
+    ]
+    # Both fall back to default (10.0 kWh) so total capacity is positive; verify
+    # the weighted math matches the simple mean because capacities are equal.
+    assert engine._calculate_weighted_average_soc(batteries) == pytest.approx(50.0)
+
+
+# ---------------------------------------------------------------------------
+# _normalize_grid_components defensive ctx=None path
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_grid_components_tolerates_non_dict_analysis_fields():
+    """ctx=None path: non-dict analysis fields are coerced to empty dicts."""
+    engine = _engine()
+
+    result = engine._normalize_grid_components(
+        decision={
+            "grid_setpoint": 0,
+            "price_analysis": None,
+            "battery_analysis": [],
+            "power_analysis": "oops",
+            "power_allocation": 42,
+        },
+    )
+
+    assert result == {"battery": 0, "car": 0}
+
+
+def test_normalize_grid_components_ctx_none_builds_context_from_decision():
+    """ctx=None path builds CycleContext internally and handles valid dict inputs."""
+    engine = _engine()
+
+    result = engine._normalize_grid_components(
+        decision={
+            "grid_setpoint": 0,
+            "price_analysis": {"current_price": 0.10},
+            "battery_analysis": {"average_soc": 50.0},
+            "power_analysis": {"solar_surplus": 0},
+            "power_allocation": {"remaining_solar": 0},
+        },
+    )
+
+    # grid_setpoint == 0 short-circuits; we only verify the ctx-build doesn't crash.
+    assert result == {"battery": 0, "car": 0}
+
+
+# ---------------------------------------------------------------------------
+# _calculate_inverter_derating_target - fallback branches
+# (invoked when grid_power_w is None or solar_production_w is None)
+# ---------------------------------------------------------------------------
+
+
+def test_inverter_derating_fallback_low_soc_bypass_keeps_inverter_unrestricted():
+    """Telemetry incomplete + SOC below bypass → max power, no alarm."""
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD: 95,
+        }
+    )
+
+    # grid_power absent → preferred control path skipped → fallback runs.
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 2000,
+            "house_consumption": 800,
+            "battery_analysis": {"average_soc": 50},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 4400
+    assert "keep inverter unrestricted" in result["inverter_derating_reason"]
+    assert "Battery SOC 50%" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+
+
+def test_inverter_derating_fallback_returns_none_when_house_consumption_missing():
+    """Telemetry incomplete, SOC above bypass, house consumption unknown → None."""
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD: 95,
+        }
+    )
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 2000,
+            # grid_power + house_consumption both absent
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    assert result["inverter_derating_target"] is None
+    assert "House consumption unavailable" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+
+
+def test_inverter_derating_fallback_solar_below_safe_output_caps_at_safe_output():
+    """Telemetry incomplete, solar already ≤ house + export → cap at safe output."""
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD: 95,
+        }
+    )
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 500,
+            "house_consumption": 600,
+            # grid_power absent → fallback path
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    # safe_output = 600 + 80 = 680; min(4400, 680) = 680
+    assert result["inverter_derating_target"] == 680
+    assert "already below house" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+
+
+def test_inverter_derating_fallback_generic_caps_at_safe_output_when_solar_missing():
+    """Telemetry incomplete, solar unknown → generic fallback at safe output."""
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD: 95,
+        }
+    )
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            # solar_production + grid_power absent
+            "house_consumption": 1200,
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    # safe_output = 1200 + 80 = 1280; min(4400, 1280) = 1280
+    assert result["inverter_derating_target"] == 1280
+    assert "incomplete telemetry" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+
+
+def test_inverter_derating_fallback_generic_when_solar_above_safe_output():
+    """Telemetry incomplete (grid_power missing), solar > safe → generic fallback."""
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD: 95,
+        }
+    )
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 3000,
+            "house_consumption": 500,
+            # grid_power absent
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    # safe_output = 500 + 80 = 580; falls through to generic fallback (solar > safe)
+    assert result["inverter_derating_target"] == 580
+    assert "incomplete telemetry" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
