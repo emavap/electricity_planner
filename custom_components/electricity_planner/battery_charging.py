@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .const import DEFAULT_MAX_SOC
-from .defaults import DEFAULT_ALGORITHM_THRESHOLDS
 
 if TYPE_CHECKING:
     from .decision_engine import CycleContext, EngineSettings
@@ -92,7 +91,7 @@ class BatteryChargingDecisionCalculator:
         significant_solar = power_analysis.get("significant_solar_surplus", False)
         solar_surplus = power_analysis.get("solar_surplus", 0)
         average_soc = battery_analysis.get("average_soc")
-        surplus_block_soc = DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold
+        surplus_block_soc = self._settings.max_soc_threshold_solar
 
         if (
             significant_solar

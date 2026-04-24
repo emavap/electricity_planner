@@ -237,11 +237,11 @@ class GridSetpointCalculator:
             gate_reason = (
                 "Grid import blocked - neither car nor battery charging authorised"
             )
-            _LOGGER.warning(
-                "Grid setpoint safety net tripped: upstream produced %dW import "
-                "with no authorisation (car_grid_need=%d, battery_grid_need=%d, "
+            _LOGGER.info(
+                "Grid setpoint safety net clamped %dW import to 0 "
+                "(car_grid_need=%d, battery_grid_need=%d, "
                 "significant_car_charging=%s, car_grid_import_allowed=%s, "
-                "battery_grid_charging=%s). This is a bug in the decision logic.",
+                "battery_grid_charging=%s)",
                 int(grid_setpoint), int(car_grid_need), int(battery_grid_need),
                 significant_car_charging, car_grid_import_allowed,
                 battery_grid_charging,
@@ -252,11 +252,10 @@ class GridSetpointCalculator:
             grid_setpoint_parts = []
         elif grid_setpoint < 0 and not export_permitted:
             gate_reason = "Grid export blocked - arbitrage dump not active"
-            _LOGGER.warning(
-                "Grid setpoint safety net tripped: upstream produced %dW export "
-                "without active arbitrage dump (battery_grid_need=%d, "
-                "arbitrage_mode_active=%s, battery_dump_export_power=%d). "
-                "This is a bug in the decision logic.",
+            _LOGGER.info(
+                "Grid setpoint safety net clamped %dW export to 0 "
+                "(battery_grid_need=%d, arbitrage_mode_active=%s, "
+                "battery_dump_export_power=%d)",
                 int(grid_setpoint), int(battery_grid_need),
                 ctx.arbitrage_mode_active, battery_dump_export_power,
             )

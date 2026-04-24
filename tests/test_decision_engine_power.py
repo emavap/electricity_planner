@@ -447,7 +447,7 @@ def test_grid_setpoint_upstream_ignores_dump_power_when_arbitrage_inactive(caplo
         "monthly_grid_peak": 4000,
     }
 
-    with caplog.at_level("WARNING", logger="custom_components.electricity_planner.decision_engine"):
+    with caplog.at_level("INFO", logger="custom_components.electricity_planner.grid_setpoint"):
         result = engine._calculate_grid_setpoint(
             {},
             battery_analysis,
@@ -460,9 +460,9 @@ def test_grid_setpoint_upstream_ignores_dump_power_when_arbitrage_inactive(caplo
     assert result["grid_components"]["battery"] == 0
     assert result["grid_components"]["car"] == 0
     # Upstream must produce a zero setpoint on its own; the safety-net
-    # warning must not fire. If it does, the decision logic has a bug.
+    # clamp must not fire. If it does, the decision logic has a bug.
     assert not any(
-        "safety net tripped" in record.message for record in caplog.records
+        "Grid setpoint safety net" in record.message for record in caplog.records
     )
 
 

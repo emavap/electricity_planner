@@ -1,10 +1,10 @@
 # Electricity Planner
 
-**Version 6.0.1** | **Config Schema Version 21** | **Home Assistant 2024.4+**
+**Version 6.0.2** | **Config Schema Version 21** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
-> Release note for v6.0.1: documentation-only patch on top of v6.0.0. Adds a `.markdownlint.json` config with project-appropriate rule overrides and fixes the remaining structural lint issues in `README.md` and `CLAUDE.md` (blank lines around lists / headings / fences, ASCII-tree code-block languages, duplicate automation heading). Also repairs a real structural bug in `README.md` where the "Permissive Mode Toggle" YAML example was missing its closing fence. No code, schema, or behavior changes. 456/456 tests still passing.
+> Release note for v6.0.2: logic-review follow-up on top of v6.0.1 — five small, low-risk fixes with no user-facing behavior drift. `battery_charging.py` now uses `max_soc_threshold_solar` for its surplus-block gate (was hardcoded 50). `car_charging.py` arbitrage path explicitly clears `car_solar_only` to overwrite stale flags. `grid_setpoint.py` safety-net clamp logs are demoted from `warning` to `info` (clamp still enforced; no more persistent HA notifications on recoverable edges). `strategies.py` docstring clarifies the `PredictiveChargingStrategy` reason surfaces only in non-dynamic mode. Architecture docs corrected from 8 → 6 strategy classes. No code-behavior, schema, or API changes. 456/456 tests still passing.
 
 ---
 

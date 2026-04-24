@@ -76,6 +76,12 @@ class PredictiveChargingStrategy(ChargingStrategy):
     This strategy runs early (priority 2) to potentially delay charging
     when a better price is coming soon. It only provides advisory "wait"
     signals - it never forces charging.
+
+    The advisory reason is only surfaced to the user when no later
+    strategy produces a reason of its own. In practice that means the
+    "waiting for price drop" text is visible primarily when dynamic
+    pricing is disabled (DynamicPriceStrategy always emits a reason when
+    a current price is available and would otherwise overwrite it).
     """
 
     def should_charge(self, context: dict[str, Any]) -> tuple[bool, str]:

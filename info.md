@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 6.0.1** | **Config Schema Version 21** | **Home Assistant 2024.4+**
+**Version 6.0.2** | **Config Schema Version 21** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Release note for v6.0.1: documentation-only patch on top of v6.0.0. Adds a `.markdownlint.json` config and fixes the remaining structural lint issues across `README.md` and `CLAUDE.md`. Also repairs a real structural bug in `README.md` where the "Permissive Mode Toggle" automation example was missing its closing YAML fence. No code, schema, or behavior changes. 456/456 tests still passing.
+> Release note for v6.0.2: logic-review follow-up on top of v6.0.1 — five small, low-risk fixes with no user-facing behavior drift. `battery_charging.py` surplus-block gate now uses `max_soc_threshold_solar` (was hardcoded 50). `car_charging.py` arbitrage path explicitly clears `car_solar_only`. `grid_setpoint.py` safety-net logs demoted from `warning` to `info` so recoverable edges no longer surface as persistent HA notifications. `strategies.py` docstring clarifies the predictive strategy's advisory reason only surfaces in non-dynamic mode. CLAUDE.md strategy count corrected 8 → 6. No code-behavior, schema, or API changes. 456/456 tests still passing.
 
 ## Key Features
 

@@ -14,8 +14,9 @@ This is a Home Assistant custom integration called "Electricity Planner" - a sma
   - 29+ methods for comprehensive decision logic
   - Extensive validation checks for data integrity and safety
   - Uses strategy pattern for extensible decision making
-- **Strategies** (`strategies.py`): 8 strategy classes implementing different charging scenarios
-  - EmergencyChargingStrategy, SolarPriorityStrategy, VeryLowPriceStrategy, etc.
+- **Strategies** (`strategies.py`): 6 strategy classes implementing different charging scenarios
+  - SolarPriorityStrategy, PredictiveChargingStrategy, VeryLowPriceStrategy, SOCBufferChargingStrategy, DynamicPriceStrategy, SOCBasedChargingStrategy
+  - Emergency-SOC override is handled inline by the `PriceThresholdGuard` inside `StrategyManager.evaluate()` (no dedicated class)
   - Clean separation of concerns for each decision type
 - **Coordinator** (`coordinator.py`): Real-time data coordination with 30-second updates and state change triggers
   - Provides normalized access to all configuration and sensor data
@@ -187,7 +188,7 @@ custom_components/electricity_planner/
 ├── const.py             # Constants and configuration keys (35 CONF_ constants)
 ├── coordinator.py       # Data coordination and state management
 ├── decision_engine.py   # Core charging decision algorithms
-├── strategies.py        # Decision strategies (8 strategy classes)
+├── strategies.py        # Decision strategies (6 strategy classes + inline PriceThresholdGuard)
 ├── config_flow.py       # UI configuration + options flow (multi-step wizard, schema v20)
 ├── sensor.py           # Analysis sensors (price, battery, power, diagnostics)
 ├── binary_sensor.py    # Main boolean outputs for charging decisions
@@ -227,7 +228,7 @@ The integration is designed for dynamic electricity markets:
 
 ### Current Version
 
-- **Integration Version**: 6.0.1
+- **Integration Version**: 6.0.2
 - **Config Schema Version**: 21
 - **Migration Path**: Automatic v1→v21 migration
 
@@ -240,6 +241,16 @@ The integration is designed for dynamic electricity markets:
 5. **Solar Parameters**: Significant solar surplus threshold, forecast start hour
 
 ### Recent Changes
+
+**v6.0.2** (logic-review follow-up — small fixes, no behavior drift)
+
+- **Fixed** (`battery_charging.py`): Surplus-block gate replaced hardcoded `DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold` (50) with `settings.max_soc_threshold_solar`. The "significant solar + medium SOC → skip grid charging" check now tracks the user-configurable solar ceiling instead of drifting from it. Default behaviour is unchanged (both defaults are 50).
+- **Fixed** (`car_charging.py`): Arbitrage-override return dict now explicitly sets `car_solar_only: False`. Arbitrage mixes solar with battery discharge, so the flag must never be true here; previously relied implicitly on the engine-level seed in `_initialize_decision_data`. Makes intent explicit and defends against future refactors.
+- **Changed** (`grid_setpoint.py`): Demoted the two safety-net clamp logs from `warning` to `info` and dropped the "This is a bug in the decision logic" suffix. The clamp-to-zero still fires; only the log noise is reduced so that recoverable edge cases (e.g. transport-cost crossover mid-interval) no longer surface as persistent HA notifications.
+- **Docs** (`strategies.py`): Clarified `PredictiveChargingStrategy` docstring — its advisory "wait for price drop" reason surfaces only when `DynamicPriceStrategy` is disabled (`use_dynamic_threshold=False`); otherwise the dynamic strategy's reason overwrites it. No behavior change.
+- **Docs** (`CLAUDE.md`): Corrected post-refactor strategy count from 8 → 6 in the architecture overview and file-structure tree (lists actual class names; notes the inline `PriceThresholdGuard` supplants the removed `EmergencyChargingStrategy`).
+- **Tests**: 456/456 passing. `tests/test_decision_engine_power.py::test_grid_setpoint_upstream_ignores_dump_power_when_arbitrage_inactive` updated to `caplog.at_level("INFO", logger="custom_components.electricity_planner.grid_setpoint")` matching the new log call-site and level.
+- **Compatibility**: No config-schema change (still v21), no migration required, no public-API changes. Drop-in replacement for v6.0.1.
 
 **v6.0.1** (documentation-only patch)
 

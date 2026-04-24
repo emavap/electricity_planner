@@ -87,6 +87,11 @@ class CarChargingDecisionCalculator:
             return {
                 "car_grid_charging": True,
                 "car_grid_import_allowed": grid_import_allowed,
+                # Arbitrage combines solar (if any) with battery discharge,
+                # so the car is never in pure solar-only mode here. Set the
+                # flag explicitly to overwrite any stale True seeded by the
+                # base decision (e.g. high-price path with allocated solar).
+                "car_solar_only": False,
                 "car_grid_charging_reason": self.append_permissive_mode_to_reason(
                     reason, context
                 ),
