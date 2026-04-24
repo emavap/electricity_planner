@@ -207,7 +207,7 @@ The integration is designed for dynamic electricity markets:
 ## Configuration System
 
 ### Current Version
-- **Integration Version**: 5.0.1
+- **Integration Version**: 5.0.2
 - **Config Schema Version**: 21
 - **Migration Path**: Automatic v1→v21 migration
 
@@ -219,6 +219,12 @@ The integration is designed for dynamic electricity markets:
 5. **Solar Parameters**: Significant solar surplus threshold, forecast start hour
 
 ### Recent Changes
+
+**v5.0.2**
+- **Added**: Immediate cap-reopen path in `_calculate_inverter_derating_target` (inside the `export_below_band` branch) for when feed-in is blocked and the site is actively importing from grid (`grid_power_w > 0`). Raises the target to `min(max_inverter_power, solar_production + grid_import + export_limit)` so the inverter can promptly reclaim output instead of creeping up 100W/tick via `should_relax_cap_upward()` while grid power is being paid for.
+- **Complements**: The existing `house_consumption > solar_production` fast path — new branch runs when house-consumption data is unavailable or when imports are driven by battery/EV draw rather than house load.
+- **Safety**: Only opens upward (`previous_target_w is None or operating_point_target_w > previous_target_w`); bounded by `max_inverter_power`; clears `inverter_derating_unreached_since` via `**no_alarm`. Feed-in allowed, export-in-band, and low-SOC bypass paths are unchanged.
+- **Tests**: 437 pytest tests passing (added `test_inverter_derating_recalculates_immediately_when_site_is_importing` in `tests/test_decision_engine_power.py`).
 
 **v5.0.1**
 - **Added**: `CONF_MAX_SOC_THRESHOLD_SOLAR` / `DEFAULT_MAX_SOC_SOLAR = 50` — independent battery SOC ceiling for solar absorption, decoupled from grid-charging `max_soc_threshold` and the sunny-day override.

@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 5.0.1** | **Config Schema Version 21** | **Home Assistant 2024.4+**
+**Version 5.0.2** | **Config Schema Version 21** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Release note for v5.0.1: introduces `max_soc_threshold_solar` (default 50%) as an independent ceiling for solar battery absorption, decoupled from the grid-charging `max_soc_threshold` and sunny-day override. `_calculate_battery_solar_allocation` and `_bootstrap_car_solar_allocation` now consult this solar-specific limit so free PV energy can be diverted to the EV (or exported) before batteries hit the grid-charging ceiling. Adds v20→v21 migration (backfills default 50%), full config/options UI wiring for single- and three-phase setups, a live-adjust `number.electricity_planner_max_soc_threshold_solar` entity, and diagnostic exposure. Builds on v5.0.0's consolidated car-state-aware solar allocation policy, solar-only bootstrap path, and unified `solar_headroom` usage across all grid-charging branches.
+> Release note for v5.0.2: adds an immediate cap-reopen path to `_calculate_inverter_derating_target` for the case where feed-in is blocked, the inverter is held at a low derating cap, and the site is actively importing from the grid (`grid_power > 0`). The new branch raises the target to `min(max_inverter_power, solar_production + grid_import + export_limit)` — complementing the existing house-exceeds-PV fast path when house-consumption data is unavailable or when imports are driven by battery/EV draw, and replacing the slow 100W/tick step-release during active imports so the inverter can promptly reclaim output instead of continuing to pay for grid power. Only opens upward (guarded by `previous_target_w`); feed-in allowed, export-in-band, and low-SOC bypass paths are unchanged.
 
 ## Key Features
 

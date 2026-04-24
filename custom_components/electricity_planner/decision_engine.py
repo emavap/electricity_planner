@@ -2281,6 +2281,29 @@ class ChargingDecisionEngine:
                             ),
                             **no_alarm,
                         }
+                if grid_power_w > 0:
+                    operating_point_target_w = min(
+                        float(max_inverter_power),
+                        max(
+                            0.0,
+                            solar_production_w + grid_power_w + export_limit_w,
+                        ),
+                    )
+                    if (
+                        previous_target_w is None
+                        or operating_point_target_w > previous_target_w
+                    ):
+                        return {
+                            "inverter_derating_target": int(operating_point_target_w),
+                            "inverter_derating_reason": (
+                                f"Feed-in blocked, but the site is already importing "
+                                f"{grid_power_w:.0f}W while solar is capped at "
+                                f"{solar_production_w:.0f}W - recalculate the inverter cap "
+                                f"immediately toward current solar + grid import + export "
+                                f"target ({int(operating_point_target_w)}W)"
+                            ),
+                            **no_alarm,
+                        }
                 if should_relax_cap_upward() and previous_target_w is not None:
                     reopened_target_w = min(
                         float(max_inverter_power),

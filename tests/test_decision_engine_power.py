@@ -1929,6 +1929,32 @@ def test_inverter_derating_recalculates_immediately_when_house_load_exceeds_pv()
     assert result["inverter_derating_unreached_since"] is None
 
 
+def test_inverter_derating_recalculates_immediately_when_site_is_importing():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 80,
+            CONF_INVERTER_EXPORT_DEADBAND: 40,
+        }
+    )
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 711,
+            "grid_power": 3049,
+            "previous_inverter_derating_target": 711,
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 3840
+    assert "already importing 3049W" in result["inverter_derating_reason"]
+    assert "current solar + grid import + export target (3840W)" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+    assert result["inverter_derating_unreached_since"] is None
+
+
 def test_inverter_derating_respects_configured_unused_release_minutes():
     engine = _engine(
         {
