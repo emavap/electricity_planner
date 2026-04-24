@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 6.0.0** | **Config Schema Version 21** | **Home Assistant 2024.4+**
+**Version 6.0.1** | **Config Schema Version 21** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Release note for v6.0.0: major internal refactor. The monolithic `ChargingDecisionEngine` (~3100 LOC) and `ElectricityPlannerCoordinator` (~3415 LOC) are decomposed into 22 focused collaborator modules. Final sizes: `decision_engine.py` 1472 LOC (−52%), `coordinator.py` 1356 LOC (−60%). Public API, config schema (still v21), and decision behavior are unchanged. 456/456 tests still passing — no user-facing changes, no migration required. Drop-in replacement.
+> Release note for v6.0.1: documentation-only patch on top of v6.0.0. Adds a `.markdownlint.json` config and fixes the remaining structural lint issues across `README.md` and `CLAUDE.md`. Also repairs a real structural bug in `README.md` where the "Permissive Mode Toggle" automation example was missing its closing YAML fence. No code, schema, or behavior changes. 456/456 tests still passing.
 
 ## Key Features
 

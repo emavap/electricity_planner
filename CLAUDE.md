@@ -227,7 +227,7 @@ The integration is designed for dynamic electricity markets:
 
 ### Current Version
 
-- **Integration Version**: 6.0.0
+- **Integration Version**: 6.0.1
 - **Config Schema Version**: 21
 - **Migration Path**: Automatic v1→v21 migration
 
@@ -240,6 +240,13 @@ The integration is designed for dynamic electricity markets:
 5. **Solar Parameters**: Significant solar surplus threshold, forecast start hour
 
 ### Recent Changes
+
+**v6.0.1** (documentation-only patch)
+
+- **Added**: `.markdownlint.json` with project-appropriate rule overrides (MD013, MD033, MD036, MD051, MD060 disabled — long-form technical docs, idiomatic `<br>` in tables, `**vX.Y.Z**` changelog markers).
+- **Fixed**: Remaining structural lint issues in `README.md` and `CLAUDE.md` — blank lines around lists, headings, and fenced code blocks; ASCII-tree fences tagged as `text`; disambiguated duplicate `### Arbitrage Mode` heading.
+- **Fixed**: Real structural bug in `README.md` — "Permissive Mode Toggle" YAML automation example was missing its closing fence (compensated by a stray duplicate close further down), corrupting downstream rendering.
+- **Net result**: 343 → 0 markdownlint errors. No code, schema, or decision-behavior changes. 456/456 tests still passing.
 
 **v6.0.0** (major internal refactor — no behavior change)
 
