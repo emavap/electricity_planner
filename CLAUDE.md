@@ -232,7 +232,7 @@ The integration is designed for dynamic electricity markets:
 
 ### Current Version
 
-- **Integration Version**: 6.2.1
+- **Integration Version**: 6.2.2
 - **Config Schema Version**: 23
 - **Migration Path**: Automatic v1→v23 migration
 
@@ -246,6 +246,16 @@ The integration is designed for dynamic electricity markets:
 6. **Arbitrage Mode**: Reserve SOC, deadline hour (shared by sell + negative-buy planning), max export power
 
 ### Recent Changes
+
+**v6.2.2** (dashboard wording fix — no behavior change)
+
+- **Changed** (`dashboard_template.yaml`, both bundled dashboards): Reworded three bullets in the *Battery Controls — quick reference* card so they match the underlying logic, which evaluates against the **capacity-weighted average** SOC across all configured batteries (not against any single battery):
+  - *Grid Max SOC*: "stops buying once **any battery** reaches this level" → "stops buying once **the average battery SOC** reaches this level". Verified against `battery_analysis.py:61` (`batteries_full = average_soc >= max_threshold`).
+  - *Solar Max SOC*: "Once **batteries cross** this level, surplus is offered to the EV or **exported instead of being absorbed**" → "Once **the average battery SOC crosses** this level, surplus is offered to the EV or **exported when feed-in is profitable**". Verified against `battery_charging.py:110` (`average_soc` vs `settings.max_soc_threshold_solar`).
+  - *Arbitrage Reserve SOC*: "exports stop once **SOC** reaches this floor" → "exports stop once **the average SOC** reaches this floor". Verified against `charger_limit.py:135` (`average_soc < arbitrage_reserve_soc`).
+- **Bumped**: `MANAGED_VERSION` `30` → `31` in `dashboard.py` so existing managed dashboards re-save the corrected wording automatically on next reload.
+- **Tests**: 486/486 passing. No new tests required — the existing dashboard assertions check for the bolded control names, not the surrounding sentence text, and remain valid under the new wording.
+- **Compatibility**: No code, schema, migration, entity-ID, or behavioural changes. Bundled-YAML users need to re-copy to pick up the corrected text; managed-dashboard users get it automatically on next integration reload via the `MANAGED_VERSION` bump. Drop-in replacement for v6.2.1.
 
 **v6.2.1** (dashboard polish — no behavior change)
 
