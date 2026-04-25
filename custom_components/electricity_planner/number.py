@@ -704,7 +704,7 @@ class NegativeBuyThresholdNumber(CoordinatorEntity, NumberEntity):
     """Number entity controlling the Negative Arbitrage Buy price threshold.
 
     The planner treats any upcoming slot with net buy price ``<= threshold`` as
-    paid-to-consume and forces grid charging during it. Default ``-0.05 €/kWh``
+    paid-to-consume and requests grid import during it. Default ``-0.05 €/kWh``
     targets only truly negative-priced slots.
     """
 
@@ -755,9 +755,9 @@ class NegativeBuyThresholdNumber(CoordinatorEntity, NumberEntity):
         )
         attrs = {
             "description": (
-                f"Negative Arbitrage Buy mode arms grid charging for any upcoming slot whose "
-                f"net buy price is at or below {threshold:.3f} €/kWh, up to the shared "
-                "arbitrage deadline."
+                f"Negative Arbitrage Buy mode requests peak-limited grid import for any "
+                f"upcoming slot whose net buy price is at or below {threshold:.3f} €/kWh, "
+                "up to the shared arbitrage deadline."
             ),
         }
         if buy_plan:

@@ -317,7 +317,7 @@ class PriceTimelineBuilder:
         """Select the cheapest eligible buy slots and derive a buy-price threshold.
 
         Symmetric counterpart to :meth:`select_export_slots`. Used by the
-        Negative Arbitrage Buy planner to plan grid-charging during
+        Negative Arbitrage Buy planner to plan grid import during
         ``price <= maximum_price`` (typically negative-price) windows.
         """
         if required_duration <= timedelta(0):
@@ -379,4 +379,3 @@ class PriceTimelineBuilder:
             "covers_full_charge": selected_duration >= required_duration,
             "selected_duration_hours": round(total_hours, 3),
         }
-

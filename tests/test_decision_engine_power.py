@@ -3158,6 +3158,43 @@ def test_negative_buy_forces_battery_grid_charging_when_active():
     assert "-0.120" in result["battery_grid_charging_reason"]
 
 
+def test_negative_buy_forces_grid_import_when_battery_full():
+    """Negative-buy should bypass the normal full-battery SOC ceiling."""
+    engine = _engine()
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={
+            "data_available": True,
+            "current_price": -0.12,
+            "price_threshold": 0.05,
+        },
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": True,
+            "average_soc": 100,
+            "max_soc_threshold": 90,
+        },
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 0,
+        },
+        power_analysis={"solar_surplus": 0, "significant_solar_surplus": False},
+        time_context={},
+        data={
+            "negative_buy_mode_enabled": True,
+            "negative_buy_mode_active": True,
+            "negative_buy_curtail_solar": True,
+            "negative_buy_import_power": 12000,
+        },
+    )
+
+    assert result["battery_grid_charging"] is True
+    assert "Negative Arbitrage Buy active" in result["battery_grid_charging_reason"]
+    assert "threshold" not in result["battery_grid_charging_reason"]
+
+
 def test_negative_buy_does_not_force_battery_charging_when_inactive():
     """When the planner has not flagged the slot active, normal logic applies."""
     engine = _engine()
@@ -3191,6 +3228,84 @@ def test_negative_buy_does_not_force_battery_charging_when_inactive():
 
     assert result["battery_grid_charging"] is False
     assert "Negative Arbitrage Buy" not in result["battery_grid_charging_reason"]
+
+
+def test_negative_buy_grid_setpoint_uses_peak_limited_import_budget():
+    """Active negative-buy should request the safe peak import budget, not battery headroom."""
+    engine = _engine({CONF_MAX_BATTERY_POWER: 3000, CONF_MAX_GRID_POWER: 12000})
+
+    result = engine._calculate_grid_setpoint(
+        price_analysis={},
+        battery_analysis={"average_soc": 100, "max_soc_threshold": 90},
+        power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
+        data={
+            "car_charging_power": 0,
+            "car_grid_charging": False,
+            "car_grid_import_allowed": False,
+            "battery_grid_charging": True,
+            "negative_buy_mode_active": True,
+            "negative_buy_import_power": 12000,
+            "monthly_grid_peak": 8000,
+        },
+        charger_limit=0,
+    )
+
+    assert result["grid_setpoint"] == 7200
+    assert result["grid_components"]["battery"] == 7200
+    assert "negative-buy import budget 7200W" in result["grid_setpoint_reason"]
+    assert "Peak this month is 8000W" in result["grid_setpoint_reason"]
+
+
+def test_negative_buy_grid_setpoint_works_without_battery_soc():
+    """Active negative-buy should still reserve import when battery SOC is unavailable."""
+    engine = _engine({CONF_MAX_GRID_POWER: 12000})
+
+    result = engine._calculate_grid_setpoint(
+        price_analysis={},
+        battery_analysis={"average_soc": None},
+        power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
+        data={
+            "car_charging_power": 0,
+            "car_grid_charging": False,
+            "car_grid_import_allowed": False,
+            "battery_grid_charging": True,
+            "negative_buy_mode_active": True,
+            "negative_buy_import_power": 12000,
+            "monthly_grid_peak": 8000,
+        },
+        charger_limit=0,
+    )
+
+    assert result["grid_setpoint"] == 7200
+    assert result["grid_components"] == {"battery": 7200, "car": 0}
+    assert "Battery data unavailable" in result["grid_setpoint_reason"]
+    assert "negative-buy import budget 7200W" in result["grid_setpoint_reason"]
+
+
+def test_negative_buy_grid_setpoint_without_soc_respects_max_grid_power_with_ev_load():
+    """SOC-unavailable negative-buy must keep total import under max_grid_power."""
+    engine = _engine({CONF_MAX_GRID_POWER: 5000})
+
+    result = engine._calculate_grid_setpoint(
+        price_analysis={},
+        battery_analysis={"average_soc": None},
+        power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
+        data={
+            "car_charging_power": 4000,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "battery_grid_charging": True,
+            "negative_buy_mode_active": True,
+            "negative_buy_import_power": 12000,
+            "monthly_grid_peak": 10000,
+        },
+        charger_limit=7000,
+    )
+
+    assert result["grid_setpoint"] == 5000
+    assert result["grid_components"] == {"battery": 1000, "car": 4000}
+    assert "car pulling 4000W" in result["grid_setpoint_reason"]
+    assert "negative-buy import budget 1000W" in result["grid_setpoint_reason"]
 
 
 def test_inverter_derating_curtails_solar_when_negative_buy_active():

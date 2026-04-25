@@ -45,6 +45,23 @@ class BatteryChargingDecisionCalculator:
         time_context: dict[str, Any],
         ctx: "CycleContext",
     ) -> dict[str, Any]:
+        # Negative Arbitrage Buy is price-triggered by the planner. Once active,
+        # request grid import even if the battery is already at a normal SOC
+        # ceiling; the downstream inverter/battery system decides where that
+        # imported power can go.
+        if ctx.negative_buy_mode_active:
+            current_price = ctx.current_price
+            price_text = (
+                f"{current_price:.3f}€/kWh" if current_price is not None else "n/a"
+            )
+            return {
+                "battery_grid_charging": True,
+                "battery_grid_charging_reason": (
+                    f"Negative Arbitrage Buy active at {price_text} - requesting grid import"
+                ),
+                "strategy_trace": [],
+            }
+
         if battery_analysis.get("batteries_count", 0) == 0:
             return {
                 "battery_grid_charging": False,
@@ -77,24 +94,6 @@ class BatteryChargingDecisionCalculator:
             return {
                 "battery_grid_charging": False,
                 "battery_grid_charging_reason": "No price data available",
-                "strategy_trace": [],
-            }
-
-        # Negative Arbitrage Buy override: when the user has armed the mode and
-        # the planner has selected the current slot as a paid-to-consume window,
-        # force grid charging regardless of price-threshold logic. The plan only
-        # turns active when batteries are below max_soc_threshold and the slot
-        # is at/below the configured negative-buy threshold.
-        if ctx.negative_buy_mode_active:
-            current_price = ctx.current_price
-            price_text = (
-                f"{current_price:.3f}€/kWh" if current_price is not None else "n/a"
-            )
-            return {
-                "battery_grid_charging": True,
-                "battery_grid_charging_reason": (
-                    f"Negative Arbitrage Buy active at {price_text} - forcing grid charging"
-                ),
                 "strategy_trace": [],
             }
 

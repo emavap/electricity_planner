@@ -19,10 +19,8 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
-    CONF_MAX_SOC_THRESHOLD,
     CONF_NEGATIVE_BUY_THRESHOLD,
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
-    DEFAULT_MAX_SOC,
     DEFAULT_NEGATIVE_BUY_THRESHOLD,
 )
 
@@ -152,16 +150,12 @@ class RuntimeModeManager:
                 DEFAULT_NEGATIVE_BUY_THRESHOLD,
             )
         )
-        max_soc_threshold = float(
-            coordinator.config.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
-        )
         plan = {
             "enabled": enabled,
             "active": False,
             "solar_curtail_active": False,
             "reason": reason,
             "threshold": round(threshold, 4),
-            "max_soc_threshold": round(max_soc_threshold, 1),
             "deadline": None,
             "required_energy_kwh": 0.0,
             "required_duration_hours": 0.0,

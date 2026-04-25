@@ -1,6 +1,6 @@
 # Electricity Planner
 
-**Version 6.1.1** | **Config Schema Version 23** | **Home Assistant 2024.4+**
+**Version 6.2.0** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
@@ -249,18 +249,18 @@ alongside the normal battery controls (`Grid Max SOC`, `Grid Max SOC (high solar
 ### Negative Arbitrage Buy Mode
 
 Enable the **Negative Arbitrage Buy Mode** switch to monetize negative-price periods by
-forcing grid charging into the battery and curtailing solar export while the net buy price
-sits below the configured `negative_buy_threshold` (default `-0.05 €/kWh`, configurable live
+requesting peak-limited grid import and curtailing solar export while the net buy price
+sits at or below the configured `negative_buy_threshold` (default `-0.05 €/kWh`, configurable live
 via `number.electricity_planner_negative_buy_threshold`).
 
 When enabled:
 
 - The planner detects upcoming negative-price slots that finish before the same cutoff hour shared with arbitrage mode (`arbitrage_mode_deadline_hour`)
-- During an active negative-price slot, batteries are force-charged from the grid (subject to `max_battery_power` and `max_grid_power`)
+- During an active negative-price slot, the grid setpoint reserves the safe import budget up to the current peak-limited cap and `max_grid_power`
 - Solar export is curtailed via the inverter derating target so the site does not pay to export while net feed-in is negative
 - Outside negative-price slots the mode is dormant; the planner falls back to its normal strategies
 
-The dashboards expose the `Negative Arbitrage Buy Mode` switch and `Negative Buy Threshold`
+The dashboards expose the `Negative Arbitrage Buy Mode` switch and `Negative Arbitrage Buy Threshold`
 number alongside the arbitrage controls.
 
 ---
@@ -449,7 +449,7 @@ data:
 | `switch.electricity_planner_car_permissive_mode` | Toggle permissive car charging mode |
 | `switch.electricity_planner_disable_battery_charging` | Persistently block battery charging from grid |
 | `switch.electricity_planner_arbitrage_mode` | Enable arbitrage mode for battery export |
-| `switch.electricity_planner_negative_arbitrage_buy_mode` | Enable forced grid charging during negative-price slots |
+| `switch.electricity_planner_negative_arbitrage_buy_mode` | Enable peak-limited grid import during negative-price slots |
 
 ### Numbers
 
@@ -461,7 +461,7 @@ data:
 | `number.electricity_planner_sunny_forecast_threshold_kwh` | Solar forecast trigger for sunny mode | kWh |
 | `number.electricity_planner_arbitrage_mode_reserve_soc` | Minimum reserve SOC used by arbitrage mode | % |
 | `number.electricity_planner_arbitrage_mode_deadline_hour` | Local cutoff hour shared by arbitrage sell and negative buy planning | h |
-| `number.electricity_planner_negative_buy_threshold` | Net buy price below which Negative Arbitrage Buy mode activates | €/kWh |
+| `number.electricity_planner_negative_buy_threshold` | Net buy price at or below which Negative Arbitrage Buy mode activates | €/kWh |
 
 ### Decision Diagnostics Attributes
 
@@ -561,7 +561,7 @@ phase_results:
 | `price_adjustment_offset` | 0.005 | -0.5–0.5 | Price offset (€/kWh) |
 | `feedin_adjustment_multiplier` | 1.0 | 0.5–2.0 | Feed-in price multiplier |
 | `feedin_adjustment_offset` | -0.0098 | -0.5–0.5 | Feed-in price offset |
-| `negative_buy_threshold` | -0.05 €/kWh | -1.0–0.0 | Net buy price below which Negative Arbitrage Buy mode forces grid charging |
+| `negative_buy_threshold` | -0.05 €/kWh | -1.0–1.0 | Net buy price at or below which Negative Arbitrage Buy mode requests peak-limited grid import |
 
 ### Power Limits
 

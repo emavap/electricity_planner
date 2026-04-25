@@ -37,6 +37,8 @@ from custom_components.electricity_planner.const import (
     CONF_MAX_INVERTER_POWER,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
+    CONF_MAX_SOC_THRESHOLD_SOLAR,
+    CONF_NEGATIVE_BUY_THRESHOLD,
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     CONF_TRANSPORT_COST_DAY,
@@ -99,6 +101,8 @@ async def test_async_reload_entry_applies_live_options_without_full_reload():
             CONF_CURRENT_PRICE_ENTITY: "sensor.current_price",
             CONF_MAX_SOC_THRESHOLD: 90,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+            CONF_MAX_SOC_THRESHOLD_SOLAR: 85,
+            CONF_NEGATIVE_BUY_THRESHOLD: -0.05,
             CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 12,
             CONF_SOLAR_FORECAST_START_HOUR: 20,
             CONF_SUNNY_FORECAST_THRESHOLD_KWH: 5.0,
@@ -107,6 +111,8 @@ async def test_async_reload_entry_applies_live_options_without_full_reload():
             CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 8,
             CONF_SOLAR_FORECAST_START_HOUR: 18,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 45,
+            CONF_MAX_SOC_THRESHOLD_SOLAR: 80,
+            CONF_NEGATIVE_BUY_THRESHOLD: -0.08,
             CONF_SUNNY_FORECAST_THRESHOLD_KWH: 6.5,
         },
     )
@@ -117,6 +123,8 @@ async def test_async_reload_entry_applies_live_options_without_full_reload():
             CONF_CURRENT_PRICE_ENTITY: "sensor.current_price",
             CONF_MAX_SOC_THRESHOLD: 90,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+            CONF_MAX_SOC_THRESHOLD_SOLAR: 85,
+            CONF_NEGATIVE_BUY_THRESHOLD: -0.05,
             CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 12,
             CONF_SOLAR_FORECAST_START_HOUR: 20,
             CONF_SUNNY_FORECAST_THRESHOLD_KWH: 5.0,
@@ -134,6 +142,8 @@ async def test_async_reload_entry_applies_live_options_without_full_reload():
 
     assert coordinator.config[CONF_SOLAR_FORECAST_START_HOUR] == 18
     assert coordinator.config[CONF_MAX_SOC_THRESHOLD_SUNNY] == 45
+    assert coordinator.config[CONF_MAX_SOC_THRESHOLD_SOLAR] == 80
+    assert coordinator.config[CONF_NEGATIVE_BUY_THRESHOLD] == -0.08
     assert coordinator.config[CONF_SUNNY_FORECAST_THRESHOLD_KWH] == 6.5
     assert coordinator.config[CONF_ARBITRAGE_MODE_DEADLINE_HOUR] == 8
     refresh_settings.assert_called_once_with(coordinator.config)

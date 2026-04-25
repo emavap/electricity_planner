@@ -243,9 +243,14 @@ def test_bundled_dashboards_include_negative_buy_threshold_line_on_buy_chart():
             "title: Electricity Sell Prices (History + Future)", 1
         )[0]
         sell_section = content.split("title: Electricity Sell Prices (History + Future)", 1)[1]
+        negative_threshold_section = buy_section.split("name: Negative Arbitrage Buy Threshold", 1)[1].split(
+            "data_generator:", 1
+        )[0]
 
         assert "name: Negative Arbitrage Buy Threshold" in buy_section
         assert "name: Negative Arbitrage Buy Threshold" not in sell_section
+        assert 'color: "#16a085"' in negative_threshold_section
+        assert 'color: "#c0392b"' not in negative_threshold_section
         assert "switch.electricity_planner_negative_arbitrage_buy_mode" in buy_section
 
 
@@ -256,9 +261,14 @@ def test_managed_dashboard_template_includes_negative_buy_threshold_line_on_buy_
         "title: Electricity Sell Prices (History + Future)", 1
     )[0]
     sell_section = template.split("title: Electricity Sell Prices (History + Future)", 1)[1]
+    negative_threshold_section = buy_section.split("name: Negative Arbitrage Buy Threshold", 1)[1].split(
+        "data_generator:", 1
+    )[0]
 
     assert "name: Negative Arbitrage Buy Threshold" in buy_section
     assert "name: Negative Arbitrage Buy Threshold" not in sell_section
+    assert 'color: "#16a085"' in negative_threshold_section
+    assert 'color: "#c0392b"' not in negative_threshold_section
     assert "switch.electricity_planner_negative_arbitrage_buy_mode" in buy_section
 
 

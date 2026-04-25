@@ -345,7 +345,6 @@ class NegativeArbitrageBuyModeSwitch(CoordinatorEntity, SwitchEntity):
             "override_active": override_active,
             "reason": reason,
             "threshold": effective_plan.get("threshold"),
-            "max_soc_threshold": effective_plan.get("max_soc_threshold"),
             "currently_buying": effective_plan.get("active", False),
             "buy_price_threshold": effective_plan.get("buy_price_threshold"),
             "current_slot_price": effective_plan.get("current_slot_price"),
@@ -359,9 +358,9 @@ class NegativeArbitrageBuyModeSwitch(CoordinatorEntity, SwitchEntity):
             "required_duration_hours": effective_plan.get("required_duration_hours"),
             "set_at": set_at.isoformat() if set_at else None,
             "description": (
-                "When enabled, the planner forces grid charging during the cheapest upcoming slots "
-                "below the configured negative-price threshold and curtails solar once the SOC ceiling "
-                "is reached, maximizing income from paid-to-consume periods."
+                "When enabled, the planner requests grid import for every slot at or below "
+                "the configured negative-price threshold and curtails solar during those "
+                "paid-to-consume periods."
             ),
         }
 

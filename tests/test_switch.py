@@ -372,7 +372,6 @@ def test_negative_buy_switch_reports_attributes_from_active_plan(fake_hass, monk
             "solar_curtail_active": True,
             "reason": "Negative Arbitrage Buy active at -0.120€/kWh",
             "threshold": -0.05,
-            "max_soc_threshold": 90.0,
             "deadline": "2025-10-14T10:00:00+02:00",
             "required_energy_kwh": 4.0,
             "required_duration_hours": 1.0,

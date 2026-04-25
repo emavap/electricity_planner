@@ -152,10 +152,56 @@ class GridSetpointCalculator:
             if active_or_planned_car_charging and car_solar_only
             else None
         )
+        max_setpoint = peak_context.effective_max_setpoint
 
         if average_soc is None:
+            if ctx.negative_buy_mode_active:
+                import_budget = min(max_setpoint, self.get_max_grid_power())
+                grid_setpoint_parts: list[str] = []
+                car_grid_need = 0
+                if car_draws_from_grid:
+                    effective_car_power = (
+                        min(requested_car_power, charger_limit)
+                        if charger_limit > 0
+                        else requested_car_power
+                    )
+                    car_grid_need = int(min(effective_car_power, import_budget))
+                    if car_grid_need > 0:
+                        grid_setpoint_parts.append(f"car pulling {car_grid_need}W")
+
+                remaining_capacity = max(0, import_budget - car_grid_need)
+                requested_import = ctx.negative_buy_import_power or max_setpoint
+                battery_grid_need = int(
+                    min(
+                        remaining_capacity,
+                        requested_import,
+                    )
+                )
+                if battery_grid_need > 0:
+                    grid_setpoint_parts.append(
+                        f"negative-buy import budget {battery_grid_need}W"
+                    )
+
+                grid_setpoint = car_grid_need + battery_grid_need
+                components_text = " + ".join(grid_setpoint_parts)
+                reason = (
+                    f"Battery data unavailable - grid import reserved for {components_text}"
+                    f" = {grid_setpoint}W | {peak_context_reason}"
+                    if components_text
+                    else f"Battery data unavailable - no grid power allocated | {peak_context_reason}"
+                )
+                if solar_only_note:
+                    reason = f"{reason} | {solar_only_note}"
+                return {
+                    "grid_setpoint": int(grid_setpoint),
+                    "grid_setpoint_reason": reason,
+                    "grid_components": {
+                        "battery": battery_grid_need,
+                        "car": car_grid_need,
+                    },
+                }
+
             if car_draws_from_grid:
-                max_setpoint = peak_context.effective_max_setpoint
                 effective_car_power = (
                     min(requested_car_power, charger_limit)
                     if charger_limit > 0
@@ -177,8 +223,6 @@ class GridSetpointCalculator:
                 ),
                 "grid_components": {"battery": 0, "car": 0},
             }
-
-        max_setpoint = peak_context.effective_max_setpoint
 
         grid_setpoint_parts: list[str] = []
         car_grid_need = 0
@@ -220,10 +264,24 @@ class GridSetpointCalculator:
                 )
         elif battery_grid_charging:
             remaining_capacity = max(0, max_setpoint - car_grid_need)
-            max_battery_power = self._settings.max_battery_power
-            battery_grid_need = min(remaining_capacity, max_battery_power)
-            if battery_grid_need > 0:
-                grid_setpoint_parts.append(f"battery charging {int(battery_grid_need)}W")
+            if ctx.negative_buy_mode_active:
+                requested_import = ctx.negative_buy_import_power or max_setpoint
+                battery_grid_need = min(
+                    remaining_capacity,
+                    requested_import,
+                    self.get_max_grid_power(),
+                )
+                if battery_grid_need > 0:
+                    grid_setpoint_parts.append(
+                        f"negative-buy import budget {int(battery_grid_need)}W"
+                    )
+            else:
+                max_battery_power = self._settings.max_battery_power
+                battery_grid_need = min(remaining_capacity, max_battery_power)
+                if battery_grid_need > 0:
+                    grid_setpoint_parts.append(
+                        f"battery charging {int(battery_grid_need)}W"
+                    )
 
         grid_setpoint = car_grid_need + battery_grid_need
         if grid_setpoint > 0:

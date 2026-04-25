@@ -232,7 +232,7 @@ The integration is designed for dynamic electricity markets:
 
 ### Current Version
 
-- **Integration Version**: 6.1.0
+- **Integration Version**: 6.2.0
 - **Config Schema Version**: 23
 - **Migration Path**: Automatic v1→v23 migration
 
@@ -246,6 +246,25 @@ The integration is designed for dynamic electricity markets:
 6. **Arbitrage Mode**: Reserve SOC, deadline hour (shared by sell + negative-buy planning), max export power
 
 ### Recent Changes
+
+**v6.2.0** (Negative Arbitrage Buy decoupled from battery SOC — behavior change)
+
+- **Changed** (`negative_buy.py`): **Negative Arbitrage Buy is now a general grid-import request, not a battery-fill planner.** The mode no longer requires battery details to plan or activate, and no longer deactivates when batteries reach `max_soc_threshold`. The activation predicate collapsed to the obvious one: *current slot price ≤ `negative_buy_threshold` AND slot finishes before the shared `arbitrage_mode_deadline_hour`*. `_select_buy_slots` is no longer called from the planner — every eligible slot at or below the threshold counts. The exposed `buy_price_threshold` is the highest price among the eligible slots (the binding upper bound).
+- **Changed** (`battery_charging.py`): The negative-buy override now runs **before** the full-battery / SOC-ceiling early returns, so an active import request takes immediate priority over normal battery state checks. The reason string surfaces the active threshold instead of the battery SOC narrative.
+- **Changed** (`grid_setpoint.py`): When negative-buy is active, the grid setpoint reserves the **safe peak-limited import budget** (capped by `monthly_grid_peak` and `max_grid_power`, with the EV's current import subtracted from the headroom) regardless of the normal battery-charging branch. New SOC-unavailable branch keeps the import bounded by `max_grid_power - car_grid_import`. The reason string explicitly calls out the `negative-buy import budget <W>` and the binding peak-this-month figure.
+- **Added** (`__init__.py` / `runtime_modes.py`): `CONF_NEGATIVE_BUY_THRESHOLD` and `CONF_MAX_SOC_THRESHOLD_SOLAR` registered in `LIVE_UPDATE_OPTIONS` so changes via the matching `number.*` entities propagate to the coordinator without an integration reload (matching the existing arbitrage live-update behaviour).
+- **Removed** (`switch.py`): `max_soc_threshold` from the `switch.electricity_planner_negative_arbitrage_buy_mode` state attributes — it was a leftover from the SOC-gated era and no longer drives the planner. Other attributes (`active`, `solar_curtail_active`, `reason`, `threshold`, `deadline`, `required_energy_kwh`, `required_duration_hours`, `import_power`, slot details) are unchanged.
+- **Changed** (`dashboard_template.yaml`, both bundled dashboards): Negative Arbitrage Buy threshold line recoloured `#c0392b` (red) → `#16a085` (teal) so it does not visually clash with the *Dynamic Threshold* (orange) on the buy-prices chart while still being clearly distinct.
+- **Bumped**: `MANAGED_VERSION` `28` → `29` so existing managed dashboards re-save the new threshold colour automatically on next reload.
+- **Docs** (`README.md`): Updated the *Negative Arbitrage Buy Mode* prose, service-target descriptions, number-entity table, and threshold parameter row to describe the new "peak-limited grid import" semantics and the widened `[-1.0, 1.0]` documented range (the config-flow already accepted `[-1, 1]`).
+- **Tests**: 484/484 passing. New coverage:
+  - `test_negative_buy_plan_allows_import_without_battery_details` — planner runs and arms with empty `battery_details`.
+  - `test_negative_buy_plan_buys_when_battery_above_soc_ceiling` (formerly `..._curtails_solar_when_battery_at_ceiling`) — the planner now actively buys at full SOC instead of arming curtailment-only.
+  - `test_negative_buy_forces_grid_import_when_battery_full` — engine override fires past the SOC ceiling.
+  - `test_negative_buy_grid_setpoint_uses_peak_limited_import_budget` — setpoint uses `monthly_grid_peak * 0.9` minus EV import, not battery headroom.
+  - `test_negative_buy_grid_setpoint_works_without_battery_soc` / `..._respects_max_grid_power_with_ev_load` — SOC-unavailable branch still imports and stays under `max_grid_power` with concurrent EV draw.
+  - Existing `..._calculates_required_energy_and_duration` updated to assert the new "all-eligible-slots, full-headroom" reporting (5 kWh / 0.83h / 8 slots / 6 kW configured cap).
+- **Compatibility**: No config-schema change (still v23), no migration required, no entity-ID renames. Existing automations watching `switch.electricity_planner_negative_arbitrage_buy_mode` continue to work unchanged. The behavioural shift means installations with negative-buy already enabled will start importing in scenarios they previously skipped (full batteries, missing battery data) — disable the switch to retain v6.1.1 behaviour.
 
 **v6.1.1** (dashboard polish — no behavior change)
 

@@ -435,7 +435,7 @@ views:
                 name: Negative Arbitrage Buy Threshold
                 type: line
                 stroke_width: 2
-                color: "#c0392b"
+                color: "#16a085"
                 curve: straight
                 show:
                   legend_value: false

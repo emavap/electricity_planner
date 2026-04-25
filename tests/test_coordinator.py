@@ -2136,8 +2136,52 @@ def test_negative_buy_plan_disabled_when_mode_off(fake_hass, monkeypatch):
     assert "disabled" in plan["reason"].lower()
 
 
+def test_negative_buy_plan_allows_import_without_battery_details(fake_hass, monkeypatch):
+    """Negative-buy is a grid import request and should not require battery details."""
+    base_time = datetime(2025, 10, 14, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_NEGATIVE_BUY_THRESHOLD: -0.05,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 23,
+            "max_grid_power": 6000,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._manual_overrides["negative_buy_mode"] = {
+        "value": True,
+        "reason": "Negative buy",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    intervals = [
+        _make_price_interval(base_time + timedelta(minutes=15 * slot), -100.0)
+        for slot in range(2)
+    ]
+
+    plan = coordinator._calculate_negative_buy_plan(
+        {
+            "battery_details": [],
+            "nordpool_prices_today": {"BE": intervals},
+            "nordpool_prices_tomorrow": None,
+        }
+    )
+
+    assert plan["enabled"] is True
+    assert plan["required_energy_kwh"] == 0.0
+    assert plan["required_duration_hours"] == 0.0
+    assert plan["active"] is True
+    assert plan["solar_curtail_active"] is True
+    assert plan["import_power"] == 6000
+    assert plan["slots_cover_full_charge"] is True
+    assert "Negative Arbitrage Buy active" in plan["reason"]
+
+
 def test_negative_buy_plan_calculates_required_energy_and_duration(fake_hass, monkeypatch):
-    """When armed, the planner should size the buy window from SOC headroom and import cap."""
+    """When armed, the planner should expose full-battery headroom but not gate by it."""
     base_time = datetime(2025, 10, 14, 6, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
 
@@ -2159,8 +2203,9 @@ def test_negative_buy_plan_calculates_required_energy_and_duration(fake_hass, mo
         "set_at": base_time,
     }
 
-    # 50% SOC on a 10kWh battery -> need (90-50)% × 10 = 4 kWh.
-    # Import cap = min(4000W, 6000W) = 4kW -> required duration = 1 hour = 4 × 15min slots.
+    # 50% SOC on a 10kWh battery -> 5 kWh headroom to full.
+    # Import cap follows the configured grid cap; the peak limiter is applied
+    # later by the grid-setpoint calculator.
     intervals = [
         _make_price_interval(base_time + timedelta(minutes=15 * slot), -100.0)
         for slot in range(8)
@@ -2182,21 +2227,21 @@ def test_negative_buy_plan_calculates_required_energy_and_duration(fake_hass, mo
     )
 
     assert plan["enabled"] is True
-    assert plan["required_energy_kwh"] == pytest.approx(4.0, rel=1e-6)
-    assert plan["required_duration_hours"] == pytest.approx(1.0, rel=1e-6)
-    assert plan["configured_import_cap_w"] == 4000
-    assert plan["selected_slots_count"] == 4
+    assert plan["required_energy_kwh"] == pytest.approx(5.0, rel=1e-6)
+    assert plan["required_duration_hours"] == pytest.approx(0.83, rel=1e-6)
+    assert plan["configured_import_cap_w"] == 6000
+    assert plan["selected_slots_count"] == 8
     assert plan["slots_cover_full_charge"] is True
     assert plan["buy_price_threshold"] == pytest.approx(-0.10, rel=1e-6)
     assert plan["current_slot_price"] == pytest.approx(-0.10, rel=1e-6)
     assert plan["active"] is True
     assert plan["solar_curtail_active"] is True
-    assert plan["import_power"] == 4000
+    assert plan["import_power"] == 6000
     assert "Negative Arbitrage Buy active" in plan["reason"]
 
 
-def test_negative_buy_plan_curtails_solar_when_battery_at_ceiling(fake_hass, monkeypatch):
-    """At/above the SOC ceiling, the planner should arm solar curtailment without grid charging."""
+def test_negative_buy_plan_buys_when_battery_above_soc_ceiling(fake_hass, monkeypatch):
+    """Negative prices should trigger buying even above the normal SOC ceiling."""
     base_time = datetime(2025, 10, 14, 6, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
 
@@ -2206,6 +2251,7 @@ def test_negative_buy_plan_curtails_solar_when_battery_at_ceiling(fake_hass, mon
             CONF_MAX_SOC_THRESHOLD: 90,
             CONF_NEGATIVE_BUY_THRESHOLD: -0.05,
             CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 23,
+            "max_grid_power": 6000,
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
@@ -2237,11 +2283,12 @@ def test_negative_buy_plan_curtails_solar_when_battery_at_ceiling(fake_hass, mon
     )
 
     assert plan["enabled"] is True
-    assert plan["required_energy_kwh"] == 0.0
-    assert plan["active"] is False
+    assert plan["required_energy_kwh"] == pytest.approx(0.5, rel=1e-6)
+    assert plan["active"] is True
     assert plan["solar_curtail_active"] is True
     assert plan["current_slot_price"] == pytest.approx(-0.10, rel=1e-6)
-    assert "SOC ceiling" in plan["reason"]
+    assert plan["import_power"] == 6000
+    assert "SOC ceiling" not in plan["reason"]
 
 
 def test_negative_buy_plan_rolls_to_next_day_after_cutoff(fake_hass, monkeypatch):
