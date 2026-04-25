@@ -232,7 +232,7 @@ The integration is designed for dynamic electricity markets:
 
 ### Current Version
 
-- **Integration Version**: 6.2.0
+- **Integration Version**: 6.2.1
 - **Config Schema Version**: 23
 - **Migration Path**: Automatic v1→v23 migration
 
@@ -246,6 +246,17 @@ The integration is designed for dynamic electricity markets:
 6. **Arbitrage Mode**: Reserve SOC, deadline hour (shared by sell + negative-buy planning), max export power
 
 ### Recent Changes
+
+**v6.2.1** (dashboard polish — no behavior change)
+
+- **Added** (`dashboard_template.yaml`, both bundled dashboards): **Battery Controls — quick reference** `type: markdown` card inserted directly below the Battery Controls entities row. One concise line per control, grouped into three sub-sections so users can scan instead of memorise:
+  - *Grid charging limits*: `Grid Max SOC` (default 70%), `Grid Max SOC (high solar)` (default 35%), `Solar Max SOC` (default 50%), `Sunny Forecast Trigger` (default 5 kWh).
+  - *Arbitrage*: `Arbitrage Reserve SOC` (default 40%), `Arbitrage Deadline Hour` (default 12), `Negative Arbitrage Buy Threshold` (default −0.05 €/kWh).
+  - *Mode toggles*: `Car permissive`, `Arbitrage mode`, `Negative Arbitrage Buy Mode`, `Disable Battery Charging`.
+  - Defaults verified against `const.py` (notably `Arbitrage Reserve SOC` is **40%**, not 50%; `Sunny Forecast Trigger` is **5 kWh**, not a percent).
+- **Bumped**: `MANAGED_VERSION` `29` → `30` in `dashboard.py` so existing managed dashboards re-save the new explanations card automatically on next reload.
+- **Tests**: 486/486 passing. Added `test_bundled_dashboards_include_battery_controls_quick_reference` and `test_managed_dashboard_template_includes_battery_controls_quick_reference` — each splits the dashboard YAML between the *Battery Controls* and *Decisions* titles and asserts every one of the 11 bolded control names appears in the explanations slice (defends against either the card going missing or any single control being orphaned from the reference).
+- **Compatibility**: No code, schema, migration, entity-ID, or behavioural changes. Bundled-YAML users need to re-copy to pick up the card; managed-dashboard users get it automatically on next integration reload via the `MANAGED_VERSION` bump. Drop-in replacement for v6.2.0.
 
 **v6.2.0** (Negative Arbitrage Buy decoupled from battery SOC — behavior change)
 

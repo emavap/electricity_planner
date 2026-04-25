@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 6.2.0** | **Config Schema Version 23** | **Home Assistant 2024.4+**
+**Version 6.2.1** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Release note for v6.2.0: **Negative Arbitrage Buy** is now a general grid-import request rather than a battery filler. The mode activates on every eligible slot at or below `negative_buy_threshold` (default `-0.05 €/kWh`) regardless of battery state — including when batteries are full or when battery details are unavailable. The grid setpoint reserves a peak-limited import budget (capped by `monthly_grid_peak` and `max_grid_power`, sharing the budget with active EV charging) so the planner keeps importing during paid-to-consume periods to maximise profit. Live-update support added for `negative_buy_threshold` and `max_soc_threshold_solar` so adjustments take effect without an integration reload. Dashboard threshold line recoloured to teal (`#16a085`) and `MANAGED_VERSION` bumped to **29**. Schema unchanged (still v23) — drop-in replacement for v6.1.1. 484/484 tests passing.
+> Release note for v6.2.1: dashboard polish on top of v6.2.0. Adds a **Battery Controls — quick reference** markdown card directly below the Battery Controls entities row (managed template + both bundled dashboards), with a one-line explanation for every one of the 11 numeric controls and runtime switches, grouped into *Grid charging limits*, *Arbitrage*, and *Mode toggles*. Defaults are quoted inline so users see the reference value without having to dig into the integration options. `MANAGED_VERSION` bumped to **30** so existing managed dashboards re-save automatically on next reload. No code, schema, or behaviour changes — drop-in replacement for v6.2.0. 486/486 tests passing.
 
 ## Key Features
 

@@ -300,6 +300,49 @@ def test_managed_dashboard_template_drops_top_section_buttons():
     assert "switch.electricity_planner_arbitrage_mode" in template
 
 
+def test_bundled_dashboards_include_battery_controls_quick_reference():
+    """Battery Controls section should be followed by an explanatory markdown card."""
+    single_phase = (Path(__file__).parent.parent / "electricity_planner_dashboard.yaml").read_text(encoding="utf-8")
+    three_phase = (Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml").read_text(encoding="utf-8")
+
+    for content in (single_phase, three_phase):
+        # The explainer card lives between Battery Controls and the next entities card (Decisions).
+        battery_section = content.split("title: Battery Controls", 1)[1].split("title: Decisions", 1)[0]
+
+        assert "Battery Controls — quick reference" in battery_section
+        # Each control name from the entities row should appear in the explanations.
+        assert "**Grid Max SOC**" in battery_section
+        assert "**Grid Max SOC (high solar)**" in battery_section
+        assert "**Solar Max SOC**" in battery_section
+        assert "**Sunny Forecast Trigger**" in battery_section
+        assert "**Arbitrage Reserve SOC**" in battery_section
+        assert "**Arbitrage Deadline Hour**" in battery_section
+        assert "**Negative Arbitrage Buy Threshold**" in battery_section
+        assert "**Car permissive**" in battery_section
+        assert "**Arbitrage mode**" in battery_section
+        assert "**Negative Arbitrage Buy Mode**" in battery_section
+        assert "**Disable Battery Charging**" in battery_section
+
+
+def test_managed_dashboard_template_includes_battery_controls_quick_reference():
+    """Managed template should ship the same Battery Controls explanations card."""
+    template = Path(dashboard.__file__).with_name("dashboard_template.yaml").read_text()
+    battery_section = template.split("title: Battery Controls", 1)[1].split("title: Decisions", 1)[0]
+
+    assert "Battery Controls — quick reference" in battery_section
+    assert "**Grid Max SOC**" in battery_section
+    assert "**Grid Max SOC (high solar)**" in battery_section
+    assert "**Solar Max SOC**" in battery_section
+    assert "**Sunny Forecast Trigger**" in battery_section
+    assert "**Arbitrage Reserve SOC**" in battery_section
+    assert "**Arbitrage Deadline Hour**" in battery_section
+    assert "**Negative Arbitrage Buy Threshold**" in battery_section
+    assert "**Car permissive**" in battery_section
+    assert "**Arbitrage mode**" in battery_section
+    assert "**Negative Arbitrage Buy Mode**" in battery_section
+    assert "**Disable Battery Charging**" in battery_section
+
+
 def test_bundled_three_phase_dashboard_includes_shared_single_phase_sections():
     """Three-phase dashboard should include the same shared charts and diagnostics as single-phase."""
     dashboard_path = Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"

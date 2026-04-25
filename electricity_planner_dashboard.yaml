@@ -207,6 +207,30 @@ views:
                 name: Disable Battery Charging
                 icon: mdi:battery-off
 
+          - type: markdown
+            content: |
+              **Battery Controls — quick reference**
+
+              *Grid charging limits*
+
+              - **Grid Max SOC** (default 70%): SOC ceiling for grid charging on normal days. The planner stops buying once any battery reaches this level.
+              - **Grid Max SOC (high solar)** (default 35%): Lower ceiling that replaces *Grid Max SOC* whenever tomorrow's solar forecast exceeds the *Sunny Forecast Trigger*. Preserves capacity for free solar.
+              - **Solar Max SOC** (default 50%): Independent ceiling for solar absorption. Once batteries cross this level, surplus is offered to the EV or exported instead of being absorbed.
+              - **Sunny Forecast Trigger** (default 5 kWh): Tomorrow-forecast value above which *Grid Max SOC (high solar)* activates. Read after the configured forecast start hour (default 20:00).
+
+              *Arbitrage*
+
+              - **Arbitrage Reserve SOC** (default 40%): Minimum battery SOC kept in reserve while *Arbitrage Mode* is active — exports stop once SOC reaches this floor.
+              - **Arbitrage Deadline Hour** (default 12): Local hour by which both arbitrage *sell* and *Negative Arbitrage Buy* slot windows must finish. Protects the morning solar harvest.
+              - **Negative Arbitrage Buy Threshold** (default −0.05 €/kWh): Net buy price at or below which the planner requests peak-limited grid import (truly paid-to-consume). More-negative values mean stricter activation.
+
+              *Mode toggles*
+
+              - **Car permissive**: Relaxes car-charging hysteresis — accepts ~20% higher prices and bypasses the minimum-window check for ad-hoc top-ups.
+              - **Arbitrage mode**: Enables battery-to-grid export during high feed-in prices, down to *Arbitrage Reserve SOC*, before the deadline hour.
+              - **Negative Arbitrage Buy Mode**: Enables peak-limited grid import (and solar export curtailment) during net-negative price slots.
+              - **Disable Battery Charging**: Persistently blocks all grid charging into batteries, overriding every automatic strategy.
+
           - type: entities
             title: Decisions
             show_header_toggle: false
