@@ -247,6 +247,20 @@ The integration is designed for dynamic electricity markets:
 
 ### Recent Changes
 
+**v6.1.1** (dashboard polish — no behavior change)
+
+- **Added** (`dashboard_template.yaml`, both bundled dashboards): **Negative Arbitrage Buy reason** attribute row in the diagnostics card, sourced from `switch.electricity_planner_negative_arbitrage_buy_mode`'s `reason` attribute. Sits next to the existing *Arbitrage reason* so both arbitrage directions are visible at a glance.
+- **Added** (`dashboard_template.yaml`, both bundled dashboards): Live **Negative Arbitrage Buy Threshold** horizontal line on the *Electricity Buy Prices* ApexCharts graph. The data-generator reads `switch.electricity_planner_negative_arbitrage_buy_mode.attributes.threshold` and only renders the line while the switch is `on`, so the chart stays clean when negative-buy mode is disabled. Drawn in `#c0392b` to visually distinguish it from the existing *Dynamic Threshold* (orange).
+- **Removed** (`dashboard_template.yaml`, both bundled dashboards): The two redundant top-of-dashboard big buttons — *Car permissive* and *Arbitrage mode*. Both switches remain reachable from the **Battery Controls** entities row below, where the live-adjustable thresholds (`negative_buy_threshold`, `arbitrage_mode_deadline_hour`, `arbitrage_mode_reserve_soc`) also live, so users have a single grouped panel for runtime toggles instead of two competing surfaces.
+- **Bumped**: `MANAGED_VERSION` `27` → `28` in `dashboard.py` so existing managed dashboards re-save automatically on next reload.
+- **Tests**: 479/479 passing. Added dashboard coverage for: (1) the dropped top buttons no longer appear in the section above the *Active Grid Charging Limit* card while both switches remain reachable from the entities list below; (2) the *Negative Arbitrage Buy reason* attribute row is present in bundled dashboards and the managed template; (3) the *Negative Arbitrage Buy Threshold* series is present in the buy chart and absent from the sell chart in bundled dashboards and the managed template. Each of the three checks runs against both the bundled YAMLs and the managed `dashboard_template.yaml` (six tests total).
+- **Repo housekeeping** (no integration code touched):
+  - Moved `automationExample_power_sensor.yaml` → `examples/automations/car_charger_dynamic_control_power_sensor.yaml` so the variant lives next to its sibling automations; documented under the existing *Charger turned on* automation in `examples/automations/README.md`.
+  - Removed the orphan `automationExample.yaml` at repo root (superseded by the curated `examples/automations/` set).
+  - Moved `test_dashboard_debug.py` → `tools/dashboard_debug.py` (it isn't a pytest fixture, so it no longer pollutes test discovery); the bootstrap now resolves modules from either the repo root or a Home Assistant config root.
+  - Extended `.gitignore` with `.pytest_cache/`, `.coverage`, and `.coverage.*`.
+- **Compatibility**: No code-path, schema, or migration changes. Internal keys and entity IDs unchanged. Drop-in replacement for v6.1.0.
+
 **v6.1.0** (Negative Arbitrage Buy mode + arbitrage-mode rename)
 
 - **Added**: **Negative Arbitrage Buy mode** (`negative_buy.py`) — when the *net* feed-in price drops below `CONF_NEGATIVE_BUY_THRESHOLD` (default `-0.05 €/kWh`, i.e. truly paid-to-consume), the planner force-grid-charges batteries up to `max_soc_threshold` and curtails solar export so the inverter ramps down instead of paying to inject. Companion to the existing arbitrage *sell* path; both are gated by the same shared `arbitrage_mode_deadline_hour`.

@@ -10,16 +10,17 @@ Run this in your Home Assistant environment to check:
 4. What's the state of lovelace data?
 
 Usage:
-1. Copy this to your HA config directory
-2. Run: python3 test_dashboard_debug.py
+1. From this repo, run: python3 tools/dashboard_debug.py
+2. Or copy this to your HA config directory and run: python3 dashboard_debug.py
 """
 
-import asyncio
 import sys
 from pathlib import Path
 
-# Add your custom component path
-sys.path.insert(0, str(Path(__file__).parent))
+# Add both the script directory and repo root/HA config root to the import path.
+script_dir = Path(__file__).resolve().parent
+for candidate in (script_dir, script_dir.parent):
+    sys.path.insert(0, str(candidate))
 
 from custom_components.electricity_planner.dashboard import (
     TEMPLATE_FILENAME,

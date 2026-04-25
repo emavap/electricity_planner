@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 6.1.0** | **Config Schema Version 23** | **Home Assistant 2024.4+**
+**Version 6.1.1** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Release note for v6.1.0: introduces **Negative Arbitrage Buy mode** (force grid-charge batteries and curtail solar export when net feed-in price drops below a configurable threshold, default `-0.05 €/kWh`) and unifies the previous *Battery Dump* nomenclature under **Arbitrage Mode** across all layers (config keys, entity IDs, manual-override service targets, dashboards, and translations). Both arbitrage directions now share a single live-adjustable `arbitrage_mode_deadline_hour`. New live entities: `switch.electricity_planner_negative_arbitrage_buy_mode`, `number.electricity_planner_arbitrage_mode_deadline_hour`, `number.electricity_planner_negative_buy_threshold`. Two-step config-schema migration v21→v22→v23 backfills the new threshold and renames the legacy `battery_dump_*` storage keys; the `battery_dump_target_soc` number entity is renamed to `arbitrage_mode_reserve_soc` while preserving its unique_id so historical statistics are retained. `set_manual_override` / `clear_manual_override` services accept the new `arbitrage_mode` and `negative_buy` targets. 474/474 tests passing.
+> Release note for v6.1.1: dashboard polish on top of v6.1.0. Adds a **Negative Arbitrage Buy reason** attribute row next to the existing Arbitrage reason in the diagnostics card and a live **Negative Arbitrage Buy Threshold** horizontal line on the *Electricity Buy Prices* chart (drawn only while the switch is on, sourced from the live `threshold` attribute). Removes the redundant top-of-dashboard *Car permissive* and *Arbitrage mode* big buttons — both switches remain reachable from the **Battery Controls** entities row below, where the live-adjustable thresholds also live. `MANAGED_VERSION` bumped to **28** so existing managed dashboards re-save automatically on next reload. No code-path, schema, or behaviour changes — drop-in replacement for v6.1.0. 479/479 tests passing.
 
 ## Key Features
 

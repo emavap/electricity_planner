@@ -214,6 +214,82 @@ def test_bundled_dashboards_include_arbitrage_reason():
     assert "name: Arbitrage reason" in three_phase
 
 
+def test_bundled_dashboards_include_negative_arbitrage_buy_reason():
+    """Both bundled dashboards should expose the Negative Arbitrage Buy reason attribute row."""
+    single_phase = (Path(__file__).parent.parent / "electricity_planner_dashboard.yaml").read_text(encoding="utf-8")
+    three_phase = (Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml").read_text(encoding="utf-8")
+
+    assert "name: Negative Arbitrage Buy reason" in single_phase
+    assert "name: Negative Arbitrage Buy reason" in three_phase
+    assert "switch.electricity_planner_negative_arbitrage_buy_mode" in single_phase
+    assert "switch.electricity_planner_negative_arbitrage_buy_mode" in three_phase
+
+
+def test_managed_dashboard_template_includes_negative_arbitrage_buy_reason():
+    """Managed dashboard should expose the Negative Arbitrage Buy reason attribute row."""
+    template = Path(dashboard.__file__).with_name("dashboard_template.yaml").read_text()
+
+    assert "name: Negative Arbitrage Buy reason" in template
+    assert "switch.electricity_planner_negative_arbitrage_buy_mode" in template
+
+
+def test_bundled_dashboards_include_negative_buy_threshold_line_on_buy_chart():
+    """The Negative Arbitrage Buy threshold line should appear only on the buy chart."""
+    single_phase = (Path(__file__).parent.parent / "electricity_planner_dashboard.yaml").read_text(encoding="utf-8")
+    three_phase = (Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml").read_text(encoding="utf-8")
+
+    for content in (single_phase, three_phase):
+        buy_section = content.split("title: Electricity Buy Prices (History + Future)", 1)[1].split(
+            "title: Electricity Sell Prices (History + Future)", 1
+        )[0]
+        sell_section = content.split("title: Electricity Sell Prices (History + Future)", 1)[1]
+
+        assert "name: Negative Arbitrage Buy Threshold" in buy_section
+        assert "name: Negative Arbitrage Buy Threshold" not in sell_section
+        assert "switch.electricity_planner_negative_arbitrage_buy_mode" in buy_section
+
+
+def test_managed_dashboard_template_includes_negative_buy_threshold_line_on_buy_chart():
+    """Managed dashboard should show the Negative Arbitrage Buy threshold only on the buy chart."""
+    template = Path(dashboard.__file__).with_name("dashboard_template.yaml").read_text()
+    buy_section = template.split("title: Electricity Buy Prices (History + Future)", 1)[1].split(
+        "title: Electricity Sell Prices (History + Future)", 1
+    )[0]
+    sell_section = template.split("title: Electricity Sell Prices (History + Future)", 1)[1]
+
+    assert "name: Negative Arbitrage Buy Threshold" in buy_section
+    assert "name: Negative Arbitrage Buy Threshold" not in sell_section
+    assert "switch.electricity_planner_negative_arbitrage_buy_mode" in buy_section
+
+
+def test_bundled_dashboards_drop_top_section_buttons():
+    """The redundant top-of-dashboard Car permissive / Arbitrage mode buttons should be removed."""
+    single_phase = (Path(__file__).parent.parent / "electricity_planner_dashboard.yaml").read_text(encoding="utf-8")
+    three_phase = (Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml").read_text(encoding="utf-8")
+
+    for content in (single_phase, three_phase):
+        # Entries above the "Active Grid Charging Limit" markdown card represent the top section.
+        top_section = content.split("title: Active Grid Charging Limit", 1)[0]
+
+        # The two buttons (`type: button` with these names) should no longer live in the top section.
+        assert "name: Car permissive" not in top_section
+        assert "name: Arbitrage mode" not in top_section
+        # But both switches must still be reachable from the entities row in Battery Controls below.
+        assert "switch.electricity_planner_car_permissive_mode" in content
+        assert "switch.electricity_planner_arbitrage_mode" in content
+
+
+def test_managed_dashboard_template_drops_top_section_buttons():
+    """Managed dashboard should keep runtime switches in Battery Controls, not duplicate top buttons."""
+    template = Path(dashboard.__file__).with_name("dashboard_template.yaml").read_text()
+    top_section = template.split("title: Active Grid Charging Limit", 1)[0]
+
+    assert "name: Car permissive" not in top_section
+    assert "name: Arbitrage mode" not in top_section
+    assert "switch.electricity_planner_car_permissive_mode" in template
+    assert "switch.electricity_planner_arbitrage_mode" in template
+
+
 def test_bundled_three_phase_dashboard_includes_shared_single_phase_sections():
     """Three-phase dashboard should include the same shared charts and diagnostics as single-phase."""
     dashboard_path = Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"

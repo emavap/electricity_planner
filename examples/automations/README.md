@@ -30,6 +30,9 @@ This folder contains example Home Assistant automations that integrate with the 
 - Charger turned on
 - Every 5 minutes
 
+**Variant**:
+- `car_charger_dynamic_control_power_sensor.yaml` uses a charger power sensor instead of a plugged-in status sensor for installations where connection state is not available.
+
 ---
 
 ### 2. Solar Feed-in Control (`solar_feedin_control.yaml`)

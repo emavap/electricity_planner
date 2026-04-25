@@ -149,28 +149,6 @@ views:
                   red: 0
                   yellow: 30
                   green: 70
-              - type: button
-                entity: switch.electricity_planner_car_permissive_mode
-                name: Car permissive
-                icon: mdi:battery-alert
-                icon_height: 60px
-                show_name: true
-                show_state: true
-                tap_action:
-                  action: toggle
-                hold_action:
-                  action: more-info
-              - type: button
-                entity: switch.electricity_planner_arbitrage_mode
-                name: Arbitrage mode
-                icon: mdi:battery-arrow-down-outline
-                icon_height: 60px
-                show_name: true
-                show_state: true
-                tap_action:
-                  action: toggle
-                hold_action:
-                  action: more-info
 
           - type: markdown
             title: Active Grid Charging Limit
@@ -302,6 +280,10 @@ views:
                 entity: switch.electricity_planner_arbitrage_mode
                 attribute: reason
                 name: Arbitrage reason
+              - type: attribute
+                entity: switch.electricity_planner_negative_arbitrage_buy_mode
+                attribute: reason
+                name: Negative Arbitrage Buy reason
 
           - type: custom:apexcharts-card
             header:
@@ -448,6 +430,31 @@ views:
                   return [
                     [startTime, threshold],
                     [endTime, threshold]
+                  ];
+              - entity: sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices
+                name: Negative Arbitrage Buy Threshold
+                type: line
+                stroke_width: 2
+                color: "#c0392b"
+                curve: straight
+                show:
+                  legend_value: false
+                data_generator: |
+                  const buySwitch = hass.states['switch.electricity_planner_negative_arbitrage_buy_mode'];
+                  const threshold = buySwitch?.attributes?.threshold;
+                  if (buySwitch?.state !== 'on' || threshold == null || threshold === undefined) {
+                    return [];
+                  }
+                  if (!entity.attributes.data || entity.attributes.data.length === 0) {
+                    return [];
+                  }
+                  const intervals = entity.attributes.data;
+                  const startTime = new Date(intervals[0].start).getTime();
+                  const lastInterval = intervals[intervals.length - 1];
+                  const endTime = new Date(lastInterval.end ?? lastInterval.start).getTime();
+                  return [
+                    [startTime, parseFloat(threshold)],
+                    [endTime, parseFloat(threshold)]
                   ];
 
           - type: custom:apexcharts-card
