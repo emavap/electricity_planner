@@ -295,14 +295,88 @@ class PriceTimelineBuilder:
 
         selected_slots.sort(key=lambda item: item["start"])
         selected_prices = [float(slot["price"]) for slot in selected_slots]
-        dump_price_threshold = min(selected_prices) if selected_prices else None
+        export_price_threshold = min(selected_prices) if selected_prices else None
         total_hours = selected_duration.total_seconds() / 3600
         return {
             "selected_slots": selected_slots,
             "selected_slots_count": len(selected_slots),
-            "dump_price_threshold": dump_price_threshold,
+            "export_price_threshold": export_price_threshold,
             "current_slot_price": current_slot_price,
-            "covers_full_dump": selected_duration >= required_duration,
+            "covers_full_export": selected_duration >= required_duration,
+            "selected_duration_hours": round(total_hours, 3),
+        }
+
+    def select_buy_slots(
+        self,
+        timeline: list[PriceInterval],
+        now: datetime,
+        required_duration: timedelta,
+        maximum_price: float,
+        latest_end: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """Select the cheapest eligible buy slots and derive a buy-price threshold.
+
+        Symmetric counterpart to :meth:`select_export_slots`. Used by the
+        Negative Arbitrage Buy planner to plan grid-charging during
+        ``price <= maximum_price`` (typically negative-price) windows.
+        """
+        if required_duration <= timedelta(0):
+            return None
+
+        eligible_slots: list[dict[str, Any]] = []
+        current_slot_price: float | None = None
+
+        for start, end, price in timeline:
+            if latest_end is not None and start >= latest_end:
+                continue
+            if latest_end is not None and end > latest_end:
+                end = latest_end
+            if end <= now or price > maximum_price:
+                continue
+
+            segment_start = max(start, now)
+            if end <= segment_start:
+                continue
+            if start <= now < end:
+                current_slot_price = price
+            eligible_slots.append(
+                {
+                    "start": segment_start,
+                    "end": end,
+                    "price": price,
+                    "duration": end - segment_start,
+                }
+            )
+
+        if not eligible_slots:
+            return None
+
+        selected_slots: list[dict[str, Any]] = []
+        selected_duration = timedelta(0)
+
+        for slot in sorted(
+            eligible_slots,
+            key=lambda item: (item["price"], item["start"]),
+        ):
+            if selected_duration >= required_duration:
+                break
+
+            selected_slots.append(slot)
+            selected_duration += slot["duration"]
+
+        if not selected_slots:
+            return None
+
+        selected_slots.sort(key=lambda item: item["start"])
+        selected_prices = [float(slot["price"]) for slot in selected_slots]
+        buy_price_threshold = max(selected_prices) if selected_prices else None
+        total_hours = selected_duration.total_seconds() / 3600
+        return {
+            "selected_slots": selected_slots,
+            "selected_slots_count": len(selected_slots),
+            "buy_price_threshold": buy_price_threshold,
+            "current_slot_price": current_slot_price,
+            "covers_full_charge": selected_duration >= required_duration,
             "selected_duration_hours": round(total_hours, 3),
         }
 

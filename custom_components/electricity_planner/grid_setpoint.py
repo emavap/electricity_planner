@@ -144,7 +144,7 @@ class GridSetpointCalculator:
         planned_car_session = car_charging_allowed and charger_limit > 0
         significant_car_charging = car_charging_power > min_threshold
         active_or_planned_car_charging = significant_car_charging or planned_car_session
-        battery_dump_active = ctx.battery_dump_active
+        arbitrage_mode_export_active = ctx.arbitrage_mode_export_active
         car_draws_from_grid = significant_car_charging and car_grid_import_allowed
         requested_car_power = car_charging_power
         solar_only_note = (
@@ -183,7 +183,7 @@ class GridSetpointCalculator:
         grid_setpoint_parts: list[str] = []
         car_grid_need = 0
         car_battery_need = 0
-        battery_dump_export_power = ctx.battery_dump_export_power
+        arbitrage_mode_export_power = ctx.arbitrage_mode_export_power
 
         if significant_car_charging and car_charging_allowed:
             car_available_solar = ctx.allocated_car_solar
@@ -207,8 +207,8 @@ class GridSetpointCalculator:
                 )
 
         battery_grid_need = 0
-        if battery_dump_active and battery_dump_export_power > 0:
-            remaining_export_power = max(0, battery_dump_export_power - int(car_battery_need))
+        if arbitrage_mode_export_active and arbitrage_mode_export_power > 0:
+            remaining_export_power = max(0, arbitrage_mode_export_power - int(car_battery_need))
             if remaining_export_power > 0:
                 battery_grid_need = -min(
                     remaining_export_power,
@@ -231,7 +231,7 @@ class GridSetpointCalculator:
             grid_setpoint = min(grid_setpoint, max_setpoint, max_grid_power)
 
         import_permitted = car_draws_from_grid or battery_grid_charging
-        export_permitted = battery_dump_active
+        export_permitted = arbitrage_mode_export_active
         gate_reason: str | None = None
         if grid_setpoint > 0 and not import_permitted:
             gate_reason = (
@@ -251,13 +251,13 @@ class GridSetpointCalculator:
             battery_grid_need = 0
             grid_setpoint_parts = []
         elif grid_setpoint < 0 and not export_permitted:
-            gate_reason = "Grid export blocked - arbitrage dump not active"
+            gate_reason = "Grid export blocked - arbitrage mode not active"
             _LOGGER.info(
                 "Grid setpoint safety net clamped %dW export to 0 "
                 "(battery_grid_need=%d, arbitrage_mode_active=%s, "
-                "battery_dump_export_power=%d)",
+                "arbitrage_mode_export_power=%d)",
                 int(grid_setpoint), int(battery_grid_need),
-                ctx.arbitrage_mode_active, battery_dump_export_power,
+                ctx.arbitrage_mode_active, arbitrage_mode_export_power,
             )
             grid_setpoint = 0
             car_grid_need = 0
@@ -268,7 +268,7 @@ class GridSetpointCalculator:
             reason = f"{gate_reason} | {peak_context_reason}"
         elif not grid_setpoint_parts:
             reason = f"No grid charging needed | {peak_context_reason}"
-        elif battery_dump_active and battery_grid_need < 0:
+        elif arbitrage_mode_export_active and battery_grid_need < 0:
             components_text = " + ".join(grid_setpoint_parts)
             if grid_setpoint < 0:
                 reason = (

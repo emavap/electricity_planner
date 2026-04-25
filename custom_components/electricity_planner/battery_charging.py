@@ -80,6 +80,24 @@ class BatteryChargingDecisionCalculator:
                 "strategy_trace": [],
             }
 
+        # Negative Arbitrage Buy override: when the user has armed the mode and
+        # the planner has selected the current slot as a paid-to-consume window,
+        # force grid charging regardless of price-threshold logic. The plan only
+        # turns active when batteries are below max_soc_threshold and the slot
+        # is at/below the configured negative-buy threshold.
+        if ctx.negative_buy_mode_active:
+            current_price = ctx.current_price
+            price_text = (
+                f"{current_price:.3f}€/kWh" if current_price is not None else "n/a"
+            )
+            return {
+                "battery_grid_charging": True,
+                "battery_grid_charging_reason": (
+                    f"Negative Arbitrage Buy active at {price_text} - forcing grid charging"
+                ),
+                "strategy_trace": [],
+            }
+
         # NOTE: Arbitrage mode does NOT block battery grid charging here.
         # The normal price-based strategies decide whether to charge.
         # Only the explicit "Disable Battery Charging" switch (manual override

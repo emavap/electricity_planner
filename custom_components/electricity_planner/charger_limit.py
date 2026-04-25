@@ -44,7 +44,7 @@ class ChargerLimitCalculator:
         return ctx.car_arbitrage_power
 
     def get_arbitrage_reserve_soc(self, ctx: "CycleContext") -> float:
-        return ctx.arbitrage_reserve_soc
+        return ctx.arbitrage_mode_reserve_soc
 
     def apply_peak_import_limit(
         self,

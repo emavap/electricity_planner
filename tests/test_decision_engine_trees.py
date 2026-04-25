@@ -6,8 +6,8 @@ from typing import Any
 import pytest
 
 from custom_components.electricity_planner.const import (
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_BASE_GRID_SETPOINT,
-    CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_CAR_USE_BATTERY_ARBITRAGE,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
@@ -44,15 +44,15 @@ def _arbitrage_battery_analysis(average_soc: float = 95, max_soc_threshold: floa
     }
 
 
-def _arbitrage_battery_dump_data(**overrides: Any) -> dict[str, Any]:
+def _arbitrage_mode_data(**overrides: Any) -> dict[str, Any]:
     data = {
         "car_charging_power": 2000,
         "car_grid_charging": True,
         "car_grid_import_allowed": False,
         "battery_grid_charging": False,
         "arbitrage_mode_active": True,
-        "battery_dump_target_soc": 40,
-        "battery_dump_export_power": 3000,
+        "arbitrage_mode_reserve_soc": 40,
+        "arbitrage_mode_export_power": 3000,
         "monthly_grid_peak": 0,
         "previous_car_charging": False,
     }
@@ -296,7 +296,7 @@ def test_car_decision_tree_arbitrage_overlay(price_analysis: dict[str, Any], exp
             "previous_car_charging": False,
             "has_min_charging_window": True,
             "arbitrage_mode_active": True,
-            "battery_dump_export_power": 3000,
+            "arbitrage_mode_export_power": 3000,
         },
     )
 
@@ -428,7 +428,7 @@ def test_feedin_decision_tree_uses_feed_specific_adjustments() -> None:
             {CONF_MAX_CAR_POWER: 11000},
             _arbitrage_battery_analysis(),
             {"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
-            _arbitrage_battery_dump_data(car_charging_power=5000, car_grid_import_allowed=True),
+            _arbitrage_mode_data(car_charging_power=5000, car_grid_import_allowed=True),
             5700,
             "3000W battery arbitrage",
         ),
@@ -499,7 +499,7 @@ def test_charger_limit_decision_tree_branches(
                 "car_grid_charging": False,
                 "battery_grid_charging": False,
                 "arbitrage_mode_active": True,
-                "battery_dump_export_power": 3500,
+                "arbitrage_mode_export_power": 3500,
                 "arbitrage_mode_reason": "High-price export window is active",
                 "monthly_grid_peak": 4000,
             },
@@ -527,7 +527,7 @@ def test_charger_limit_decision_tree_branches(
         (
             _arbitrage_battery_analysis(),
             {"solar_for_car": 0, "car_current_solar_usage": 0},
-            _arbitrage_battery_dump_data(
+            _arbitrage_mode_data(
                 car_charging_power=5000,
                 car_grid_import_allowed=True,
                 arbitrage_mode_reason="Arbitrage mode active",
@@ -580,7 +580,7 @@ def test_decision_tree_combinations_keep_charger_limit_and_grid_setpoint_coheren
     expected_limit: int,
     expected_setpoint: int,
 ) -> None:
-    engine = _engine({CONF_MAX_CAR_POWER: 11000, CONF_BATTERY_DUMP_TARGET_SOC: 40})
+    engine = _engine({CONF_MAX_CAR_POWER: 11000, CONF_ARBITRAGE_MODE_RESERVE_SOC: 40})
     battery_analysis = _arbitrage_battery_analysis(average_soc=95 if arbitrage_mode_active else 60)
     power_allocation = {"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0}
     data = {
@@ -589,8 +589,8 @@ def test_decision_tree_combinations_keep_charger_limit_and_grid_setpoint_coheren
         "car_grid_import_allowed": car_grid_import_allowed,
         "battery_grid_charging": battery_grid_charging,
         "arbitrage_mode_active": arbitrage_mode_active,
-        "battery_dump_target_soc": 40,
-        "battery_dump_export_power": 3000 if arbitrage_mode_active else 0,
+        "arbitrage_mode_reserve_soc": 40,
+        "arbitrage_mode_export_power": 3000 if arbitrage_mode_active else 0,
         "monthly_grid_peak": 0,
         "previous_car_charging": True,
     }

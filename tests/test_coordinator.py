@@ -19,11 +19,13 @@ from custom_components.electricity_planner.const import (
     ATTR_ACTION,
     ATTR_ENTRY_ID,
     ATTR_TARGET,
+    CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+    CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_BASE_GRID_SETPOINT,
-    CONF_BATTERY_DUMP_DEADLINE_HOUR,
-    CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
-    CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_BATTERY_SOC_ENTITIES,
+    CONF_MAX_SOC_THRESHOLD,
+    CONF_NEGATIVE_BUY_THRESHOLD,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     CONF_CURRENT_PRICE_ENTITY,
@@ -63,8 +65,8 @@ from custom_components.electricity_planner.const import (
     DOMAIN,
     MANUAL_OVERRIDE_ACTION_FORCE_CHARGE,
     MANUAL_OVERRIDE_ACTION_FORCE_WAIT,
+    MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE,
     MANUAL_OVERRIDE_TARGET_BATTERY,
-    MANUAL_OVERRIDE_TARGET_BATTERY_DUMP,
     MANUAL_OVERRIDE_TARGET_CAR,
     SERVICE_CLEAR_MANUAL_OVERRIDE,
     SERVICE_SET_MANUAL_OVERRIDE,
@@ -1415,13 +1417,13 @@ async def test_manual_override_persists_across_restart(fake_hass, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_battery_dump_mode_persists_across_restart(fake_hass, monkeypatch):
-    """Battery dump mode should survive coordinator recreation."""
+async def test_arbitrage_mode_persists_across_restart(fake_hass, monkeypatch):
+    """Arbitrage mode should survive coordinator recreation."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     store = _MemoryOverrideStore()
     coordinator._manual_override_store = store
 
-    await coordinator.async_set_battery_dump_mode(reason="persisted dump")
+    await coordinator.async_set_arbitrage_mode(reason="persisted dump")
 
     restored = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     restored._manual_override_store = _MemoryOverrideStore(store.data)
@@ -1454,15 +1456,15 @@ async def test_car_permissive_mode_persists_across_restart(fake_hass, monkeypatc
     assert restored._car_permissive_mode_active is True
 
 
-def test_battery_dump_plan_prefers_highest_export_slots(fake_hass, monkeypatch):
-    """Battery dump planner should derive its threshold from the highest-value eligible slots."""
+def test_arbitrage_mode_plan_prefers_highest_export_slots(fake_hass, monkeypatch):
+    """Arbitrage mode planner should derive its threshold from the highest-value eligible slots."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
 
     config = _base_config()
     config.update(
         {
-            CONF_BATTERY_DUMP_TARGET_SOC: 20,
+            CONF_ARBITRAGE_MODE_RESERVE_SOC: 20,
             "feedin_adjustment_multiplier": 1.0,
             "feedin_adjustment_offset": 0.0,
             "feedin_price_threshold": 0.05,
@@ -1487,7 +1489,7 @@ def test_battery_dump_plan_prefers_highest_export_slots(fake_hass, monkeypatch):
         for slot in range(8)
     ]
 
-    plan = coordinator._calculate_battery_dump_plan(
+    plan = coordinator._calculate_arbitrage_mode_plan(
         {
             "battery_details": [
                 {
@@ -1506,20 +1508,20 @@ def test_battery_dump_plan_prefers_highest_export_slots(fake_hass, monkeypatch):
     assert plan["active"] is False
     assert plan["required_duration_hours"] == pytest.approx(2.0, rel=1e-6)
     assert plan["selected_slots_count"] == 8
-    assert plan["dump_price_threshold"] == pytest.approx(0.11, rel=1e-6)
+    assert plan["arbitrage_price_threshold"] == pytest.approx(0.11, rel=1e-6)
     assert "top 8 eligible slots" in plan["reason"]
 
 
-def test_battery_dump_plan_honors_configured_export_cap(fake_hass, monkeypatch):
-    """Configured dump export cap should further limit the automatic battery/grid cap."""
+def test_arbitrage_mode_plan_honors_configured_export_cap(fake_hass, monkeypatch):
+    """Configured export cap should further limit the automatic battery/grid cap."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
 
     config = _base_config()
     config.update(
         {
-            CONF_BATTERY_DUMP_TARGET_SOC: 20,
-            CONF_BATTERY_DUMP_MAX_EXPORT_POWER: 4500,
+            CONF_ARBITRAGE_MODE_RESERVE_SOC: 20,
+            CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER: 4500,
             "feedin_adjustment_multiplier": 1.0,
             "feedin_adjustment_offset": 0.0,
             "feedin_price_threshold": 0.05,
@@ -1540,7 +1542,7 @@ def test_battery_dump_plan_honors_configured_export_cap(fake_hass, monkeypatch):
         for slot in range(16)
     ]
 
-    plan = coordinator._calculate_battery_dump_plan(
+    plan = coordinator._calculate_arbitrage_mode_plan(
         {
             "battery_details": [
                 {
@@ -1558,7 +1560,7 @@ def test_battery_dump_plan_honors_configured_export_cap(fake_hass, monkeypatch):
     assert plan["configured_export_cap_w"] == 4500
 
 
-def test_battery_dump_plan_derives_threshold_from_selected_slots(fake_hass, monkeypatch):
+def test_arbitrage_mode_plan_derives_threshold_from_selected_slots(fake_hass, monkeypatch):
     """The arbitrage threshold should be the lowest price among the selected top slots."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -1566,7 +1568,7 @@ def test_battery_dump_plan_derives_threshold_from_selected_slots(fake_hass, monk
     config = _base_config()
     config.update(
         {
-            CONF_BATTERY_DUMP_TARGET_SOC: 20,
+            CONF_ARBITRAGE_MODE_RESERVE_SOC: 20,
             "feedin_adjustment_multiplier": 1.0,
             "feedin_adjustment_offset": 0.0,
             "feedin_price_threshold": 0.05,
@@ -1592,7 +1594,7 @@ def test_battery_dump_plan_derives_threshold_from_selected_slots(fake_hass, monk
         for slot in range(4)
     ]
 
-    plan = coordinator._calculate_battery_dump_plan(
+    plan = coordinator._calculate_arbitrage_mode_plan(
         {
             "battery_details": [
                 {
@@ -1607,23 +1609,23 @@ def test_battery_dump_plan_derives_threshold_from_selected_slots(fake_hass, monk
         }
     )
 
-    assert plan["slots_cover_full_dump"] is True
+    assert plan["slots_cover_full_arbitrage"] is True
     assert plan["selected_slots_count"] == 6
-    assert plan["dump_price_threshold"] == pytest.approx(0.08, rel=1e-6)
+    assert plan["arbitrage_price_threshold"] == pytest.approx(0.08, rel=1e-6)
     assert plan["current_slot_price"] == pytest.approx(0.08, rel=1e-6)
     assert plan["active"] is True
     assert "arbitrage threshold 0.080€/kWh" in plan["reason"]
 
 
-def test_battery_dump_plan_stops_when_fleet_net_energy_is_at_reserve(fake_hass, monkeypatch):
-    """Batteries below reserve must offset those above it when computing dump energy."""
+def test_arbitrage_mode_plan_stops_when_fleet_net_energy_is_at_reserve(fake_hass, monkeypatch):
+    """Batteries below reserve must offset those above it when computing arbitrage energy."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
 
     config = _base_config()
     config.update(
         {
-            CONF_BATTERY_DUMP_TARGET_SOC: 40,
+            CONF_ARBITRAGE_MODE_RESERVE_SOC: 40,
             "feedin_adjustment_multiplier": 1.0,
             "feedin_adjustment_offset": 0.0,
             "feedin_price_threshold": 0.05,
@@ -1644,7 +1646,7 @@ def test_battery_dump_plan_stops_when_fleet_net_energy_is_at_reserve(fake_hass, 
         for slot in range(8)
     ]
 
-    plan = coordinator._calculate_battery_dump_plan(
+    plan = coordinator._calculate_arbitrage_mode_plan(
         {
             "battery_details": [
                 {
@@ -1670,17 +1672,17 @@ def test_battery_dump_plan_stops_when_fleet_net_energy_is_at_reserve(fake_hass, 
     assert "reserve target already reached" in plan["reason"]
 
 
-def test_battery_dump_plan_uses_net_fleet_headroom_when_some_batteries_are_below_reserve(
+def test_arbitrage_mode_plan_uses_net_fleet_headroom_when_some_batteries_are_below_reserve(
     fake_hass, monkeypatch
 ):
-    """A below-reserve battery should reduce, not erase, dump energy when net headroom remains."""
+    """A below-reserve battery should reduce, not erase, arbitrage energy when net headroom remains."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
 
     config = _base_config()
     config.update(
         {
-            CONF_BATTERY_DUMP_TARGET_SOC: 40,
+            CONF_ARBITRAGE_MODE_RESERVE_SOC: 40,
             "feedin_adjustment_multiplier": 1.0,
             "feedin_adjustment_offset": 0.0,
             "feedin_price_threshold": 0.05,
@@ -1701,7 +1703,7 @@ def test_battery_dump_plan_uses_net_fleet_headroom_when_some_batteries_are_below
         for slot in range(8)
     ]
 
-    plan = coordinator._calculate_battery_dump_plan(
+    plan = coordinator._calculate_arbitrage_mode_plan(
         {
             "battery_details": [
                 {
@@ -1728,7 +1730,7 @@ def test_battery_dump_plan_uses_net_fleet_headroom_when_some_batteries_are_below
     assert plan["export_power"] == 2000
 
 
-def test_battery_dump_plan_activates_during_current_selected_window(fake_hass, monkeypatch):
+def test_arbitrage_mode_plan_activates_during_current_selected_window(fake_hass, monkeypatch):
     """Export should activate when the current price is at or above the arbitrage threshold."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -1736,7 +1738,7 @@ def test_battery_dump_plan_activates_during_current_selected_window(fake_hass, m
     config = _base_config()
     config.update(
         {
-            CONF_BATTERY_DUMP_TARGET_SOC: 20,
+            CONF_ARBITRAGE_MODE_RESERVE_SOC: 20,
             "feedin_adjustment_multiplier": 1.0,
             "feedin_adjustment_offset": 0.0,
             "feedin_price_threshold": 0.05,
@@ -1761,7 +1763,7 @@ def test_battery_dump_plan_activates_during_current_selected_window(fake_hass, m
         for slot in range(4)
     ]
 
-    plan = coordinator._calculate_battery_dump_plan(
+    plan = coordinator._calculate_arbitrage_mode_plan(
         {
             "battery_details": [
                 {
@@ -1779,13 +1781,13 @@ def test_battery_dump_plan_activates_during_current_selected_window(fake_hass, m
     assert plan["active"] is True
     assert plan["export_power"] > 0
     assert plan["selected_slots_count"] == 4
-    assert plan["dump_price_threshold"] == pytest.approx(0.11, rel=1e-6)
+    assert plan["arbitrage_price_threshold"] == pytest.approx(0.11, rel=1e-6)
     assert plan["current_slot_price"] == pytest.approx(0.12, rel=1e-6)
     assert "Dumping battery to grid until 20% across the selected high-price windows" not in plan["reason"]
     assert "Arbitrage export active at 0.120€/kWh" in plan["reason"]
 
 
-def test_battery_dump_plan_falls_back_when_total_eligible_duration_is_insufficient(fake_hass, monkeypatch):
+def test_arbitrage_mode_plan_falls_back_when_total_eligible_duration_is_insufficient(fake_hass, monkeypatch):
     """If there are too few eligible slots, the planner should still arm the best available threshold."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -1793,7 +1795,7 @@ def test_battery_dump_plan_falls_back_when_total_eligible_duration_is_insufficie
     config = _base_config()
     config.update(
         {
-            CONF_BATTERY_DUMP_TARGET_SOC: 20,
+            CONF_ARBITRAGE_MODE_RESERVE_SOC: 20,
             "feedin_adjustment_multiplier": 1.0,
             "feedin_adjustment_offset": 0.0,
             "feedin_price_threshold": 0.05,
@@ -1819,7 +1821,7 @@ def test_battery_dump_plan_falls_back_when_total_eligible_duration_is_insufficie
         for slot in range(4)
     ]
 
-    plan = coordinator._calculate_battery_dump_plan(
+    plan = coordinator._calculate_arbitrage_mode_plan(
         {
             "battery_details": [
                 {
@@ -1834,14 +1836,14 @@ def test_battery_dump_plan_falls_back_when_total_eligible_duration_is_insufficie
         }
     )
 
-    assert plan["slots_cover_full_dump"] is False
+    assert plan["slots_cover_full_arbitrage"] is False
     assert plan["selected_slots_count"] == 8
-    assert plan["dump_price_threshold"] == pytest.approx(0.08, rel=1e-6)
+    assert plan["arbitrage_price_threshold"] == pytest.approx(0.08, rel=1e-6)
     assert plan["active"] is True
     assert "using the best available slots" in plan["reason"]
 
 
-def test_battery_dump_plan_uses_whole_slots_without_partial_truncation(fake_hass, monkeypatch):
+def test_arbitrage_mode_plan_uses_whole_slots_without_partial_truncation(fake_hass, monkeypatch):
     """The planner should select whole slots rather than truncating the last interval."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -1849,7 +1851,7 @@ def test_battery_dump_plan_uses_whole_slots_without_partial_truncation(fake_hass
     config = _base_config()
     config.update(
         {
-            CONF_BATTERY_DUMP_TARGET_SOC: 20,
+            CONF_ARBITRAGE_MODE_RESERVE_SOC: 20,
             "feedin_adjustment_multiplier": 1.0,
             "feedin_adjustment_offset": 0.0,
             "feedin_price_threshold": 0.05,
@@ -1871,7 +1873,7 @@ def test_battery_dump_plan_uses_whole_slots_without_partial_truncation(fake_hass
         for slot in range(8)
     ]
 
-    plan = coordinator._calculate_battery_dump_plan(
+    plan = coordinator._calculate_arbitrage_mode_plan(
         {
             "battery_details": [
                 {
@@ -1892,16 +1894,16 @@ def test_battery_dump_plan_uses_whole_slots_without_partial_truncation(fake_hass
     assert dt_util.as_utc(parsed_end) == base_time + timedelta(hours=1, minutes=15)
 
 
-def test_battery_dump_plan_targets_same_day_deadline_before_cutoff(fake_hass, monkeypatch):
-    """Before the cutoff, dump planning should target today's configured deadline."""
+def test_arbitrage_mode_plan_targets_same_day_deadline_before_cutoff(fake_hass, monkeypatch):
+    """Before the cutoff, arbitrage planning should target today's configured deadline."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
 
     config = _base_config()
     config.update(
         {
-            CONF_BATTERY_DUMP_TARGET_SOC: 20,
-            CONF_BATTERY_DUMP_DEADLINE_HOUR: 9,
+            CONF_ARBITRAGE_MODE_RESERVE_SOC: 20,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 9,
             "feedin_adjustment_multiplier": 1.0,
             "feedin_adjustment_offset": 0.0,
             "feedin_price_threshold": 0.05,
@@ -1926,7 +1928,7 @@ def test_battery_dump_plan_targets_same_day_deadline_before_cutoff(fake_hass, mo
         for slot in range(4)
     ]
 
-    plan = coordinator._calculate_battery_dump_plan(
+    plan = coordinator._calculate_arbitrage_mode_plan(
         {
             "battery_details": [
                 {
@@ -1941,7 +1943,7 @@ def test_battery_dump_plan_targets_same_day_deadline_before_cutoff(fake_hass, mo
         }
     )
 
-    assert plan["dump_price_threshold"] == pytest.approx(0.09, rel=1e-6)
+    assert plan["arbitrage_price_threshold"] == pytest.approx(0.09, rel=1e-6)
     parsed_deadline = dt_util.parse_datetime(plan["deadline"])
     parsed_last_end = dt_util.parse_datetime(plan["selected_slots"][-1]["end"])
     assert dt_util.as_local(parsed_deadline).hour == 9
@@ -1949,16 +1951,16 @@ def test_battery_dump_plan_targets_same_day_deadline_before_cutoff(fake_hass, mo
     assert parsed_last_end <= parsed_deadline
 
 
-def test_battery_dump_plan_rolls_to_next_day_after_cutoff(fake_hass, monkeypatch):
-    """After the cutoff, dump planning should target the next day's configured deadline."""
+def test_arbitrage_mode_plan_rolls_to_next_day_after_cutoff(fake_hass, monkeypatch):
+    """After the cutoff, arbitrage planning should target the next day's configured deadline."""
     base_time = datetime(2025, 10, 14, 9, 30, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
 
     config = _base_config()
     config.update(
         {
-            CONF_BATTERY_DUMP_TARGET_SOC: 20,
-            CONF_BATTERY_DUMP_DEADLINE_HOUR: 9,
+            CONF_ARBITRAGE_MODE_RESERVE_SOC: 20,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 9,
             "feedin_adjustment_multiplier": 1.0,
             "feedin_adjustment_offset": 0.0,
             "feedin_price_threshold": 0.05,
@@ -1983,7 +1985,7 @@ def test_battery_dump_plan_rolls_to_next_day_after_cutoff(fake_hass, monkeypatch
         for slot in range(4)
     ]
 
-    plan = coordinator._calculate_battery_dump_plan(
+    plan = coordinator._calculate_arbitrage_mode_plan(
         {
             "battery_details": [
                 {
@@ -2005,20 +2007,20 @@ def test_battery_dump_plan_rolls_to_next_day_after_cutoff(fake_hass, monkeypatch
     assert parsed_last_end <= parsed_deadline
 
 
-def test_battery_dump_deadline_skips_nonexistent_local_hour_on_dst_start(fake_hass, monkeypatch):
+def test_arbitrage_mode_deadline_skips_nonexistent_local_hour_on_dst_start(fake_hass, monkeypatch):
     """A missing local cutoff hour should move to the first valid instant after the gap."""
     base_time = datetime(2026, 3, 29, 0, 30, tzinfo=timezone.utc)  # 01:30 local Brussels
     _freeze_time(monkeypatch, base_time)
 
     config = _base_config()
-    config[CONF_BATTERY_DUMP_DEADLINE_HOUR] = 2
+    config[CONF_ARBITRAGE_MODE_DEADLINE_HOUR] = 2
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
     original_tz = dt_util.DEFAULT_TIME_ZONE
     dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
 
     try:
-        deadline = coordinator._battery_dump_deadline(base_time)
+        deadline = coordinator._arbitrage_mode_deadline(base_time)
         deadline_local = dt_util.as_local(deadline)
     finally:
         dt_util.set_default_time_zone(original_tz)
@@ -2028,20 +2030,20 @@ def test_battery_dump_deadline_skips_nonexistent_local_hour_on_dst_start(fake_ha
     assert deadline_local.minute == 0
 
 
-def test_battery_dump_deadline_uses_first_ambiguous_local_hour_on_dst_end(fake_hass, monkeypatch):
+def test_arbitrage_mode_deadline_uses_first_ambiguous_local_hour_on_dst_end(fake_hass, monkeypatch):
     """A repeated local cutoff hour should resolve to the earliest matching instant."""
     base_time = datetime(2026, 10, 24, 23, 30, tzinfo=timezone.utc)  # 01:30 local Brussels
     _freeze_time(monkeypatch, base_time)
 
     config = _base_config()
-    config[CONF_BATTERY_DUMP_DEADLINE_HOUR] = 2
+    config[CONF_ARBITRAGE_MODE_DEADLINE_HOUR] = 2
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
     original_tz = dt_util.DEFAULT_TIME_ZONE
     dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
 
     try:
-        deadline = coordinator._battery_dump_deadline(base_time)
+        deadline = coordinator._arbitrage_mode_deadline(base_time)
         deadline_local = dt_util.as_local(deadline)
     finally:
         dt_util.set_default_time_zone(original_tz)
@@ -2050,6 +2052,249 @@ def test_battery_dump_deadline_uses_first_ambiguous_local_hour_on_dst_end(fake_h
     assert deadline_local.hour == 2
     assert deadline_local.minute == 0
     assert deadline_local.utcoffset() == timedelta(hours=2)
+
+
+def test_select_buy_slots_picks_cheapest_within_deadline(fake_hass, monkeypatch):
+    """select_buy_slots should pick the cheapest slots and exclude any after the deadline."""
+    base_time = datetime(2025, 10, 14, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    # 8 slots: first 4 at -0.10€/kWh (within deadline), last 4 at -0.20€/kWh (excluded by deadline).
+    timeline = []
+    for slot in range(8):
+        start = base_time + timedelta(minutes=15 * slot)
+        end = start + timedelta(minutes=15)
+        price = -0.10 if slot < 4 else -0.20
+        timeline.append((start, end, price))
+    deadline = base_time + timedelta(hours=1)
+
+    selection = coordinator._select_buy_slots(
+        timeline,
+        base_time,
+        timedelta(minutes=30),
+        -0.05,
+        latest_end=deadline,
+    )
+
+    assert selection is not None
+    assert selection["selected_slots_count"] == 2
+    assert selection["covers_full_charge"] is True
+    assert selection["buy_price_threshold"] == pytest.approx(-0.10, rel=1e-6)
+    for slot in selection["selected_slots"]:
+        assert slot["end"] <= deadline
+        assert slot["price"] == pytest.approx(-0.10, rel=1e-6)
+
+
+def test_select_buy_slots_returns_none_when_no_slot_below_threshold(fake_hass, monkeypatch):
+    """select_buy_slots should return None when every slot is above the maximum price."""
+    base_time = datetime(2025, 10, 14, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    timeline = [
+        (
+            base_time + timedelta(minutes=15 * slot),
+            base_time + timedelta(minutes=15 * (slot + 1)),
+            0.10,
+        )
+        for slot in range(4)
+    ]
+
+    assert (
+        coordinator._select_buy_slots(
+            timeline,
+            base_time,
+            timedelta(minutes=30),
+            -0.05,
+        )
+        is None
+    )
+
+
+def test_negative_buy_plan_disabled_when_mode_off(fake_hass, monkeypatch):
+    """Without the override, the negative-buy plan should report disabled."""
+    base_time = datetime(2025, 10, 14, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    plan = coordinator._calculate_negative_buy_plan(
+        {
+            "battery_details": [],
+            "nordpool_prices_today": None,
+            "nordpool_prices_tomorrow": None,
+        }
+    )
+
+    assert plan["enabled"] is False
+    assert plan["active"] is False
+    assert plan["solar_curtail_active"] is False
+    assert plan["selected_slots"] == []
+    assert "disabled" in plan["reason"].lower()
+
+
+def test_negative_buy_plan_calculates_required_energy_and_duration(fake_hass, monkeypatch):
+    """When armed, the planner should size the buy window from SOC headroom and import cap."""
+    base_time = datetime(2025, 10, 14, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_MAX_SOC_THRESHOLD: 90,
+            CONF_NEGATIVE_BUY_THRESHOLD: -0.05,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 23,
+            "max_battery_power": 4000,
+            "max_grid_power": 6000,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._manual_overrides["negative_buy_mode"] = {
+        "value": True,
+        "reason": "Negative buy",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    # 50% SOC on a 10kWh battery -> need (90-50)% × 10 = 4 kWh.
+    # Import cap = min(4000W, 6000W) = 4kW -> required duration = 1 hour = 4 × 15min slots.
+    intervals = [
+        _make_price_interval(base_time + timedelta(minutes=15 * slot), -100.0)
+        for slot in range(8)
+    ]
+
+    plan = coordinator._calculate_negative_buy_plan(
+        {
+            "battery_details": [
+                {
+                    "entity_id": "sensor.battery_soc_1",
+                    "soc": 50,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                }
+            ],
+            "nordpool_prices_today": {"BE": intervals},
+            "nordpool_prices_tomorrow": None,
+        }
+    )
+
+    assert plan["enabled"] is True
+    assert plan["required_energy_kwh"] == pytest.approx(4.0, rel=1e-6)
+    assert plan["required_duration_hours"] == pytest.approx(1.0, rel=1e-6)
+    assert plan["configured_import_cap_w"] == 4000
+    assert plan["selected_slots_count"] == 4
+    assert plan["slots_cover_full_charge"] is True
+    assert plan["buy_price_threshold"] == pytest.approx(-0.10, rel=1e-6)
+    assert plan["current_slot_price"] == pytest.approx(-0.10, rel=1e-6)
+    assert plan["active"] is True
+    assert plan["solar_curtail_active"] is True
+    assert plan["import_power"] == 4000
+    assert "Negative Arbitrage Buy active" in plan["reason"]
+
+
+def test_negative_buy_plan_curtails_solar_when_battery_at_ceiling(fake_hass, monkeypatch):
+    """At/above the SOC ceiling, the planner should arm solar curtailment without grid charging."""
+    base_time = datetime(2025, 10, 14, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_MAX_SOC_THRESHOLD: 90,
+            CONF_NEGATIVE_BUY_THRESHOLD: -0.05,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 23,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._manual_overrides["negative_buy_mode"] = {
+        "value": True,
+        "reason": "Negative buy",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    intervals = [
+        _make_price_interval(base_time + timedelta(minutes=15 * slot), -100.0)
+        for slot in range(4)
+    ]
+
+    plan = coordinator._calculate_negative_buy_plan(
+        {
+            "battery_details": [
+                {
+                    "entity_id": "sensor.battery_soc_1",
+                    "soc": 95,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                }
+            ],
+            "nordpool_prices_today": {"BE": intervals},
+            "nordpool_prices_tomorrow": None,
+        }
+    )
+
+    assert plan["enabled"] is True
+    assert plan["required_energy_kwh"] == 0.0
+    assert plan["active"] is False
+    assert plan["solar_curtail_active"] is True
+    assert plan["current_slot_price"] == pytest.approx(-0.10, rel=1e-6)
+    assert "SOC ceiling" in plan["reason"]
+
+
+def test_negative_buy_plan_rolls_to_next_day_after_cutoff(fake_hass, monkeypatch):
+    """After today's cutoff, the buy deadline should target tomorrow's configured hour."""
+    base_time = datetime(2025, 10, 14, 11, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config.update(
+        {
+            CONF_MAX_SOC_THRESHOLD: 90,
+            CONF_NEGATIVE_BUY_THRESHOLD: -0.05,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 10,
+            "max_battery_power": 2000,
+            "max_grid_power": 6000,
+        }
+    )
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._manual_overrides["negative_buy_mode"] = {
+        "value": True,
+        "reason": "Negative buy",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    tomorrow_start = base_time + timedelta(hours=18)  # 05:00 UTC the next day
+    tomorrow_intervals = [
+        _make_price_interval(tomorrow_start + timedelta(minutes=15 * slot), -100.0)
+        for slot in range(8)
+    ]
+
+    plan = coordinator._calculate_negative_buy_plan(
+        {
+            "battery_details": [
+                {
+                    "entity_id": "sensor.battery_soc_1",
+                    "soc": 50,
+                    "capacity": 10.0,
+                    "phases": ["phase_1"],
+                }
+            ],
+            "nordpool_prices_today": None,
+            "nordpool_prices_tomorrow": {"BE": tomorrow_intervals},
+        }
+    )
+
+    parsed_deadline = dt_util.parse_datetime(plan["deadline"])
+    assert dt_util.as_utc(parsed_deadline) == datetime(
+        2025, 10, 15, 10, 0, tzinfo=timezone.utc
+    )
+    for slot in plan["selected_slots"]:
+        parsed_end = dt_util.parse_datetime(slot["end"])
+        assert parsed_end <= parsed_deadline
 
 
 def test_forecast_summary_uses_price_timeline(fake_hass, monkeypatch):
@@ -2283,11 +2528,11 @@ async def test_service_accepts_explicit_entry(fake_hass, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_service_can_enable_battery_dump_mode(fake_hass, monkeypatch):
-    """Battery dump target should route to the dedicated coordinator helper."""
+async def test_service_can_enable_arbitrage_mode(fake_hass, monkeypatch):
+    """Arbitrage mode target should route to the dedicated coordinator helper."""
     config = _base_config()
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator.async_set_battery_dump_mode = AsyncMock()
+    coordinator.async_set_arbitrage_mode = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
 
     from custom_components.electricity_planner.__init__ import _register_services_once
@@ -2301,12 +2546,12 @@ async def test_service_can_enable_battery_dump_mode(fake_hass, monkeypatch):
     await handler(
         FakeServiceCall(
             {
-                ATTR_TARGET: MANUAL_OVERRIDE_TARGET_BATTERY_DUMP,
+                ATTR_TARGET: MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE,
             }
         )
     )
 
-    coordinator.async_set_battery_dump_mode.assert_awaited_once_with(reason=None)
+    coordinator.async_set_arbitrage_mode.assert_awaited_once_with(reason=None)
     coordinator.async_request_refresh.assert_awaited_once()
 
 

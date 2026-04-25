@@ -15,7 +15,7 @@ from .const import (
     PHASE_MODE_THREE,
     CONF_MIN_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD,
-    CONF_BATTERY_DUMP_TARGET_SOC,
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_MAX_SOC_THRESHOLD_SOLAR,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
@@ -50,7 +50,7 @@ from .const import (
     CONF_SOC_BUFFER_TARGET,
     DEFAULT_MIN_SOC,
     DEFAULT_MAX_SOC,
-    DEFAULT_BATTERY_DUMP_TARGET_SOC,
+    DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
     DEFAULT_MAX_SOC_SUNNY,
     DEFAULT_MAX_SOC_SOLAR,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
@@ -259,7 +259,7 @@ class EngineSettings:
     significant_solar_threshold: int
     min_soc_threshold: float
     max_soc_threshold: float
-    battery_dump_target_soc: float
+    arbitrage_mode_reserve_soc: float
     max_soc_threshold_sunny: float
     max_soc_threshold_solar: float
     sunny_forecast_threshold_kwh: float
@@ -392,10 +392,10 @@ class EngineSettings:
         max_soc_threshold = extractor.get_float(
             CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC, "max_soc_threshold"
         )
-        battery_dump_target_soc = extractor.get_float(
-            CONF_BATTERY_DUMP_TARGET_SOC,
-            DEFAULT_BATTERY_DUMP_TARGET_SOC,
-            "battery_dump_target_soc",
+        arbitrage_mode_reserve_soc = extractor.get_float(
+            CONF_ARBITRAGE_MODE_RESERVE_SOC,
+            DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
+            "arbitrage_mode_reserve_soc",
         )
         max_soc_threshold_sunny = extractor.get_float(
             CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY,
@@ -473,7 +473,7 @@ class EngineSettings:
             significant_solar_threshold=significant_solar_threshold,
             min_soc_threshold=min_soc_threshold,
             max_soc_threshold=max_soc_threshold,
-            battery_dump_target_soc=battery_dump_target_soc,
+            arbitrage_mode_reserve_soc=arbitrage_mode_reserve_soc,
             max_soc_threshold_sunny=max_soc_threshold_sunny,
             max_soc_threshold_solar=max_soc_threshold_solar,
             sunny_forecast_threshold_kwh=sunny_forecast_threshold_kwh,
@@ -543,10 +543,13 @@ class CycleContext:
     charger_limit: int
     arbitrage_mode_enabled: bool
     arbitrage_mode_active: bool
-    battery_dump_export_power: int
-    battery_dump_target_soc: float
-    battery_dump_active: bool
-    arbitrage_reserve_soc: float
+    arbitrage_mode_export_power: int
+    arbitrage_mode_reserve_soc: float
+    arbitrage_mode_export_active: bool
+    negative_buy_mode_enabled: bool
+    negative_buy_mode_active: bool
+    negative_buy_curtail_solar: bool
+    negative_buy_import_power: int
     allocated_car_solar: float
     remaining_solar: float
     car_arbitrage_power: int
@@ -626,18 +629,18 @@ class CycleContext:
 
         battery_grid_charging = bool(data.get("battery_grid_charging", False))
         car_grid_charging = bool(data.get("car_grid_charging", False))
-        battery_dump_export_power = max(
+        arbitrage_mode_export_power = max(
             0,
-            int(_safe_optional_float(data.get("battery_dump_export_power")) or 0),
+            int(_safe_optional_float(data.get("arbitrage_mode_export_power")) or 0),
         )
-        battery_dump_target_soc = _safe_optional_float(data.get("battery_dump_target_soc"))
-        if battery_dump_target_soc is None:
-            battery_dump_target_soc = settings.battery_dump_target_soc
-        battery_dump_target_soc = max(0.0, min(100.0, float(battery_dump_target_soc)))
+        arbitrage_mode_reserve_soc = _safe_optional_float(data.get("arbitrage_mode_reserve_soc"))
+        if arbitrage_mode_reserve_soc is None:
+            arbitrage_mode_reserve_soc = settings.arbitrage_mode_reserve_soc
+        arbitrage_mode_reserve_soc = max(0.0, min(100.0, float(arbitrage_mode_reserve_soc)))
 
         arbitrage_mode_active = bool(data.get("arbitrage_mode_active"))
-        battery_dump_active = (
-            arbitrage_mode_active and battery_dump_export_power > 0
+        arbitrage_mode_export_active = (
+            arbitrage_mode_active and arbitrage_mode_export_power > 0
         )
 
         allocated_car_solar = (
@@ -649,12 +652,12 @@ class CycleContext:
         if (
             settings.car_use_battery_arbitrage
             and arbitrage_mode_active
-            and battery_dump_export_power > 0
+            and arbitrage_mode_export_power > 0
             and not battery_grid_charging
             and battery_average_soc is not None
-            and battery_average_soc >= battery_dump_target_soc
+            and battery_average_soc >= arbitrage_mode_reserve_soc
         ):
-            car_arbitrage_power = battery_dump_export_power
+            car_arbitrage_power = arbitrage_mode_export_power
 
         return cls(
             current_price=_safe_optional_float(price_analysis.get("current_price")),
@@ -732,10 +735,16 @@ class CycleContext:
             ),
             arbitrage_mode_enabled=bool(data.get("arbitrage_mode_enabled")),
             arbitrage_mode_active=arbitrage_mode_active,
-            battery_dump_export_power=battery_dump_export_power,
-            battery_dump_target_soc=battery_dump_target_soc,
-            battery_dump_active=battery_dump_active,
-            arbitrage_reserve_soc=battery_dump_target_soc,
+            arbitrage_mode_export_power=arbitrage_mode_export_power,
+            arbitrage_mode_reserve_soc=arbitrage_mode_reserve_soc,
+            arbitrage_mode_export_active=arbitrage_mode_export_active,
+            negative_buy_mode_enabled=bool(data.get("negative_buy_mode_enabled")),
+            negative_buy_mode_active=bool(data.get("negative_buy_mode_active")),
+            negative_buy_curtail_solar=bool(data.get("negative_buy_curtail_solar")),
+            negative_buy_import_power=max(
+                0,
+                int(_safe_optional_float(data.get("negative_buy_import_power")) or 0),
+            ),
             allocated_car_solar=float(allocated_car_solar),
             remaining_solar=float(
                 _safe_optional_float(power_allocation.get("remaining_solar")) or 0.0

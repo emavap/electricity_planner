@@ -33,6 +33,17 @@ v19 → v20: Added ``battery_dump_deadline_hour`` so the arbitrage mode cutoff c
            be configured instead of always using noon.
 v20 → v21: Added ``max_soc_threshold_solar`` so the solar-charging ceiling is
            independent from the grid-charging ``max_soc_threshold``.
+v21 → v22: Added ``negative_buy_threshold`` for the Negative Arbitrage Buy mode
+           (force grid-charge battery when net buy price drops below the
+           threshold). The cutoff hour is shared with arbitrage selling via
+           ``battery_dump_deadline_hour``; defensively removes the in-progress
+           ``negative_buy_deadline_hour`` key from data and options if it was
+           ever stored by a pre-release dev install.
+v22 → v23: Renamed legacy ``battery_dump_*`` storage keys in ``entry.data`` and
+           ``entry.options`` to their ``arbitrage_mode_*`` equivalents
+           (``battery_dump_target_soc`` → ``arbitrage_mode_reserve_soc``,
+           ``battery_dump_deadline_hour`` → ``arbitrage_mode_deadline_hour``,
+           ``battery_dump_max_export_power`` → ``arbitrage_mode_max_export_power``).
 """
 from __future__ import annotations
 
@@ -58,7 +69,10 @@ from .const import (
     CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_SOC_PRICE_MULTIPLIER_MAX,
     CONF_SOC_BUFFER_TARGET,
-    CONF_BATTERY_DUMP_DEADLINE_HOUR,
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
+    CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+    CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
+    CONF_NEGATIVE_BUY_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_MAX_SOC_THRESHOLD_SOLAR,
     CONF_SOLAR_FORECAST_START_HOUR,
@@ -86,7 +100,8 @@ from .const import (
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
     DEFAULT_SOC_BUFFER_TARGET,
-    DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
+    DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
+    DEFAULT_NEGATIVE_BUY_THRESHOLD,
     DEFAULT_MAX_SOC_SOLAR,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
@@ -110,7 +125,7 @@ _LEGACY_DEFAULT_MAX_SOC = 90
 _LEGACY_DEFAULT_MAX_SOC_SUNNY = 50
 
 # Current config version
-CURRENT_VERSION = 21
+CURRENT_VERSION = 23
 
 
 def _validate_numeric_config(
@@ -583,23 +598,25 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.info("Migration to version 19 complete")
 
     if entry.version == 19:
+        # Historical migration: stored under the legacy key
+        # ``battery_dump_deadline_hour``; the v22 → v23 migration below renames
+        # it to ``arbitrage_mode_deadline_hour``.
         new_data = {**entry.data}
+        legacy_key = "battery_dump_deadline_hour"
 
-        if CONF_BATTERY_DUMP_DEADLINE_HOUR not in new_data:
-            new_data[CONF_BATTERY_DUMP_DEADLINE_HOUR] = (
-                DEFAULT_BATTERY_DUMP_DEADLINE_HOUR
-            )
+        if legacy_key not in new_data:
+            new_data[legacy_key] = DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR
             _LOGGER.info(
                 "Added battery_dump_deadline_hour: %d",
-                DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
+                DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
             )
 
         _normalize_integral_config(
             new_data,
-            CONF_BATTERY_DUMP_DEADLINE_HOUR,
+            legacy_key,
             0,
             23,
-            DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
+            DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
             "battery_dump_deadline_hour",
         )
 
@@ -637,5 +654,72 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
         _LOGGER.info("Migration to version 21 complete")
+
+    if entry.version == 21:
+        new_data = {**entry.data}
+        new_options = {**entry.options}
+
+        if CONF_NEGATIVE_BUY_THRESHOLD not in new_data:
+            new_data[CONF_NEGATIVE_BUY_THRESHOLD] = DEFAULT_NEGATIVE_BUY_THRESHOLD
+            _LOGGER.info(
+                "Added negative_buy_threshold: %.3f€/kWh",
+                DEFAULT_NEGATIVE_BUY_THRESHOLD,
+            )
+
+        # Defensive cleanup: pre-release dev installs may have stored an
+        # independent ``negative_buy_deadline_hour`` before it was unified
+        # with the arbitrage cutoff (``battery_dump_deadline_hour``).
+        if new_data.pop("negative_buy_deadline_hour", None) is not None:
+            _LOGGER.info(
+                "Removed obsolete negative_buy_deadline_hour from data — unified"
+                " with battery_dump_deadline_hour"
+            )
+        if new_options.pop("negative_buy_deadline_hour", None) is not None:
+            _LOGGER.info(
+                "Removed obsolete negative_buy_deadline_hour from options —"
+                " unified with battery_dump_deadline_hour"
+            )
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            options=new_options,
+            version=22,
+        )
+
+        _LOGGER.info("Migration to version 22 complete")
+
+    if entry.version == 22:
+        # Rename legacy ``battery_dump_*`` keys to ``arbitrage_mode_*`` in both
+        # ``entry.data`` and ``entry.options``. Internal-only keys; users never
+        # type these.
+        new_data = {**entry.data}
+        new_options = {**entry.options}
+
+        rename_map = {
+            "battery_dump_target_soc": CONF_ARBITRAGE_MODE_RESERVE_SOC,
+            "battery_dump_deadline_hour": CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+            "battery_dump_max_export_power": CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
+        }
+
+        for source_dict in (new_data, new_options):
+            for legacy_key, new_key in rename_map.items():
+                if legacy_key in source_dict and new_key not in source_dict:
+                    source_dict[new_key] = source_dict.pop(legacy_key)
+                    _LOGGER.info(
+                        "Renamed %s → %s", legacy_key, new_key,
+                    )
+                elif legacy_key in source_dict:
+                    # New key already present; drop the legacy duplicate.
+                    source_dict.pop(legacy_key)
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            options=new_options,
+            version=23,
+        )
+
+        _LOGGER.info("Migration to version 23 complete")
 
     return True

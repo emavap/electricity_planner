@@ -189,10 +189,14 @@ custom_components/electricity_planner/
 ├── coordinator.py       # Data coordination and state management
 ├── decision_engine.py   # Core charging decision algorithms
 ├── strategies.py        # Decision strategies (6 strategy classes + inline PriceThresholdGuard)
-├── config_flow.py       # UI configuration + options flow (multi-step wizard, schema v20)
+├── config_flow.py       # UI configuration + options flow (multi-step wizard, schema v23)
 ├── sensor.py           # Analysis sensors (price, battery, power, diagnostics)
 ├── binary_sensor.py    # Main boolean outputs for charging decisions
-├── migrations.py       # Configuration migration system (v1→v20)
+├── number.py           # Live-adjust SOC/threshold/deadline number entities
+├── switch.py           # Runtime mode switches (permissive, arbitrage, negative buy, disable charging)
+├── arbitrage_mode.py   # Arbitrage sell planner (formerly battery_dump.py)
+├── negative_buy.py     # Negative Arbitrage Buy planner (force grid-charge during negative prices)
+├── migrations.py       # Configuration migration system (v1→v23)
 ├── manifest.json       # Integration metadata and dependencies
 └── strings.json        # UI text and translations
 ```
@@ -228,19 +232,40 @@ The integration is designed for dynamic electricity markets:
 
 ### Current Version
 
-- **Integration Version**: 6.0.2
-- **Config Schema Version**: 21
-- **Migration Path**: Automatic v1→v21 migration
+- **Integration Version**: 6.1.0
+- **Config Schema Version**: 23
+- **Migration Path**: Automatic v1→v23 migration
 
 ### Configuration Categories
 
 1. **Entity Selection**: Nord Pool, battery, solar, car, power flow, solar forecast entities
-2. **SOC Thresholds**: Min/max SOC (grid), sunny-day max SOC (grid), **solar-specific max SOC**, emergency overrides, predictive logic thresholds
-3. **Price Thresholds**: Price threshold, very low price %, feed-in threshold
-4. **Power Limits**: Max battery/car/grid power, charging thresholds
+2. **SOC Thresholds**: Min/max SOC (grid), sunny-day max SOC (grid), **solar-specific max SOC**, emergency overrides, predictive logic thresholds, **arbitrage reserve SOC**
+3. **Price Thresholds**: Price threshold, very low price %, feed-in threshold, **negative-buy threshold**
+4. **Power Limits**: Max battery/car/grid power, charging thresholds, **arbitrage export cap**
 5. **Solar Parameters**: Significant solar surplus threshold, forecast start hour
+6. **Arbitrage Mode**: Reserve SOC, deadline hour (shared by sell + negative-buy planning), max export power
 
 ### Recent Changes
+
+**v6.1.0** (Negative Arbitrage Buy mode + arbitrage-mode rename)
+
+- **Added**: **Negative Arbitrage Buy mode** (`negative_buy.py`) — when the *net* feed-in price drops below `CONF_NEGATIVE_BUY_THRESHOLD` (default `-0.05 €/kWh`, i.e. truly paid-to-consume), the planner force-grid-charges batteries up to `max_soc_threshold` and curtails solar export so the inverter ramps down instead of paying to inject. Companion to the existing arbitrage *sell* path; both are gated by the same shared `arbitrage_mode_deadline_hour`.
+- **Added**: `switch.electricity_planner_negative_arbitrage_buy_mode` runtime toggle (`switch.py`) wired through `runtime_modes.py` and exposed on both bundled dashboards.
+- **Added**: Live-adjustable number entities — `number.electricity_planner_arbitrage_mode_deadline_hour` and `number.electricity_planner_negative_buy_threshold` — joining the existing `arbitrage_mode_reserve_soc` slider. All three live-update the coordinator without an integration reload (registered in `LIVE_UPDATE_OPTIONS`).
+- **Renamed (project-wide)**: `Battery Dump` → `Arbitrage Mode`. Affects:
+  - Config keys: `battery_dump_target_soc` → `arbitrage_mode_reserve_soc`, `battery_dump_deadline_hour` → `arbitrage_mode_deadline_hour`, `battery_dump_max_export_power` → `arbitrage_mode_max_export_power`.
+  - Constants: `CONF_BATTERY_DUMP_*` → `CONF_ARBITRAGE_MODE_*`, `MANUAL_OVERRIDE_TARGET_BATTERY_DUMP` → `MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE`.
+  - Module: `battery_dump.py` → `arbitrage_mode.py` (and consumers updated).
+  - Number entity: `number.electricity_planner_battery_dump_target_soc` → `number.electricity_planner_arbitrage_mode_reserve_soc`. **The unique_id suffix is intentionally preserved** (`battery_dump_target_soc`) so historical statistics survive the rename — only the entity_id slug is migrated via `_async_migrate_entity_ids`.
+  - Internal slot-selection keys: `select_export_slots()` returns `export_price_threshold` / `covers_full_export` (was `dump_price_threshold` / `covers_full_dump`); `arbitrage_mode.py` continues to expose them publicly as `arbitrage_price_threshold` / `slots_cover_full_arbitrage`.
+- **Added**: Manual-override service targets `arbitrage_mode` and `negative_buy` in `services.yaml`, `__init__.py` schemas, and the README override table. Both targets are state-based (no `action` / `duration` / `charger_limit` / `grid_setpoint` accepted; service raises `HomeAssistantError` if any are passed).
+- **Added**: Config-schema migration path **v21 → v22 → v23**:
+  - v21→v22 backfills `negative_buy_threshold = -0.05` and defensively strips any pre-release `negative_buy_deadline_hour` key (the deadline is shared with arbitrage selling).
+  - v22→v23 renames the legacy `battery_dump_*` storage keys in both `entry.data` and `entry.options` to their `arbitrage_mode_*` equivalents.
+- **Added**: Solar Max SOC parity in both bundled dashboards — `number.electricity_planner_max_soc_threshold_solar` is now a first-class control alongside `max_soc_threshold` and `max_soc_threshold_sunny` (was previously only exposed via the auto-generated dashboard).
+- **Audited**: Energie.be Dynamic (April 2026, Particulier — Vlaanderen) reference contract verified against codebase defaults — all per-kWh price formulas, transport tariffs, GSC/WKK, and Belgian taxes match exactly. No constant changes required.
+- **Tests**: 474/474 passing (added coverage for the new override targets, dashboard entity-reference resolution for the negative-buy/arbitrage controls, and the rename-aware migration path).
+- **Compatibility**: Existing config entries are migrated automatically on next load. Number-entity history for the renamed reserve-SOC slider is preserved via the unique_id-stable rename. Drop-in replacement for v6.0.2.
 
 **v6.0.2** (logic-review follow-up — small fixes, no behavior drift)
 
@@ -263,7 +288,7 @@ The integration is designed for dynamic electricity markets:
 
 - **Refactor**: Decomposed `ChargingDecisionEngine` (~3100 LOC) and `ElectricityPlannerCoordinator` (~3415 LOC) into 22 focused collaborator modules. Final sizes: `decision_engine.py` 1472 LOC (−52%), `coordinator.py` 1356 LOC (−60%).
 - **New modules — engine-side**: `inverter_derating.py`, `feedin_decision.py`, `battery_analysis.py`, `price_analysis.py`, `threshold_calculator.py`, `charging_window.py`, `car_charging.py`, `battery_charging.py`, `solar_allocation.py`, `grid_setpoint.py`, `charger_limit.py`, `override_recalculator.py`, `phase_distributor.py`.
-- **New modules — coordinator-side**: `price_timeline.py`, `transport_cost.py`, `nordpool_service.py`, `battery_dump.py`, `forecast_summary.py`, `solar_forecast.py`, `entity_status.py`, `manual_overrides.py`, `runtime_modes.py`.
+- **New modules — coordinator-side**: `price_timeline.py`, `transport_cost.py`, `nordpool_service.py`, `arbitrage_mode.py` (formerly `battery_dump.py`), `forecast_summary.py`, `solar_forecast.py`, `entity_status.py`, `manual_overrides.py`, `runtime_modes.py`.
 - **Patterns**: Collaborators receive an `EngineSettings` snapshot or share a `CycleContext` per decision cycle. Public API of `ChargingDecisionEngine` and `ElectricityPlannerCoordinator` is unchanged; only the load-bearing orchestration methods remain on the parent classes.
 - **Cleanup**: Removed 32 dead private delegator methods (unreachable after extraction) and 5 unused imports. No test churn — all existing monkeypatch / attribute access call-sites still resolve correctly.
 - **Tests**: 456 pytest tests passing (433 lines of new test coverage in `tests/test_decision_engine_power.py` and `tests/test_strategies_smoke.py`).

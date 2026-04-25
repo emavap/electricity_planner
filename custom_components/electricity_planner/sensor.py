@@ -589,9 +589,9 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
             "solar_surplus": self.coordinator.data.get("power_analysis", {}).get("solar_surplus", 0),
             "battery_average_soc": self.coordinator.data.get("battery_analysis", {}).get("average_soc", 0),
             "arbitrage_mode_active": self.coordinator.data.get("arbitrage_mode_active", False),
-            "battery_dump_export_power": self.coordinator.data.get("battery_dump_export_power", 0),
-            "battery_dump_configured_export_cap_w": (
-                self.coordinator.data.get("battery_dump_plan", {}).get("configured_export_cap_w")
+            "arbitrage_mode_export_power": self.coordinator.data.get("arbitrage_mode_export_power", 0),
+            "arbitrage_mode_configured_export_cap_w": (
+                self.coordinator.data.get("arbitrage_mode_plan", {}).get("configured_export_cap_w")
             ),
             "monthly_grid_peak": monthly_peak,
             "applied_monthly_grid_peak": applied_monthly_peak,
@@ -746,7 +746,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "inverter_derating_reason": self.coordinator.data.get("inverter_derating_reason", ""),
                 "inverter_derating_alarm": self.coordinator.data.get("inverter_derating_alarm", False),
                 "inverter_derating_alarm_reason": self.coordinator.data.get("inverter_derating_alarm_reason", ""),
-                "battery_dump_plan": self.coordinator.data.get("battery_dump_plan", {}),
+                "arbitrage_mode_plan": self.coordinator.data.get("arbitrage_mode_plan", {}),
                 "grid_components": self.coordinator.data.get("grid_components", {}),
                 "phase_mode": self.coordinator.data.get("phase_mode", PHASE_MODE_SINGLE),
                 "phase_results": self.coordinator.data.get("phase_results", {}),

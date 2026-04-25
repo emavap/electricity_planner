@@ -23,8 +23,8 @@ from custom_components.electricity_planner.const import (
     ATTR_ACTION,
     ATTR_DURATION,
     ATTR_TARGET,
+    CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
     CONF_BATTERY_CAPACITIES,
-    CONF_BATTERY_DUMP_DEADLINE_HOUR,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_ENERGY_COST_GSC,
     CONF_ENERGY_COST_WKK,
@@ -46,7 +46,7 @@ from custom_components.electricity_planner.const import (
     DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
     DEFAULT_INVERTER_EXPORT_DEADBAND,
     DEFAULT_INVERTER_EXPORT_LIMIT,
-    DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
+    DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
     DEFAULT_MAX_INVERTER_POWER,
     DEFAULT_ENERGY_COST_GSC,
     DEFAULT_ENERGY_COST_WKK,
@@ -55,9 +55,10 @@ from custom_components.electricity_planner.const import (
     DEFAULT_TRANSPORT_COST_DAY,
     DEFAULT_TRANSPORT_COST_NIGHT,
     ATTR_GRID_SETPOINT_OVERRIDE,
-    MANUAL_OVERRIDE_TARGET_BATTERY_DUMP,
+    MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE,
     MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
     MANUAL_OVERRIDE_TARGET_GRID_SETPOINT,
+    MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY,
     SERVICE_SET_MANUAL_OVERRIDE,
     DOMAIN,
 )
@@ -98,12 +99,12 @@ async def test_async_reload_entry_applies_live_options_without_full_reload():
             CONF_CURRENT_PRICE_ENTITY: "sensor.current_price",
             CONF_MAX_SOC_THRESHOLD: 90,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
-            CONF_BATTERY_DUMP_DEADLINE_HOUR: 12,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 12,
             CONF_SOLAR_FORECAST_START_HOUR: 20,
             CONF_SUNNY_FORECAST_THRESHOLD_KWH: 5.0,
         },
         options={
-            CONF_BATTERY_DUMP_DEADLINE_HOUR: 8,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 8,
             CONF_SOLAR_FORECAST_START_HOUR: 18,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 45,
             CONF_SUNNY_FORECAST_THRESHOLD_KWH: 6.5,
@@ -116,7 +117,7 @@ async def test_async_reload_entry_applies_live_options_without_full_reload():
             CONF_CURRENT_PRICE_ENTITY: "sensor.current_price",
             CONF_MAX_SOC_THRESHOLD: 90,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
-            CONF_BATTERY_DUMP_DEADLINE_HOUR: 12,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 12,
             CONF_SOLAR_FORECAST_START_HOUR: 20,
             CONF_SUNNY_FORECAST_THRESHOLD_KWH: 5.0,
         },
@@ -134,7 +135,7 @@ async def test_async_reload_entry_applies_live_options_without_full_reload():
     assert coordinator.config[CONF_SOLAR_FORECAST_START_HOUR] == 18
     assert coordinator.config[CONF_MAX_SOC_THRESHOLD_SUNNY] == 45
     assert coordinator.config[CONF_SUNNY_FORECAST_THRESHOLD_KWH] == 6.5
-    assert coordinator.config[CONF_BATTERY_DUMP_DEADLINE_HOUR] == 8
+    assert coordinator.config[CONF_ARBITRAGE_MODE_DEADLINE_HOUR] == 8
     refresh_settings.assert_called_once_with(coordinator.config)
     coordinator.async_request_refresh.assert_awaited_once()
     hass.config_entries.async_reload.assert_not_called()
@@ -149,7 +150,7 @@ async def test_async_reload_entry_performs_full_reload_for_non_live_changes():
             CONF_CURRENT_PRICE_ENTITY: "sensor.current_price_new",
             CONF_MAX_SOC_THRESHOLD: 90,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
-            CONF_BATTERY_DUMP_DEADLINE_HOUR: 12,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 12,
             CONF_SOLAR_FORECAST_START_HOUR: 20,
             CONF_SUNNY_FORECAST_THRESHOLD_KWH: 5.0,
         },
@@ -161,7 +162,7 @@ async def test_async_reload_entry_performs_full_reload_for_non_live_changes():
             CONF_CURRENT_PRICE_ENTITY: "sensor.current_price_old",
             CONF_MAX_SOC_THRESHOLD: 90,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
-            CONF_BATTERY_DUMP_DEADLINE_HOUR: 12,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 12,
             CONF_SOLAR_FORECAST_START_HOUR: 20,
             CONF_SUNNY_FORECAST_THRESHOLD_KWH: 5.0,
         },
@@ -186,14 +187,14 @@ async def test_async_reload_entry_skips_when_live_change_already_applied():
             CONF_CURRENT_PRICE_ENTITY: "sensor.current_price",
             CONF_MAX_SOC_THRESHOLD: 90,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
-            CONF_BATTERY_DUMP_DEADLINE_HOUR: 12,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 12,
             CONF_SOLAR_FORECAST_START_HOUR: 20,
             CONF_SUNNY_FORECAST_THRESHOLD_KWH: 5.0,
         },
         options={
             CONF_MAX_SOC_THRESHOLD: 85,
             CONF_MAX_SOC_THRESHOLD_SUNNY: 40,
-            CONF_BATTERY_DUMP_DEADLINE_HOUR: 10,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 10,
         },
     )
 
@@ -201,7 +202,7 @@ async def test_async_reload_entry_skips_when_live_change_already_applied():
         CONF_CURRENT_PRICE_ENTITY: "sensor.current_price",
         CONF_MAX_SOC_THRESHOLD: 85,
         CONF_MAX_SOC_THRESHOLD_SUNNY: 40,
-        CONF_BATTERY_DUMP_DEADLINE_HOUR: 10,
+        CONF_ARBITRAGE_MODE_DEADLINE_HOUR: 10,
         CONF_SOLAR_FORECAST_START_HOUR: 20,
         CONF_SUNNY_FORECAST_THRESHOLD_KWH: 5.0,
     }
@@ -234,6 +235,17 @@ def test_manual_override_service_schema_accepts_negative_grid_setpoint():
     )
 
     assert data[ATTR_GRID_SETPOINT_OVERRIDE] == -4500
+
+
+def test_manual_override_service_schema_accepts_negative_buy_target():
+    """Negative Arbitrage Buy should be callable through the service schema."""
+    data = MANUAL_OVERRIDE_SERVICE_SCHEMA(
+        {
+            ATTR_TARGET: MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY,
+        }
+    )
+
+    assert data[ATTR_TARGET] == MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY
 
 
 @pytest.mark.asyncio
@@ -301,8 +313,8 @@ async def test_manual_override_service_applies_negative_grid_setpoint(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_battery_dump_service_rejects_unsupported_duration(monkeypatch):
-    """battery_dump target should fail fast instead of silently ignoring duration."""
+async def test_arbitrage_mode_service_rejects_unsupported_duration(monkeypatch):
+    """arbitrage_mode target should fail fast instead of silently ignoring duration."""
     hass = FakeHass()
     entry = MockConfigEntry(domain=DOMAIN, data={CONF_CURRENT_PRICE_ENTITY: "sensor.price"}, options={})
 
@@ -312,24 +324,82 @@ async def test_battery_dump_service_rejects_unsupported_duration(monkeypatch):
         lambda self: None,
     )
     coordinator = ElectricityPlannerCoordinator(hass, entry)
-    coordinator.async_set_battery_dump_mode = AsyncMock()
+    coordinator.async_set_arbitrage_mode = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
     hass.data = {DOMAIN: {entry.entry_id: coordinator}}
 
     _register_services_once(hass)
     handler = hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
 
-    with pytest.raises(HomeAssistantError, match="battery_dump target does not accept duration"):
+    with pytest.raises(HomeAssistantError, match="arbitrage_mode target does not accept duration"):
         await handler(
             SimpleNamespace(
                 data={
-                    ATTR_TARGET: MANUAL_OVERRIDE_TARGET_BATTERY_DUMP,
+                    ATTR_TARGET: MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE,
                     ATTR_DURATION: 60,
                 }
             )
         )
 
-    coordinator.async_set_battery_dump_mode.assert_not_awaited()
+    coordinator.async_set_arbitrage_mode.assert_not_awaited()
+    coordinator.async_request_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_negative_buy_service_enables_mode(monkeypatch):
+    """negative_buy target should enable the persistent runtime mode."""
+    hass = FakeHass()
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_CURRENT_PRICE_ENTITY: "sensor.price"}, options={})
+
+    monkeypatch.setattr(
+        ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+    coordinator = ElectricityPlannerCoordinator(hass, entry)
+    coordinator.async_set_negative_buy_mode = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+    hass.data = {DOMAIN: {entry.entry_id: coordinator}}
+
+    _register_services_once(hass)
+    handler = hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
+
+    await handler(SimpleNamespace(data={ATTR_TARGET: MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY}))
+
+    coordinator.async_set_negative_buy_mode.assert_awaited_once_with(reason=None)
+    coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_negative_buy_service_rejects_unsupported_duration(monkeypatch):
+    """negative_buy target should fail fast instead of silently ignoring duration."""
+    hass = FakeHass()
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_CURRENT_PRICE_ENTITY: "sensor.price"}, options={})
+
+    monkeypatch.setattr(
+        ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+    coordinator = ElectricityPlannerCoordinator(hass, entry)
+    coordinator.async_set_negative_buy_mode = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+    hass.data = {DOMAIN: {entry.entry_id: coordinator}}
+
+    _register_services_once(hass)
+    handler = hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
+
+    with pytest.raises(HomeAssistantError, match="negative_buy target does not accept duration"):
+        await handler(
+            SimpleNamespace(
+                data={
+                    ATTR_TARGET: MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY,
+                    ATTR_DURATION: 60,
+                }
+            )
+        )
+
+    coordinator.async_set_negative_buy_mode.assert_not_awaited()
     coordinator.async_request_refresh.assert_not_awaited()
 
 
@@ -346,6 +416,23 @@ def test_services_yaml_allows_negative_grid_setpoint_selector():
     grid_selector = services_data["set_manual_override"]["fields"]["grid_setpoint"]["selector"]["number"]
 
     assert grid_selector["min"] == -50000
+
+
+def test_services_yaml_exposes_negative_buy_target():
+    """The service selector should expose Negative Arbitrage Buy mode."""
+    services_path = (
+        Path(__file__).resolve().parents[1]
+        / "custom_components"
+        / "electricity_planner"
+        / "services.yaml"
+    )
+
+    services_data = yaml.safe_load(services_path.read_text())
+    set_options = services_data["set_manual_override"]["fields"]["target"]["selector"]["select"]["options"]
+    clear_options = services_data["clear_manual_override"]["fields"]["target"]["selector"]["select"]["options"]
+
+    assert MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY in set_options
+    assert MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY in clear_options
 
 
 @pytest.mark.asyncio
@@ -471,7 +558,7 @@ async def test_async_migrate_entry_derives_sunny_threshold_from_option_capacitie
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 21
+    assert entry.version == 23
     assert entry.data[CONF_SUNNY_FORECAST_THRESHOLD_KWH] == pytest.approx(7.0)
     assert entry.data[CONF_MAX_SOC_THRESHOLD] == 90
     assert entry.data[CONF_MAX_SOC_THRESHOLD_SUNNY] == 50
@@ -501,7 +588,7 @@ async def test_async_migrate_entry_preserves_legacy_soc_defaults_for_sparse_v14_
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 21
+    assert entry.version == 23
     assert entry.data[CONF_MAX_SOC_THRESHOLD] == 90
     assert entry.data[CONF_MAX_SOC_THRESHOLD_SUNNY] == 50
 
@@ -530,7 +617,7 @@ async def test_async_migrate_entry_uses_legacy_sunny_default_for_pre_v12_entries
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 21
+    assert entry.version == 23
     assert entry.data[CONF_MAX_SOC_THRESHOLD_SUNNY] == 50
 
 
@@ -561,7 +648,7 @@ async def test_async_migrate_entry_replaces_legacy_transport_cost_sensor():
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 21
+    assert entry.version == 23
     assert CONF_TRANSPORT_COST_ENTITY not in entry.data
     assert entry.data[CONF_TRANSPORT_COST_DAY] == pytest.approx(DEFAULT_TRANSPORT_COST_DAY)
     assert entry.data[CONF_TRANSPORT_COST_NIGHT] == pytest.approx(DEFAULT_TRANSPORT_COST_NIGHT)
@@ -597,7 +684,7 @@ async def test_async_migrate_entry_adds_inverter_derating_defaults_for_v16():
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 21
+    assert entry.version == 23
     assert entry.data[CONF_MAX_INVERTER_POWER] == DEFAULT_MAX_INVERTER_POWER
     assert entry.data[CONF_INVERTER_EXPORT_LIMIT] == DEFAULT_INVERTER_EXPORT_LIMIT
     assert entry.data[CONF_INVERTER_EXPORT_DEADBAND] == DEFAULT_INVERTER_EXPORT_DEADBAND
@@ -612,8 +699,8 @@ async def test_async_migrate_entry_adds_inverter_derating_defaults_for_v16():
 
 
 @pytest.mark.asyncio
-async def test_async_migrate_entry_adds_battery_dump_deadline_hour_for_v19():
-    """v19 entries should receive the configurable battery dump deadline."""
+async def test_async_migrate_entry_adds_arbitrage_mode_deadline_hour_for_v19():
+    """v19 entries should receive the configurable arbitrage deadline (renamed in v23)."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         version=19,
@@ -637,22 +724,22 @@ async def test_async_migrate_entry_adds_battery_dump_deadline_hour_for_v19():
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 21
-    assert entry.data[CONF_BATTERY_DUMP_DEADLINE_HOUR] == DEFAULT_BATTERY_DUMP_DEADLINE_HOUR
+    assert entry.version == 23
+    assert entry.data[CONF_ARBITRAGE_MODE_DEADLINE_HOUR] == DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR
 
 
 @pytest.mark.parametrize(
     ("stored_value", "expected_value"),
     [
         (9.0, 9),
-        (9.5, DEFAULT_BATTERY_DUMP_DEADLINE_HOUR),
-        ("abc", DEFAULT_BATTERY_DUMP_DEADLINE_HOUR),
-        (-1, DEFAULT_BATTERY_DUMP_DEADLINE_HOUR),
-        (24, DEFAULT_BATTERY_DUMP_DEADLINE_HOUR),
+        (9.5, DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR),
+        ("abc", DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR),
+        (-1, DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR),
+        (24, DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR),
     ],
 )
 @pytest.mark.asyncio
-async def test_async_migrate_entry_normalizes_battery_dump_deadline_hour_for_v19(
+async def test_async_migrate_entry_normalizes_arbitrage_mode_deadline_hour_for_v19(
     stored_value,
     expected_value,
 ):
@@ -662,7 +749,7 @@ async def test_async_migrate_entry_normalizes_battery_dump_deadline_hour_for_v19
         version=19,
         data={
             CONF_CURRENT_PRICE_ENTITY: "sensor.current_price",
-            CONF_BATTERY_DUMP_DEADLINE_HOUR: stored_value,
+            "battery_dump_deadline_hour": stored_value,
         },
         options={},
     )
@@ -681,5 +768,5 @@ async def test_async_migrate_entry_normalizes_battery_dump_deadline_hour_for_v19
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 21
-    assert entry.data[CONF_BATTERY_DUMP_DEADLINE_HOUR] == expected_value
+    assert entry.version == 23
+    assert entry.data[CONF_ARBITRAGE_MODE_DEADLINE_HOUR] == expected_value

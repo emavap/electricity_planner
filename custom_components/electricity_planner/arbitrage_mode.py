@@ -1,4 +1,4 @@
-"""Battery dump (arbitrage) deadline computation and plan building.
+"""Arbitrage mode deadline computation and plan building.
 
 Extracted from ``coordinator.py`` as a standalone collaborator. Responsible
 for resolving the local deadline after which no more arbitrage export should
@@ -14,15 +14,15 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CONF_BATTERY_DUMP_DEADLINE_HOUR,
-    CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
-    CONF_BATTERY_DUMP_TARGET_SOC,
+    CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+    CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_FEEDIN_PRICE_THRESHOLD,
     CONF_MAX_BATTERY_POWER,
     CONF_MAX_GRID_POWER,
-    DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
-    DEFAULT_BATTERY_DUMP_MAX_EXPORT_POWER,
-    DEFAULT_BATTERY_DUMP_TARGET_SOC,
+    DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
+    DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER,
+    DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
     DEFAULT_MAX_BATTERY_POWER,
     DEFAULT_MAX_GRID_POWER,
@@ -35,8 +35,8 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
-class BatteryDumpPlanner:
-    """Computes arbitrage deadlines and builds the current dump plan."""
+class ArbitrageModePlanner:
+    """Computes arbitrage deadlines and builds the current arbitrage plan."""
 
     def __init__(self, coordinator: ElectricityPlannerCoordinator) -> None:
         self._coordinator = coordinator
@@ -46,8 +46,8 @@ class BatteryDumpPlanner:
         coordinator = self._coordinator
         now_local = dt_util.as_local(now)
         configured_deadline_hour = coordinator.config.get(
-            CONF_BATTERY_DUMP_DEADLINE_HOUR,
-            DEFAULT_BATTERY_DUMP_DEADLINE_HOUR,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+            DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
         )
         deadline_hour = coerce_integral_range(
             configured_deadline_hour,
@@ -55,7 +55,7 @@ class BatteryDumpPlanner:
             max_value=23,
         )
         if deadline_hour is None:
-            deadline_hour = DEFAULT_BATTERY_DUMP_DEADLINE_HOUR
+            deadline_hour = DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR
 
         deadline_local = resolve_local_deadline(now_local.date(), deadline_hour)
         if now_local >= deadline_local:
@@ -68,26 +68,26 @@ class BatteryDumpPlanner:
     def build_plan(self, data: dict[str, Any]) -> dict[str, Any]:
         """Build the current arbitrage plan and status."""
         coordinator = self._coordinator
-        enabled = coordinator.is_battery_dump_mode_enabled()
-        target_soc = float(
+        enabled = coordinator.is_arbitrage_mode_enabled()
+        reserve_soc = float(
             coordinator.config.get(
-                CONF_BATTERY_DUMP_TARGET_SOC,
-                DEFAULT_BATTERY_DUMP_TARGET_SOC,
+                CONF_ARBITRAGE_MODE_RESERVE_SOC,
+                DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
             )
         )
-        target_soc = min(100.0, max(0.0, target_soc))
+        reserve_soc = min(100.0, max(0.0, reserve_soc))
 
         plan: dict[str, Any] = {
             "enabled": enabled,
             "active": False,
             "reason": "Arbitrage mode disabled",
-            "target_soc": round(target_soc, 1),
+            "reserve_soc": round(reserve_soc, 1),
             "configured_export_cap_w": 0,
             "deadline": None,
             "available_energy_kwh": 0.0,
             "required_duration_hours": 0.0,
-            "slots_cover_full_dump": False,
-            "dump_price_threshold": None,
+            "slots_cover_full_arbitrage": False,
+            "arbitrage_price_threshold": None,
             "current_slot_price": None,
             "selected_slots": [],
             "selected_slots_count": 0,
@@ -109,13 +109,13 @@ class BatteryDumpPlanner:
                 continue
             # Treat the arbitrage reserve as a fleet-wide floor: batteries already
             # below the target must offset the excess of batteries above it.
-            available_energy_kwh += capacity * (soc - target_soc) / 100.0
+            available_energy_kwh += capacity * (soc - reserve_soc) / 100.0
 
         available_energy_kwh = max(0.0, available_energy_kwh)
         plan["available_energy_kwh"] = round(available_energy_kwh, 3)
         if available_energy_kwh <= 0:
             plan["reason"] = (
-                f"Arbitrage reserve target already reached (net energy above {target_soc:.0f}% is unavailable)"
+                f"Arbitrage reserve target already reached (net energy above {reserve_soc:.0f}% is unavailable)"
             )
             return plan
 
@@ -127,8 +127,8 @@ class BatteryDumpPlanner:
         )
         configured_export_cap = int(
             coordinator.config.get(
-                CONF_BATTERY_DUMP_MAX_EXPORT_POWER,
-                DEFAULT_BATTERY_DUMP_MAX_EXPORT_POWER,
+                CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
+                DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER,
             )
         )
         automatic_export_cap = min(max_battery_power, max_grid_power)
@@ -200,12 +200,12 @@ class BatteryDumpPlanner:
             for slot in selected_slots
         ]
         plan["selected_slots_count"] = int(slot_selection.get("selected_slots_count", 0))
-        plan["slots_cover_full_dump"] = bool(slot_selection.get("covers_full_dump", False))
-        dump_price_threshold = slot_selection.get("dump_price_threshold")
+        plan["slots_cover_full_arbitrage"] = bool(slot_selection.get("covers_full_export", False))
+        arbitrage_price_threshold = slot_selection.get("export_price_threshold")
         current_slot_price = slot_selection.get("current_slot_price")
-        plan["dump_price_threshold"] = (
-            round(float(dump_price_threshold), 4)
-            if dump_price_threshold is not None
+        plan["arbitrage_price_threshold"] = (
+            round(float(arbitrage_price_threshold), 4)
+            if arbitrage_price_threshold is not None
             else None
         )
         plan["current_slot_price"] = (
@@ -216,31 +216,31 @@ class BatteryDumpPlanner:
 
         if (
             current_slot_price is not None
-            and dump_price_threshold is not None
-            and float(current_slot_price) >= float(dump_price_threshold)
+            and arbitrage_price_threshold is not None
+            and float(current_slot_price) >= float(arbitrage_price_threshold)
         ):
             plan["active"] = True
             plan["export_power"] = export_power_cap
-            if plan["slots_cover_full_dump"]:
+            if plan["slots_cover_full_arbitrage"]:
                 plan["reason"] = (
                     f"Arbitrage export active at {float(current_slot_price):.3f}€/kWh "
-                    f"(arbitrage threshold {float(dump_price_threshold):.3f}€/kWh)"
+                    f"(arbitrage threshold {float(arbitrage_price_threshold):.3f}€/kWh)"
                 )
             else:
                 plan["reason"] = (
                     f"Arbitrage export active at {float(current_slot_price):.3f}€/kWh using the best available slots "
-                    f"(arbitrage threshold {float(dump_price_threshold):.3f}€/kWh)"
+                    f"(arbitrage threshold {float(arbitrage_price_threshold):.3f}€/kWh)"
                 )
         else:
-            if plan["slots_cover_full_dump"]:
+            if plan["slots_cover_full_arbitrage"]:
                 plan["reason"] = (
                     f"Arbitrage mode armed for the top {plan['selected_slots_count']} eligible slots "
-                    f"with arbitrage threshold {float(dump_price_threshold):.3f}€/kWh"
+                    f"with arbitrage threshold {float(arbitrage_price_threshold):.3f}€/kWh"
                 )
             else:
                 plan["reason"] = (
                     f"Arbitrage mode armed for the best available {plan['selected_slots_count']} eligible slots "
-                    f"with arbitrage threshold {float(dump_price_threshold):.3f}€/kWh"
+                    f"with arbitrage threshold {float(arbitrage_price_threshold):.3f}€/kWh"
                 )
 
         return plan

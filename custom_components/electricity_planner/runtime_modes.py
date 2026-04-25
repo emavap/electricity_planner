@@ -3,10 +3,9 @@
 Owns the persistent toggles that are not per-decision overrides:
 
 * Car permissive mode (load/persist to ``_car_permissive_mode_store``)
-* Battery-dump (a.k.a. arbitrage) mode, which is implemented as an
-  ``arbitrage_mode`` entry in ``_manual_overrides`` plus a runtime state
-  flip on the data payload so sensors update before the next coordinator
-  refresh.
+* Arbitrage mode, which is implemented as an ``arbitrage_mode`` entry in
+  ``_manual_overrides`` plus a runtime state flip on the data payload so
+  sensors update before the next coordinator refresh.
 
 Underlying state attributes remain on the coordinator for test and
 sensor compatibility.
@@ -18,7 +17,14 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_BATTERY_DUMP_TARGET_SOC, DEFAULT_BATTERY_DUMP_TARGET_SOC
+from .const import (
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
+    CONF_MAX_SOC_THRESHOLD,
+    CONF_NEGATIVE_BUY_THRESHOLD,
+    DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
+    DEFAULT_MAX_SOC,
+    DEFAULT_NEGATIVE_BUY_THRESHOLD,
+)
 
 if TYPE_CHECKING:
     from .coordinator import ElectricityPlannerCoordinator
@@ -32,14 +38,14 @@ class RuntimeModeManager:
     def __init__(self, coordinator: ElectricityPlannerCoordinator) -> None:
         self._coordinator = coordinator
 
-    # --- battery-dump / arbitrage mode -----------------------------------
+    # --- arbitrage mode --------------------------------------------------
 
-    def is_battery_dump_mode_enabled(self) -> bool:
+    def is_arbitrage_mode_enabled(self) -> bool:
         """Return whether persistent arbitrage mode is enabled."""
         override = self._coordinator.get_manual_override("arbitrage_mode")
         return bool(override and override.get("value") is True)
 
-    async def set_battery_dump_mode(self, reason: str | None = None) -> None:
+    async def set_arbitrage_mode(self, reason: str | None = None) -> None:
         """Persistently enable arbitrage mode."""
         coordinator = self._coordinator
         now = dt_util.utcnow()
@@ -54,7 +60,7 @@ class RuntimeModeManager:
         _LOGGER.info("Arbitrage mode enabled")
         await coordinator._manual_override_manager.persist()
 
-    async def clear_battery_dump_mode(self) -> None:
+    async def clear_arbitrage_mode(self) -> None:
         """Disable persistent arbitrage mode."""
         coordinator = self._coordinator
         if coordinator._manual_overrides.get("arbitrage_mode"):
@@ -69,23 +75,23 @@ class RuntimeModeManager:
         if not isinstance(coordinator.data, dict):
             return
 
-        target_soc = float(
+        reserve_soc = float(
             coordinator.config.get(
-                CONF_BATTERY_DUMP_TARGET_SOC,
-                DEFAULT_BATTERY_DUMP_TARGET_SOC,
+                CONF_ARBITRAGE_MODE_RESERVE_SOC,
+                DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
             )
         )
         plan = {
             "enabled": enabled,
             "active": False,
             "reason": reason,
-            "target_soc": round(min(100.0, max(0.0, target_soc)), 1),
+            "reserve_soc": round(min(100.0, max(0.0, reserve_soc)), 1),
             "configured_export_cap_w": 0,
             "deadline": None,
             "available_energy_kwh": 0.0,
             "required_duration_hours": 0.0,
-            "slots_cover_full_dump": False,
-            "dump_price_threshold": None,
+            "slots_cover_full_arbitrage": False,
+            "arbitrage_price_threshold": None,
             "current_slot_price": None,
             "selected_slots": [],
             "selected_slots_count": 0,
@@ -93,12 +99,88 @@ class RuntimeModeManager:
         }
 
         updated_data = dict(coordinator.data)
-        updated_data["battery_dump_plan"] = plan
+        updated_data["arbitrage_mode_plan"] = plan
         updated_data["arbitrage_mode_enabled"] = enabled
         updated_data["arbitrage_mode_active"] = False
         updated_data["arbitrage_mode_reason"] = reason
-        updated_data["battery_dump_target_soc"] = plan["target_soc"]
-        updated_data["battery_dump_export_power"] = 0
+        updated_data["arbitrage_mode_reserve_soc"] = plan["reserve_soc"]
+        updated_data["arbitrage_mode_export_power"] = 0
+        coordinator.async_set_updated_data(updated_data)
+
+    # --- negative arbitrage buy mode -------------------------------------
+
+    def is_negative_buy_mode_enabled(self) -> bool:
+        """Return whether persistent Negative Arbitrage Buy mode is enabled."""
+        override = self._coordinator.get_manual_override("negative_buy_mode")
+        return bool(override and override.get("value") is True)
+
+    async def set_negative_buy_mode(self, reason: str | None = None) -> None:
+        """Persistently enable Negative Arbitrage Buy mode."""
+        coordinator = self._coordinator
+        now = dt_util.utcnow()
+        effective_reason = reason or "Negative Arbitrage Buy mode enabled"
+        coordinator._manual_overrides["negative_buy_mode"] = {
+            "value": True,
+            "reason": effective_reason,
+            "expires_at": None,
+            "set_at": now,
+        }
+        self.update_runtime_negative_buy_state(enabled=True, reason=effective_reason)
+        _LOGGER.info("Negative Arbitrage Buy mode enabled")
+        await coordinator._manual_override_manager.persist()
+
+    async def clear_negative_buy_mode(self) -> None:
+        """Disable persistent Negative Arbitrage Buy mode."""
+        coordinator = self._coordinator
+        if coordinator._manual_overrides.get("negative_buy_mode"):
+            _LOGGER.info("Negative Arbitrage Buy mode cleared")
+        coordinator._manual_overrides["negative_buy_mode"] = None
+        self.update_runtime_negative_buy_state(
+            enabled=False, reason="Negative Arbitrage Buy mode disabled"
+        )
+        await coordinator._manual_override_manager.persist()
+
+    def update_runtime_negative_buy_state(self, enabled: bool, reason: str) -> None:
+        """Keep runtime entity state coherent while the next refresh is pending."""
+        coordinator = self._coordinator
+        if not isinstance(coordinator.data, dict):
+            return
+
+        threshold = float(
+            coordinator.config.get(
+                CONF_NEGATIVE_BUY_THRESHOLD,
+                DEFAULT_NEGATIVE_BUY_THRESHOLD,
+            )
+        )
+        max_soc_threshold = float(
+            coordinator.config.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
+        )
+        plan = {
+            "enabled": enabled,
+            "active": False,
+            "solar_curtail_active": False,
+            "reason": reason,
+            "threshold": round(threshold, 4),
+            "max_soc_threshold": round(max_soc_threshold, 1),
+            "deadline": None,
+            "required_energy_kwh": 0.0,
+            "required_duration_hours": 0.0,
+            "slots_cover_full_charge": False,
+            "buy_price_threshold": None,
+            "current_slot_price": None,
+            "selected_slots": [],
+            "selected_slots_count": 0,
+            "import_power": 0,
+            "configured_import_cap_w": 0,
+        }
+
+        updated_data = dict(coordinator.data)
+        updated_data["negative_buy_plan"] = plan
+        updated_data["negative_buy_mode_enabled"] = enabled
+        updated_data["negative_buy_mode_active"] = False
+        updated_data["negative_buy_mode_reason"] = reason
+        updated_data["negative_buy_import_power"] = 0
+        updated_data["negative_buy_curtail_solar"] = False
         coordinator.async_set_updated_data(updated_data)
 
     # --- car permissive mode ---------------------------------------------

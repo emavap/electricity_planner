@@ -12,14 +12,15 @@ set_manual_override:
         text:
     target:
       name: Target
-      description: Which override to set (battery, battery_dump, car, both, charger_limit, or grid_setpoint)
+      description: Which override to set (battery, arbitrage_mode, negative_buy, car, both, charger_limit, or grid_setpoint)
       required: true
       example: "battery"
       selector:
         select:
           options:
             - "battery"
-            - "battery_dump"
+            - "arbitrage_mode"
+            - "negative_buy"
             - "car"
             - "both"
             - "charger_limit"
@@ -87,7 +88,7 @@ clear_manual_override:
         text:
     target:
       name: Target
-      description: Which device(s) override to clear (battery, battery_dump, car, both, charger_limit, grid_setpoint, or all)
+      description: Which device(s) override to clear (battery, arbitrage_mode, negative_buy, car, both, charger_limit, grid_setpoint, or all)
       required: false
       example: "all"
       default: "all"
@@ -95,7 +96,8 @@ clear_manual_override:
         select:
           options:
             - "battery"
-            - "battery_dump"
+            - "arbitrage_mode"
+            - "negative_buy"
             - "car"
             - "both"
             - "charger_limit"

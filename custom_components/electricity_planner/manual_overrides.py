@@ -14,7 +14,12 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_BATTERY_DUMP_TARGET_SOC, DEFAULT_BATTERY_DUMP_TARGET_SOC
+from .const import (
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
+    CONF_NEGATIVE_BUY_THRESHOLD,
+    DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
+    DEFAULT_NEGATIVE_BUY_THRESHOLD,
+)
 
 if TYPE_CHECKING:
     from .coordinator import ElectricityPlannerCoordinator
@@ -23,7 +28,8 @@ _LOGGER = logging.getLogger(__name__)
 
 _TARGET_MAPPING: dict[str, tuple[str, ...]] = {
     "battery": ("battery_grid_charging",),
-    "battery_dump": ("arbitrage_mode",),
+    "arbitrage_mode": ("arbitrage_mode",),
+    "negative_buy": ("negative_buy_mode",),
     "car": ("car_grid_charging",),
     "both": ("battery_grid_charging", "car_grid_charging"),
     "charger_limit": ("charger_limit",),
@@ -31,6 +37,7 @@ _TARGET_MAPPING: dict[str, tuple[str, ...]] = {
     "all": (
         "battery_grid_charging",
         "arbitrage_mode",
+        "negative_buy_mode",
         "car_grid_charging",
         "charger_limit",
         "grid_setpoint",
@@ -108,7 +115,7 @@ class ManualOverrideManager:
         }
 
         for key, payload in serialized_overrides.items():
-            if key == "battery_dump_to_grid":
+            if key in ("battery_dump_to_grid", "battery_dump"):
                 key = "arbitrage_mode"
                 overrides_changed = True
             if key not in loaded_overrides or not isinstance(payload, dict):
@@ -274,9 +281,22 @@ class ManualOverrideManager:
                     "reason": manual_reason,
                     "set_at": override.get("set_at").isoformat() if override.get("set_at") else None,
                     "expires_at": expires_at.isoformat() if expires_at else None,
-                    "target_soc": coordinator.config.get(
-                        CONF_BATTERY_DUMP_TARGET_SOC,
-                        DEFAULT_BATTERY_DUMP_TARGET_SOC,
+                    "reserve_soc": coordinator.config.get(
+                        CONF_ARBITRAGE_MODE_RESERVE_SOC,
+                        DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
+                    ),
+                }
+                continue
+
+            if coordinator_key == "negative_buy_mode":
+                overrides_info[coordinator_key] = {
+                    "value": override_value,
+                    "reason": manual_reason,
+                    "set_at": override.get("set_at").isoformat() if override.get("set_at") else None,
+                    "expires_at": expires_at.isoformat() if expires_at else None,
+                    "threshold": coordinator.config.get(
+                        CONF_NEGATIVE_BUY_THRESHOLD,
+                        DEFAULT_NEGATIVE_BUY_THRESHOLD,
                     ),
                 }
                 continue

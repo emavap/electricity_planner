@@ -15,18 +15,22 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
 
 from .const import (
-    CONF_BATTERY_DUMP_TARGET_SOC,
+    CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_MAX_SOC_THRESHOLD_SOLAR,
+    CONF_NEGATIVE_BUY_THRESHOLD,
     CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_SOLAR_FORECAST_TODAY_ENTITY,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
-    DEFAULT_BATTERY_DUMP_TARGET_SOC,
+    DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
+    DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
     DEFAULT_MAX_SOC,
     DEFAULT_MAX_SOC_SUNNY,
     DEFAULT_MAX_SOC_SOLAR,
+    DEFAULT_NEGATIVE_BUY_THRESHOLD,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
     DOMAIN,
@@ -36,10 +40,12 @@ from .coordinator import ElectricityPlannerCoordinator
 _LOGGER = logging.getLogger(__name__)
 _NUMERIC_PREFIX_RE = re.compile(r"^\s*([-+]?\d+(?:[.,]\d+)?)")
 _LIVE_NUMBER_OPTION_KEYS = (
-    CONF_BATTERY_DUMP_TARGET_SOC,
+    CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_MAX_SOC_THRESHOLD_SOLAR,
+    CONF_NEGATIVE_BUY_THRESHOLD,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
 )
 
@@ -147,7 +153,9 @@ async def async_setup_entry(
         MaxSocThresholdSunnyNumber(coordinator, entry),
         MaxSocThresholdSolarNumber(coordinator, entry),
         SunnyForecastThresholdNumber(coordinator, entry),
-        BatteryDumpTargetSocNumber(coordinator, entry),
+        ArbitrageModeReserveSocNumber(coordinator, entry),
+        ArbitrageModeDeadlineHourNumber(coordinator, entry),
+        NegativeBuyThresholdNumber(coordinator, entry),
     ]
 
     async_add_entities(entities)
@@ -255,7 +263,7 @@ class MaxSocThresholdNumber(CoordinatorEntity, NumberEntity):
         await self.coordinator.async_request_refresh()
 
 
-class BatteryDumpTargetSocNumber(CoordinatorEntity, NumberEntity):
+class ArbitrageModeReserveSocNumber(CoordinatorEntity, NumberEntity):
     """Number entity controlling the reserve SOC for arbitrage mode."""
 
     def __init__(
@@ -267,9 +275,12 @@ class BatteryDumpTargetSocNumber(CoordinatorEntity, NumberEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._attr_name = f"{entry.title} Arbitrage Reserve SOC"
+        # Preserve the legacy unique_id so historical statistics survive the
+        # v22→v23 rename; the entity_id slug is updated in lockstep with
+        # _async_migrate_entity_ids().
         self._attr_unique_id = f"{entry.entry_id}_battery_dump_target_soc"
         self.entity_id = (
-            f"number.{slugify(entry.title or 'electricity_planner')}_battery_dump_target_soc"
+            f"number.{slugify(entry.title or 'electricity_planner')}_arbitrage_mode_reserve_soc"
         )
         self._attr_icon = "mdi:battery-arrow-down-outline"
         self._attr_native_unit_of_measurement = "%"
@@ -286,10 +297,10 @@ class BatteryDumpTargetSocNumber(CoordinatorEntity, NumberEntity):
 
     @property
     def native_value(self) -> float:
-        """Return the current battery dump target SOC."""
+        """Return the current arbitrage reserve SOC."""
         return self.coordinator.config.get(
-            CONF_BATTERY_DUMP_TARGET_SOC,
-            DEFAULT_BATTERY_DUMP_TARGET_SOC,
+            CONF_ARBITRAGE_MODE_RESERVE_SOC,
+            DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
         )
 
     @property
@@ -303,19 +314,19 @@ class BatteryDumpTargetSocNumber(CoordinatorEntity, NumberEntity):
             ),
         }
 
-        dump_plan = self.coordinator.data.get("battery_dump_plan", {}) if self.coordinator.data else {}
+        arbitrage_plan = self.coordinator.data.get("arbitrage_mode_plan", {}) if self.coordinator.data else {}
         average_soc = self.coordinator.data.get("battery_analysis", {}).get("average_soc") if self.coordinator.data else None
 
         if average_soc is not None:
             attrs["current_battery_soc"] = f"{average_soc:.1f}%"
-            attrs["available_to_dump_percent"] = f"{max(0, average_soc - self.native_value):.1f}%"
+            attrs["available_to_export_percent"] = f"{max(0, average_soc - self.native_value):.1f}%"
 
-        if dump_plan:
-            attrs["dump_mode_enabled"] = dump_plan.get("enabled", False)
-            attrs["dump_price_threshold"] = dump_plan.get("dump_price_threshold")
-            attrs["current_slot_price"] = dump_plan.get("current_slot_price")
-            attrs["selected_slots_count"] = dump_plan.get("selected_slots_count", 0)
-            attrs["slots_cover_full_dump"] = dump_plan.get("slots_cover_full_dump", False)
+        if arbitrage_plan:
+            attrs["arbitrage_mode_enabled"] = arbitrage_plan.get("enabled", False)
+            attrs["arbitrage_price_threshold"] = arbitrage_plan.get("arbitrage_price_threshold")
+            attrs["current_slot_price"] = arbitrage_plan.get("current_slot_price")
+            attrs["selected_slots_count"] = arbitrage_plan.get("selected_slots_count", 0)
+            attrs["slots_cover_full_arbitrage"] = arbitrage_plan.get("slots_cover_full_arbitrage", False)
 
         return attrs
 
@@ -328,7 +339,7 @@ class BatteryDumpTargetSocNumber(CoordinatorEntity, NumberEntity):
             self.hass,
             self._entry,
             self.coordinator,
-            CONF_BATTERY_DUMP_TARGET_SOC,
+            CONF_ARBITRAGE_MODE_RESERVE_SOC,
             new_value,
         )
 
@@ -337,7 +348,82 @@ class BatteryDumpTargetSocNumber(CoordinatorEntity, NumberEntity):
             options=new_options,
         )
 
-        self.coordinator.config[CONF_BATTERY_DUMP_TARGET_SOC] = new_value
+        self.coordinator.config[CONF_ARBITRAGE_MODE_RESERVE_SOC] = new_value
+        self.coordinator.decision_engine.refresh_settings(self.coordinator.config)
+        await self.coordinator.async_request_refresh()
+
+
+class ArbitrageModeDeadlineHourNumber(CoordinatorEntity, NumberEntity):
+    """Number entity controlling the local deadline hour for arbitrage mode."""
+
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the arbitrage deadline hour number."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = f"{entry.title} Arbitrage Deadline Hour"
+        self._attr_unique_id = f"{entry.entry_id}_arbitrage_mode_deadline_hour"
+        self.entity_id = (
+            f"number.{slugify(entry.title or 'electricity_planner')}_arbitrage_mode_deadline_hour"
+        )
+        self._attr_icon = "mdi:clock-end"
+        self._attr_native_unit_of_measurement = "h"
+        self._attr_mode = NumberMode.SLIDER
+        self._attr_native_min_value = 0
+        self._attr_native_max_value = 23
+        self._attr_native_step = 1
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": entry.title,
+            "manufacturer": "Electricity Planner",
+            "model": "Smart Charging Controller",
+        }
+
+    @property
+    def native_value(self) -> float:
+        """Return the current arbitrage deadline hour."""
+        return self.coordinator.config.get(
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+            DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes."""
+        return {
+            "description": (
+                "Local hour of the next arbitrage cutoff (shared by arbitrage selling "
+                "and Negative Arbitrage Buy). Before it the planner targets today; "
+                "after it, tomorrow."
+            ),
+        }
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Persist and apply the arbitrage deadline hour immediately."""
+        new_value = int(value)
+        if new_value < 0 or new_value > 23:
+            raise HomeAssistantError(
+                f"Arbitrage Deadline Hour must be between 0 and 23 (got {new_value})"
+            )
+        _LOGGER.info("Updating arbitrage deadline hour to %d", new_value)
+
+        self._entry, new_options = _build_updated_number_options(
+            self.hass,
+            self._entry,
+            self.coordinator,
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+            new_value,
+        )
+
+        self.hass.config_entries.async_update_entry(
+            self._entry,
+            options=new_options,
+        )
+
+        self.coordinator.config[CONF_ARBITRAGE_MODE_DEADLINE_HOUR] = new_value
         self.coordinator.decision_engine.refresh_settings(self.coordinator.config)
         await self.coordinator.async_request_refresh()
 
@@ -610,5 +696,99 @@ class SunnyForecastThresholdNumber(CoordinatorEntity, NumberEntity):
         )
 
         self.coordinator.config[CONF_SUNNY_FORECAST_THRESHOLD_KWH] = new_value
+        self.coordinator.decision_engine.refresh_settings(self.coordinator.config)
+        await self.coordinator.async_request_refresh()
+
+
+class NegativeBuyThresholdNumber(CoordinatorEntity, NumberEntity):
+    """Number entity controlling the Negative Arbitrage Buy price threshold.
+
+    The planner treats any upcoming slot with net buy price ``<= threshold`` as
+    paid-to-consume and forces grid charging during it. Default ``-0.05 €/kWh``
+    targets only truly negative-priced slots.
+    """
+
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the negative buy threshold number."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_name = f"{entry.title} Negative Arbitrage Buy Threshold"
+        self._attr_unique_id = f"{entry.entry_id}_negative_buy_threshold"
+        self.entity_id = (
+            f"number.{slugify(entry.title or 'electricity_planner')}_negative_buy_threshold"
+        )
+        self._attr_icon = "mdi:cash-minus"
+        self._attr_native_unit_of_measurement = "€/kWh"
+        self._attr_mode = NumberMode.BOX
+        self._attr_native_min_value = -1.0
+        self._attr_native_max_value = 1.0
+        self._attr_native_step = 0.01
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": entry.title,
+            "manufacturer": "Electricity Planner",
+            "model": "Smart Charging Controller",
+        }
+
+    @property
+    def native_value(self) -> float:
+        """Return the current Negative Arbitrage Buy price threshold."""
+        return float(
+            self.coordinator.config.get(
+                CONF_NEGATIVE_BUY_THRESHOLD,
+                DEFAULT_NEGATIVE_BUY_THRESHOLD,
+            )
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes."""
+        threshold = self.native_value
+        buy_plan = (
+            self.coordinator.data.get("negative_buy_plan", {})
+            if self.coordinator.data
+            else {}
+        )
+        attrs = {
+            "description": (
+                f"Negative Arbitrage Buy mode arms grid charging for any upcoming slot whose "
+                f"net buy price is at or below {threshold:.3f} €/kWh, up to the shared "
+                "arbitrage deadline."
+            ),
+        }
+        if buy_plan:
+            attrs["mode_enabled"] = buy_plan.get("enabled", False)
+            attrs["currently_buying"] = buy_plan.get("active", False)
+            attrs["selected_slots_count"] = buy_plan.get("selected_slots_count", 0)
+            attrs["buy_price_threshold"] = buy_plan.get("buy_price_threshold")
+            attrs["current_slot_price"] = buy_plan.get("current_slot_price")
+            attrs["deadline"] = buy_plan.get("deadline")
+        return attrs
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Persist and apply the Negative Arbitrage Buy threshold immediately."""
+        new_value = round(float(value), 3)
+        _LOGGER.info(
+            "Updating Negative Arbitrage Buy threshold to %.3f €/kWh", new_value
+        )
+
+        self._entry, new_options = _build_updated_number_options(
+            self.hass,
+            self._entry,
+            self.coordinator,
+            CONF_NEGATIVE_BUY_THRESHOLD,
+            new_value,
+        )
+
+        self.hass.config_entries.async_update_entry(
+            self._entry,
+            options=new_options,
+        )
+
+        self.coordinator.config[CONF_NEGATIVE_BUY_THRESHOLD] = new_value
         self.coordinator.decision_engine.refresh_settings(self.coordinator.config)
         await self.coordinator.async_request_refresh()

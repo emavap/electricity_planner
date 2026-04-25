@@ -127,9 +127,9 @@ def test_dashboard_template_keeps_dump_threshold_on_sell_graph():
     assert "name: Arbitrage Threshold" in template
     assert "name: Arbitrage Threshold" in sell_section
     assert "name: Arbitrage Threshold" not in buy_section
-    assert "dump_price_threshold" in template
+    assert "arbitrage_price_threshold" in template
     assert "title: Battery Dump Plan" not in template
-    assert "number.electricity_planner_battery_dump_max_export_power" not in template
+    assert "number.electricity_planner_arbitrage_mode_max_export_power" not in template
 
 
 def test_dashboard_three_phase_appendix_contains_phase_specific_cards():
@@ -195,10 +195,14 @@ def test_bundled_dashboards_keep_dump_toggle_but_not_export_cap_number():
     assert "binary_sensor.electricity_planner_solar_feed_in_grid" in single_phase
     assert "Sunny Forecast Trigger" in single_phase
     assert "Sunny Forecast Trigger" in three_phase
+    assert "Solar Max SOC" in single_phase
+    assert "Solar Max SOC" in three_phase
+    assert "number.electricity_planner_max_soc_threshold_solar" in single_phase
+    assert "number.electricity_planner_max_soc_threshold_solar" in three_phase
     assert "title: Battery Dump Plan" not in single_phase
     assert "title: Battery Dump Plan" not in three_phase
-    assert "number.electricity_planner_battery_dump_max_export_power" not in single_phase
-    assert "number.electricity_planner_battery_dump_max_export_power" not in three_phase
+    assert "number.electricity_planner_arbitrage_mode_max_export_power" not in single_phase
+    assert "number.electricity_planner_arbitrage_mode_max_export_power" not in three_phase
 
 
 def test_bundled_dashboards_include_arbitrage_reason():
@@ -311,6 +315,10 @@ async def test_dashboard_creation_uses_registered_entities():
         f"{entry.entry_id}_max_soc_threshold_sunny": "number.custom_max_soc_sunny",
         f"{entry.entry_id}_max_soc_threshold_solar": "number.custom_max_soc_solar",
         f"{entry.entry_id}_sunny_forecast_threshold_kwh": "number.custom_sunny_forecast_threshold",
+        f"{entry.entry_id}_battery_dump_target_soc": "number.custom_arbitrage_reserve",
+        f"{entry.entry_id}_arbitrage_mode_deadline_hour": "number.custom_arbitrage_deadline",
+        f"{entry.entry_id}_negative_buy_threshold": "number.custom_negative_buy_threshold",
+        f"{entry.entry_id}_negative_buy_mode": "switch.custom_negative_buy_mode",
     }
     template = (
         "views:\n"
@@ -320,7 +328,12 @@ async def test_dashboard_creation_uses_registered_entities():
         "      - entity: binary_sensor.electricity_planner_car_charge_from_grid\n"
         "      - entity: number.electricity_planner_max_soc_threshold\n"
         "      - entity: number.electricity_planner_max_soc_threshold_sunny\n"
+        "      - entity: number.electricity_planner_max_soc_threshold_solar\n"
         "      - entity: number.electricity_planner_sunny_forecast_threshold_kwh\n"
+        "      - entity: number.electricity_planner_arbitrage_mode_reserve_soc\n"
+        "      - entity: number.electricity_planner_arbitrage_mode_deadline_hour\n"
+        "      - entity: number.electricity_planner_negative_buy_threshold\n"
+        "      - entity: switch.electricity_planner_negative_arbitrage_buy_mode\n"
     )
 
     storage = FakeStorage()
@@ -343,7 +356,15 @@ async def test_dashboard_creation_uses_registered_entities():
     assert "binary_sensor.car_grid_allowed" in config_str
     assert "number.custom_max_soc" in config_str
     assert "number.custom_max_soc_sunny" in config_str
+    assert "number.custom_max_soc_solar" in config_str
     assert "number.custom_sunny_forecast_threshold" in config_str
+    assert "number.custom_arbitrage_reserve" in config_str
+    assert "number.custom_arbitrage_deadline" in config_str
+    assert "number.custom_negative_buy_threshold" in config_str
+    assert "switch.custom_negative_buy_mode" in config_str
+    assert "number.electricity_planner_arbitrage_mode_reserve_soc" not in config_str
+    assert "number.electricity_planner_negative_buy_threshold" not in config_str
+    assert "switch.electricity_planner_negative_arbitrage_buy_mode" not in config_str
     assert storage.saved[dashboard.MANAGED_KEY]["entry_id"] == entry.entry_id
 
 

@@ -86,7 +86,8 @@ from .const import (
     BATTERY_SOC_DECIMAL_THRESHOLD,
 )
 from .decision_engine import ChargingDecisionEngine
-from .battery_dump import BatteryDumpPlanner
+from .arbitrage_mode import ArbitrageModePlanner
+from .negative_buy import NegativeBuyPlanner
 from .charging_window import ChargingWindowValidator
 from .entity_status import EntityStatusReporter
 from .forecast_summary import ForecastSummaryCalculator
@@ -171,6 +172,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._manual_overrides: dict[str, dict[str, Any] | None] = {
             "battery_grid_charging": None,
             "arbitrage_mode": None,
+            "negative_buy_mode": None,
             "car_grid_charging": None,
             "charger_limit": None,
             "grid_setpoint": None,
@@ -211,8 +213,11 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Nord Pool service (fetch + TTL/LRU cache)
         self._nordpool_service = NordpoolService(self)
 
-        # Battery dump (arbitrage) plan builder
-        self._battery_dump_planner = BatteryDumpPlanner(self)
+        # Arbitrage mode plan builder
+        self._arbitrage_mode_planner = ArbitrageModePlanner(self)
+
+        # Negative arbitrage buy plan builder
+        self._negative_buy_planner = NegativeBuyPlanner(self)
 
         # Forecast summary (cheapest interval + best charging window)
         self._forecast_summary_calculator = ForecastSummaryCalculator(self)
@@ -226,7 +231,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Manual override manager (user forced battery/car/charger_limit/grid_setpoint)
         self._manual_override_manager = ManualOverrideManager(self)
 
-        # Runtime mode manager (car permissive + battery dump mode toggles)
+        # Runtime mode manager (car permissive + arbitrage mode toggles)
         self._runtime_mode_manager = RuntimeModeManager(self)
 
         super().__init__(
@@ -274,9 +279,21 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         """Delegate to the manual override manager collaborator."""
         return self._manual_override_manager.get(key)
 
-    def is_battery_dump_mode_enabled(self) -> bool:
+    def is_arbitrage_mode_enabled(self) -> bool:
         """Delegate to the runtime mode manager collaborator."""
-        return self._runtime_mode_manager.is_battery_dump_mode_enabled()
+        return self._runtime_mode_manager.is_arbitrage_mode_enabled()
+
+    def is_negative_buy_mode_enabled(self) -> bool:
+        """Delegate to the runtime mode manager collaborator."""
+        return self._runtime_mode_manager.is_negative_buy_mode_enabled()
+
+    async def async_set_negative_buy_mode(self, reason: str | None = None) -> None:
+        """Delegate to the runtime mode manager collaborator."""
+        await self._runtime_mode_manager.set_negative_buy_mode(reason=reason)
+
+    async def async_clear_negative_buy_mode(self) -> None:
+        """Delegate to the runtime mode manager collaborator."""
+        await self._runtime_mode_manager.clear_negative_buy_mode()
 
     async def async_set_car_permissive_mode(self, reason: str | None = None) -> None:
         """Delegate to the runtime mode manager collaborator."""
@@ -286,13 +303,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         """Delegate to the runtime mode manager collaborator."""
         await self._runtime_mode_manager.clear_car_permissive_mode(reason=reason)
 
-    async def async_set_battery_dump_mode(self, reason: str | None = None) -> None:
+    async def async_set_arbitrage_mode(self, reason: str | None = None) -> None:
         """Delegate to the runtime mode manager collaborator."""
-        await self._runtime_mode_manager.set_battery_dump_mode(reason=reason)
+        await self._runtime_mode_manager.set_arbitrage_mode(reason=reason)
 
-    async def async_clear_battery_dump_mode(self) -> None:
+    async def async_clear_arbitrage_mode(self) -> None:
         """Delegate to the runtime mode manager collaborator."""
-        await self._runtime_mode_manager.clear_battery_dump_mode()
+        await self._runtime_mode_manager.clear_arbitrage_mode()
 
     async def _async_load_manual_overrides(self) -> None:
         """Delegate to the manual override manager collaborator."""
@@ -658,13 +675,38 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             latest_end=latest_end,
         )
 
-    def _battery_dump_deadline(self, now: datetime) -> datetime:
-        """Delegate to the battery dump planner collaborator."""
-        return self._battery_dump_planner.deadline(now)
+    def _arbitrage_mode_deadline(self, now: datetime) -> datetime:
+        """Delegate to the arbitrage mode planner collaborator."""
+        return self._arbitrage_mode_planner.deadline(now)
 
-    def _calculate_battery_dump_plan(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Delegate to the battery dump planner collaborator."""
-        return self._battery_dump_planner.build_plan(data)
+    def _calculate_arbitrage_mode_plan(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Delegate to the arbitrage mode planner collaborator."""
+        return self._arbitrage_mode_planner.build_plan(data)
+
+    def _select_buy_slots(
+        self,
+        timeline: list[PriceInterval],
+        now: datetime,
+        required_duration: timedelta,
+        maximum_price: float,
+        latest_end: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """Delegate to the price-timeline builder collaborator."""
+        return self._price_timeline_builder.select_buy_slots(
+            timeline,
+            now,
+            required_duration,
+            maximum_price,
+            latest_end=latest_end,
+        )
+
+    def _negative_buy_deadline(self, now: datetime) -> datetime:
+        """Delegate to the negative buy planner collaborator."""
+        return self._negative_buy_planner.deadline(now)
+
+    def _calculate_negative_buy_plan(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Delegate to the negative buy planner collaborator."""
+        return self._negative_buy_planner.build_plan(data)
 
     @callback
     def _handle_entity_change(self, event: Event) -> None:
@@ -802,13 +844,23 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             # Update peak import limit state based on current grid power
             self._update_peak_limit_state(data)
 
-            battery_dump_plan = self._calculate_battery_dump_plan(data)
-            data["battery_dump_plan"] = battery_dump_plan
-            data["arbitrage_mode_enabled"] = battery_dump_plan.get("enabled", False)
-            data["arbitrage_mode_active"] = battery_dump_plan.get("active", False)
-            data["arbitrage_mode_reason"] = battery_dump_plan.get("reason")
-            data["battery_dump_target_soc"] = battery_dump_plan.get("target_soc")
-            data["battery_dump_export_power"] = battery_dump_plan.get("export_power", 0)
+            arbitrage_mode_plan = self._calculate_arbitrage_mode_plan(data)
+            data["arbitrage_mode_plan"] = arbitrage_mode_plan
+            data["arbitrage_mode_enabled"] = arbitrage_mode_plan.get("enabled", False)
+            data["arbitrage_mode_active"] = arbitrage_mode_plan.get("active", False)
+            data["arbitrage_mode_reason"] = arbitrage_mode_plan.get("reason")
+            data["arbitrage_mode_reserve_soc"] = arbitrage_mode_plan.get("reserve_soc")
+            data["arbitrage_mode_export_power"] = arbitrage_mode_plan.get("export_power", 0)
+
+            negative_buy_plan = self._calculate_negative_buy_plan(data)
+            data["negative_buy_plan"] = negative_buy_plan
+            data["negative_buy_mode_enabled"] = negative_buy_plan.get("enabled", False)
+            data["negative_buy_mode_active"] = negative_buy_plan.get("active", False)
+            data["negative_buy_mode_reason"] = negative_buy_plan.get("reason")
+            data["negative_buy_import_power"] = negative_buy_plan.get("import_power", 0)
+            data["negative_buy_curtail_solar"] = negative_buy_plan.get(
+                "solar_curtail_active", False
+            )
 
             charging_decision = await self.decision_engine.evaluate_charging_decision(data)
             charging_decision, override_targets = self._apply_manual_overrides(charging_decision)

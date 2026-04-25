@@ -193,12 +193,12 @@ class OverrideRecalculator:
             self.normalize_car_override_state(combined_data)
 
         # When the user force-enables battery grid charging the arbitrage export
-        # window must not dominate.  Clear the dump flags so that
+        # window must not dominate.  Clear the arbitrage flags so that
         # _calculate_grid_setpoint follows the charging path instead of the
         # export path.
         if "battery_grid_charging" in override_targets and decision.get("battery_grid_charging"):
             combined_data["arbitrage_mode_active"] = False
-            combined_data["battery_dump_export_power"] = 0
+            combined_data["arbitrage_mode_export_power"] = 0
 
         ctx = CycleContext.from_data(
             combined_data,

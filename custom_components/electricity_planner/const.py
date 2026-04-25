@@ -44,9 +44,10 @@ CONF_ENERGY_COST_WKK = "energy_cost_wkk"
 
 CONF_MIN_SOC_THRESHOLD = "min_soc_threshold"
 CONF_MAX_SOC_THRESHOLD = "max_soc_threshold"
-CONF_BATTERY_DUMP_TARGET_SOC = "battery_dump_target_soc"
-CONF_BATTERY_DUMP_DEADLINE_HOUR = "battery_dump_deadline_hour"
-CONF_BATTERY_DUMP_MAX_EXPORT_POWER = "battery_dump_max_export_power"
+CONF_ARBITRAGE_MODE_RESERVE_SOC = "arbitrage_mode_reserve_soc"
+CONF_ARBITRAGE_MODE_DEADLINE_HOUR = "arbitrage_mode_deadline_hour"
+CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER = "arbitrage_mode_max_export_power"
+CONF_NEGATIVE_BUY_THRESHOLD = "negative_buy_threshold"
 CONF_PRICE_THRESHOLD = "price_threshold"
 CONF_EMERGENCY_SOC_THRESHOLD = "emergency_soc_threshold"
 CONF_VERY_LOW_PRICE_THRESHOLD = "very_low_price_threshold"
@@ -89,9 +90,10 @@ CONF_SOC_BUFFER_TARGET = "soc_buffer_target"
 # Default Threshold Values
 DEFAULT_MIN_SOC = 20
 DEFAULT_MAX_SOC = 70
-DEFAULT_BATTERY_DUMP_TARGET_SOC = 40
-DEFAULT_BATTERY_DUMP_DEADLINE_HOUR = 12
-DEFAULT_BATTERY_DUMP_MAX_EXPORT_POWER = 0  # 0 = automatic cap based on battery/grid limits
+DEFAULT_ARBITRAGE_MODE_RESERVE_SOC = 40
+DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR = 12
+DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER = 0  # 0 = automatic cap based on battery/grid limits
+DEFAULT_NEGATIVE_BUY_THRESHOLD = -0.05  # €/kWh - only buy when net price ≤ this (truly paid-to-consume)
 DEFAULT_PRICE_THRESHOLD = 0.15
 DEFAULT_EMERGENCY_SOC = 15
 DEFAULT_VERY_LOW_PRICE_THRESHOLD = 30  # Bottom 30% of daily range
@@ -211,7 +213,8 @@ MANUAL_OVERRIDE_ACTION_FORCE_WAIT = "force_wait"
 MANUAL_OVERRIDE_TARGET_BATTERY = "battery"
 MANUAL_OVERRIDE_TARGET_CAR = "car"
 MANUAL_OVERRIDE_TARGET_BOTH = "both"
-MANUAL_OVERRIDE_TARGET_BATTERY_DUMP = "battery_dump"
+MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE = "arbitrage_mode"
+MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY = "negative_buy"
 MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT = "charger_limit"
 MANUAL_OVERRIDE_TARGET_GRID_SETPOINT = "grid_setpoint"
 MANUAL_OVERRIDE_TARGET_ALL = "all"
@@ -220,4 +223,4 @@ MANUAL_OVERRIDE_TARGET_ALL = "all"
 MAX_POWER_VALIDATION_W = 50000  # Maximum reasonable power for solar/consumption/grid validation
 MAX_CAR_POWER_VALIDATION_W = 22000  # Maximum reasonable car charging power
 
-INTEGRATION_VERSION = "6.0.2"
+INTEGRATION_VERSION = "6.1.0"

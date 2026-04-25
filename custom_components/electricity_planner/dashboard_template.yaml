@@ -215,15 +215,24 @@ views:
               - entity: number.electricity_planner_sunny_forecast_threshold_kwh
                 name: "Sunny Forecast Trigger"
                 icon: mdi:weather-partly-cloudy
-              - entity: number.electricity_planner_battery_dump_target_soc
+              - entity: number.electricity_planner_arbitrage_mode_reserve_soc
                 name: "Arbitrage Reserve SOC"
                 icon: mdi:battery-arrow-down-outline
+              - entity: number.electricity_planner_arbitrage_mode_deadline_hour
+                name: "Arbitrage Deadline Hour"
+                icon: mdi:clock-end
+              - entity: number.electricity_planner_negative_buy_threshold
+                name: "Negative Arbitrage Buy Threshold"
+                icon: mdi:cash-minus
               - entity: switch.electricity_planner_car_permissive_mode
                 name: Car permissive
                 icon: mdi:car-electric-outline
               - entity: switch.electricity_planner_arbitrage_mode
                 name: Arbitrage mode
                 icon: mdi:battery-arrow-down-outline
+              - entity: switch.electricity_planner_negative_arbitrage_buy_mode
+                name: Negative Arbitrage Buy Mode
+                icon: mdi:battery-arrow-up-outline
               - entity: switch.electricity_planner_disable_battery_charging
                 name: Disable Battery Charging
                 icon: mdi:battery-off
@@ -534,9 +543,9 @@ views:
                 show:
                   legend_value: false
                 data_generator: |
-                  const dumpSwitch = hass.states['switch.electricity_planner_arbitrage_mode'];
-                  const threshold = dumpSwitch?.attributes?.dump_price_threshold;
-                  if (dumpSwitch?.state !== 'on' || threshold == null || threshold === undefined) {
+                  const arbitrageSwitch = hass.states['switch.electricity_planner_arbitrage_mode'];
+                  const threshold = arbitrageSwitch?.attributes?.arbitrage_price_threshold;
+                  if (arbitrageSwitch?.state !== 'on' || threshold == null || threshold === undefined) {
                     return [];
                   }
                   if (!entity.attributes.data || entity.attributes.data.length === 0) {

@@ -34,18 +34,22 @@ Three-phase managed and bundled dashboards additionally require:
 
 The current arbitrage-related dashboard surface is:
 
-- `switch.electricity_planner_arbitrage_mode` as `Arbitrage mode`
-- `number.electricity_planner_battery_dump_target_soc` as `Arbitrage Reserve SOC`
+- `switch.electricity_planner_arbitrage_mode` as `Arbitrage Mode`
+- `switch.electricity_planner_negative_arbitrage_buy_mode` as `Negative Arbitrage Buy Mode`
+- `number.electricity_planner_arbitrage_mode_reserve_soc` as `Arbitrage Reserve SOC`
+- `number.electricity_planner_arbitrage_mode_deadline_hour` as `Arbitrage Deadline Hour`
+- `number.electricity_planner_negative_buy_threshold` as `Negative Arbitrage Buy Threshold`
 - `Arbitrage Threshold` line on the price chart when arbitrage mode is active
 
 The dashboards also keep the normal battery controls visible:
 
 - `number.electricity_planner_max_soc_threshold`
 - `number.electricity_planner_max_soc_threshold_sunny`
+- `number.electricity_planner_max_soc_threshold_solar`
 - `number.electricity_planner_sunny_forecast_threshold_kwh`
 - `switch.electricity_planner_disable_battery_charging`
 
-`battery_dump_deadline_hour` is configurable in the integration options flow and is not currently exposed as a dashboard entity.
+The `arbitrage_mode_max_export_power` cap remains an options-flow setting (Safety Limits step) and is not exposed as a dashboard entity.
 
 ## Main Entities Used By Current YAML
 
@@ -60,11 +64,15 @@ These are the primary entity IDs referenced by the shipped dashboard YAML:
 - `sensor.electricity_planner_grid_setpoint`
 - `sensor.electricity_planner_decision_diagnostics`
 - `sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices`
-- `number.electricity_planner_battery_dump_target_soc`
+- `number.electricity_planner_arbitrage_mode_reserve_soc`
+- `number.electricity_planner_arbitrage_mode_deadline_hour`
+- `number.electricity_planner_negative_buy_threshold`
 - `number.electricity_planner_max_soc_threshold`
 - `number.electricity_planner_max_soc_threshold_sunny`
+- `number.electricity_planner_max_soc_threshold_solar`
 - `number.electricity_planner_sunny_forecast_threshold_kwh`
 - `switch.electricity_planner_arbitrage_mode`
+- `switch.electricity_planner_negative_arbitrage_buy_mode`
 - `switch.electricity_planner_car_permissive_mode`
 - `switch.electricity_planner_disable_battery_charging`
 

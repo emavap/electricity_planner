@@ -21,8 +21,9 @@
                         "data": {
                             "min_soc_threshold": "Minimum SOC Threshold",
                             "max_soc_threshold": "Maximum SOC Threshold",
-                            "battery_dump_target_soc": "Arbitrage Reserve SOC",
-                            "battery_dump_deadline_hour": "Arbitrage Deadline Hour",
+                            "arbitrage_mode_reserve_soc": "Arbitrage Reserve SOC",
+                            "arbitrage_mode_deadline_hour": "Arbitrage Deadline Hour",
+                            "negative_buy_threshold": "Negative Arbitrage Buy Threshold",
                             "emergency_soc_threshold": "Emergency SOC Threshold",
                             "soc_buffer_target": "SOC Buffer Target",
                             "soc_price_multiplier_max": "SOC Price Multiplier (Max)"
@@ -30,8 +31,9 @@
                         "data_description": {
                             "min_soc_threshold": "Minimum battery charge level to maintain (%)",
                             "max_soc_threshold": "Maximum battery charge level target (%)",
-                            "battery_dump_target_soc": "Minimum reserve SOC kept in the battery during arbitrage mode (%)",
-                            "battery_dump_deadline_hour": "Local hour of the next arbitrage cutoff. Before it the planner targets today; after it, tomorrow",
+                            "arbitrage_mode_reserve_soc": "Minimum reserve SOC kept in the battery during arbitrage mode (%)",
+                            "arbitrage_mode_deadline_hour": "Local hour of the next arbitrage cutoff (shared by arbitrage selling and Negative Arbitrage Buy). Before it the planner targets today; after it, tomorrow",
+                            "negative_buy_threshold": "Net buy price (€/kWh) at or below which Negative Arbitrage Buy mode treats a slot as paid-to-consume. Default: -0.05",
                             "emergency_soc_threshold": "SOC level below which emergency charging is triggered regardless of price (%)",
                             "soc_buffer_target": "SOC level above which no price relaxation is applied. Below this, the price threshold is gradually relaxed (%)",
                             "soc_price_multiplier_max": "Maximum price threshold multiplier when battery is at/below emergency SOC (1.3 = accept 30% higher prices)"
@@ -119,8 +121,9 @@
                 "data": {
                     "min_soc_threshold": "Minimum SOC Threshold",
                     "max_soc_threshold": "Maximum SOC Threshold",
-                    "battery_dump_target_soc": "Arbitrage Reserve SOC",
-                    "battery_dump_deadline_hour": "Arbitrage Deadline Hour",
+                    "arbitrage_mode_reserve_soc": "Arbitrage Reserve SOC",
+                    "arbitrage_mode_deadline_hour": "Arbitrage Deadline Hour",
+                    "negative_buy_threshold": "Negative Arbitrage Buy Threshold",
                     "solar_forecast_start_hour": "Forecast Start Hour",
                     "max_soc_threshold_sunny": "Max SOC Grid Charge (Sunny Day)",
                     "max_soc_threshold_solar": "Max SOC Solar Charge",
@@ -151,8 +154,9 @@
                 "data_description": {
                     "min_soc_threshold": "Minimum battery charge level to maintain (%)",
                     "max_soc_threshold": "Maximum battery charge level target (%)",
-                    "battery_dump_target_soc": "Minimum reserve SOC kept in the battery during arbitrage mode (%)",
-                    "battery_dump_deadline_hour": "Local hour of the next arbitrage cutoff. Before it the planner targets today; after it, tomorrow",
+                    "arbitrage_mode_reserve_soc": "Minimum reserve SOC kept in the battery during arbitrage mode (%)",
+                    "arbitrage_mode_deadline_hour": "Local hour of the next arbitrage cutoff (shared by arbitrage selling and Negative Arbitrage Buy). Before it the planner targets today; after it, tomorrow",
+                    "negative_buy_threshold": "Net buy price (\u20ac/kWh) at or below which Negative Arbitrage Buy mode treats a slot as paid-to-consume. Default: -0.05",
                     "solar_forecast_start_hour": "Hour of the day (12-23) when the system starts reading tomorrow's solar forecast. Earlier = more time to react, later = more accurate forecast. Default: 20 (8 PM)",
                     "max_soc_threshold_sunny": "Max SOC for grid charging when tomorrow is sunny (%). Grid charging stops at this level to leave room for free solar energy",
                     "max_soc_threshold_solar": "Battery SOC above which solar surplus is diverted to the EV / export instead of being absorbed by the battery (%). Independent from grid charging ceiling.",
@@ -378,14 +382,14 @@
                             "max_battery_power": "Max Battery Power",
                             "max_car_power": "Max Car Power",
                             "max_grid_power": "Max Grid Power",
-                            "battery_dump_max_export_power": "Arbitrage Max Export Power",
+                            "arbitrage_mode_max_export_power": "Arbitrage Max Export Power",
                             "base_grid_setpoint": "Base Grid Setpoint"
                         },
                         "data_description": {
                             "max_battery_power": "Maximum power limit for battery charging/discharging (W)",
                             "max_car_power": "Maximum power limit for car charging (W)",
                             "max_grid_power": "Maximum power limit from grid — safety limit (W)",
-                            "battery_dump_max_export_power": "Maximum export power used during arbitrage mode. Set to 0 to use the automatic cap from the battery and grid limits (W)",
+                            "arbitrage_mode_max_export_power": "Maximum export power used during arbitrage mode. Set to 0 to use the automatic cap from the battery and grid limits (W)",
                             "base_grid_setpoint": "Base minimum grid setpoint when no monthly peak data available (W)"
                         }
                     },
@@ -406,7 +410,7 @@
                     "max_battery_power": "Max Battery Power",
                     "max_car_power": "Max Car Power",
                     "max_grid_power": "Max Grid Power",
-                    "battery_dump_max_export_power": "Arbitrage Max Export Power",
+                    "arbitrage_mode_max_export_power": "Arbitrage Max Export Power",
                     "min_car_charging_threshold": "Min Car Charging Threshold",
                     "predictive_charging_min_soc": "Predictive Charging Min SOC",
                     "base_grid_setpoint": "Base Grid Setpoint"
@@ -415,7 +419,7 @@
                     "max_battery_power": "Maximum power limit for battery charging/discharging (W)",
                     "max_car_power": "Maximum power limit for car charging (W)",
                     "max_grid_power": "Maximum power limit from grid — safety limit (W)",
-                    "battery_dump_max_export_power": "Maximum export power used during arbitrage mode. Set to 0 to use the automatic cap from the battery and grid limits (W)",
+                    "arbitrage_mode_max_export_power": "Maximum export power used during arbitrage mode. Set to 0 to use the automatic cap from the battery and grid limits (W)",
                     "min_car_charging_threshold": "Minimum power to consider car as actively charging (W)",
                     "predictive_charging_min_soc": "Minimum SOC for predictive charging logic (%)",
                     "base_grid_setpoint": "Base minimum grid setpoint when no monthly peak data available (W)"
@@ -442,7 +446,7 @@
                 },
                 "target": {
                     "name": "Target",
-                    "description": "Which system to override: battery, car, both, charger_limit, grid_setpoint, or battery_dump."
+                    "description": "Which system to override: battery, car, both, charger_limit, grid_setpoint, or arbitrage_mode."
                 },
                 "action": {
                     "name": "Action",
@@ -476,7 +480,7 @@
                 },
                 "target": {
                     "name": "Target",
-                    "description": "Which override to clear: battery, car, both, charger_limit, grid_setpoint, battery_dump, or all."
+                    "description": "Which override to clear: battery, car, both, charger_limit, grid_setpoint, arbitrage_mode, or all."
                 }
             }
         }
@@ -874,8 +878,9 @@
                 "data": {
                     "min_soc_threshold": "Minimum SOC Threshold",
                     "max_soc_threshold": "Maximum SOC Threshold",
-                    "battery_dump_target_soc": "Arbitrage Reserve SOC",
-                    "battery_dump_deadline_hour": "Arbitrage Deadline Hour",
+                    "arbitrage_mode_reserve_soc": "Arbitrage Reserve SOC",
+                    "arbitrage_mode_deadline_hour": "Arbitrage Deadline Hour",
+                    "negative_buy_threshold": "Negative Arbitrage Buy Threshold",
                     "solar_forecast_start_hour": "Forecast Start Hour",
                     "max_soc_threshold_sunny": "Max SOC Grid Charge (Sunny Day)",
                     "max_soc_threshold_solar": "Max SOC Solar Charge",
@@ -905,8 +910,9 @@
                 "data_description": {
                     "min_soc_threshold": "Minimum battery charge level to maintain (%)",
                     "max_soc_threshold": "Maximum battery charge level target (%)",
-                    "battery_dump_target_soc": "Minimum reserve SOC kept in the battery during arbitrage mode (%)",
-                    "battery_dump_deadline_hour": "Local hour of the next arbitrage cutoff. Before it the planner targets today; after it, tomorrow",
+                    "arbitrage_mode_reserve_soc": "Minimum reserve SOC kept in the battery during arbitrage mode (%)",
+                    "arbitrage_mode_deadline_hour": "Local hour of the next arbitrage cutoff (shared by arbitrage selling and Negative Arbitrage Buy). Before it the planner targets today; after it, tomorrow",
+                    "negative_buy_threshold": "Net buy price (\u20ac/kWh) at or below which Negative Arbitrage Buy mode treats a slot as paid-to-consume. Default: -0.05",
                     "solar_forecast_start_hour": "Hour of the day (12-23) when the system starts reading tomorrow's solar forecast. Earlier = more time to react, later = more accurate forecast. Default: 20 (8 PM)",
                     "max_soc_threshold_sunny": "Max SOC for grid charging when tomorrow is sunny (%). Grid charging stops at this level to leave room for free solar energy",
                     "max_soc_threshold_solar": "Battery SOC above which solar surplus is diverted to the EV / export instead of being absorbed by the battery (%). Independent from grid charging ceiling.",
@@ -942,7 +948,7 @@
                     "max_battery_power": "Max Battery Power",
                     "max_car_power": "Max Car Power",
                     "max_grid_power": "Max Grid Power",
-                    "battery_dump_max_export_power": "Arbitrage Max Export Power",
+                    "arbitrage_mode_max_export_power": "Arbitrage Max Export Power",
                     "min_car_charging_threshold": "Min Car Charging Threshold",
                     "predictive_charging_min_soc": "Predictive Charging Min SOC",
                     "base_grid_setpoint": "Base Grid Setpoint"
@@ -951,7 +957,7 @@
                     "max_battery_power": "Maximum power limit for battery charging/discharging (W)",
                     "max_car_power": "Maximum power limit for car charging (W)",
                     "max_grid_power": "Maximum power limit from grid — safety limit (W)",
-                    "battery_dump_max_export_power": "Maximum export power used during arbitrage mode. Set to 0 to use the automatic cap from the battery and grid limits (W)",
+                    "arbitrage_mode_max_export_power": "Maximum export power used during arbitrage mode. Set to 0 to use the automatic cap from the battery and grid limits (W)",
                     "min_car_charging_threshold": "Minimum power to consider car as actively charging (W)",
                     "predictive_charging_min_soc": "Minimum SOC for predictive charging logic (%)",
                     "base_grid_setpoint": "Base minimum grid setpoint when no monthly peak data available (W)"

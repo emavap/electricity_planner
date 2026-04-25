@@ -34,6 +34,7 @@ async def async_setup_entry(
         CarPermissiveModeSwitch(coordinator, entry),
         BatteryChargingDisableSwitch(coordinator, entry),
         ArbitrageModeSwitch(coordinator, entry),
+        NegativeArbitrageBuyModeSwitch(coordinator, entry),
     ]
 
     async_add_entities(entities)
@@ -249,11 +250,11 @@ class ArbitrageModeSwitch(CoordinatorEntity, SwitchEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
-        dump_plan = self.coordinator.data.get("battery_dump_plan", {}) if self.coordinator.data else {}
+        arbitrage_plan = self.coordinator.data.get("arbitrage_mode_plan", {}) if self.coordinator.data else {}
         override = self.coordinator.get_manual_override("arbitrage_mode")
         override_active = bool(override and override.get("value") is True)
         set_at = override.get("set_at") if override else None
-        effective_plan = dump_plan if override_active and dump_plan.get("enabled") else {}
+        effective_plan = arbitrage_plan if override_active and arbitrage_plan.get("enabled") else {}
         reason = (
             effective_plan.get("reason")
             or (override.get("reason") if override_active and override else None)
@@ -263,11 +264,11 @@ class ArbitrageModeSwitch(CoordinatorEntity, SwitchEntity):
         return {
             "override_active": override_active,
             "reason": reason,
-            "target_soc": effective_plan.get("target_soc"),
-            "currently_dumping": effective_plan.get("active", False),
-            "dump_price_threshold": effective_plan.get("dump_price_threshold"),
+            "reserve_soc": effective_plan.get("reserve_soc"),
+            "currently_exporting": effective_plan.get("active", False),
+            "arbitrage_price_threshold": effective_plan.get("arbitrage_price_threshold"),
             "current_slot_price": effective_plan.get("current_slot_price"),
-            "slots_cover_full_dump": effective_plan.get("slots_cover_full_dump"),
+            "slots_cover_full_arbitrage": effective_plan.get("slots_cover_full_arbitrage"),
             "selected_slots_count": effective_plan.get("selected_slots_count", 0),
             "selected_slots": effective_plan.get("selected_slots", []),
             "deadline": effective_plan.get("deadline"),
@@ -284,7 +285,7 @@ class ArbitrageModeSwitch(CoordinatorEntity, SwitchEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on arbitrage mode."""
         _LOGGER.info("Enabling arbitrage mode")
-        await self.coordinator.async_set_battery_dump_mode(
+        await self.coordinator.async_set_arbitrage_mode(
             reason="Manual arbitrage mode via dashboard switch",
         )
         await self.coordinator.async_request_refresh()
@@ -292,5 +293,88 @@ class ArbitrageModeSwitch(CoordinatorEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off arbitrage mode."""
         _LOGGER.info("Clearing arbitrage mode")
-        await self.coordinator.async_clear_battery_dump_mode()
+        await self.coordinator.async_clear_arbitrage_mode()
+        await self.coordinator.async_request_refresh()
+
+
+class NegativeArbitrageBuyModeSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch to enable persistent Negative Arbitrage Buy mode."""
+
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the negative arbitrage buy mode switch."""
+        super().__init__(coordinator)
+        self._attr_name = f"{entry.title} Negative Arbitrage Buy Mode"
+        self._attr_unique_id = f"{entry.entry_id}_negative_buy_mode"
+        self._attr_icon = "mdi:battery-arrow-up-outline"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": entry.title,
+            "manufacturer": "Electricity Planner",
+            "model": "Smart Charging Controller",
+        }
+
+    @property
+    def is_on(self) -> bool:
+        """Return true if Negative Arbitrage Buy mode is enabled."""
+        override = self.coordinator.get_manual_override("negative_buy_mode")
+        return bool(override and override.get("value") is True)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes."""
+        buy_plan = (
+            self.coordinator.data.get("negative_buy_plan", {})
+            if self.coordinator.data
+            else {}
+        )
+        override = self.coordinator.get_manual_override("negative_buy_mode")
+        override_active = bool(override and override.get("value") is True)
+        set_at = override.get("set_at") if override else None
+        effective_plan = buy_plan if override_active and buy_plan.get("enabled") else {}
+        reason = (
+            effective_plan.get("reason")
+            or (override.get("reason") if override_active and override else None)
+            or "Negative Arbitrage Buy mode disabled"
+        )
+
+        return {
+            "override_active": override_active,
+            "reason": reason,
+            "threshold": effective_plan.get("threshold"),
+            "max_soc_threshold": effective_plan.get("max_soc_threshold"),
+            "currently_buying": effective_plan.get("active", False),
+            "buy_price_threshold": effective_plan.get("buy_price_threshold"),
+            "current_slot_price": effective_plan.get("current_slot_price"),
+            "slots_cover_full_charge": effective_plan.get("slots_cover_full_charge"),
+            "selected_slots_count": effective_plan.get("selected_slots_count", 0),
+            "selected_slots": effective_plan.get("selected_slots", []),
+            "deadline": effective_plan.get("deadline"),
+            "import_power": effective_plan.get("import_power"),
+            "configured_import_cap_w": effective_plan.get("configured_import_cap_w"),
+            "required_energy_kwh": effective_plan.get("required_energy_kwh"),
+            "required_duration_hours": effective_plan.get("required_duration_hours"),
+            "set_at": set_at.isoformat() if set_at else None,
+            "description": (
+                "When enabled, the planner forces grid charging during the cheapest upcoming slots "
+                "below the configured negative-price threshold and curtails solar once the SOC ceiling "
+                "is reached, maximizing income from paid-to-consume periods."
+            ),
+        }
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn on Negative Arbitrage Buy mode."""
+        _LOGGER.info("Enabling Negative Arbitrage Buy mode")
+        await self.coordinator.async_set_negative_buy_mode(
+            reason="Manual Negative Arbitrage Buy mode via dashboard switch",
+        )
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn off Negative Arbitrage Buy mode."""
+        _LOGGER.info("Clearing Negative Arbitrage Buy mode")
+        await self.coordinator.async_clear_negative_buy_mode()
         await self.coordinator.async_request_refresh()

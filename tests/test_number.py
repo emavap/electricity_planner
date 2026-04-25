@@ -16,7 +16,7 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner import coordinator as coordinator_module
 from custom_components.electricity_planner.const import (
-    CONF_BATTERY_DUMP_TARGET_SOC,
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
@@ -32,10 +32,12 @@ from custom_components.electricity_planner.const import (
 )
 from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
 from custom_components.electricity_planner.number import (
-    BatteryDumpTargetSocNumber,
+    ArbitrageModeDeadlineHourNumber,
+    ArbitrageModeReserveSocNumber,
     MaxSocThresholdNumber,
     MaxSocThresholdSolarNumber,
     MaxSocThresholdSunnyNumber,
+    NegativeBuyThresholdNumber,
     SunnyForecastThresholdNumber,
     async_setup_entry,
 )
@@ -134,12 +136,14 @@ async def test_number_setup_always_adds_standard_and_sunny_entities(fake_hass, m
     entities = []
     await async_setup_entry(fake_hass, entry, entities.extend)
 
-    assert len(entities) == 5
+    assert len(entities) == 7
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
     assert isinstance(entities[2], MaxSocThresholdSolarNumber)
     assert isinstance(entities[3], SunnyForecastThresholdNumber)
-    assert isinstance(entities[4], BatteryDumpTargetSocNumber)
+    assert isinstance(entities[4], ArbitrageModeReserveSocNumber)
+    assert isinstance(entities[5], ArbitrageModeDeadlineHourNumber)
+    assert isinstance(entities[6], NegativeBuyThresholdNumber)
 
 
 @pytest.mark.asyncio
@@ -161,12 +165,14 @@ async def test_number_setup_with_forecast_entity_keeps_same_three_entities(fake_
     entities = []
     await async_setup_entry(fake_hass, entry, entities.extend)
 
-    assert len(entities) == 5
+    assert len(entities) == 7
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
     assert isinstance(entities[2], MaxSocThresholdSolarNumber)
     assert isinstance(entities[3], SunnyForecastThresholdNumber)
-    assert isinstance(entities[4], BatteryDumpTargetSocNumber)
+    assert isinstance(entities[4], ArbitrageModeReserveSocNumber)
+    assert isinstance(entities[5], ArbitrageModeDeadlineHourNumber)
+    assert isinstance(entities[6], NegativeBuyThresholdNumber)
 
 
 @pytest.mark.asyncio
@@ -191,7 +197,7 @@ async def test_number_entities_use_stable_dashboard_friendly_entity_ids(fake_has
     max_entity = MaxSocThresholdNumber(coordinator, entry)
     sunny_entity = MaxSocThresholdSunnyNumber(coordinator, entry)
     forecast_entity = SunnyForecastThresholdNumber(coordinator, entry)
-    dump_entity = BatteryDumpTargetSocNumber(coordinator, entry)
+    reserve_entity = ArbitrageModeReserveSocNumber(coordinator, entry)
     assert max_entity.entity_id == "number.electricity_planner_max_soc_threshold"
     assert sunny_entity.entity_id == "number.electricity_planner_max_soc_threshold_sunny"
     assert (
@@ -199,8 +205,8 @@ async def test_number_entities_use_stable_dashboard_friendly_entity_ids(fake_has
         == "number.electricity_planner_sunny_forecast_threshold_kwh"
     )
     assert (
-        dump_entity.entity_id
-        == "number.electricity_planner_battery_dump_target_soc"
+        reserve_entity.entity_id
+        == "number.electricity_planner_arbitrage_mode_reserve_soc"
     )
 
 
@@ -270,8 +276,8 @@ async def test_max_soc_number_update_preserves_other_options(fake_hass, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_battery_dump_target_update_persists_in_options(fake_hass, monkeypatch):
-    """Dump target SOC should persist like the other live number controls."""
+async def test_arbitrage_mode_reserve_update_persists_in_options(fake_hass, monkeypatch):
+    """Reserve SOC should persist like the other live number controls."""
     config = _base_config()
     entry = MockConfigEntry(domain=DOMAIN, data=config, options={})
 
@@ -286,20 +292,20 @@ async def test_battery_dump_target_update_persists_in_options(fake_hass, monkeyp
     coordinator.decision_engine.refresh_settings = Mock()
     coordinator.async_request_refresh = AsyncMock()
 
-    entity = BatteryDumpTargetSocNumber(coordinator, entry)
+    entity = ArbitrageModeReserveSocNumber(coordinator, entry)
     entity.hass = fake_hass
 
     await entity.async_set_native_value(25)
 
-    assert entry.options[CONF_BATTERY_DUMP_TARGET_SOC] == 25
-    assert coordinator.config[CONF_BATTERY_DUMP_TARGET_SOC] == 25
+    assert entry.options[CONF_ARBITRAGE_MODE_RESERVE_SOC] == 25
+    assert coordinator.config[CONF_ARBITRAGE_MODE_RESERVE_SOC] == 25
     coordinator.decision_engine.refresh_settings.assert_called_once_with(coordinator.config)
     coordinator.async_request_refresh.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_battery_dump_target_attributes_show_threshold_state_not_windows(fake_hass, monkeypatch):
-    """Dump target number attributes should reflect threshold-based planning state."""
+async def test_arbitrage_mode_reserve_attributes_show_threshold_state_not_windows(fake_hass, monkeypatch):
+    """Reserve number attributes should reflect threshold-based planning state."""
     config = _base_config()
     entry = MockConfigEntry(domain=DOMAIN, data=config, options={})
 
@@ -312,25 +318,25 @@ async def test_battery_dump_target_attributes_show_threshold_state_not_windows(f
     coordinator = ElectricityPlannerCoordinator(fake_hass, entry)
     coordinator.data = {
         "battery_analysis": {"average_soc": 54.2},
-        "battery_dump_plan": {
+        "arbitrage_mode_plan": {
             "enabled": True,
-            "dump_price_threshold": 0.1123,
+            "arbitrage_price_threshold": 0.1123,
             "current_slot_price": 0.1456,
             "selected_slots_count": 5,
-            "slots_cover_full_dump": True,
+            "slots_cover_full_arbitrage": True,
         },
     }
 
-    entity = BatteryDumpTargetSocNumber(coordinator, entry)
+    entity = ArbitrageModeReserveSocNumber(coordinator, entry)
     attrs = entity.extra_state_attributes
 
-    assert attrs["dump_mode_enabled"] is True
+    assert attrs["arbitrage_mode_enabled"] is True
     assert attrs["current_battery_soc"] == "54.2%"
-    assert attrs["available_to_dump_percent"] == "14.2%"
-    assert attrs["dump_price_threshold"] == 0.1123
+    assert attrs["available_to_export_percent"] == "14.2%"
+    assert attrs["arbitrage_price_threshold"] == 0.1123
     assert attrs["current_slot_price"] == 0.1456
     assert attrs["selected_slots_count"] == 5
-    assert attrs["slots_cover_full_dump"] is True
+    assert attrs["slots_cover_full_arbitrage"] is True
     assert "scheduled_window_start" not in attrs
     assert "scheduled_window_end" not in attrs
 

@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 6.0.2** | **Config Schema Version 21** | **Home Assistant 2024.4+**
+**Version 6.1.0** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Release note for v6.0.2: logic-review follow-up on top of v6.0.1 — five small, low-risk fixes with no user-facing behavior drift. `battery_charging.py` surplus-block gate now uses `max_soc_threshold_solar` (was hardcoded 50). `car_charging.py` arbitrage path explicitly clears `car_solar_only`. `grid_setpoint.py` safety-net logs demoted from `warning` to `info` so recoverable edges no longer surface as persistent HA notifications. `strategies.py` docstring clarifies the predictive strategy's advisory reason only surfaces in non-dynamic mode. CLAUDE.md strategy count corrected 8 → 6. No code-behavior, schema, or API changes. 456/456 tests still passing.
+> Release note for v6.1.0: introduces **Negative Arbitrage Buy mode** (force grid-charge batteries and curtail solar export when net feed-in price drops below a configurable threshold, default `-0.05 €/kWh`) and unifies the previous *Battery Dump* nomenclature under **Arbitrage Mode** across all layers (config keys, entity IDs, manual-override service targets, dashboards, and translations). Both arbitrage directions now share a single live-adjustable `arbitrage_mode_deadline_hour`. New live entities: `switch.electricity_planner_negative_arbitrage_buy_mode`, `number.electricity_planner_arbitrage_mode_deadline_hour`, `number.electricity_planner_negative_buy_threshold`. Two-step config-schema migration v21→v22→v23 backfills the new threshold and renames the legacy `battery_dump_*` storage keys; the `battery_dump_target_soc` number entity is renamed to `arbitrage_mode_reserve_soc` while preserving its unique_id so historical statistics are retained. `set_manual_override` / `clear_manual_override` services accept the new `arbitrage_mode` and `negative_buy` targets. 474/474 tests passing.
 
 ## Key Features
 
@@ -20,7 +20,7 @@ A Home Assistant custom integration that analyses live Nord Pool prices, battery
 - **Permissive mode switch** for temporarily relaxed car charging thresholds
 - **Manual override services** to force or block charging for configurable durations
 - **Contract-specific pricing** with multiplier/offset adjustments for consumption and feed-in
-- **Arbitrage mode** with threshold-based export activation and dashboard threshold visibility
+- **Arbitrage mode** (sell + Negative Arbitrage Buy) with shared deadline hour, threshold-based activation, and dashboard threshold visibility
 - **Comprehensive diagnostics** with 20 sensors and 7 binary sensors
 
 ## Entities Overview
@@ -31,7 +31,7 @@ A Home Assistant custom integration that analyses live Nord Pool prices, battery
 | Binary Sensors (Diagnostic) | 3 | Low Price, Solar Production, Data Availability |
 | Sensors (Automation) | 3 | Car Charger Limit, Grid Setpoint, Inverter Derating Target |
 | Sensors (Diagnostic) | 17 | Decision Diagnostics, Price/Threshold sensors, SOC Average |
-| Switch | 3 | Car Permissive Mode, Arbitrage Mode, Disable Battery Charging |
+| Switch | 4 | Car Permissive Mode, Arbitrage Mode, Negative Arbitrage Buy Mode, Disable Battery Charging |
 | Services | 2 | Set/Clear Manual Override |
 
 ## Documentation

@@ -27,6 +27,7 @@ from custom_components.electricity_planner.switch import (
     ArbitrageModeSwitch,
     BatteryChargingDisableSwitch,
     CarPermissiveModeSwitch,
+    NegativeArbitrageBuyModeSwitch,
 )
 
 
@@ -194,44 +195,44 @@ async def test_car_permissive_switch_persists_state_before_refresh(fake_hass, mo
 
 
 @pytest.mark.asyncio
-async def test_battery_dump_switch_uses_persistent_override(fake_hass, monkeypatch):
-    """Dump switch should delegate persistence to the coordinator override store."""
+async def test_arbitrage_mode_switch_uses_persistent_override(fake_hass, monkeypatch):
+    """Arbitrage switch should delegate persistence to the coordinator override store."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
     entity = ArbitrageModeSwitch(coordinator, entry)
 
-    coordinator.async_set_battery_dump_mode = AsyncMock()
-    coordinator.async_clear_battery_dump_mode = AsyncMock()
+    coordinator.async_set_arbitrage_mode = AsyncMock()
+    coordinator.async_clear_arbitrage_mode = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
 
     await entity.async_turn_on()
 
-    coordinator.async_set_battery_dump_mode.assert_awaited_once()
+    coordinator.async_set_arbitrage_mode.assert_awaited_once()
     coordinator.async_request_refresh.assert_awaited_once()
 
     coordinator.async_request_refresh.reset_mock()
 
     await entity.async_turn_off()
 
-    coordinator.async_clear_battery_dump_mode.assert_awaited_once()
+    coordinator.async_clear_arbitrage_mode.assert_awaited_once()
     coordinator.async_request_refresh.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_battery_dump_switch_reflects_persisted_override_after_restart(
+async def test_arbitrage_mode_switch_reflects_persisted_override_after_restart(
     fake_hass, monkeypatch,
 ):
     """Arbitrage switch should prefer the live plan reason after restart refresh."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     coordinator._manual_override_store = _MemoryStore()
 
-    await coordinator.async_set_battery_dump_mode(reason="persisted dump")
+    await coordinator.async_set_arbitrage_mode(reason="persisted dump")
 
     restored = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     restored._manual_override_store = _MemoryStore(coordinator._manual_override_store.data)
     await restored._async_load_manual_overrides()
     restored.data = {
-        "battery_dump_plan": {
+        "arbitrage_mode_plan": {
             "enabled": True,
             "active": False,
             "reason": "Arbitrage mode enabled but no battery data is available",
@@ -250,14 +251,14 @@ async def test_battery_dump_switch_reflects_persisted_override_after_restart(
 
 
 @pytest.mark.asyncio
-async def test_battery_dump_switch_uses_override_reason_before_first_refresh(
+async def test_arbitrage_mode_switch_uses_override_reason_before_first_refresh(
     fake_hass, monkeypatch,
 ):
     """Arbitrage switch should fall back to the persisted override reason before plan data exists."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     coordinator._manual_override_store = _MemoryStore()
 
-    await coordinator.async_set_battery_dump_mode(reason="persisted dump")
+    await coordinator.async_set_arbitrage_mode(reason="persisted dump")
 
     restored = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     restored._manual_override_store = _MemoryStore(coordinator._manual_override_store.data)
@@ -270,15 +271,15 @@ async def test_battery_dump_switch_uses_override_reason_before_first_refresh(
     assert entity.extra_state_attributes["reason"] == "persisted dump"
 
 
-def test_battery_dump_switch_ignores_stale_plan_when_override_is_cleared(fake_hass, monkeypatch):
-    """Stale dump-plan data must not leak through after arbitrage mode is turned off."""
+def test_arbitrage_mode_switch_ignores_stale_plan_when_override_is_cleared(fake_hass, monkeypatch):
+    """Stale arbitrage-plan data must not leak through after arbitrage mode is turned off."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     coordinator.data = {
-        "battery_dump_plan": {
+        "arbitrage_mode_plan": {
             "enabled": True,
             "active": True,
             "reason": "Arbitrage export active at 0.120€/kWh",
-            "dump_price_threshold": 0.08,
+            "arbitrage_price_threshold": 0.08,
             "current_slot_price": 0.12,
             "selected_slots_count": 3,
             "selected_slots": [{"start": "x", "end": "y", "price": 0.12}],
@@ -297,8 +298,8 @@ def test_battery_dump_switch_ignores_stale_plan_when_override_is_cleared(fake_ha
     assert entity.is_on is False
     assert attrs["override_active"] is False
     assert attrs["reason"] == "Arbitrage mode disabled"
-    assert attrs["currently_dumping"] is False
-    assert attrs["dump_price_threshold"] is None
+    assert attrs["currently_exporting"] is False
+    assert attrs["arbitrage_price_threshold"] is None
     assert attrs["selected_slots_count"] == 0
     assert attrs["selected_slots"] == []
     assert attrs["export_power"] is None
@@ -327,3 +328,104 @@ def test_battery_disable_switch_ignores_expired_override(fake_hass, monkeypatch)
 
     assert entity.is_on is False
     assert coordinator._manual_overrides["battery_grid_charging"] is None
+
+
+
+@pytest.mark.asyncio
+async def test_negative_buy_switch_uses_persistent_override(fake_hass, monkeypatch):
+    """Negative-buy switch should delegate persistence to the coordinator override store."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entity = NegativeArbitrageBuyModeSwitch(coordinator, entry)
+
+    coordinator.async_set_negative_buy_mode = AsyncMock()
+    coordinator.async_clear_negative_buy_mode = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    await entity.async_turn_on()
+
+    coordinator.async_set_negative_buy_mode.assert_awaited_once()
+    coordinator.async_request_refresh.assert_awaited_once()
+
+    coordinator.async_request_refresh.reset_mock()
+
+    await entity.async_turn_off()
+
+    coordinator.async_clear_negative_buy_mode.assert_awaited_once()
+    coordinator.async_request_refresh.assert_awaited_once()
+
+
+def test_negative_buy_switch_reports_attributes_from_active_plan(fake_hass, monkeypatch):
+    """When armed, the switch should expose plan threshold, slots, and active flags."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    base_time = coordinator_module.dt_util.utcnow()
+    coordinator._manual_overrides["negative_buy_mode"] = {
+        "value": True,
+        "reason": "Manual Negative Arbitrage Buy",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+    coordinator.data = {
+        "negative_buy_plan": {
+            "enabled": True,
+            "active": True,
+            "solar_curtail_active": True,
+            "reason": "Negative Arbitrage Buy active at -0.120€/kWh",
+            "threshold": -0.05,
+            "max_soc_threshold": 90.0,
+            "deadline": "2025-10-14T10:00:00+02:00",
+            "required_energy_kwh": 4.0,
+            "required_duration_hours": 1.0,
+            "slots_cover_full_charge": True,
+            "buy_price_threshold": -0.10,
+            "current_slot_price": -0.12,
+            "selected_slots": [{"start": "x", "end": "y", "price": -0.12}],
+            "selected_slots_count": 4,
+            "import_power": 4000,
+            "configured_import_cap_w": 4000,
+        }
+    }
+
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entity = NegativeArbitrageBuyModeSwitch(coordinator, entry)
+    attrs = entity.extra_state_attributes
+
+    assert entity.is_on is True
+    assert attrs["override_active"] is True
+    assert attrs["currently_buying"] is True
+    assert attrs["buy_price_threshold"] == -0.10
+    assert attrs["current_slot_price"] == -0.12
+    assert attrs["selected_slots_count"] == 4
+    assert attrs["import_power"] == 4000
+    assert attrs["configured_import_cap_w"] == 4000
+    assert "Negative Arbitrage Buy active" in attrs["reason"]
+
+
+def test_negative_buy_switch_ignores_stale_plan_when_override_is_cleared(fake_hass, monkeypatch):
+    """Stale negative-buy plan data must not leak through after the mode is turned off."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    coordinator.data = {
+        "negative_buy_plan": {
+            "enabled": True,
+            "active": True,
+            "reason": "Negative Arbitrage Buy active at -0.120€/kWh",
+            "buy_price_threshold": -0.10,
+            "current_slot_price": -0.12,
+            "selected_slots": [{"start": "x", "end": "y", "price": -0.12}],
+            "selected_slots_count": 4,
+            "import_power": 4000,
+        }
+    }
+    coordinator._manual_overrides["negative_buy_mode"] = None
+
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entity = NegativeArbitrageBuyModeSwitch(coordinator, entry)
+    attrs = entity.extra_state_attributes
+
+    assert entity.is_on is False
+    assert attrs["override_active"] is False
+    assert attrs["reason"] == "Negative Arbitrage Buy mode disabled"
+    assert attrs["currently_buying"] is False
+    assert attrs["buy_price_threshold"] is None
+    assert attrs["selected_slots_count"] == 0
+    assert attrs["selected_slots"] == []

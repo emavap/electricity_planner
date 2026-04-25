@@ -7,9 +7,9 @@ import pytest
 from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner.const import (
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_BASE_GRID_SETPOINT,
     CONF_BATTERY_CAPACITIES,
-    CONF_BATTERY_DUMP_TARGET_SOC,
     CONF_CAR_USE_BATTERY_ARBITRAGE,
     CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
@@ -60,15 +60,15 @@ def _arbitrage_battery_analysis(average_soc=95, max_soc_threshold=90):
     }
 
 
-def _arbitrage_battery_dump_data(**overrides):
+def _arbitrage_mode_data(**overrides):
     data = {
         "car_charging_power": 2000,
         "car_grid_charging": True,
         "car_grid_import_allowed": False,
         "battery_grid_charging": False,
         "arbitrage_mode_active": True,
-        "battery_dump_target_soc": 40,
-        "battery_dump_export_power": 3000,
+        "arbitrage_mode_reserve_soc": 40,
+        "arbitrage_mode_export_power": 3000,
         "monthly_grid_peak": 0,
     }
     data.update(overrides)
@@ -270,7 +270,7 @@ def test_grid_setpoint_preserves_battery_export_when_car_is_solar_only():
         "car_grid_import_allowed": False,
         "car_solar_only": True,
         "arbitrage_mode_active": True,
-        "battery_dump_export_power": 3500,
+        "arbitrage_mode_export_power": 3500,
         "arbitrage_mode_reason": "High-price export window is active",
         "monthly_grid_peak": 4000,
     }
@@ -328,7 +328,7 @@ def test_grid_setpoint_exports_battery_during_dump_window():
         "car_grid_charging": False,
         "battery_grid_charging": False,
         "arbitrage_mode_active": True,
-        "battery_dump_export_power": 3500,
+        "arbitrage_mode_export_power": 3500,
         "arbitrage_mode_reason": "High-price export window is active",
         "monthly_grid_peak": 4000,
     }
@@ -430,7 +430,7 @@ def test_grid_setpoint_permits_import_for_car_without_battery():
 
 def test_grid_setpoint_upstream_ignores_dump_power_when_arbitrage_inactive(caplog):
     """Upstream correctness check: when arbitrage mode is off, the decision
-    logic must ignore any stale ``battery_dump_export_power`` in ``data``
+    logic must ignore any stale ``arbitrage_mode_export_power`` in ``data``
     and never request grid export. The direction gate is only a safety net
     for a bug in the decision logic; a tripped gate here would indicate
     the upstream invariant is broken.
@@ -443,7 +443,7 @@ def test_grid_setpoint_upstream_ignores_dump_power_when_arbitrage_inactive(caplo
         "car_grid_charging": False,
         "battery_grid_charging": False,
         "arbitrage_mode_active": False,
-        "battery_dump_export_power": 3500,
+        "arbitrage_mode_export_power": 3500,
         "monthly_grid_peak": 4000,
     }
 
@@ -483,7 +483,7 @@ def test_car_decision_allows_arbitrage_charging_without_grid_import():
             "previous_car_charging": False,
             "has_min_charging_window": False,
             "arbitrage_mode_active": True,
-            "battery_dump_export_power": 3000,
+            "arbitrage_mode_export_power": 3000,
         },
     )
 
@@ -509,8 +509,8 @@ def test_car_decision_prioritizes_car_above_arbitrage_reserve_even_below_max_soc
             "previous_car_charging": False,
             "has_min_charging_window": False,
             "arbitrage_mode_active": True,
-            "battery_dump_target_soc": 40,
-            "battery_dump_export_power": 3000,
+            "arbitrage_mode_reserve_soc": 40,
+            "arbitrage_mode_export_power": 3000,
         },
     )
 
@@ -536,7 +536,7 @@ def test_car_decision_skips_arbitrage_when_local_use_disabled():
             "previous_car_charging": False,
             "has_min_charging_window": False,
             "arbitrage_mode_active": True,
-            "battery_dump_export_power": 3000,
+            "arbitrage_mode_export_power": 3000,
         },
     )
 
@@ -561,7 +561,7 @@ def test_car_decision_skips_arbitrage_when_no_export_power_is_scheduled():
             "previous_car_charging": False,
             "has_min_charging_window": False,
             "arbitrage_mode_active": True,
-            "battery_dump_export_power": 0,
+            "arbitrage_mode_export_power": 0,
         },
     )
 
@@ -588,7 +588,7 @@ def test_car_decision_arbitrage_allows_grid_import_on_low_price_without_window()
             "previous_car_charging": False,
             "has_min_charging_window": False,
             "arbitrage_mode_active": True,
-            "battery_dump_export_power": 3000,
+            "arbitrage_mode_export_power": 3000,
         },
     )
 
@@ -686,7 +686,7 @@ async def test_single_phase_passes_current_battery_decision_to_car_logic(monkeyp
             "current_price": 0.30,
             "battery_grid_charging": False,
             "arbitrage_mode_active": True,
-            "battery_dump_export_power": 3000,
+            "arbitrage_mode_export_power": 3000,
         }
     )
 
@@ -701,7 +701,7 @@ def test_charger_limit_adds_arbitrage_power_to_allowed_grid():
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(),
         power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
-        data=_arbitrage_battery_dump_data(
+        data=_arbitrage_mode_data(
             car_charging_power=5000,
             car_grid_import_allowed=True,
         ),
@@ -719,7 +719,7 @@ def test_charger_limit_uses_arbitrage_power_without_grid_import():
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(),
         power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
-        data=_arbitrage_battery_dump_data(),
+        data=_arbitrage_mode_data(),
     )
 
     assert result["charger_limit"] == 3000
@@ -734,7 +734,7 @@ def test_charger_limit_uses_arbitrage_power_above_reserve_even_below_max_soc():
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(average_soc=60),
         power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
-        data=_arbitrage_battery_dump_data(),
+        data=_arbitrage_mode_data(),
     )
 
     assert result["charger_limit"] == 3000
@@ -749,7 +749,7 @@ def test_charger_limit_keeps_arbitrage_energy_below_reserve_floor():
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(average_soc=35),
         power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
-        data=_arbitrage_battery_dump_data(),
+        data=_arbitrage_mode_data(),
     )
 
     assert result["charger_limit"] == 0
@@ -761,7 +761,7 @@ def test_charger_limit_falls_back_to_configured_reserve_when_live_target_missing
     engine = _engine(
         {
             CONF_MAX_CAR_POWER: 11000,
-            CONF_BATTERY_DUMP_TARGET_SOC: 45,
+            CONF_ARBITRAGE_MODE_RESERVE_SOC: 45,
         }
     )
 
@@ -769,7 +769,7 @@ def test_charger_limit_falls_back_to_configured_reserve_when_live_target_missing
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(average_soc=50),
         power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
-        data=_arbitrage_battery_dump_data(battery_dump_target_soc=None),
+        data=_arbitrage_mode_data(arbitrage_mode_reserve_soc=None),
     )
 
     assert result["charger_limit"] == 3000
@@ -781,7 +781,7 @@ def test_charger_limit_blocks_when_configured_reserve_fallback_is_not_met():
     engine = _engine(
         {
             CONF_MAX_CAR_POWER: 11000,
-            CONF_BATTERY_DUMP_TARGET_SOC: 45,
+            CONF_ARBITRAGE_MODE_RESERVE_SOC: 45,
         }
     )
 
@@ -789,7 +789,7 @@ def test_charger_limit_blocks_when_configured_reserve_fallback_is_not_met():
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(average_soc=40),
         power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
-        data=_arbitrage_battery_dump_data(battery_dump_target_soc=None),
+        data=_arbitrage_mode_data(arbitrage_mode_reserve_soc=None),
     )
 
     assert result["charger_limit"] == 0
@@ -1040,7 +1040,7 @@ def test_grid_setpoint_nets_remaining_export_after_supplying_ev_from_battery():
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(),
         power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
-        data=_arbitrage_battery_dump_data(
+        data=_arbitrage_mode_data(
             arbitrage_mode_reason="Arbitrage mode active"
         ),
         charger_limit=3000,
@@ -1060,7 +1060,7 @@ def test_grid_setpoint_nets_ev_load_before_export_above_reserve_even_below_max_s
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(average_soc=60, max_soc_threshold=90),
         power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
-        data=_arbitrage_battery_dump_data(
+        data=_arbitrage_mode_data(
             arbitrage_mode_reason="Arbitrage mode active",
         ),
         charger_limit=3000,
@@ -1080,7 +1080,7 @@ def test_grid_setpoint_combines_arbitrage_battery_with_allowed_grid_import():
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(),
         power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
-        data=_arbitrage_battery_dump_data(
+        data=_arbitrage_mode_data(
             car_charging_power=5000,
             car_grid_import_allowed=True,
             arbitrage_mode_reason="Arbitrage mode active",
@@ -1107,7 +1107,7 @@ def test_grid_setpoint_does_not_export_without_scheduled_arbitrage_power():
             "car_grid_charging": False,
             "battery_grid_charging": False,
             "arbitrage_mode_active": True,
-            "battery_dump_export_power": 0,
+            "arbitrage_mode_export_power": 0,
             "monthly_grid_peak": 4000,
         },
         charger_limit=0,
@@ -1275,7 +1275,7 @@ def test_recalculate_after_car_override_clears_stale_arbitrage_state():
 
     result = engine.recalculate_after_override(
         baseline_data={
-            **_arbitrage_battery_dump_data(),
+            **_arbitrage_mode_data(),
             "car_grid_import_allowed": False,
         },
         decision={
@@ -1314,7 +1314,7 @@ def test_recalculate_after_battery_override_while_arbitrage_active_yields_positi
     result = engine.recalculate_after_override(
         baseline_data={
             "arbitrage_mode_active": True,
-            "battery_dump_export_power": 3000,
+            "arbitrage_mode_export_power": 3000,
             "arbitrage_mode_reason": "High-price export window",
             "car_grid_charging": False,
             "car_grid_import_allowed": False,
@@ -1335,7 +1335,7 @@ def test_recalculate_after_battery_override_while_arbitrage_active_yields_positi
             "car_solar_only": False,
             "battery_grid_charging": True,   # forced on by override
             "arbitrage_mode_active": True,   # stale from automatic decision
-            "battery_dump_export_power": 3000,
+            "arbitrage_mode_export_power": 3000,
             "charger_limit": 0,
             "grid_setpoint": -3000,          # old automatic setpoint
             "grid_components": {"battery": -3000, "car": 0},
@@ -1362,7 +1362,7 @@ def test_recalculate_after_battery_override_while_arbitrage_active_car_still_use
     result = engine.recalculate_after_override(
         baseline_data={
             "arbitrage_mode_active": True,
-            "battery_dump_export_power": 3000,
+            "arbitrage_mode_export_power": 3000,
             "arbitrage_mode_reason": "High-price export window",
             "car_grid_import_allowed": False,
             "car_solar_only": False,
@@ -1382,7 +1382,7 @@ def test_recalculate_after_battery_override_while_arbitrage_active_car_still_use
             "car_solar_only": False,
             "battery_grid_charging": True,   # forced on
             "arbitrage_mode_active": True,
-            "battery_dump_export_power": 3000,
+            "arbitrage_mode_export_power": 3000,
             "charger_limit": 3000,
             "grid_setpoint": -1000,
             "grid_components": {"battery": -1000, "car": 0},
@@ -1415,8 +1415,8 @@ def test_charger_limit_uses_arbitrage_not_solar_limit_when_car_solar_only_was_st
         "car_solar_only": False,           # correctly reset by init (was stale True)
         "battery_grid_charging": False,
         "arbitrage_mode_active": True,
-        "battery_dump_target_soc": 40,
-        "battery_dump_export_power": 3000,
+        "arbitrage_mode_reserve_soc": 40,
+        "arbitrage_mode_export_power": 3000,
         "monthly_grid_peak": 0,
     }
 
@@ -1453,8 +1453,8 @@ def test_charger_limit_stale_solar_only_flag_causes_wrong_limit():
         "car_solar_only": True,            # STALE - bug scenario
         "battery_grid_charging": False,
         "arbitrage_mode_active": True,
-        "battery_dump_target_soc": 40,
-        "battery_dump_export_power": 3000,
+        "arbitrage_mode_reserve_soc": 40,
+        "arbitrage_mode_export_power": 3000,
         "monthly_grid_peak": 0,
     }
 
@@ -1487,7 +1487,7 @@ def test_grid_setpoint_uses_arbitrage_not_solar_only_when_car_solar_only_is_fals
             "car_solar_only": False,          # correctly reset
             "battery_grid_charging": False,
             "arbitrage_mode_active": True,
-            "battery_dump_export_power": 3000,
+            "arbitrage_mode_export_power": 3000,
             "arbitrage_mode_reason": "Arbitrage mode active",
             "monthly_grid_peak": 0,
         },
@@ -1518,7 +1518,7 @@ def test_grid_setpoint_stale_solar_only_bypasses_arbitrage_car_power():
             "car_solar_only": True,           # STALE - bug scenario
             "battery_grid_charging": False,
             "arbitrage_mode_active": True,
-            "battery_dump_export_power": 3000,
+            "arbitrage_mode_export_power": 3000,
             "arbitrage_mode_reason": "Arbitrage mode active",
             "monthly_grid_peak": 0,
         },
@@ -3118,3 +3118,146 @@ def test_inverter_derating_fallback_generic_when_solar_above_safe_output():
     assert result["inverter_derating_target"] == 580
     assert "incomplete telemetry" in result["inverter_derating_reason"]
     assert result["inverter_derating_alarm"] is False
+
+
+
+def test_negative_buy_forces_battery_grid_charging_when_active():
+    """Negative Arbitrage Buy active should force battery grid charging regardless of price."""
+    engine = _engine()
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={
+            "data_available": True,
+            "current_price": -0.12,
+            "price_threshold": 0.05,
+        },
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+            "average_soc": 60,
+            "max_soc_threshold": 90,
+        },
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 0,
+        },
+        power_analysis={"solar_surplus": 0, "significant_solar_surplus": False},
+        time_context={},
+        data={
+            "negative_buy_mode_enabled": True,
+            "negative_buy_mode_active": True,
+            "negative_buy_curtail_solar": True,
+            "negative_buy_import_power": 4000,
+        },
+    )
+
+    assert result["battery_grid_charging"] is True
+    assert "Negative Arbitrage Buy active" in result["battery_grid_charging_reason"]
+    assert "-0.120" in result["battery_grid_charging_reason"]
+
+
+def test_negative_buy_does_not_force_battery_charging_when_inactive():
+    """When the planner has not flagged the slot active, normal logic applies."""
+    engine = _engine()
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={
+            "data_available": True,
+            "current_price": 0.20,
+            "price_threshold": 0.05,
+        },
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+            "average_soc": 60,
+            "max_soc_threshold": 90,
+        },
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 0,
+        },
+        power_analysis={"solar_surplus": 0, "significant_solar_surplus": False},
+        time_context={},
+        data={
+            "negative_buy_mode_enabled": True,
+            "negative_buy_mode_active": False,
+            "negative_buy_curtail_solar": False,
+        },
+    )
+
+    assert result["battery_grid_charging"] is False
+    assert "Negative Arbitrage Buy" not in result["battery_grid_charging_reason"]
+
+
+def test_inverter_derating_curtails_solar_when_negative_buy_active():
+    """Negative-buy curtailment should target 0W and override feed-in / SOC bypass logic."""
+    engine = _engine({CONF_MAX_INVERTER_POWER: 4400})
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "negative_buy_curtail_solar": True,
+            "feedin_solar": True,  # would normally release the cap
+            "solar_production": 3500,
+            "house_consumption": 600,
+            "battery_analysis": {"average_soc": 98},  # would normally bypass derating
+        }
+    )
+
+    assert result["inverter_derating_target"] == 0
+    assert "Negative Arbitrage Buy curtailment" in result["inverter_derating_reason"]
+    assert result["inverter_derating_alarm"] is False
+    assert result["inverter_derating_unreached_since"] is None
+
+
+def test_inverter_derating_skips_curtailment_when_flag_absent():
+    """Without the curtail flag, normal feed-in path is preserved."""
+    engine = _engine({CONF_MAX_INVERTER_POWER: 4400})
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "negative_buy_curtail_solar": False,
+            "feedin_solar": True,
+            "solar_production": 3500,
+            "house_consumption": 600,
+            "battery_analysis": {"average_soc": 60},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 4400
+    assert "Negative Arbitrage Buy curtailment" not in result["inverter_derating_reason"]
+
+
+def test_negative_buy_does_not_bypass_peak_import_protection():
+    """Peak-import protection (90% of monthly peak) must still halve grid share during negative buy."""
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    # Same power scenario as test_charger_limit_peak_import_preserves_allocated_solar_and_halves_grid
+    # but with negative-buy mode flags set. Charger-limit logic must be unchanged.
+    result = engine._calculate_charger_limit(
+        price_analysis={},
+        battery_analysis={"average_soc": 60, "max_soc_threshold": 90},
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 3800,
+        },
+        data={
+            "car_charging_power": 4500,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "battery_grid_charging": True,
+            "monthly_grid_peak": 5304,
+            "car_peak_limited": True,
+            "negative_buy_mode_enabled": True,
+            "negative_buy_mode_active": True,
+            "negative_buy_curtail_solar": True,
+        },
+    )
+
+    # Solar (3800W) preserved + grid (4773W) halved (2386W) = 6186W; identical to baseline.
+    assert result["charger_limit"] == 6186
+    assert "Peak import exceeded - reduced to 6186W" in result["charger_limit_reason"]

@@ -21,8 +21,8 @@ from .const import (
     ATTR_GRID_SETPOINT_OVERRIDE,
     ATTR_REASON,
     ATTR_TARGET,
-    CONF_BATTERY_DUMP_DEADLINE_HOUR,
-    CONF_BATTERY_DUMP_TARGET_SOC,
+    CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_SOLAR_FORECAST_START_HOUR,
@@ -31,12 +31,13 @@ from .const import (
     MANUAL_OVERRIDE_ACTION_FORCE_CHARGE,
     MANUAL_OVERRIDE_ACTION_FORCE_WAIT,
     MANUAL_OVERRIDE_TARGET_ALL,
+    MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE,
     MANUAL_OVERRIDE_TARGET_BATTERY,
-    MANUAL_OVERRIDE_TARGET_BATTERY_DUMP,
     MANUAL_OVERRIDE_TARGET_BOTH,
     MANUAL_OVERRIDE_TARGET_CAR,
     MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
     MANUAL_OVERRIDE_TARGET_GRID_SETPOINT,
+    MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY,
     SERVICE_CLEAR_MANUAL_OVERRIDE,
     SERVICE_SET_MANUAL_OVERRIDE,
 )
@@ -49,7 +50,13 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH, Platform.NUMBER]
 
 NUMBER_ENTITY_ID_SUFFIXES: tuple[tuple[str, str], ...] = (
-    ("battery_dump_target_soc", "battery_dump_target_soc"),
+    # First column is the unique_id suffix (preserved across the v22→v23 rename
+    # so historical statistics survive); second column is the desired entity_id
+    # slug.  The migration helper looks up the current entity by unique_id and
+    # only updates the entity_id, so the legacy ``battery_dump_target_soc``
+    # unique_id continues to identify the arbitrage-reserve number.
+    ("battery_dump_target_soc", "arbitrage_mode_reserve_soc"),
+    ("arbitrage_mode_deadline_hour", "arbitrage_mode_deadline_hour"),
     ("max_soc_threshold", "max_soc_threshold"),
     ("max_soc_threshold_sunny", "max_soc_threshold_sunny"),
     ("max_soc_threshold_solar", "max_soc_threshold_solar"),
@@ -62,7 +69,8 @@ MANUAL_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
         vol.Required(ATTR_TARGET): vol.In(
             (
                 MANUAL_OVERRIDE_TARGET_BATTERY,
-                MANUAL_OVERRIDE_TARGET_BATTERY_DUMP,
+                MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE,
+                MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY,
                 MANUAL_OVERRIDE_TARGET_CAR,
                 MANUAL_OVERRIDE_TARGET_BOTH,
                 MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
@@ -85,7 +93,8 @@ CLEAR_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_TARGET, default=MANUAL_OVERRIDE_TARGET_ALL): vol.In(
             (
                 MANUAL_OVERRIDE_TARGET_BATTERY,
-                MANUAL_OVERRIDE_TARGET_BATTERY_DUMP,
+                MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE,
+                MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY,
                 MANUAL_OVERRIDE_TARGET_CAR,
                 MANUAL_OVERRIDE_TARGET_BOTH,
                 MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
@@ -242,8 +251,8 @@ async def _async_migrate_entity_ids(
 # Options that can be updated without requiring a full reload
 # These are applied immediately via coordinator.config and decision_engine.refresh_settings()
 LIVE_UPDATE_OPTIONS = {
-    CONF_BATTERY_DUMP_DEADLINE_HOUR,
-    CONF_BATTERY_DUMP_TARGET_SOC,
+    CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_SOLAR_FORECAST_START_HOUR,
@@ -344,7 +353,7 @@ def _register_services_once(hass: HomeAssistant) -> None:
         charger_limit = call.data.get(ATTR_CHARGER_LIMIT_OVERRIDE)
         grid_setpoint = call.data.get(ATTR_GRID_SETPOINT_OVERRIDE)
 
-        if target == MANUAL_OVERRIDE_TARGET_BATTERY_DUMP:
+        if target == MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE:
             invalid_fields = [
                 field_name
                 for field_name, field_value in (
@@ -357,10 +366,30 @@ def _register_services_once(hass: HomeAssistant) -> None:
             ]
             if invalid_fields:
                 raise HomeAssistantError(
-                    "battery_dump target does not accept "
+                    "arbitrage_mode target does not accept "
                     + ", ".join(invalid_fields)
                 )
-            await coordinator.async_set_battery_dump_mode(reason=reason)
+            await coordinator.async_set_arbitrage_mode(reason=reason)
+            await coordinator.async_request_refresh()
+            return
+
+        if target == MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY:
+            invalid_fields = [
+                field_name
+                for field_name, field_value in (
+                    ("action", action),
+                    ("duration", duration_minutes),
+                    ("charger_limit", charger_limit),
+                    ("grid_setpoint", grid_setpoint),
+                )
+                if field_value is not None
+            ]
+            if invalid_fields:
+                raise HomeAssistantError(
+                    "negative_buy target does not accept "
+                    + ", ".join(invalid_fields)
+                )
+            await coordinator.async_set_negative_buy_mode(reason=reason)
             await coordinator.async_request_refresh()
             return
 

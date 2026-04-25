@@ -39,7 +39,7 @@ MANAGED_KEY = "electricity_planner_managed"
 # MUST be bumped whenever dashboard_template.yaml or the 3-phase appendix
 # changes so existing installs re-save on next reload. The deep-diff in
 # _save_dashboard is a defence-in-depth; this stamp is the primary signal.
-MANAGED_VERSION = 26  # Fix placeholder resolution + regroup main dashboard sections
+MANAGED_VERSION = 27  # Add arbitrage/negative-buy controls and Solar Max SOC parity
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 THREE_PHASE_APPENDIX_FILENAME = "dashboard_template_3phase_appendix.yaml"
 
@@ -90,8 +90,11 @@ ENTITY_REFERENCES: tuple[EntityReference, ...] = (
     EntityReference("sensor.electricity_planner_diagnostics_monitoring_entity_status", "entity_status"),
     EntityReference("switch.electricity_planner_car_permissive_mode", "car_permissive_mode"),
     EntityReference("switch.electricity_planner_arbitrage_mode", "arbitrage_mode"),
+    EntityReference("switch.electricity_planner_negative_arbitrage_buy_mode", "negative_buy_mode"),
     EntityReference("switch.electricity_planner_disable_battery_charging", "disable_battery_charging"),
-    EntityReference("number.electricity_planner_battery_dump_target_soc", "battery_dump_target_soc"),
+    EntityReference("number.electricity_planner_arbitrage_mode_reserve_soc", "battery_dump_target_soc"),
+    EntityReference("number.electricity_planner_arbitrage_mode_deadline_hour", "arbitrage_mode_deadline_hour"),
+    EntityReference("number.electricity_planner_negative_buy_threshold", "negative_buy_threshold"),
     EntityReference("number.electricity_planner_max_soc_threshold", "max_soc_threshold"),
     EntityReference("number.electricity_planner_max_soc_threshold_sunny", "max_soc_threshold_sunny"),
     EntityReference("number.electricity_planner_max_soc_threshold_solar", "max_soc_threshold_solar"),

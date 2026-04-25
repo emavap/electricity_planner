@@ -1,6 +1,6 @@
 # Electricity Planner
 
-**Version 6.0.2** | **Config Schema Version 21** | **Home Assistant 2024.4+**
+**Version 6.1.0** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
@@ -225,27 +225,43 @@ solar monetization during periods of low and stable home consumption.
 When enabled:
 
 - Solar can still charge the battery normally
-- The planner does **not** force discharge outside profitable dump moments
-- The planner calculates how many 15-minute export slots are needed from the dumpable battery energy and configured export power
+- The planner does **not** force discharge outside profitable export moments
+- The planner calculates how many 15-minute export slots are needed from the exportable battery energy and configured export power
 - The planner selects the highest-priced eligible feed-in slots before the next occurrence of the configured local cutoff hour
 - It derives a single arbitrage threshold from those selected slots and exports whenever the current feed-in price is at or above that threshold
 - The planner only considers eligible slots that finish before that next cutoff, so after the cutoff it automatically targets the following day
-- Export only uses energy above the configured dump target SOC
+- Export only uses energy above the configured Reserve SOC
 - Grid charging is blocked while the mode is enabled unless the current price is negative
-- If there are not enough eligible slots to complete the full dump, the planner still uses the best available slots and monetizes what it can
+- If there are not enough eligible slots to complete the full export, the planner still uses the best available slots and monetizes what it can
 
 The export recommendation appears as a **negative** `sensor.electricity_planner_grid_setpoint`.
 For example, `-4500 W` means “target roughly 4.5 kW export to grid”.
 
-The managed dashboard now draws an **Arbitrage Threshold** line on the price graph whenever
+The managed dashboard draws an **Arbitrage Threshold** line on the price graph whenever
 arbitrage mode is enabled, so you can see the current feed-in price against the threshold that activates export.
 
-The dump export cap is configured in **Settings → Devices & Services → Electricity Planner → Configure → Safety Limits**.
-It is no longer exposed as a live dashboard number. The dashboards keep the arbitrage-specific controls
-(`Arbitrage mode`, `Arbitrage Reserve SOC`, and the `Arbitrage Threshold` line) alongside the normal
-battery controls (`Grid Max SOC`, `Grid Max SOC (high solar)`, `Sunny Forecast Trigger`, and
-`Disable Battery Charging`). `battery_dump_deadline_hour` remains an options-flow setting and is not
-currently exposed as a dashboard entity.
+The arbitrage export cap is configured in **Settings → Devices & Services → Electricity Planner → Configure → Safety Limits**.
+It is not exposed as a live dashboard number. The dashboards keep the arbitrage-specific controls
+(`Arbitrage Mode`, `Arbitrage Reserve SOC`, `Arbitrage Deadline Hour`, and the `Arbitrage Threshold` line)
+alongside the normal battery controls (`Grid Max SOC`, `Grid Max SOC (high solar)`,
+`Sunny Forecast Trigger`, and `Disable Battery Charging`).
+
+### Negative Arbitrage Buy Mode
+
+Enable the **Negative Arbitrage Buy Mode** switch to monetize negative-price periods by
+forcing grid charging into the battery and curtailing solar export while the net buy price
+sits below the configured `negative_buy_threshold` (default `-0.05 €/kWh`, configurable live
+via `number.electricity_planner_negative_buy_threshold`).
+
+When enabled:
+
+- The planner detects upcoming negative-price slots that finish before the same cutoff hour shared with arbitrage mode (`arbitrage_mode_deadline_hour`)
+- During an active negative-price slot, batteries are force-charged from the grid (subject to `max_battery_power` and `max_grid_power`)
+- Solar export is curtailed via the inverter derating target so the site does not pay to export while net feed-in is negative
+- Outside negative-price slots the mode is dormant; the planner falls back to its normal strategies
+
+The dashboards expose the `Negative Arbitrage Buy Mode` switch and `Negative Buy Threshold`
+number alongside the arbitrage controls.
 
 ---
 
@@ -351,13 +367,13 @@ data:
 
 | Parameter | Values | Description |
 |-----------|--------|-------------|
-| `target` | `battery`, `car`, `both`, `charger_limit`, `grid_setpoint`, `battery_dump` | Which override to apply |
+| `target` | `battery`, `car`, `both`, `charger_limit`, `grid_setpoint`, `arbitrage_mode`, `negative_buy` | Which override to apply |
 | `action` | `force_charge`, `force_wait` | Boolean override action for `battery`, `car`, or `both` |
 | `duration` | 1–1440 | Override duration in minutes |
 | `charger_limit` | 0–50000 | Manual EV charger limit override used with `target: charger_limit` |
 | `grid_setpoint` | 0–50000 | Manual import/export setpoint override used with `target: grid_setpoint` |
 
-`target: battery_dump` enables the persistent arbitrage mode. It does not use `action` or `duration`.
+`target: arbitrage_mode` enables the persistent arbitrage mode and `target: negative_buy` enables the persistent Negative Arbitrage Buy mode. Neither accepts `action` or `duration`.
 
 #### `electricity_planner.clear_manual_override`
 
@@ -366,7 +382,7 @@ Remove an active override:
 ```yaml
 service: electricity_planner.clear_manual_override
 data:
-  target: battery_dump
+  target: arbitrage_mode
 ```
 
 ### Override Behaviour
@@ -375,7 +391,7 @@ data:
 - Automatically expire after configured duration
 - Visible in `decision_diagnostics` sensor attributes
 - Can be cleared manually at any time
-- `battery_dump` is persistent until cleared manually
+- `arbitrage_mode` and `negative_buy` are persistent until cleared manually
 
 ---
 
@@ -433,6 +449,7 @@ data:
 | `switch.electricity_planner_car_permissive_mode` | Toggle permissive car charging mode |
 | `switch.electricity_planner_disable_battery_charging` | Persistently block battery charging from grid |
 | `switch.electricity_planner_arbitrage_mode` | Enable arbitrage mode for battery export |
+| `switch.electricity_planner_negative_arbitrage_buy_mode` | Enable forced grid charging during negative-price slots |
 
 ### Numbers
 
@@ -440,8 +457,11 @@ data:
 |--------|---------|------|
 | `number.electricity_planner_max_soc_threshold` | Normal grid-charging battery SOC ceiling | % |
 | `number.electricity_planner_max_soc_threshold_sunny` | High-solar-day grid-charging SOC ceiling | % |
+| `number.electricity_planner_max_soc_threshold_solar` | Battery SOC ceiling for solar absorption | % |
 | `number.electricity_planner_sunny_forecast_threshold_kwh` | Solar forecast trigger for sunny mode | kWh |
-| `number.electricity_planner_battery_dump_target_soc` | Minimum reserve SOC used by arbitrage mode | % |
+| `number.electricity_planner_arbitrage_mode_reserve_soc` | Minimum reserve SOC used by arbitrage mode | % |
+| `number.electricity_planner_arbitrage_mode_deadline_hour` | Local cutoff hour shared by arbitrage sell and negative buy planning | h |
+| `number.electricity_planner_negative_buy_threshold` | Net buy price below which Negative Arbitrage Buy mode activates | €/kWh |
 
 ### Decision Diagnostics Attributes
 
@@ -520,8 +540,8 @@ phase_results:
 | `min_soc_threshold` | 20% | 5–50% | Minimum battery SOC |
 | `max_soc_threshold` | 70% | 50–100% | Maximum battery SOC |
 | `max_soc_threshold_sunny` | 35% | 0–100% | Grid-charging max SOC on high-solar days |
-| `battery_dump_target_soc` | 40% | 0–100% | Reserve floor for arbitrage mode |
-| `battery_dump_deadline_hour` | 12 | 0–23 | Local cutoff hour; before it the planner targets today, after it the planner targets tomorrow |
+| `arbitrage_mode_reserve_soc` | 40% | 0–100% | Reserve floor for arbitrage mode |
+| `arbitrage_mode_deadline_hour` | 12 | 0–23 | Local cutoff hour shared by arbitrage sell and Negative Arbitrage Buy planning; before it the planner targets today, after it the planner targets tomorrow |
 | `emergency_soc_threshold` | 15% | 5–30% | Force charging below this |
 | `predictive_charging_soc` | 30% | 10–50% | SOC for predictive logic |
 | `soc_buffer_target` | 50% | 20–80% | SOC above which no price relaxation |
@@ -541,6 +561,7 @@ phase_results:
 | `price_adjustment_offset` | 0.005 | -0.5–0.5 | Price offset (€/kWh) |
 | `feedin_adjustment_multiplier` | 1.0 | 0.5–2.0 | Feed-in price multiplier |
 | `feedin_adjustment_offset` | -0.0098 | -0.5–0.5 | Feed-in price offset |
+| `negative_buy_threshold` | -0.05 €/kWh | -1.0–0.0 | Net buy price below which Negative Arbitrage Buy mode forces grid charging |
 
 ### Power Limits
 
@@ -549,7 +570,7 @@ phase_results:
 | `max_battery_power` | 5000 W | 500–50000 | Max battery charging power |
 | `max_car_power` | 11000 W | 1000–22000 | Max EV charging power |
 | `max_grid_power` | 10000 W | 1000–50000 | Max grid import power |
-| `battery_dump_max_export_power` | 0 W | 0–50000 | Arbitrage export cap (`0` = automatic min of battery/grid limits); configured via the options flow Safety Limits step |
+| `arbitrage_mode_max_export_power` | 0 W | 0–50000 | Arbitrage export cap (`0` = automatic min of battery/grid limits); configured via the options flow Safety Limits step |
 | `base_grid_setpoint` | 5000 W | 1000–15000 | Base grid setpoint |
 | `min_car_charging_threshold` | 100 W | 50–500 | Min power to consider the EV "charging" (above EVSE standby) |
 | `min_car_charging_duration` | 2 h | 0.5–8 | Min charging window for hysteresis |
@@ -694,7 +715,7 @@ automation:
           entity_id: switch.electricity_planner_arbitrage_mode
       - service: number.set_value
         target:
-          entity_id: number.electricity_planner_battery_dump_target_soc
+          entity_id: number.electricity_planner_arbitrage_mode_reserve_soc
         data:
           value: 20
 ```
