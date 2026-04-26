@@ -367,6 +367,87 @@ def test_extra_state_attributes_combines_prices(fake_coordinator, fake_entry):
     assert set(attrs["data"][1]) == {"start", "price", "raw_price", "transport_cost"}
 
 
+def test_extra_state_attributes_reuses_cached_payload_until_inputs_change(
+    fake_coordinator, fake_entry, monkeypatch
+):
+    """Repeated attribute reads should not churn last_update for identical payloads."""
+    from datetime import datetime, timedelta, timezone
+
+    first_now = datetime(2025, 10, 14, 12, 0, tzinfo=timezone.utc)
+    second_now = first_now + timedelta(minutes=1)
+    third_now = first_now + timedelta(minutes=2)
+    current_now = first_now
+    monkeypatch.setattr(dt_util, "now", lambda: current_now)
+
+    fake_coordinator.data = {
+        "nordpool_prices_today": {
+            "BE": [
+                {"start": "2025-10-14T10:00:00+00:00", "price": 100.0},
+                {"start": "2025-10-14T10:15:00+00:00", "price": 110.0},
+            ]
+        },
+        "nordpool_prices_tomorrow": None,
+        "transport_cost_lookup": [],
+        "transport_cost_status": "not_configured",
+    }
+
+    sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
+    first_attrs = sensor.extra_state_attributes
+
+    current_now = second_now
+    second_attrs = sensor.extra_state_attributes
+
+    assert second_attrs == first_attrs
+    assert second_attrs["last_update"] == first_attrs["last_update"]
+
+    fake_coordinator.data["transport_cost_status"] = "pending_history"
+    current_now = third_now
+    third_attrs = sensor.extra_state_attributes
+
+    assert third_attrs["transport_cost_status"] == "pending_history"
+    assert third_attrs["last_update"] == third_now.isoformat()
+
+
+def test_extra_state_attributes_invalidates_when_data_dict_replaced(
+    fake_coordinator, fake_entry, monkeypatch
+):
+    """Wholesale replacement of ``coordinator.data`` (the production path) must refresh."""
+    from datetime import datetime, timedelta, timezone
+
+    first_now = datetime(2025, 10, 14, 12, 0, tzinfo=timezone.utc)
+    second_now = first_now + timedelta(seconds=30)
+    current_now = first_now
+    monkeypatch.setattr(dt_util, "now", lambda: current_now)
+
+    fake_coordinator.data = {
+        "nordpool_prices_today": {
+            "BE": [{"start": "2025-10-14T10:00:00+00:00", "price": 100.0}]
+        },
+        "nordpool_prices_tomorrow": None,
+        "transport_cost_lookup": [],
+        "transport_cost_status": "not_configured",
+    }
+
+    sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
+    first_attrs = sensor.extra_state_attributes
+
+    # Simulate DataUpdateCoordinator returning a fresh dict for the next cycle —
+    # contents are byte-equal but identity differs, which is the production case.
+    fake_coordinator.data = {
+        "nordpool_prices_today": {
+            "BE": [{"start": "2025-10-14T10:00:00+00:00", "price": 100.0}]
+        },
+        "nordpool_prices_tomorrow": None,
+        "transport_cost_lookup": [],
+        "transport_cost_status": "not_configured",
+    }
+    current_now = second_now
+    second_attrs = sensor.extra_state_attributes
+
+    assert second_attrs["last_update"] == second_now.isoformat()
+    assert second_attrs["last_update"] != first_attrs["last_update"]
+
+
 def test_extra_state_attributes_handles_different_price_keys(fake_coordinator, fake_entry):
     """Test that attributes work with different price key formats."""
     fake_coordinator.data = {
@@ -540,3 +621,94 @@ def test_extra_state_attributes_skips_invalid_intervals(fake_coordinator, fake_e
     assert attrs["data"][1]["price"] == 0.11  # Converted to €/kWh
     assert attrs["total_intervals"] == 2
     assert attrs["transport_cost_applied"] is None
+
+
+
+def test_resolve_transport_cost_uses_pre_parsed_local_when_present(monkeypatch):
+    """Pre-parsed ``_local`` field bypasses ``parse_datetime`` on the hot path."""
+    from datetime import datetime, timezone
+
+    from custom_components.electricity_planner.helpers import _parse_datetime_cached
+
+    # Clear the module-level lru_cache so prior tests don't mask the call counts.
+    _parse_datetime_cached.cache_clear()
+
+    parse_calls = {"count": 0}
+    original_parse = dt_util.parse_datetime
+
+    def counting_parse(value):
+        parse_calls["count"] += 1
+        return original_parse(value)
+
+    monkeypatch.setattr(dt_util, "parse_datetime", counting_parse)
+
+    # Target is far enough into the day that both lookup entries are <= target
+    # in any reasonable local timezone. Reference is just before, so the
+    # ``start_time_utc > reference_now`` future-pattern branch runs but finds
+    # nothing a week earlier, then falls through to the direct-match path.
+    target = datetime(2099, 6, 1, 20, 0, tzinfo=timezone.utc)
+    reference_now = datetime(2099, 6, 1, 19, 0, tzinfo=timezone.utc)
+
+    # Use unique ISO strings so they're guaranteed not to be cached from any
+    # other test that ran before this one.
+    raw_lookup = [
+        {"start": "2099-06-01T00:00:00+00:00", "cost": 0.03},
+        {"start": "2099-06-01T11:00:00+00:00", "cost": 0.05},
+    ]
+    raw_result = resolve_transport_cost_from_lookup(
+        raw_lookup, target, reference_now=reference_now
+    )
+    raw_parse_calls = parse_calls["count"]
+    assert raw_result == pytest.approx(0.05)
+    assert raw_parse_calls > 0  # Raw lookup forces parsing.
+
+    pre_parsed_lookup = [
+        {
+            "start": "2099-06-01T02:00:00+00:00",
+            "cost": 0.03,
+            "_local": dt_util.as_local(datetime(2099, 6, 1, 2, 0, tzinfo=timezone.utc)),
+        },
+        {
+            "start": "2099-06-01T13:00:00+00:00",
+            "cost": 0.05,
+            "_local": dt_util.as_local(datetime(2099, 6, 1, 13, 0, tzinfo=timezone.utc)),
+        },
+    ]
+    parse_calls["count"] = 0
+    pre_parsed_result = resolve_transport_cost_from_lookup(
+        pre_parsed_lookup, target, reference_now=reference_now
+    )
+    assert pre_parsed_result == pytest.approx(0.05)
+    assert parse_calls["count"] == 0  # Hot path no longer calls parse_datetime.
+
+
+def test_parse_datetime_cached_skips_redundant_parses(monkeypatch):
+    """The wrapper must hit ``dt_util.parse_datetime`` only once per unique string."""
+    from custom_components.electricity_planner.helpers import (
+        _parse_datetime_cached,
+        parse_datetime_cached,
+    )
+
+    _parse_datetime_cached.cache_clear()
+
+    parse_calls = {"count": 0}
+    original_parse = dt_util.parse_datetime
+
+    def counting_parse(value):
+        parse_calls["count"] += 1
+        return original_parse(value)
+
+    monkeypatch.setattr(dt_util, "parse_datetime", counting_parse)
+
+    iso_str = "2099-07-15T08:30:00+00:00"
+    first = parse_datetime_cached(iso_str)
+    second = parse_datetime_cached(iso_str)
+    third = parse_datetime_cached(iso_str)
+
+    assert first is not None
+    assert first == second == third
+    assert parse_calls["count"] == 1
+
+    # ``None`` short-circuits without invoking the parser.
+    assert parse_datetime_cached(None) is None
+    assert parse_calls["count"] == 1

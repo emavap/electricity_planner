@@ -1,11 +1,11 @@
 - type: markdown
   content: |
-    ---
     ## 🔀 Three-Phase Details
 
-    The cards above show the shared planner state for the whole installation.
-    The sections below show how battery charging, car charging, and grid setpoints
-    are distributed across L1, L2, and L3.
+    The Overview, Controls, Prices, and Diagnostics views show the shared
+    planner state for the whole installation. The cards on this view show
+    how battery charging, car charging, and grid setpoints are distributed
+    across L1, L2, and L3.
 
 - type: markdown
   content: |

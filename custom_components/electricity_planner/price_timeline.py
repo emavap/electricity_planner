@@ -32,6 +32,7 @@ from .helpers import (
     PriceInterval,
     apply_price_adjustment,
     extract_price_from_interval,
+    parse_datetime_cached,
 )
 
 if TYPE_CHECKING:
@@ -68,7 +69,7 @@ class PriceTimelineBuilder:
                     if not start_time_str:
                         continue
 
-                    start_time = dt_util.parse_datetime(start_time_str)
+                    start_time = parse_datetime_cached(start_time_str)
                     if start_time is None:
                         continue
                     start_time_utc = dt_util.as_utc(start_time)
@@ -77,7 +78,7 @@ class PriceTimelineBuilder:
                     end_time_str = interval.get("end")
                     if end_time_str:
                         try:
-                            parsed_end = dt_util.parse_datetime(end_time_str)
+                            parsed_end = parse_datetime_cached(end_time_str)
                             if parsed_end is not None:
                                 end_time_utc = dt_util.as_utc(parsed_end)
                                 if end_time_utc > start_time_utc:

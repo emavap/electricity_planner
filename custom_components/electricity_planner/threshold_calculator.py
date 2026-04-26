@@ -24,7 +24,7 @@ from .const import (
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
 )
-from .helpers import extract_price_from_interval
+from .helpers import extract_price_from_interval, parse_datetime_cached
 
 if TYPE_CHECKING:
     from .coordinator import ElectricityPlannerCoordinator
@@ -80,7 +80,7 @@ class ThresholdCalculator:
                     if not start_time_str:
                         continue
 
-                    start_time = dt_util.parse_datetime(start_time_str)
+                    start_time = parse_datetime_cached(start_time_str)
                     if start_time is None:
                         continue
                     start_time_utc = dt_util.as_utc(start_time)
@@ -131,7 +131,7 @@ class ThresholdCalculator:
                     start_time_str = interval.get("start")
                     if not start_time_str:
                         continue
-                    start_time = dt_util.parse_datetime(start_time_str)
+                    start_time = parse_datetime_cached(start_time_str)
                     if start_time is None:
                         continue
                     timestamps.append(dt_util.as_utc(start_time))
@@ -175,7 +175,7 @@ class ThresholdCalculator:
                     if not start_time_str:
                         continue
 
-                    start_time = dt_util.parse_datetime(start_time_str)
+                    start_time = parse_datetime_cached(start_time_str)
                     if start_time is None:
                         continue
                     start_time_utc = dt_util.as_utc(start_time)

@@ -211,7 +211,11 @@ class TransportCostResolver:
                 coordinator._transport_cost_lookup_time = now
                 return coordinator._transport_cost_lookup, coordinator._transport_cost_status
 
-            # First collect all valid cost changes with timestamps
+            # First collect all valid cost changes with timestamps. Pre-parse
+            # the local-time representation here so resolve() doesn't have to
+            # call dt_util.parse_datetime() once per entry per interval (the
+            # 192-interval timeline rebuild would otherwise spend ~134 k
+            # ISO-8601 parses per cycle on a full 7-day history lookup).
             raw_changes: list[dict[str, Any]] = []
             for state in states[transport_entity]:
                 value = state.state
@@ -224,6 +228,7 @@ class TransportCostResolver:
                         {
                             "start": timestamp.isoformat(),
                             "cost": cost,
+                            "_local": dt_util.as_local(timestamp),
                         }
                     )
                 except (ValueError, TypeError, AttributeError):

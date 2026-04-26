@@ -63,7 +63,11 @@ from .const import (
     INTEGRATION_VERSION,
 )
 from .coordinator import ElectricityPlannerCoordinator
-from .helpers import extract_price_from_interval, is_in_month_peak_transition_window
+from .helpers import (
+    extract_price_from_interval,
+    is_in_month_peak_transition_window,
+    parse_datetime_cached,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1247,6 +1251,9 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         self._attr_icon = "mdi:chart-line"
         self._attr_device_class = None
         self._attr_native_unit_of_measurement = None
+        self._cached_attribute_signature: tuple[Any, ...] | None = None
+        self._cached_attributes: dict[str, Any] | None = None
+        self._cached_attributes_last_update: str | None = None
 
     @property
     def native_value(self) -> str | None:
@@ -1282,6 +1289,20 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         # Transport cost lookup/status provided by coordinator
         transport_lookup = self.coordinator.data.get("transport_cost_lookup") or []
         transport_status = self.coordinator.data.get("transport_cost_status", "not_configured")
+        now = dt_util.now()
+
+        signature = self._attribute_cache_signature(
+            prices_today,
+            prices_tomorrow,
+            transport_lookup,
+            transport_status,
+            now,
+        )
+        if (
+            signature == self._cached_attribute_signature
+            and self._cached_attributes is not None
+        ):
+            return dict(self._cached_attributes)
 
         # Combine today and tomorrow prices into a single list for easier dashboard usage
         combined_prices: list[dict[str, Any]] = []
@@ -1324,14 +1345,13 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         # budget even for 15-minute Nord Pool data (~180 intervals across two
         # days otherwise). Dashboard chart only reads the ``data`` array, so
         # the cap preferentially retains the most recent + forward intervals.
-        now = dt_util.now()
         history_cutoff = now - timedelta(hours=6)
         recent_prices: list[dict[str, Any]] = []
         for price_entry in combined_prices:
             start_raw = price_entry.get("start")
             if not start_raw:
                 continue
-            start_dt = dt_util.parse_datetime(start_raw)
+            start_dt = parse_datetime_cached(start_raw)
             if start_dt and start_dt >= history_cutoff:
                 recent_prices.append(price_entry)
         limited_prices = recent_prices if recent_prices else combined_prices
@@ -1341,7 +1361,8 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
         if len(limited_prices) > _MAX_RECORDER_INTERVALS:
             limited_prices = limited_prices[-_MAX_RECORDER_INTERVALS:]
 
-        return {
+        self._cached_attributes_last_update = now.isoformat()
+        attributes = {
             "data": limited_prices,  # Limited price data for ApexCharts (already in €/kWh)
             "today_available": prices_today is not None,
             "tomorrow_available": prices_tomorrow is not None,
@@ -1359,8 +1380,42 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
                 else None
             ),
             "transport_cost_status": transport_status,
-            "last_update": dt_util.now().isoformat(),
+            "last_update": self._cached_attributes_last_update,
         }
+        self._cached_attribute_signature = signature
+        self._cached_attributes = attributes
+        return dict(attributes)
+
+    def _attribute_cache_signature(
+        self,
+        prices_today: dict[str, Any] | None,
+        prices_tomorrow: dict[str, Any] | None,
+        transport_lookup: list[dict[str, Any]],
+        transport_status: str,
+        now,
+    ) -> tuple[Any, ...]:
+        """Return a cheap identity-based key for the rendered attribute payload.
+
+        ``DataUpdateCoordinator`` replaces ``coordinator.data`` wholesale on
+        every refresh, so its ``id()`` plus the ids of the major nested
+        containers is enough to detect a refresh without serialising any
+        contents. Mutable scalars on the data dict that the test suite may
+        flip in-place (transport status / current cost) are included as
+        plain values so they still trigger a recompute.
+        ``transport_lookup`` here can be a freshly-allocated empty list (the
+        ``or []`` fallback in the caller), so we read the raw stored value to
+        keep identity stable across calls when no lookup is configured.
+        """
+        coordinator_data = self.coordinator.data
+        stored_lookup = coordinator_data.get("transport_cost_lookup")
+        return (
+            id(coordinator_data),
+            id(prices_today),
+            id(prices_tomorrow),
+            id(stored_lookup),
+            transport_status,
+            coordinator_data.get("transport_cost"),
+        )
 
     def _compact_price_interval(self, interval: dict[str, Any]) -> dict[str, Any] | None:
         """Return a recorder-friendly interval payload for dashboard rendering.
@@ -1414,7 +1469,7 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
 
         transport_cost = 0.0
         start_time_str = interval.get("start")
-        interval_start = dt_util.parse_datetime(start_time_str) if start_time_str else None
+        interval_start = parse_datetime_cached(start_time_str) if start_time_str else None
         interval_start_utc = dt_util.as_utc(interval_start) if interval_start is not None else None
 
         # Use coordinator's unified transport cost resolution (handles both built-in and legacy)

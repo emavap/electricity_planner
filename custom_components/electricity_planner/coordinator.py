@@ -103,6 +103,7 @@ from .helpers import (
     apply_price_adjustment,
     extract_price_from_interval,
     is_in_month_peak_transition_window,
+    parse_datetime_cached,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -184,6 +185,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._last_price_timeline_generated_at: datetime | None = None
         self._last_price_timeline_data_hash: str | None = None  # Hash of price data used to build timeline
         self._price_timeline_max_age = timedelta(hours=PRICE_TIMELINE_MAX_AGE_HOURS)
+        self._active_timeline_cache_token: object | None = None
+        self._purchase_timeline_cache: dict[tuple[Any, ...], list[PriceInterval]] = {}
+        self._feedin_timeline_cache: dict[tuple[Any, ...], list[PriceInterval]] = {}
 
         # Car peak limit tracking (15-minute hold after 5 minutes of sustained peak exceedance)
         self._car_peak_limited_until: datetime | None = None
@@ -468,7 +472,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 if not start_raw:
                     continue
 
-                start = dt_util.parse_datetime(start_raw)
+                start = parse_datetime_cached(start_raw)
                 if start is None:
                     continue
                 start_utc = dt_util.as_utc(start)
@@ -488,7 +492,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 end_utc: datetime | None = None
                 end_raw = interval.get("end")
                 if end_raw:
-                    parsed_end = dt_util.parse_datetime(end_raw)
+                    parsed_end = parse_datetime_cached(end_raw)
                     if parsed_end is not None:
                         candidate_end = dt_util.as_utc(parsed_end)
                         if candidate_end > start_utc:
@@ -659,13 +663,26 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         now: datetime,
     ) -> list[PriceInterval]:
         """Delegate to the price-timeline builder collaborator."""
-        return self._price_timeline_builder.build_purchase(
+        cache_key = self._purchase_timeline_cache_key(
             prices_today,
             prices_tomorrow,
             transport_lookup,
             current_transport_cost,
             now,
         )
+        if cache_key is not None and cache_key in self._purchase_timeline_cache:
+            return self._purchase_timeline_cache[cache_key]
+
+        timeline = self._price_timeline_builder.build_purchase(
+            prices_today,
+            prices_tomorrow,
+            transport_lookup,
+            current_transport_cost,
+            now,
+        )
+        if cache_key is not None:
+            self._purchase_timeline_cache[cache_key] = timeline
+        return timeline
 
     def _build_feedin_price_timeline(
         self,
@@ -674,8 +691,65 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         now: datetime,
     ) -> list[PriceInterval]:
         """Delegate to the price-timeline builder collaborator."""
-        return self._price_timeline_builder.build_feedin(
+        cache_key = self._feedin_timeline_cache_key(prices_today, prices_tomorrow, now)
+        if cache_key is not None and cache_key in self._feedin_timeline_cache:
+            return self._feedin_timeline_cache[cache_key]
+
+        timeline = self._price_timeline_builder.build_feedin(
             prices_today, prices_tomorrow, now
+        )
+        if cache_key is not None:
+            self._feedin_timeline_cache[cache_key] = timeline
+        return timeline
+
+    def _purchase_timeline_cache_key(
+        self,
+        prices_today: dict[str, Any] | None,
+        prices_tomorrow: dict[str, Any] | None,
+        transport_lookup: list[dict[str, Any]] | None,
+        current_transport_cost: float | None,
+        now: datetime,
+    ) -> tuple[Any, ...] | None:
+        """Return a per-update cache key for purchase price timelines.
+
+        Within a single update cycle (pinned by ``_active_timeline_cache_token``)
+        the price and transport-lookup containers passed in are the same dict
+        / list objects living on ``self.data``. Object identity is therefore a
+        cheap substitute for hashing their full contents. ``now`` is still part
+        of the key because timeline construction filters against it and uses it
+        as the current-slot transport-cost reference.
+        """
+        if self._active_timeline_cache_token is None:
+            return None
+
+        return (
+            self._active_timeline_cache_token,
+            id(prices_today),
+            id(prices_tomorrow),
+            id(transport_lookup),
+            current_transport_cost,
+            now.replace(microsecond=0).isoformat(),
+            self.config.get(CONF_PRICE_ADJUSTMENT_MULTIPLIER),
+            self.config.get(CONF_PRICE_ADJUSTMENT_OFFSET),
+        )
+
+    def _feedin_timeline_cache_key(
+        self,
+        prices_today: dict[str, Any] | None,
+        prices_tomorrow: dict[str, Any] | None,
+        now: datetime,
+    ) -> tuple[Any, ...] | None:
+        """Return a per-update cache key for feed-in price timelines."""
+        if self._active_timeline_cache_token is None:
+            return None
+
+        return (
+            self._active_timeline_cache_token,
+            id(prices_today),
+            id(prices_tomorrow),
+            now.replace(microsecond=0).isoformat(),
+            self.config.get(CONF_FEEDIN_ADJUSTMENT_MULTIPLIER),
+            self.config.get(CONF_FEEDIN_ADJUSTMENT_OFFSET),
         )
 
     def _select_export_slots(
@@ -832,6 +906,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Update data via library."""
+        self._active_timeline_cache_token = object()
+        self._purchase_timeline_cache.clear()
+        self._feedin_timeline_cache.clear()
         try:
             # Clean expired cache entries periodically
             self._clean_expired_nordpool_cache()
@@ -904,6 +981,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             if isinstance(err, (KeyboardInterrupt, SystemExit)):
                 raise
             raise UpdateFailed(f"Error communicating with entities: {err}") from err
+        finally:
+            self._active_timeline_cache_token = None
+            self._purchase_timeline_cache.clear()
+            self._feedin_timeline_cache.clear()
 
     async def _fetch_all_data(self) -> dict[str, Any]:
         """Fetch data from all configured entities."""

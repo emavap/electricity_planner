@@ -28,6 +28,32 @@ _LOGGER = logging.getLogger(__name__)
 _INTEGER_RE = re.compile(r"^[+-]?\d+$")
 
 
+@lru_cache(maxsize=1024)
+def _parse_datetime_cached(value: str) -> datetime | None:
+    """LRU-backed delegate for ``dt_util.parse_datetime`` keyed on the raw string."""
+    return dt_util.parse_datetime(value)
+
+
+def parse_datetime_cached(value: Any) -> datetime | None:
+    """Cached wrapper around ``dt_util.parse_datetime`` for ISO-8601 strings.
+
+    The same ~192 Nord Pool interval ``start`` / ``end`` strings are parsed
+    multiple times per update cycle (across price-timeline construction,
+    threshold-calculator passes, price-analysis overrides, and the dashboard
+    sensor rendering). Caching by string lets the second-and-later visit
+    return the previously parsed ``datetime`` without re-running the
+    relatively expensive ISO-8601 parser.
+
+    Non-string inputs and ``None`` defer to the underlying helper so callers
+    keep their original validation semantics.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return dt_util.parse_datetime(value)
+    return _parse_datetime_cached(value)
+
+
 def extract_price_from_interval(interval: dict[str, Any]) -> float | None:
     """Extract price value from a Nord Pool interval dict.
 
@@ -217,6 +243,28 @@ def _same_local_time_last_week(target_time_utc: datetime) -> datetime:
     return _coerce_local_datetime(week_ago_naive)
 
 
+def _entry_local_datetime(entry: dict[str, Any]) -> datetime | None:
+    """Return the cached local datetime for a transport-lookup entry.
+
+    Production lookups built by ``TransportCostResolver.get_lookup`` already
+    embed a parsed ``_local`` field, which avoids a ~134 k ``parse_datetime``
+    calls per update cycle (192 intervals \u00d7 ~672 history entries). Tests and
+    legacy callers pass raw ``{"start": iso_str, "cost": x}`` dicts \u2014 fall
+    back to parsing on demand for those.
+    """
+    cached = entry.get("_local")
+    if isinstance(cached, datetime):
+        return cached
+
+    entry_start_str = entry.get("start")
+    if entry_start_str is None:
+        return None
+    parsed = parse_datetime_cached(entry_start_str)
+    if parsed is None:
+        return None
+    return dt_util.as_local(dt_util.as_utc(parsed))
+
+
 def resolve_transport_cost_from_lookup(
     transport_lookup: list[dict[str, Any]] | None,
     start_time_utc: datetime,
@@ -238,14 +286,12 @@ def resolve_transport_cost_from_lookup(
             entry_cost = entry.get("cost")
             if entry_cost is None:
                 continue
-            entry_start_str = entry.get("start")
-            if entry_start_str is None:
+            if entry.get("start") is None:
                 cost_from_pattern = float(entry_cost)
                 continue
-            entry_start = dt_util.parse_datetime(entry_start_str)
-            if entry_start is None:
+            entry_local = _entry_local_datetime(entry)
+            if entry_local is None:
                 continue
-            entry_local = dt_util.as_local(dt_util.as_utc(entry_start))
             if entry_local <= week_ago_local:
                 cost_from_pattern = float(entry_cost)
             else:
@@ -259,14 +305,12 @@ def resolve_transport_cost_from_lookup(
         entry_cost = entry.get("cost")
         if entry_cost is None:
             continue
-        entry_start_str = entry.get("start")
-        if entry_start_str is None:
+        if entry.get("start") is None:
             cost = float(entry_cost)
             continue
-        entry_start = dt_util.parse_datetime(entry_start_str)
-        if entry_start is None:
+        entry_local = _entry_local_datetime(entry)
+        if entry_local is None:
             continue
-        entry_local = dt_util.as_local(dt_util.as_utc(entry_start))
         if entry_local <= target_local:
             cost = float(entry_cost)
         else:

@@ -39,7 +39,7 @@ MANAGED_KEY = "electricity_planner_managed"
 # MUST be bumped whenever dashboard_template.yaml or the 3-phase appendix
 # changes so existing installs re-save on next reload. The deep-diff in
 # _save_dashboard is a defence-in-depth; this stamp is the primary signal.
-MANAGED_VERSION = 32  # Manual override status: runtime modes split out, numeric values as watts
+MANAGED_VERSION = 33  # Split managed dashboard into lightweight operational views
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 THREE_PHASE_APPENDIX_FILENAME = "dashboard_template_3phase_appendix.yaml"
 
@@ -683,31 +683,28 @@ def _entry_phase_mode(entry) -> str:
 def _append_cards_to_primary_stack(
     dashboard_config: dict[str, Any], appendix_cards: Any
 ) -> bool:
-    """Append extra cards to the main vertical stack used by managed dashboards."""
+    """Append extra three-phase cards as their own managed dashboard view."""
     if not isinstance(appendix_cards, list):
         return False
 
     views = dashboard_config.get("views")
-    if not isinstance(views, list) or not views:
+    if not isinstance(views, list):
         return False
 
-    first_view = views[0]
-    if not isinstance(first_view, dict):
-        return False
-
-    view_cards = first_view.get("cards")
-    if not isinstance(view_cards, list) or not view_cards:
-        return False
-
-    primary_card = view_cards[0]
-    if not isinstance(primary_card, dict):
-        return False
-
-    stack_cards = primary_card.get("cards")
-    if not isinstance(stack_cards, list):
-        return False
-
-    stack_cards.extend(appendix_cards)
+    views.append(
+        {
+            "title": "Three Phase",
+            "path": "three-phase",
+            "icon": "mdi:transmission-tower",
+            "panel": True,
+            "cards": [
+                {
+                    "type": "vertical-stack",
+                    "cards": appendix_cards,
+                }
+            ],
+        }
+    )
     return True
 
 

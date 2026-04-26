@@ -115,6 +115,30 @@ def test_dashboard_template_splits_buy_and_sell_price_graphs():
     assert "name: Sell price" in template
 
 
+def test_managed_dashboard_template_splits_heavy_cards_into_secondary_views():
+    """Managed dashboard should keep the first view light and move charts/diagnostics elsewhere."""
+    template = Path(dashboard.__file__).with_name("dashboard_template.yaml").read_text()
+    parsed = yaml.safe_load(template)
+    views = parsed["views"]
+
+    assert [view["title"] for view in views] == [
+        "Overview",
+        "Controls",
+        "Prices",
+        "Diagnostics",
+    ]
+
+    overview_text = json.dumps(views[0])
+    prices_text = json.dumps(views[2])
+    diagnostics_text = json.dumps(views[3])
+
+    assert "custom:apexcharts-card" not in overview_text
+    assert "Electricity Buy Prices (History + Future)" in prices_text
+    assert "Electricity Sell Prices (History + Future)" in prices_text
+    assert "Price & Decisions (24h)" in prices_text
+    assert "Algorithm thresholds" in diagnostics_text
+
+
 def test_dashboard_template_keeps_dump_threshold_on_sell_graph():
     """The managed dashboard should surface the arbitrage threshold only on the sell chart."""
     template = Path(dashboard.__file__).with_name("dashboard_template.yaml").read_text()
@@ -143,6 +167,19 @@ def test_dashboard_three_phase_appendix_contains_phase_specific_cards():
     assert "Grid Setpoint per Phase (Current)" in appendix
     assert "custom:template-entity-row" in appendix
     assert "card_mod:" in appendix
+
+
+def test_three_phase_appendix_merges_as_dedicated_view():
+    """Managed three-phase cards should not make the overview heavy again."""
+    dashboard_config = {"views": [{"title": "Overview", "cards": []}]}
+    appendix_cards = [{"type": "markdown", "content": "three phase"}]
+
+    assert dashboard._append_cards_to_primary_stack(dashboard_config, appendix_cards) is True
+
+    assert [view["title"] for view in dashboard_config["views"]] == ["Overview", "Three Phase"]
+    three_phase_view = dashboard_config["views"][1]
+    assert three_phase_view["path"] == "three-phase"
+    assert three_phase_view["cards"][0]["cards"] == appendix_cards
 
 
 def test_bundled_single_phase_dashboard_renders_price_components_with_four_decimals():
@@ -568,8 +605,12 @@ async def test_dashboard_creation_appends_three_phase_cards_when_enabled():
     ):
         await dashboard.async_setup_or_update_dashboard(hass, entry)
 
-    cards = storage.saved["views"][0]["cards"][0]["cards"]
-    assert cards[-1]["content"].strip() == "three phase"
+    assert [view.get("title") for view in storage.saved["views"]] == [
+        None,
+        "Three Phase",
+    ]
+    cards = storage.saved["views"][1]["cards"][0]["cards"]
+    assert cards[0]["content"].strip() == "three phase"
 
 
 @pytest.mark.asyncio
