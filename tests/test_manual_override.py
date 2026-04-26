@@ -362,8 +362,14 @@ def test_numeric_only_override_does_not_set_boolean(fake_hass, monkeypatch):
     assert "battery_grid_charging" not in changed_targets
 
 
-def test_mixed_boolean_target_ignores_numeric_override_fields(fake_hass, monkeypatch):
-    """Numeric override values should only apply to their dedicated targets."""
+def test_mixed_boolean_target_applies_numeric_override_fields(fake_hass, monkeypatch):
+    """Bundling numeric values with a boolean target should set both overrides.
+
+    The dashboard "Force Car Charging" button prompts the user for charger_limit
+    and grid_setpoint and sends them in the same ``target='car'`` service call.
+    Those values must take effect (including ``grid_setpoint=0`` to suppress
+    grid import while force-charging the car), not be silently dropped.
+    """
     base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
 
@@ -372,19 +378,154 @@ def test_mixed_boolean_target_ignores_numeric_override_fields(fake_hass, monkeyp
     import asyncio
     asyncio.run(coordinator.async_set_manual_override(
         target="car",
-        value=False,
+        value=True,
         duration=timedelta(minutes=60),
-        reason="Pause charging",
+        reason="Force car charging",
         charger_limit=5000,
-        grid_setpoint=4000,
+        grid_setpoint=0,
     ))
 
-    assert coordinator._manual_overrides["car_grid_charging"]["value"] is False
-    assert coordinator._manual_overrides["charger_limit"] is None
-    assert coordinator._manual_overrides["grid_setpoint"] is None
+    assert coordinator._manual_overrides["car_grid_charging"]["value"] is True
+    assert coordinator._manual_overrides["charger_limit"]["value"] == 5000
+    assert coordinator._manual_overrides["grid_setpoint"]["value"] == 0
 
+    # Per-target clear scopes only to the named override.
     asyncio.run(coordinator.async_clear_manual_override("car"))
 
     assert coordinator._manual_overrides["car_grid_charging"] is None
-    assert coordinator._manual_overrides["charger_limit"] is None
+    assert coordinator._manual_overrides["charger_limit"]["value"] == 5000
+    assert coordinator._manual_overrides["grid_setpoint"]["value"] == 0
+
+
+def test_force_car_with_zero_grid_setpoint_propagates_to_decision(fake_hass, monkeypatch):
+    """Force-charge car with ``grid_setpoint=0`` must clamp the decision to 0W."""
+    base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    import asyncio
+    asyncio.run(coordinator.async_set_manual_override(
+        target="car",
+        value=True,
+        duration=timedelta(minutes=60),
+        reason="Solar-only car charging",
+        grid_setpoint=0,
+    ))
+
+    decision = {
+        "car_grid_charging": False,
+        "car_grid_charging_reason": "Price too high",
+        "battery_grid_charging": False,
+        "grid_setpoint": 7000,
+        "grid_setpoint_reason": "Default",
+        "strategy_trace": [],
+    }
+
+    updated_decision, changed_targets = coordinator._apply_manual_overrides(decision)
+
+    assert updated_decision["car_grid_charging"] is True
+    assert updated_decision["grid_setpoint"] == 0
+    assert "car_grid_charging" in changed_targets
+    assert "grid_setpoint" in changed_targets
+
+
+def test_clear_all_preserves_arbitrage_and_negative_buy_modes(fake_hass, monkeypatch):
+    """``clear(target='all')`` must not disable persistent runtime mode toggles.
+
+    Arbitrage Mode and Negative Arbitrage Buy Mode are persistent toggles owned
+    by their dedicated dashboard switches.  The "Clear all" button is meant to
+    cancel per-decision overrides only (battery/car/charger_limit/grid_setpoint).
+    """
+    base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    coordinator._arbitrage_mode_state = {
+        "value": True,
+        "reason": "Arbitrage mode enabled",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+    coordinator._negative_buy_mode_state = {
+        "value": True,
+        "reason": "Negative buy mode enabled",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+    coordinator._manual_overrides["car_grid_charging"] = {
+        "value": True,
+        "reason": "Force charge",
+        "expires_at": base_time + timedelta(minutes=60),
+        "set_at": base_time,
+    }
+    coordinator._manual_overrides["grid_setpoint"] = {
+        "value": 0,
+        "reason": "Solar-only",
+        "expires_at": base_time + timedelta(minutes=60),
+        "set_at": base_time,
+    }
+
+    import asyncio
+    asyncio.run(coordinator.async_clear_manual_override("all"))
+
+    # Per-decision overrides cleared.
+    assert coordinator._manual_overrides["car_grid_charging"] is None
     assert coordinator._manual_overrides["grid_setpoint"] is None
+
+    # Persistent runtime mode toggles untouched.
+    assert coordinator._arbitrage_mode_state["value"] is True
+    assert coordinator._negative_buy_mode_state["value"] is True
+    assert "arbitrage_mode" not in coordinator._manual_overrides
+    assert "negative_buy_mode" not in coordinator._manual_overrides
+
+
+def test_manual_override_target_mapping_excludes_runtime_modes(fake_hass, monkeypatch):
+    """Runtime mode toggles are not manual override clear targets."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    assert coordinator._manual_override_manager.resolve_targets("arbitrage_mode") == ()
+    assert coordinator._manual_override_manager.resolve_targets("negative_buy") == ()
+    assert set(coordinator._manual_override_manager.resolve_targets("all")) == {
+        "battery_grid_charging",
+        "car_grid_charging",
+        "charger_limit",
+        "grid_setpoint",
+    }
+
+
+def test_runtime_modes_are_not_exposed_as_manual_override_status(fake_hass, monkeypatch):
+    """Runtime mode toggles should not appear in the decision manual override payload."""
+    base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    coordinator._arbitrage_mode_state = {
+        "value": True,
+        "reason": "Manual arbitrage mode via dashboard switch",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+    coordinator._negative_buy_mode_state = {
+        "value": True,
+        "reason": "Manual Negative Arbitrage Buy mode via dashboard switch",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+    decision = {
+        "battery_grid_charging": False,
+        "car_grid_charging": False,
+        "manual_overrides": {
+            "arbitrage_mode": {"value": True},
+            "negative_buy_mode": {"value": True},
+        },
+        "strategy_trace": [],
+    }
+
+    updated_decision, changed_targets = coordinator._apply_manual_overrides(decision)
+
+    assert changed_targets == set()
+    assert updated_decision["manual_overrides"] == {}

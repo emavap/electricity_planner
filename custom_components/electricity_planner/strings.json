@@ -438,7 +438,7 @@
     "services": {
         "set_manual_override": {
             "name": "Set Manual Override",
-            "description": "Force battery or car charging decisions (charge or wait) for a specified duration.",
+            "description": "Set battery/car charging decision overrides or numeric charger/grid overrides.",
             "fields": {
                 "entry_id": {
                     "name": "Config Entry ID",
@@ -446,7 +446,7 @@
                 },
                 "target": {
                     "name": "Target",
-                    "description": "Which system to override: battery, car, both, charger_limit, grid_setpoint, or arbitrage_mode."
+                    "description": "Which manual override target to set: battery, car, both, charger_limit, or grid_setpoint."
                 },
                 "action": {
                     "name": "Action",
@@ -454,7 +454,7 @@
                 },
                 "duration": {
                     "name": "Duration",
-                    "description": "Override duration in minutes (1-1440). Optional - omit for indefinite override."
+                    "description": "Manual override duration in minutes (1-1440). Optional - omit for indefinite override."
                 },
                 "reason": {
                     "name": "Reason",
@@ -462,17 +462,17 @@
                 },
                 "charger_limit": {
                     "name": "Charger Limit",
-                    "description": "Manual EV charger limit in watts when target is charger_limit."
+                    "description": "Manual EV charger limit in watts. Use with target charger_limit or bundle with a car override."
                 },
                 "grid_setpoint": {
                     "name": "Grid Setpoint",
-                    "description": "Manual grid import/export setpoint in watts when target is grid_setpoint."
+                    "description": "Manual grid import/export setpoint in watts. Use with target grid_setpoint or bundle with a car override."
                 }
             }
         },
         "clear_manual_override": {
             "name": "Clear Manual Override",
-            "description": "Remove active manual overrides and return to automatic decision making.",
+            "description": "Remove active manual overrides and return battery/car/charger/grid control to automatic decision making.",
             "fields": {
                 "entry_id": {
                     "name": "Config Entry ID",
@@ -480,7 +480,7 @@
                 },
                 "target": {
                     "name": "Target",
-                    "description": "Which override to clear: battery, car, both, charger_limit, grid_setpoint, arbitrage_mode, or all."
+                    "description": "Which manual override target to clear. all clears battery/car/charger_limit/grid_setpoint."
                 }
             }
         }

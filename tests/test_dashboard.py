@@ -398,8 +398,29 @@ def test_bundled_three_phase_dashboard_documents_required_custom_cards():
     assert "card_mod:" in content
 
 
-def test_bundled_single_phase_dashboard_clear_all_targets_all_overrides():
-    """Bundled single-phase dashboard should clear every manual override explicitly."""
+def test_manual_override_status_formats_numeric_overrides_as_watts():
+    """Dashboard status should format numeric override values as watts."""
+    paths = [
+        Path(__file__).parent.parent / "custom_components" / "electricity_planner" / "dashboard_template.yaml",
+        Path(__file__).parent.parent / "electricity_planner_dashboard.yaml",
+        Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml",
+    ]
+
+    for dashboard_path in paths:
+        content = dashboard_path.read_text(encoding="utf-8")
+        status_block = content.split("title: Manual override status", 1)[1].split(
+            "_No manual overrides active_",
+            1,
+        )[0]
+
+        assert "key not in ['arbitrage_mode', 'negative_buy_mode']" not in status_block
+        assert "{% if key in ['charger_limit', 'grid_setpoint'] %}" in status_block
+        assert "{{ value.value }}W" in status_block
+        assert "'arbitrage_mode': 'Arbitrage mode'" not in status_block
+
+
+def test_bundled_single_phase_dashboard_clear_all_targets_per_decision_overrides():
+    """Bundled single-phase dashboard should clear the per-decision override group."""
     dashboard_path = Path(__file__).parent.parent / "electricity_planner_dashboard.yaml"
     content = dashboard_path.read_text(encoding="utf-8")
 

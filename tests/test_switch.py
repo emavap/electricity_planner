@@ -195,8 +195,8 @@ async def test_car_permissive_switch_persists_state_before_refresh(fake_hass, mo
 
 
 @pytest.mark.asyncio
-async def test_arbitrage_mode_switch_uses_persistent_override(fake_hass, monkeypatch):
-    """Arbitrage switch should delegate persistence to the coordinator override store."""
+async def test_arbitrage_mode_switch_uses_runtime_mode_manager(fake_hass, monkeypatch):
+    """Arbitrage switch should delegate persistence to the runtime mode manager."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
     entity = ArbitrageModeSwitch(coordinator, entry)
@@ -224,13 +224,13 @@ async def test_arbitrage_mode_switch_reflects_persisted_override_after_restart(
 ):
     """Arbitrage switch should prefer the live plan reason after restart refresh."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
-    coordinator._manual_override_store = _MemoryStore()
+    coordinator._runtime_mode_store = _MemoryStore()
 
     await coordinator.async_set_arbitrage_mode(reason="persisted dump")
 
     restored = _create_coordinator(fake_hass, _base_config(), monkeypatch)
-    restored._manual_override_store = _MemoryStore(coordinator._manual_override_store.data)
-    await restored._async_load_manual_overrides()
+    restored._runtime_mode_store = _MemoryStore(coordinator._runtime_mode_store.data)
+    await restored._async_load_runtime_modes()
     restored.data = {
         "arbitrage_mode_plan": {
             "enabled": True,
@@ -246,7 +246,7 @@ async def test_arbitrage_mode_switch_reflects_persisted_override_after_restart(
     entity = ArbitrageModeSwitch(restored, entry)
 
     assert entity.is_on is True
-    assert entity.extra_state_attributes["override_active"] is True
+    assert entity.extra_state_attributes["mode_enabled"] is True
     assert entity.extra_state_attributes["reason"] == "Arbitrage mode enabled but no battery data is available"
 
 
@@ -254,15 +254,15 @@ async def test_arbitrage_mode_switch_reflects_persisted_override_after_restart(
 async def test_arbitrage_mode_switch_uses_override_reason_before_first_refresh(
     fake_hass, monkeypatch,
 ):
-    """Arbitrage switch should fall back to the persisted override reason before plan data exists."""
+    """Arbitrage switch should fall back to the persisted runtime-mode reason before plan data exists."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
-    coordinator._manual_override_store = _MemoryStore()
+    coordinator._runtime_mode_store = _MemoryStore()
 
     await coordinator.async_set_arbitrage_mode(reason="persisted dump")
 
     restored = _create_coordinator(fake_hass, _base_config(), monkeypatch)
-    restored._manual_override_store = _MemoryStore(coordinator._manual_override_store.data)
-    await restored._async_load_manual_overrides()
+    restored._runtime_mode_store = _MemoryStore(coordinator._runtime_mode_store.data)
+    await restored._async_load_runtime_modes()
 
     entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
     entity = ArbitrageModeSwitch(restored, entry)
@@ -289,14 +289,14 @@ def test_arbitrage_mode_switch_ignores_stale_plan_when_override_is_cleared(fake_
             "available_energy_kwh": 5.0,
         }
     }
-    coordinator._manual_overrides["arbitrage_mode"] = None
+    coordinator._arbitrage_mode_state = None
 
     entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
     entity = ArbitrageModeSwitch(coordinator, entry)
     attrs = entity.extra_state_attributes
 
     assert entity.is_on is False
-    assert attrs["override_active"] is False
+    assert attrs["mode_enabled"] is False
     assert attrs["reason"] == "Arbitrage mode disabled"
     assert attrs["currently_exporting"] is False
     assert attrs["arbitrage_price_threshold"] is None
@@ -332,8 +332,8 @@ def test_battery_disable_switch_ignores_expired_override(fake_hass, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_negative_buy_switch_uses_persistent_override(fake_hass, monkeypatch):
-    """Negative-buy switch should delegate persistence to the coordinator override store."""
+async def test_negative_buy_switch_uses_runtime_mode_manager(fake_hass, monkeypatch):
+    """Negative-buy switch should delegate persistence to the runtime mode manager."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
     entity = NegativeArbitrageBuyModeSwitch(coordinator, entry)
@@ -359,7 +359,7 @@ def test_negative_buy_switch_reports_attributes_from_active_plan(fake_hass, monk
     """When armed, the switch should expose plan threshold, slots, and active flags."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     base_time = coordinator_module.dt_util.utcnow()
-    coordinator._manual_overrides["negative_buy_mode"] = {
+    coordinator._negative_buy_mode_state = {
         "value": True,
         "reason": "Manual Negative Arbitrage Buy",
         "expires_at": None,
@@ -390,7 +390,7 @@ def test_negative_buy_switch_reports_attributes_from_active_plan(fake_hass, monk
     attrs = entity.extra_state_attributes
 
     assert entity.is_on is True
-    assert attrs["override_active"] is True
+    assert attrs["mode_enabled"] is True
     assert attrs["currently_buying"] is True
     assert attrs["buy_price_threshold"] == -0.10
     assert attrs["current_slot_price"] == -0.12
@@ -415,14 +415,14 @@ def test_negative_buy_switch_ignores_stale_plan_when_override_is_cleared(fake_ha
             "import_power": 4000,
         }
     }
-    coordinator._manual_overrides["negative_buy_mode"] = None
+    coordinator._negative_buy_mode_state = None
 
     entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
     entity = NegativeArbitrageBuyModeSwitch(coordinator, entry)
     attrs = entity.extra_state_attributes
 
     assert entity.is_on is False
-    assert attrs["override_active"] is False
+    assert attrs["mode_enabled"] is False
     assert attrs["reason"] == "Negative Arbitrage Buy mode disabled"
     assert attrs["currently_buying"] is False
     assert attrs["buy_price_threshold"] is None

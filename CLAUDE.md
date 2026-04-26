@@ -232,7 +232,7 @@ The integration is designed for dynamic electricity markets:
 
 ### Current Version
 
-- **Integration Version**: 6.2.2
+- **Integration Version**: 6.3.0
 - **Config Schema Version**: 23
 - **Migration Path**: Automatic v1→v23 migration
 
@@ -246,6 +246,28 @@ The integration is designed for dynamic electricity markets:
 6. **Arbitrage Mode**: Reserve SOC, deadline hour (shared by sell + negative-buy planning), max export power
 
 ### Recent Changes
+
+**v6.3.0** (Runtime modes split out of manual overrides — behavior change with auto-migration)
+
+- **Architecture**: Persistent toggles (Arbitrage Mode, Negative Arbitrage Buy Mode) are now first-class **Runtime Modes** owned by their dedicated dashboard switches, no longer entries in `_manual_overrides`. The "Clear Manual Override" service / dashboard button (`target: all`) now wipes only the per-decision overrides — battery charging, car charging, charger limit, and grid setpoint — and leaves the runtime-mode switches untouched. Car Permissive Mode was already a separate switch with its own store and continues to behave the same way.
+- **New storage** (`coordinator.py`): `_runtime_mode_store` (filename `<DOMAIN>.<entry_id>.runtime_modes`, version 1) holds the persistent toggle state in `{"modes": {"arbitrage_mode": {...}, "negative_buy_mode": {...}}}` shape. Loaded before `_manual_override_store`.
+- **Backward-compat migration** (`runtime_modes.py:load_runtime_modes`): On first load after upgrade, if the new store is empty the manager reads the legacy `arbitrage_mode` / `negative_buy_mode` (and the historical `battery_dump` / `battery_dump_to_grid` rename targets) from the manual-override store, seeds the runtime store via `persist_runtime_modes()`, then `_async_load_manual_overrides` rewrites the legacy store without those keys via its existing "unknown key → mark changed → re-persist" path. No user intervention required.
+- **Service surface** (`__init__.py`, `services.yaml`, `strings.json`, `translations/en.json`): Removed `arbitrage_mode` and `negative_buy` from the `target` selector of both `electricity_planner.set_manual_override` and `electricity_planner.clear_manual_override`. The dedicated switches (`switch.electricity_planner_arbitrage_mode`, `switch.electricity_planner_negative_arbitrage_buy_mode`) are now the only way to toggle. Removed the corresponding `MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE` / `MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY` constants from `const.py`.
+- **Switch attributes** (`switch.py`): `ArbitrageModeSwitch` and `NegativeArbitrageBuyModeSwitch` now expose `mode_enabled` (was `override_active`) since the toggle is no longer modelled as a manual override. `is_on` reads `coordinator.is_arbitrage_mode_enabled()` / `is_negative_buy_mode_enabled()` which delegate to the runtime mode manager. Other attributes (`reason`, `set_at`, plan-derived fields) unchanged.
+- **Numeric override fix** (`manual_overrides.py`): `set_override()` now applies `charger_limit` and `grid_setpoint` whenever the caller passes a value, regardless of which boolean `target` was named. Previously, calling `set_manual_override(target='car', action='force_charge', grid_setpoint=0)` from the dashboard's "Force Car Charging" prompt silently dropped the `grid_setpoint=0` because the field name didn't match the target. The dashboard bundles all four prompts into the same service call, so this gate dropped legitimate user input.
+- **Decision payload cleanup** (`manual_overrides.py:apply`): The `manual_overrides` block on the decision now always reflects the current per-decision overrides (or `{}` when there are none) instead of merging via `setdefault`. Runtime mode state never leaks into this payload — sensors and the dashboard read it from the dedicated switches and planner data.
+- **New runtime-mode coordinator API**: `get_arbitrage_mode_state()` and `get_negative_buy_mode_state()` return the full state dict (or `None`), used by the switches; `is_arbitrage_mode_enabled()` and `is_negative_buy_mode_enabled()` remain the boolean predicates consumed by `arbitrage_mode.py` and `negative_buy.py`.
+- **Dashboard** (`dashboard_template.yaml`, both bundled dashboards): The *Manual override status* card no longer lists `arbitrage_mode` (those have their own switches) and now formats `charger_limit` / `grid_setpoint` values as watts with the same expiry/reason metadata as boolean overrides. `MANAGED_VERSION` bumped `31` → `32` so existing managed dashboards re-save automatically on next reload.
+- **Tests**: 488/488 passing. Notable additions:
+  - `test_force_car_with_zero_grid_setpoint_propagates_to_decision` — regression for the original `grid_setpoint=0` drop bug, asserts the value reaches the final decision.
+  - `test_clear_all_preserves_arbitrage_and_negative_buy_modes` — verifies `clear(target='all')` leaves runtime mode states intact while clearing per-decision overrides.
+  - `test_runtime_modes_migrate_from_legacy_manual_override_store` — exercises the full upgrade path: legacy store with `arbitrage_mode` + `negative_buy_mode` + `car_grid_charging` → runtime store seeded, manual-override store cleaned, legacy keys gone.
+  - `test_runtime_modes_are_not_exposed_as_manual_override_status` — guards that runtime state can never leak into `decision["manual_overrides"]`.
+  - `test_manual_override_target_mapping_excludes_runtime_modes`, `test_manual_override_service_schema_rejects_runtime_mode_targets`, `test_services_yaml_excludes_runtime_mode_targets` — pin the service-surface contract.
+  - `test_mixed_boolean_target_applies_numeric_override_fields` rewritten from the previous "ignores numeric fields" expectation to assert the bundled application path.
+  - Dashboard tests: `test_manual_override_status_formats_numeric_overrides_as_watts` covers the new wattage formatting; `test_bundled_single_phase_dashboard_clear_all_targets_per_decision_overrides` replaces the old "all targets" assertion.
+  - `test_arbitrage_mode_persists_across_restart` and the `ArbitrageModeSwitch` / `NegativeArbitrageBuyModeSwitch` restart tests now exercise `_runtime_mode_store` and `_async_load_runtime_modes`.
+- **Compatibility**: No config-schema change (still v23), no migration needed for `entry.data` / `entry.options`. Persisted runtime-mode state migrates transparently on the first coordinator load. Existing automations targeting `switch.electricity_planner_arbitrage_mode` / `switch.electricity_planner_negative_arbitrage_buy_mode` continue to work unchanged. Automations that called `electricity_planner.set_manual_override` with `target: arbitrage_mode` or `target: negative_buy` must be updated to use the corresponding switch entity (`switch.turn_on` / `switch.turn_off`) — the service schema now rejects those targets. The `extra_state_attributes` rename `override_active` → `mode_enabled` on the two runtime-mode switches is a breaking change for any dashboard / template that read the old attribute name.
 
 **v6.2.2** (dashboard wording fix — no behavior change)
 
@@ -308,11 +330,11 @@ The integration is designed for dynamic electricity markets:
 - **Added**: Live-adjustable number entities — `number.electricity_planner_arbitrage_mode_deadline_hour` and `number.electricity_planner_negative_buy_threshold` — joining the existing `arbitrage_mode_reserve_soc` slider. All three live-update the coordinator without an integration reload (registered in `LIVE_UPDATE_OPTIONS`).
 - **Renamed (project-wide)**: `Battery Dump` → `Arbitrage Mode`. Affects:
   - Config keys: `battery_dump_target_soc` → `arbitrage_mode_reserve_soc`, `battery_dump_deadline_hour` → `arbitrage_mode_deadline_hour`, `battery_dump_max_export_power` → `arbitrage_mode_max_export_power`.
-  - Constants: `CONF_BATTERY_DUMP_*` → `CONF_ARBITRAGE_MODE_*`, `MANUAL_OVERRIDE_TARGET_BATTERY_DUMP` → `MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE`.
+  - Constants: `CONF_BATTERY_DUMP_*` → `CONF_ARBITRAGE_MODE_*`.
   - Module: `battery_dump.py` → `arbitrage_mode.py` (and consumers updated).
   - Number entity: `number.electricity_planner_battery_dump_target_soc` → `number.electricity_planner_arbitrage_mode_reserve_soc`. **The unique_id suffix is intentionally preserved** (`battery_dump_target_soc`) so historical statistics survive the rename — only the entity_id slug is migrated via `_async_migrate_entity_ids`.
   - Internal slot-selection keys: `select_export_slots()` returns `export_price_threshold` / `covers_full_export` (was `dump_price_threshold` / `covers_full_dump`); `arbitrage_mode.py` continues to expose them publicly as `arbitrage_price_threshold` / `slots_cover_full_arbitrage`.
-- **Added**: Manual-override service targets `arbitrage_mode` and `negative_buy` in `services.yaml`, `__init__.py` schemas, and the README override table. Both targets are state-based (no `action` / `duration` / `charger_limit` / `grid_setpoint` accepted; service raises `HomeAssistantError` if any are passed).
+- **Current behaviour**: Arbitrage Mode and Negative Arbitrage Buy Mode are switch-controlled runtime settings stored separately from manual overrides. Manual override services only target battery, car, charger limit, and grid setpoint.
 - **Added**: Config-schema migration path **v21 → v22 → v23**:
   - v21→v22 backfills `negative_buy_threshold = -0.05` and defensively strips any pre-release `negative_buy_deadline_hour` key (the deadline is shared with arbitrage selling).
   - v22→v23 renames the legacy `battery_dump_*` storage keys in both `entry.data` and `entry.options` to their `arbitrage_mode_*` equivalents.

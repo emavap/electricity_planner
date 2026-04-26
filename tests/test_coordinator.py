@@ -65,7 +65,6 @@ from custom_components.electricity_planner.const import (
     DOMAIN,
     MANUAL_OVERRIDE_ACTION_FORCE_CHARGE,
     MANUAL_OVERRIDE_ACTION_FORCE_WAIT,
-    MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE,
     MANUAL_OVERRIDE_TARGET_BATTERY,
     MANUAL_OVERRIDE_TARGET_CAR,
     SERVICE_CLEAR_MANUAL_OVERRIDE,
@@ -1421,19 +1420,66 @@ async def test_arbitrage_mode_persists_across_restart(fake_hass, monkeypatch):
     """Arbitrage mode should survive coordinator recreation."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     store = _MemoryOverrideStore()
-    coordinator._manual_override_store = store
+    coordinator._runtime_mode_store = store
 
     await coordinator.async_set_arbitrage_mode(reason="persisted dump")
 
     restored = _create_coordinator(fake_hass, _base_config(), monkeypatch)
-    restored._manual_override_store = _MemoryOverrideStore(store.data)
+    restored._runtime_mode_store = _MemoryOverrideStore(store.data)
 
-    await restored._async_load_manual_overrides()
+    await restored._async_load_runtime_modes()
 
-    override = restored.get_manual_override("arbitrage_mode")
-    assert override is not None
-    assert override["value"] is True
-    assert override["reason"] == "persisted dump"
+    state = restored.get_arbitrage_mode_state()
+    assert state is not None
+    assert state["value"] is True
+    assert state["reason"] == "persisted dump"
+
+
+@pytest.mark.asyncio
+async def test_runtime_modes_migrate_from_legacy_manual_override_store(fake_hass, monkeypatch):
+    """Legacy runtime-mode entries should move out of the manual override store."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    legacy_store = _MemoryOverrideStore(
+        {
+            "overrides": {
+                "arbitrage_mode": {
+                    "value": True,
+                    "reason": "legacy arbitrage",
+                    "set_at": base_time.isoformat(),
+                    "expires_at": None,
+                },
+                "negative_buy_mode": {
+                    "value": True,
+                    "reason": "legacy negative buy",
+                    "set_at": base_time.isoformat(),
+                    "expires_at": None,
+                },
+                "car_grid_charging": {
+                    "value": True,
+                    "reason": "legacy car override",
+                    "set_at": base_time.isoformat(),
+                    "expires_at": None,
+                },
+            }
+        }
+    )
+    runtime_store = _MemoryOverrideStore()
+    coordinator._manual_override_store = legacy_store
+    coordinator._runtime_mode_store = runtime_store
+
+    await coordinator._async_load_runtime_modes()
+    await coordinator._async_load_manual_overrides()
+
+    assert coordinator.get_arbitrage_mode_state()["reason"] == "legacy arbitrage"
+    assert coordinator.get_negative_buy_mode_state()["reason"] == "legacy negative buy"
+    assert coordinator.get_manual_override("arbitrage_mode") is None
+    assert coordinator.get_manual_override("negative_buy_mode") is None
+    assert coordinator.get_manual_override("car_grid_charging")["reason"] == "legacy car override"
+    assert "arbitrage_mode" in runtime_store.data["modes"]
+    assert "negative_buy_mode" in runtime_store.data["modes"]
+    assert "arbitrage_mode" not in legacy_store.data["overrides"]
+    assert "negative_buy_mode" not in legacy_store.data["overrides"]
 
 
 @pytest.mark.asyncio
@@ -1473,7 +1519,7 @@ def test_arbitrage_mode_plan_prefers_highest_export_slots(fake_hass, monkeypatch
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["arbitrage_mode"] = {
+    coordinator._arbitrage_mode_state = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1530,7 +1576,7 @@ def test_arbitrage_mode_plan_honors_configured_export_cap(fake_hass, monkeypatch
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["arbitrage_mode"] = {
+    coordinator._arbitrage_mode_state = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1577,7 +1623,7 @@ def test_arbitrage_mode_plan_derives_threshold_from_selected_slots(fake_hass, mo
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["arbitrage_mode"] = {
+    coordinator._arbitrage_mode_state = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1634,7 +1680,7 @@ def test_arbitrage_mode_plan_stops_when_fleet_net_energy_is_at_reserve(fake_hass
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["arbitrage_mode"] = {
+    coordinator._arbitrage_mode_state = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1691,7 +1737,7 @@ def test_arbitrage_mode_plan_uses_net_fleet_headroom_when_some_batteries_are_bel
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["arbitrage_mode"] = {
+    coordinator._arbitrage_mode_state = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1747,7 +1793,7 @@ def test_arbitrage_mode_plan_activates_during_current_selected_window(fake_hass,
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["arbitrage_mode"] = {
+    coordinator._arbitrage_mode_state = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1804,7 +1850,7 @@ def test_arbitrage_mode_plan_falls_back_when_total_eligible_duration_is_insuffic
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["arbitrage_mode"] = {
+    coordinator._arbitrage_mode_state = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1860,7 +1906,7 @@ def test_arbitrage_mode_plan_uses_whole_slots_without_partial_truncation(fake_ha
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["arbitrage_mode"] = {
+    coordinator._arbitrage_mode_state = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1912,7 +1958,7 @@ def test_arbitrage_mode_plan_targets_same_day_deadline_before_cutoff(fake_hass, 
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["arbitrage_mode"] = {
+    coordinator._arbitrage_mode_state = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -1969,7 +2015,7 @@ def test_arbitrage_mode_plan_rolls_to_next_day_after_cutoff(fake_hass, monkeypat
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["arbitrage_mode"] = {
+    coordinator._arbitrage_mode_state = {
         "value": True,
         "reason": "Dump mode",
         "expires_at": None,
@@ -2150,7 +2196,7 @@ def test_negative_buy_plan_allows_import_without_battery_details(fake_hass, monk
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["negative_buy_mode"] = {
+    coordinator._negative_buy_mode_state = {
         "value": True,
         "reason": "Negative buy",
         "expires_at": None,
@@ -2196,7 +2242,7 @@ def test_negative_buy_plan_calculates_required_energy_and_duration(fake_hass, mo
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["negative_buy_mode"] = {
+    coordinator._negative_buy_mode_state = {
         "value": True,
         "reason": "Negative buy",
         "expires_at": None,
@@ -2255,7 +2301,7 @@ def test_negative_buy_plan_buys_when_battery_above_soc_ceiling(fake_hass, monkey
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["negative_buy_mode"] = {
+    coordinator._negative_buy_mode_state = {
         "value": True,
         "reason": "Negative buy",
         "expires_at": None,
@@ -2307,7 +2353,7 @@ def test_negative_buy_plan_rolls_to_next_day_after_cutoff(fake_hass, monkeypatch
         }
     )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator._manual_overrides["negative_buy_mode"] = {
+    coordinator._negative_buy_mode_state = {
         "value": True,
         "reason": "Negative buy",
         "expires_at": None,
@@ -2571,34 +2617,6 @@ async def test_service_accepts_explicit_entry(fake_hass, monkeypatch):
     )
 
     coordinator.async_clear_manual_override.assert_awaited_once_with(MANUAL_OVERRIDE_TARGET_CAR)
-    coordinator.async_request_refresh.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_service_can_enable_arbitrage_mode(fake_hass, monkeypatch):
-    """Arbitrage mode target should route to the dedicated coordinator helper."""
-    config = _base_config()
-    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
-    coordinator.async_set_arbitrage_mode = AsyncMock()
-    coordinator.async_request_refresh = AsyncMock()
-
-    from custom_components.electricity_planner.__init__ import _register_services_once
-
-    fake_hass.data.setdefault(DOMAIN, {})[coordinator.entry.entry_id] = coordinator
-
-    _register_services_once(fake_hass)
-
-    handler = fake_hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
-
-    await handler(
-        FakeServiceCall(
-            {
-                ATTR_TARGET: MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE,
-            }
-        )
-    )
-
-    coordinator.async_set_arbitrage_mode.assert_awaited_once_with(reason=None)
     coordinator.async_request_refresh.assert_awaited_once()
 
 

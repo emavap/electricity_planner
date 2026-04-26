@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+import voluptuous as vol
 import yaml
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.exceptions import HomeAssistantError
@@ -57,10 +58,8 @@ from custom_components.electricity_planner.const import (
     DEFAULT_TRANSPORT_COST_DAY,
     DEFAULT_TRANSPORT_COST_NIGHT,
     ATTR_GRID_SETPOINT_OVERRIDE,
-    MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE,
     MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
     MANUAL_OVERRIDE_TARGET_GRID_SETPOINT,
-    MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY,
     SERVICE_SET_MANUAL_OVERRIDE,
     DOMAIN,
 )
@@ -247,15 +246,12 @@ def test_manual_override_service_schema_accepts_negative_grid_setpoint():
     assert data[ATTR_GRID_SETPOINT_OVERRIDE] == -4500
 
 
-def test_manual_override_service_schema_accepts_negative_buy_target():
-    """Negative Arbitrage Buy should be callable through the service schema."""
-    data = MANUAL_OVERRIDE_SERVICE_SCHEMA(
-        {
-            ATTR_TARGET: MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY,
-        }
-    )
-
-    assert data[ATTR_TARGET] == MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY
+def test_manual_override_service_schema_rejects_runtime_mode_targets():
+    """Runtime mode toggles are planner settings, not manual override targets."""
+    with pytest.raises(vol.Invalid):
+        MANUAL_OVERRIDE_SERVICE_SCHEMA({ATTR_TARGET: "arbitrage_mode"})
+    with pytest.raises(vol.Invalid):
+        MANUAL_OVERRIDE_SERVICE_SCHEMA({ATTR_TARGET: "negative_buy"})
 
 
 @pytest.mark.asyncio
@@ -322,97 +318,6 @@ async def test_manual_override_service_applies_negative_grid_setpoint(monkeypatc
     coordinator.async_request_refresh.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_arbitrage_mode_service_rejects_unsupported_duration(monkeypatch):
-    """arbitrage_mode target should fail fast instead of silently ignoring duration."""
-    hass = FakeHass()
-    entry = MockConfigEntry(domain=DOMAIN, data={CONF_CURRENT_PRICE_ENTITY: "sensor.price"}, options={})
-
-    monkeypatch.setattr(
-        ElectricityPlannerCoordinator,
-        "_setup_entity_listeners",
-        lambda self: None,
-    )
-    coordinator = ElectricityPlannerCoordinator(hass, entry)
-    coordinator.async_set_arbitrage_mode = AsyncMock()
-    coordinator.async_request_refresh = AsyncMock()
-    hass.data = {DOMAIN: {entry.entry_id: coordinator}}
-
-    _register_services_once(hass)
-    handler = hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
-
-    with pytest.raises(HomeAssistantError, match="arbitrage_mode target does not accept duration"):
-        await handler(
-            SimpleNamespace(
-                data={
-                    ATTR_TARGET: MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE,
-                    ATTR_DURATION: 60,
-                }
-            )
-        )
-
-    coordinator.async_set_arbitrage_mode.assert_not_awaited()
-    coordinator.async_request_refresh.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_negative_buy_service_enables_mode(monkeypatch):
-    """negative_buy target should enable the persistent runtime mode."""
-    hass = FakeHass()
-    entry = MockConfigEntry(domain=DOMAIN, data={CONF_CURRENT_PRICE_ENTITY: "sensor.price"}, options={})
-
-    monkeypatch.setattr(
-        ElectricityPlannerCoordinator,
-        "_setup_entity_listeners",
-        lambda self: None,
-    )
-    coordinator = ElectricityPlannerCoordinator(hass, entry)
-    coordinator.async_set_negative_buy_mode = AsyncMock()
-    coordinator.async_request_refresh = AsyncMock()
-    hass.data = {DOMAIN: {entry.entry_id: coordinator}}
-
-    _register_services_once(hass)
-    handler = hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
-
-    await handler(SimpleNamespace(data={ATTR_TARGET: MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY}))
-
-    coordinator.async_set_negative_buy_mode.assert_awaited_once_with(reason=None)
-    coordinator.async_request_refresh.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_negative_buy_service_rejects_unsupported_duration(monkeypatch):
-    """negative_buy target should fail fast instead of silently ignoring duration."""
-    hass = FakeHass()
-    entry = MockConfigEntry(domain=DOMAIN, data={CONF_CURRENT_PRICE_ENTITY: "sensor.price"}, options={})
-
-    monkeypatch.setattr(
-        ElectricityPlannerCoordinator,
-        "_setup_entity_listeners",
-        lambda self: None,
-    )
-    coordinator = ElectricityPlannerCoordinator(hass, entry)
-    coordinator.async_set_negative_buy_mode = AsyncMock()
-    coordinator.async_request_refresh = AsyncMock()
-    hass.data = {DOMAIN: {entry.entry_id: coordinator}}
-
-    _register_services_once(hass)
-    handler = hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
-
-    with pytest.raises(HomeAssistantError, match="negative_buy target does not accept duration"):
-        await handler(
-            SimpleNamespace(
-                data={
-                    ATTR_TARGET: MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY,
-                    ATTR_DURATION: 60,
-                }
-            )
-        )
-
-    coordinator.async_set_negative_buy_mode.assert_not_awaited()
-    coordinator.async_request_refresh.assert_not_awaited()
-
-
 def test_services_yaml_allows_negative_grid_setpoint_selector():
     """The service selector should expose export-capable grid setpoints in the UI."""
     services_path = (
@@ -428,8 +333,8 @@ def test_services_yaml_allows_negative_grid_setpoint_selector():
     assert grid_selector["min"] == -50000
 
 
-def test_services_yaml_exposes_negative_buy_target():
-    """The service selector should expose Negative Arbitrage Buy mode."""
+def test_services_yaml_excludes_runtime_mode_targets():
+    """Manual override services should not expose planner runtime modes."""
     services_path = (
         Path(__file__).resolve().parents[1]
         / "custom_components"
@@ -441,8 +346,10 @@ def test_services_yaml_exposes_negative_buy_target():
     set_options = services_data["set_manual_override"]["fields"]["target"]["selector"]["select"]["options"]
     clear_options = services_data["clear_manual_override"]["fields"]["target"]["selector"]["select"]["options"]
 
-    assert MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY in set_options
-    assert MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY in clear_options
+    assert "arbitrage_mode" not in set_options
+    assert "negative_buy" not in set_options
+    assert "arbitrage_mode" not in clear_options
+    assert "negative_buy" not in clear_options
 
 
 @pytest.mark.asyncio

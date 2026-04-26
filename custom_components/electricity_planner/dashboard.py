@@ -39,7 +39,7 @@ MANAGED_KEY = "electricity_planner_managed"
 # MUST be bumped whenever dashboard_template.yaml or the 3-phase appendix
 # changes so existing installs re-save on next reload. The deep-diff in
 # _save_dashboard is a defence-in-depth; this stamp is the primary signal.
-MANAGED_VERSION = 31  # Battery Controls quick-reference: clarify average-SOC wording
+MANAGED_VERSION = 32  # Manual override status: runtime modes split out, numeric values as watts
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 THREE_PHASE_APPENDIX_FILENAME = "dashboard_template_3phase_appendix.yaml"
 

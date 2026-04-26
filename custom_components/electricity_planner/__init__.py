@@ -33,13 +33,11 @@ from .const import (
     MANUAL_OVERRIDE_ACTION_FORCE_CHARGE,
     MANUAL_OVERRIDE_ACTION_FORCE_WAIT,
     MANUAL_OVERRIDE_TARGET_ALL,
-    MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE,
     MANUAL_OVERRIDE_TARGET_BATTERY,
     MANUAL_OVERRIDE_TARGET_BOTH,
     MANUAL_OVERRIDE_TARGET_CAR,
     MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
     MANUAL_OVERRIDE_TARGET_GRID_SETPOINT,
-    MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY,
     SERVICE_CLEAR_MANUAL_OVERRIDE,
     SERVICE_SET_MANUAL_OVERRIDE,
 )
@@ -71,8 +69,6 @@ MANUAL_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
         vol.Required(ATTR_TARGET): vol.In(
             (
                 MANUAL_OVERRIDE_TARGET_BATTERY,
-                MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE,
-                MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY,
                 MANUAL_OVERRIDE_TARGET_CAR,
                 MANUAL_OVERRIDE_TARGET_BOTH,
                 MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
@@ -95,8 +91,6 @@ CLEAR_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_TARGET, default=MANUAL_OVERRIDE_TARGET_ALL): vol.In(
             (
                 MANUAL_OVERRIDE_TARGET_BATTERY,
-                MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE,
-                MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY,
                 MANUAL_OVERRIDE_TARGET_CAR,
                 MANUAL_OVERRIDE_TARGET_BOTH,
                 MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
@@ -356,46 +350,6 @@ def _register_services_once(hass: HomeAssistant) -> None:
         duration = timedelta(minutes=duration_minutes) if duration_minutes is not None else None
         charger_limit = call.data.get(ATTR_CHARGER_LIMIT_OVERRIDE)
         grid_setpoint = call.data.get(ATTR_GRID_SETPOINT_OVERRIDE)
-
-        if target == MANUAL_OVERRIDE_TARGET_ARBITRAGE_MODE:
-            invalid_fields = [
-                field_name
-                for field_name, field_value in (
-                    ("action", action),
-                    ("duration", duration_minutes),
-                    ("charger_limit", charger_limit),
-                    ("grid_setpoint", grid_setpoint),
-                )
-                if field_value is not None
-            ]
-            if invalid_fields:
-                raise HomeAssistantError(
-                    "arbitrage_mode target does not accept "
-                    + ", ".join(invalid_fields)
-                )
-            await coordinator.async_set_arbitrage_mode(reason=reason)
-            await coordinator.async_request_refresh()
-            return
-
-        if target == MANUAL_OVERRIDE_TARGET_NEGATIVE_BUY:
-            invalid_fields = [
-                field_name
-                for field_name, field_value in (
-                    ("action", action),
-                    ("duration", duration_minutes),
-                    ("charger_limit", charger_limit),
-                    ("grid_setpoint", grid_setpoint),
-                )
-                if field_value is not None
-            ]
-            if invalid_fields:
-                raise HomeAssistantError(
-                    "negative_buy target does not accept "
-                    + ", ".join(invalid_fields)
-                )
-            await coordinator.async_set_negative_buy_mode(reason=reason)
-            await coordinator.async_request_refresh()
-            return
 
         # For numeric-only targets, action is optional
         # For boolean targets (battery/car/both), action is required

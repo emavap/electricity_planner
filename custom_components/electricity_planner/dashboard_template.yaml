@@ -870,7 +870,6 @@ views:
               {% for key, value in overrides.items() %}
               {% set target_name = {
                 'battery_grid_charging': 'Battery charging',
-                'arbitrage_mode': 'Arbitrage mode',
                 'car_grid_charging': 'Car charging',
                 'charger_limit': 'Charger limit',
                 'grid_setpoint': 'Grid setpoint'
@@ -880,7 +879,7 @@ views:
               {% if key in ['charger_limit', 'grid_setpoint'] %}
               **{{ target_name }}:** {{ value.value }}W{% if until %} (until {{ as_datetime(until).astimezone().strftime('%H:%M') }}){% endif %}{% if reason %} — {{ reason }}{% endif %}
               {% else %}
-              {% set mode = 'enabled' if key == 'arbitrage_mode' else ('charging' if value.value else 'waiting') %}
+              {% set mode = 'charging' if value.value else 'waiting' %}
               **{{ target_name }}:** {{ mode }}{% if until %} (until {{ as_datetime(until).astimezone().strftime('%H:%M') }}){% endif %}{% if reason %} — {{ reason }}{% endif %}
               {% endif %}
 

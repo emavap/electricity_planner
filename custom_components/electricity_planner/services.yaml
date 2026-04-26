@@ -1,7 +1,7 @@
 # Services for Electricity Planner integration
 set_manual_override:
   name: Set Manual Override
-  description: Manually override charging decisions for battery or car
+  description: Manually override battery/car charging decisions or numeric charger/grid limits
   fields:
     entry_id:
       name: Config Entry
@@ -12,15 +12,13 @@ set_manual_override:
         text:
     target:
       name: Target
-      description: Which override to set (battery, arbitrage_mode, negative_buy, car, both, charger_limit, or grid_setpoint)
+      description: Which manual override target to set (battery, car, both, charger_limit, or grid_setpoint)
       required: true
       example: "battery"
       selector:
         select:
           options:
             - "battery"
-            - "arbitrage_mode"
-            - "negative_buy"
             - "car"
             - "both"
             - "charger_limit"
@@ -37,7 +35,7 @@ set_manual_override:
             - "force_wait"
     duration:
       name: Duration (minutes)
-      description: Optional number of minutes before the override automatically clears
+      description: Optional number of minutes before the manual override automatically clears
       required: false
       example: 60
       selector:
@@ -54,7 +52,7 @@ set_manual_override:
         text:
     charger_limit:
       name: Charger Limit (Watts)
-      description: Manual override for car charger power limit when target is charger_limit
+      description: Manual override for car charger power limit. Use with target charger_limit or bundle with a car override.
       required: false
       example: 5000
       selector:
@@ -65,7 +63,7 @@ set_manual_override:
           unit_of_measurement: "W"
     grid_setpoint:
       name: Grid Setpoint (Watts)
-      description: Manual override for grid import/export power setpoint when target is grid_setpoint
+      description: Manual override for grid import/export power setpoint. Use with target grid_setpoint or bundle with a car override.
       required: false
       example: 8000
       selector:
@@ -77,7 +75,7 @@ set_manual_override:
 
 clear_manual_override:
   name: Clear Manual Override
-  description: Clear any active manual overrides
+  description: Clear active manual overrides and return battery/car/charger/grid control to automatic decision making.
   fields:
     entry_id:
       name: Config Entry
@@ -88,7 +86,7 @@ clear_manual_override:
         text:
     target:
       name: Target
-      description: Which device(s) override to clear (battery, arbitrage_mode, negative_buy, car, both, charger_limit, grid_setpoint, or all)
+      description: Which manual override target to clear. all clears battery/car/charger_limit/grid_setpoint.
       required: false
       example: "all"
       default: "all"
@@ -96,8 +94,6 @@ clear_manual_override:
         select:
           options:
             - "battery"
-            - "arbitrage_mode"
-            - "negative_buy"
             - "car"
             - "both"
             - "charger_limit"

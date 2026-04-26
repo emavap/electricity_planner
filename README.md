@@ -1,6 +1,6 @@
 # Electricity Planner
 
-**Version 6.2.2** | **Config Schema Version 23** | **Home Assistant 2024.4+**
+**Version 6.3.0** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
@@ -367,13 +367,13 @@ data:
 
 | Parameter | Values | Description |
 |-----------|--------|-------------|
-| `target` | `battery`, `car`, `both`, `charger_limit`, `grid_setpoint`, `arbitrage_mode`, `negative_buy` | Which override to apply |
+| `target` | `battery`, `car`, `both`, `charger_limit`, `grid_setpoint` | Which manual override to apply |
 | `action` | `force_charge`, `force_wait` | Boolean override action for `battery`, `car`, or `both` |
 | `duration` | 1–1440 | Override duration in minutes |
-| `charger_limit` | 0–50000 | Manual EV charger limit override used with `target: charger_limit` |
-| `grid_setpoint` | 0–50000 | Manual import/export setpoint override used with `target: grid_setpoint` |
+| `charger_limit` | 0–50000 | Manual EV charger limit override used with `target: charger_limit`, or bundled with a `car` override |
+| `grid_setpoint` | -50000–50000 | Manual import/export setpoint override used with `target: grid_setpoint`, or bundled with a `car` override |
 
-`target: arbitrage_mode` enables the persistent arbitrage mode and `target: negative_buy` enables the persistent Negative Arbitrage Buy mode. Neither accepts `action` or `duration`.
+Arbitrage Mode and Negative Arbitrage Buy Mode are planner runtime settings, not manual overrides. Control them through `switch.electricity_planner_arbitrage_mode` and `switch.electricity_planner_negative_arbitrage_buy_mode`.
 
 #### `electricity_planner.clear_manual_override`
 
@@ -382,7 +382,7 @@ Remove an active override:
 ```yaml
 service: electricity_planner.clear_manual_override
 data:
-  target: arbitrage_mode
+  target: all
 ```
 
 ### Override Behaviour
@@ -391,7 +391,8 @@ data:
 - Automatically expire after configured duration
 - Visible in `decision_diagnostics` sensor attributes
 - Can be cleared manually at any time
-- `arbitrage_mode` and `negative_buy` are persistent until cleared manually
+- `target: all` clears only manual overrides: battery, car, charger limit, and grid setpoint
+- Arbitrage Mode and Negative Arbitrage Buy Mode persist independently as switch-controlled planner settings
 
 ---
 

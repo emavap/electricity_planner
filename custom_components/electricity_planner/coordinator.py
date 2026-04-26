@@ -108,6 +108,7 @@ from .helpers import (
 _LOGGER = logging.getLogger(__name__)
 _MANUAL_OVERRIDE_STORE_VERSION = 1
 _CAR_PERMISSIVE_MODE_STORE_VERSION = 1
+_RUNTIME_MODE_STORE_VERSION = 1
 
 
 class ElectricityPlannerCoordinator(DataUpdateCoordinator):
@@ -167,12 +168,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._battery_threshold_snapshot: float | None = None
         self._last_config_hash: int | None = None  # Track config changes for threshold updates
 
-        # Manual override tracking
+        # Runtime mode and manual override tracking
         self._car_permissive_mode_store: Store[dict[str, Any]] | None = None
+        self._runtime_mode_store: Store[dict[str, Any]] | None = None
+        self._arbitrage_mode_state: dict[str, Any] | None = None
+        self._negative_buy_mode_state: dict[str, Any] | None = None
         self._manual_overrides: dict[str, dict[str, Any] | None] = {
             "battery_grid_charging": None,
-            "arbitrage_mode": None,
-            "negative_buy_mode": None,
             "car_grid_charging": None,
             "charger_limit": None,
             "grid_setpoint": None,
@@ -272,7 +274,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             _MANUAL_OVERRIDE_STORE_VERSION,
             f"{DOMAIN}.{self.entry.entry_id}.manual_overrides",
         )
+        self._runtime_mode_store = Store(
+            self.hass,
+            _RUNTIME_MODE_STORE_VERSION,
+            f"{DOMAIN}.{self.entry.entry_id}.runtime_modes",
+        )
         await self._async_load_car_permissive_mode()
+        await self._async_load_runtime_modes()
         await self._async_load_manual_overrides()
 
     def get_manual_override(self, key: str) -> dict[str, Any] | None:
@@ -283,9 +291,17 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         """Delegate to the runtime mode manager collaborator."""
         return self._runtime_mode_manager.is_arbitrage_mode_enabled()
 
+    def get_arbitrage_mode_state(self) -> dict[str, Any] | None:
+        """Delegate to the runtime mode manager collaborator."""
+        return self._runtime_mode_manager.get_arbitrage_mode_state()
+
     def is_negative_buy_mode_enabled(self) -> bool:
         """Delegate to the runtime mode manager collaborator."""
         return self._runtime_mode_manager.is_negative_buy_mode_enabled()
+
+    def get_negative_buy_mode_state(self) -> dict[str, Any] | None:
+        """Delegate to the runtime mode manager collaborator."""
+        return self._runtime_mode_manager.get_negative_buy_mode_state()
 
     async def async_set_negative_buy_mode(self, reason: str | None = None) -> None:
         """Delegate to the runtime mode manager collaborator."""
@@ -314,6 +330,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
     async def _async_load_manual_overrides(self) -> None:
         """Delegate to the manual override manager collaborator."""
         await self._manual_override_manager.load()
+
+    async def _async_load_runtime_modes(self) -> None:
+        """Delegate to the runtime mode manager collaborator."""
+        await self._runtime_mode_manager.load_runtime_modes()
 
     async def _async_load_car_permissive_mode(self) -> None:
         """Delegate to the runtime mode manager collaborator."""

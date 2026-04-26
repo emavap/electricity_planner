@@ -244,25 +244,24 @@ class ArbitrageModeSwitch(CoordinatorEntity, SwitchEntity):
     @property
     def is_on(self) -> bool:
         """Return true if arbitrage mode is enabled."""
-        override = self.coordinator.get_manual_override("arbitrage_mode")
-        return bool(override and override.get("value") is True)
+        return self.coordinator.is_arbitrage_mode_enabled()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
         arbitrage_plan = self.coordinator.data.get("arbitrage_mode_plan", {}) if self.coordinator.data else {}
-        override = self.coordinator.get_manual_override("arbitrage_mode")
-        override_active = bool(override and override.get("value") is True)
-        set_at = override.get("set_at") if override else None
-        effective_plan = arbitrage_plan if override_active and arbitrage_plan.get("enabled") else {}
+        runtime_state = self.coordinator.get_arbitrage_mode_state()
+        mode_enabled = runtime_state is not None
+        set_at = runtime_state.get("set_at") if runtime_state else None
+        effective_plan = arbitrage_plan if mode_enabled and arbitrage_plan.get("enabled") else {}
         reason = (
             effective_plan.get("reason")
-            or (override.get("reason") if override_active and override else None)
+            or (runtime_state.get("reason") if runtime_state else None)
             or "Arbitrage mode disabled"
         )
 
         return {
-            "override_active": override_active,
+            "mode_enabled": mode_enabled,
             "reason": reason,
             "reserve_soc": effective_plan.get("reserve_soc"),
             "currently_exporting": effective_plan.get("active", False),
@@ -320,8 +319,7 @@ class NegativeArbitrageBuyModeSwitch(CoordinatorEntity, SwitchEntity):
     @property
     def is_on(self) -> bool:
         """Return true if Negative Arbitrage Buy mode is enabled."""
-        override = self.coordinator.get_manual_override("negative_buy_mode")
-        return bool(override and override.get("value") is True)
+        return self.coordinator.is_negative_buy_mode_enabled()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -331,18 +329,18 @@ class NegativeArbitrageBuyModeSwitch(CoordinatorEntity, SwitchEntity):
             if self.coordinator.data
             else {}
         )
-        override = self.coordinator.get_manual_override("negative_buy_mode")
-        override_active = bool(override and override.get("value") is True)
-        set_at = override.get("set_at") if override else None
-        effective_plan = buy_plan if override_active and buy_plan.get("enabled") else {}
+        runtime_state = self.coordinator.get_negative_buy_mode_state()
+        mode_enabled = runtime_state is not None
+        set_at = runtime_state.get("set_at") if runtime_state else None
+        effective_plan = buy_plan if mode_enabled and buy_plan.get("enabled") else {}
         reason = (
             effective_plan.get("reason")
-            or (override.get("reason") if override_active and override else None)
+            or (runtime_state.get("reason") if runtime_state else None)
             or "Negative Arbitrage Buy mode disabled"
         )
 
         return {
-            "override_active": override_active,
+            "mode_enabled": mode_enabled,
             "reason": reason,
             "threshold": effective_plan.get("threshold"),
             "currently_buying": effective_plan.get("active", False),

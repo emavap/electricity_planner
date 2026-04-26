@@ -14,13 +14,6 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.util import dt as dt_util
 
-from .const import (
-    CONF_ARBITRAGE_MODE_RESERVE_SOC,
-    CONF_NEGATIVE_BUY_THRESHOLD,
-    DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
-    DEFAULT_NEGATIVE_BUY_THRESHOLD,
-)
-
 if TYPE_CHECKING:
     from .coordinator import ElectricityPlannerCoordinator
 
@@ -28,16 +21,12 @@ _LOGGER = logging.getLogger(__name__)
 
 _TARGET_MAPPING: dict[str, tuple[str, ...]] = {
     "battery": ("battery_grid_charging",),
-    "arbitrage_mode": ("arbitrage_mode",),
-    "negative_buy": ("negative_buy_mode",),
     "car": ("car_grid_charging",),
     "both": ("battery_grid_charging", "car_grid_charging"),
     "charger_limit": ("charger_limit",),
     "grid_setpoint": ("grid_setpoint",),
     "all": (
         "battery_grid_charging",
-        "arbitrage_mode",
-        "negative_buy_mode",
         "car_grid_charging",
         "charger_limit",
         "grid_setpoint",
@@ -115,9 +104,6 @@ class ManualOverrideManager:
         }
 
         for key, payload in serialized_overrides.items():
-            if key in ("battery_dump_to_grid", "battery_dump"):
-                key = "arbitrage_mode"
-                overrides_changed = True
             if key not in loaded_overrides or not isinstance(payload, dict):
                 overrides_changed = True
                 continue
@@ -202,43 +188,36 @@ class ManualOverrideManager:
                         expires_at.isoformat() if expires_at else "never",
                     )
 
+        # Numeric overrides apply whenever the caller passes a value, regardless
+        # of which boolean ``target`` was named.  The dashboard "Force Car
+        # Charging" prompt bundles ``charger_limit`` and ``grid_setpoint`` into
+        # the same ``target='car'`` service call, so gating these on the target
+        # string would silently drop user input.
         if charger_limit is not None:
-            if "charger_limit" in resolved_targets:
-                coordinator._manual_overrides["charger_limit"] = {
-                    "value": charger_limit,
-                    "reason": reason or "Manual charger limit override",
-                    "expires_at": expires_at,
-                    "set_at": now,
-                }
-                _LOGGER.info(
-                    "Manual override set for charger_limit → %dW (expires %s)",
-                    charger_limit,
-                    expires_at.isoformat() if expires_at else "never",
-                )
-            else:
-                _LOGGER.debug(
-                    "Ignoring charger_limit override for target %s; use target='charger_limit'",
-                    target,
-                )
+            coordinator._manual_overrides["charger_limit"] = {
+                "value": charger_limit,
+                "reason": reason or "Manual charger limit override",
+                "expires_at": expires_at,
+                "set_at": now,
+            }
+            _LOGGER.info(
+                "Manual override set for charger_limit → %dW (expires %s)",
+                charger_limit,
+                expires_at.isoformat() if expires_at else "never",
+            )
 
         if grid_setpoint is not None:
-            if "grid_setpoint" in resolved_targets:
-                coordinator._manual_overrides["grid_setpoint"] = {
-                    "value": grid_setpoint,
-                    "reason": reason or "Manual grid setpoint override",
-                    "expires_at": expires_at,
-                    "set_at": now,
-                }
-                _LOGGER.info(
-                    "Manual override set for grid_setpoint → %dW (expires %s)",
-                    grid_setpoint,
-                    expires_at.isoformat() if expires_at else "never",
-                )
-            else:
-                _LOGGER.debug(
-                    "Ignoring grid_setpoint override for target %s; use target='grid_setpoint'",
-                    target,
-                )
+            coordinator._manual_overrides["grid_setpoint"] = {
+                "value": grid_setpoint,
+                "reason": reason or "Manual grid setpoint override",
+                "expires_at": expires_at,
+                "set_at": now,
+            }
+            _LOGGER.info(
+                "Manual override set for grid_setpoint → %dW (expires %s)",
+                grid_setpoint,
+                expires_at.isoformat() if expires_at else "never",
+            )
 
         await self.persist()
 
@@ -274,32 +253,6 @@ class ManualOverrideManager:
 
             override_value = override["value"]
             manual_reason: str = override.get("reason", "Manual override")
-
-            if coordinator_key == "arbitrage_mode":
-                overrides_info[coordinator_key] = {
-                    "value": override_value,
-                    "reason": manual_reason,
-                    "set_at": override.get("set_at").isoformat() if override.get("set_at") else None,
-                    "expires_at": expires_at.isoformat() if expires_at else None,
-                    "reserve_soc": coordinator.config.get(
-                        CONF_ARBITRAGE_MODE_RESERVE_SOC,
-                        DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
-                    ),
-                }
-                continue
-
-            if coordinator_key == "negative_buy_mode":
-                overrides_info[coordinator_key] = {
-                    "value": override_value,
-                    "reason": manual_reason,
-                    "set_at": override.get("set_at").isoformat() if override.get("set_at") else None,
-                    "expires_at": expires_at.isoformat() if expires_at else None,
-                    "threshold": coordinator.config.get(
-                        CONF_NEGATIVE_BUY_THRESHOLD,
-                        DEFAULT_NEGATIVE_BUY_THRESHOLD,
-                    ),
-                }
-                continue
 
             if coordinator_key in ("charger_limit", "grid_setpoint"):
                 previous_value = decision.get(coordinator_key)
@@ -369,6 +322,6 @@ class ManualOverrideManager:
             decision["manual_overrides"] = overrides_info
             decision["strategy_trace"] = augmented_trace
         else:
-            decision.setdefault("manual_overrides", {})
+            decision["manual_overrides"] = {}
 
         return decision, changed_targets
