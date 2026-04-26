@@ -1,10 +1,10 @@
 # Electricity Planner
 
-**Version 6.4.0** | **Config Schema Version 23** | **Home Assistant 2024.4+**
+**Version 6.5.0** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
-> Release note for v6.0.2: logic-review follow-up on top of v6.0.1 — five small, low-risk fixes with no user-facing behavior drift. `battery_charging.py` now uses `max_soc_threshold_solar` for its surplus-block gate (was hardcoded 50). `car_charging.py` arbitrage path explicitly clears `car_solar_only` to overwrite stale flags. `grid_setpoint.py` safety-net clamp logs are demoted from `warning` to `info` (clamp still enforced; no more persistent HA notifications on recoverable edges). `strategies.py` docstring clarifies the `PredictiveChargingStrategy` reason surfaces only in non-dynamic mode. Architecture docs corrected from 8 → 6 strategy classes. No code-behavior, schema, or API changes. 456/456 tests still passing.
+> Release note for v6.5.0: behaviour change — inverter derating no longer fires while Negative Arbitrage Buy is active. The `negative_buy_curtail_solar` branch in `inverter_derating.py` (introduced in v6.1.0) that pinned `inverter_derating_target = 0` during paid-to-consume slots has been removed. Derating is now strictly reserved for the *exporting* case via the existing export-deadband control loop around `inverter_export_limit`; while the site is importing — including arbitrage-buy slots — the inverter stays unrestricted, exactly like before v6.1.0. The rest of the Negative Arbitrage Buy planner (forced battery grid-charging via `battery_charging.py`, peak-limited grid setpoint via `grid_setpoint.py`) is unchanged. 495/495 tests passing.
 
 ---
 

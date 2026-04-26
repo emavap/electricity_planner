@@ -3308,24 +3308,46 @@ def test_negative_buy_grid_setpoint_without_soc_respects_max_grid_power_with_ev_
     assert "negative-buy import budget 1000W" in result["grid_setpoint_reason"]
 
 
-def test_inverter_derating_curtails_solar_when_negative_buy_active():
-    """Negative-buy curtailment should target 0W and override feed-in / SOC bypass logic."""
+def test_inverter_derating_does_not_curtail_solar_when_negative_buy_active():
+    """Negative-buy must NOT force the inverter to 0W: derating only fires when exporting."""
     engine = _engine({CONF_MAX_INVERTER_POWER: 4400})
 
     result = engine._calculate_inverter_derating_target(
         {
             "negative_buy_curtail_solar": True,
-            "feedin_solar": True,  # would normally release the cap
+            "feedin_solar": True,  # release the cap as usual
             "solar_production": 3500,
             "house_consumption": 600,
-            "battery_analysis": {"average_soc": 98},  # would normally bypass derating
+            "battery_analysis": {"average_soc": 98},
         }
     )
 
-    assert result["inverter_derating_target"] == 0
-    assert "Negative Arbitrage Buy curtailment" in result["inverter_derating_reason"]
+    # Feed-in path wins: inverter stays unrestricted regardless of negative-buy flag.
+    assert result["inverter_derating_target"] == 4400
+    assert "Negative Arbitrage Buy curtailment" not in result["inverter_derating_reason"]
     assert result["inverter_derating_alarm"] is False
-    assert result["inverter_derating_unreached_since"] is None
+
+
+def test_inverter_derating_holds_during_negative_buy_when_importing():
+    """During negative-buy import (grid_power > 0, no export), derating must NOT engage."""
+    engine = _engine({CONF_MAX_INVERTER_POWER: 4400})
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "negative_buy_curtail_solar": True,
+            "feedin_solar": False,
+            "solar_production": 1500,
+            "house_consumption": 600,
+            "grid_power": 4000,  # importing - no export at all
+            "previous_grid_power": 4000,
+            "battery_analysis": {"average_soc": 60},
+        }
+    )
+
+    # No export -> no derating: target should be at or above current solar.
+    assert result["inverter_derating_target"] is not None
+    assert result["inverter_derating_target"] >= 1500
+    assert result["inverter_derating_alarm"] is False
 
 
 def test_inverter_derating_skips_curtailment_when_flag_absent():

@@ -232,7 +232,7 @@ The integration is designed for dynamic electricity markets:
 
 ### Current Version
 
-- **Integration Version**: 6.4.0
+- **Integration Version**: 6.5.0
 - **Config Schema Version**: 23
 - **Migration Path**: Automatic v1→v23 migration
 
@@ -246,6 +246,13 @@ The integration is designed for dynamic electricity markets:
 6. **Arbitrage Mode**: Reserve SOC, deadline hour (shared by sell + negative-buy planning), max export power
 
 ### Recent Changes
+
+**v6.5.0** (Negative Arbitrage Buy no longer derates the inverter — behaviour change)
+
+- **Removed** (`inverter_derating.py`): The `negative_buy_curtail_solar` early-return branch (introduced in v6.1.0) that pinned `inverter_derating_target = 0` whenever the planner flagged the current slot as paid-to-consume. Forcing the inverter to 0W during arbitrage-buy slots cut off PV that was already covering house and EV load, which is wasteful — the import we are credited for is the *net* draw, not gross consumption, so curtailing solar does not increase the credit.
+- **New behaviour**: Inverter derating is now strictly reserved for the **exporting** case — the existing export-deadband control loop around `inverter_export_limit` is the only path that lowers the cap. While the site is importing (`grid_power > 0`) — including paid-to-consume Negative Arbitrage Buy slots — the inverter stays unrestricted, exactly as it did before v6.1.0. The rest of the Negative Arbitrage Buy planner is unchanged: `battery_charging.py` still force-grid-charges batteries past the SOC ceiling, and `grid_setpoint.py` still reserves the peak-limited grid import budget.
+- **Tests**: 495/495 passing. The legacy assertion `test_inverter_derating_curtails_solar_when_negative_buy_active` was inverted into `test_inverter_derating_does_not_curtail_solar_when_negative_buy_active` (asserts the inverter stays at `max_inverter_power` under the same inputs that previously yielded 0W). New `test_inverter_derating_holds_during_negative_buy_when_importing` covers the importing-during-negative-buy case (`grid_power > 0`, no export → no derating engaged).
+- **Compatibility**: No config-schema change (still v23), no migration required, no entity-ID renames, no service-surface or public API changes. The flag `negative_buy_curtail_solar` is still produced by the planner and exposed on the Negative Arbitrage Buy switch's attributes; only the derating side-effect was removed. Installations that depended on the inverter dropping to 0W during negative-buy slots will see the inverter stay online — disable the Negative Arbitrage Buy switch to retain v6.4.0 behaviour, or wire your own automation against the `negative_buy_mode_active` attribute if you want a hard inverter cut.
 
 **v6.4.0** (Dashboard view-split + per-cycle hot-path optimisations — no behaviour change)
 

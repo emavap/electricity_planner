@@ -65,20 +65,11 @@ class InverterDeratingCalculator:
             "inverter_derating_unreached_since": None,
         }
 
-        # Negative Arbitrage Buy curtailment overrides feed-in/derating logic:
-        # while the planner has flagged the current slot as paid-to-consume,
-        # we want zero solar output so all house and EV load is met from the
-        # grid (maximizing the credit we earn for importing).
-        if bool(data.get("negative_buy_curtail_solar", False)):
-            return {
-                "inverter_derating_target": 0,
-                "inverter_derating_reason": (
-                    "Negative Arbitrage Buy curtailment - solar production stopped to "
-                    "maximize paid-to-consume grid import"
-                ),
-                **no_alarm,
-            }
-
+        # Note: even when Negative Arbitrage Buy curtailment is flagged, we no
+        # longer force the inverter to 0W here. Derating is reserved for the
+        # exporting case (handled below via the export deadband). When the site
+        # is importing - including paid-to-consume arbitrage-buy slots - the
+        # normal logic leaves the inverter unrestricted instead of derating.
         if feed_allowed:
             return {
                 "inverter_derating_target": int(max_inverter_power),
