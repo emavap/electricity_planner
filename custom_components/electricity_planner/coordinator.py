@@ -110,6 +110,7 @@ _LOGGER = logging.getLogger(__name__)
 _MANUAL_OVERRIDE_STORE_VERSION = 1
 _CAR_PERMISSIVE_MODE_STORE_VERSION = 1
 _RUNTIME_MODE_STORE_VERSION = 1
+_BATTERY_CHARGING_STATE_STORE_VERSION = 1
 
 
 class ElectricityPlannerCoordinator(DataUpdateCoordinator):
@@ -163,6 +164,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
         # Car charging state tracking for hysteresis
         self._previous_car_charging: bool = False
+        self._previous_battery_grid_charging: bool = False
+        self._battery_grid_charging_changed_at: datetime | None = None
+        self._battery_grid_charging_locked_threshold: float | None = None
+        self._battery_charging_state_store: Store[dict[str, Any]] | None = None
 
         # Price interval tracking for threshold stability
         self._current_price_interval_start: datetime | None = None
@@ -283,9 +288,77 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             _RUNTIME_MODE_STORE_VERSION,
             f"{DOMAIN}.{self.entry.entry_id}.runtime_modes",
         )
+        self._battery_charging_state_store = Store(
+            self.hass,
+            _BATTERY_CHARGING_STATE_STORE_VERSION,
+            f"{DOMAIN}.{self.entry.entry_id}.battery_charging_state",
+        )
         await self._async_load_car_permissive_mode()
         await self._async_load_runtime_modes()
         await self._async_load_manual_overrides()
+        await self._async_load_battery_charging_state()
+
+    async def _async_load_battery_charging_state(self) -> None:
+        """Restore battery grid-charging anti-flap state across restarts."""
+        if self._battery_charging_state_store is None:
+            return
+
+        try:
+            stored = await self._battery_charging_state_store.async_load()
+        except Exception as err:
+            if isinstance(err, (KeyboardInterrupt, SystemExit)):
+                raise
+            _LOGGER.warning(
+                "Unable to load battery charging state for %s: %s",
+                self.entry.entry_id,
+                err,
+            )
+            return
+
+        if not isinstance(stored, dict):
+            return
+
+        previous = stored.get("previous_battery_grid_charging")
+        if isinstance(previous, bool):
+            self._previous_battery_grid_charging = previous
+
+        changed_at_raw = stored.get("battery_grid_charging_changed_at")
+        if isinstance(changed_at_raw, str):
+            parsed = dt_util.parse_datetime(changed_at_raw)
+            if parsed is not None:
+                self._battery_grid_charging_changed_at = dt_util.as_utc(parsed)
+
+        locked_raw = stored.get("battery_grid_charging_locked_threshold")
+        if isinstance(locked_raw, (int, float)):
+            self._battery_grid_charging_locked_threshold = float(locked_raw)
+
+    async def _async_persist_battery_charging_state(self) -> None:
+        """Persist battery grid-charging anti-flap state for restart recovery."""
+        if self._battery_charging_state_store is None:
+            return
+
+        payload: dict[str, Any] = {
+            "previous_battery_grid_charging": bool(self._previous_battery_grid_charging),
+            "battery_grid_charging_changed_at": (
+                self._battery_grid_charging_changed_at.isoformat()
+                if self._battery_grid_charging_changed_at is not None
+                else None
+            ),
+            "battery_grid_charging_locked_threshold": (
+                self._battery_grid_charging_locked_threshold
+            ),
+        }
+
+        try:
+            await self._battery_charging_state_store.async_save(payload)
+        except Exception as err:
+            if isinstance(err, (KeyboardInterrupt, SystemExit)):
+                raise
+            _LOGGER.warning(
+                "Unable to persist battery charging state for %s: %s",
+                self.entry.entry_id,
+                err,
+            )
 
     def get_manual_override(self, key: str) -> dict[str, Any] | None:
         """Delegate to the manual override manager collaborator."""
@@ -654,6 +727,39 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         """Delegate to the manual override manager collaborator."""
         return self._manual_override_manager.apply(decision)
 
+    def _update_battery_charging_state_tracking(
+        self,
+        automatic_battery_grid_charging: bool,
+        override_targets: set[str],
+        effective_threshold: float | None = None,
+    ) -> None:
+        """Track automatic battery charging state for anti-flapping logic.
+
+        Locks the price threshold at OFF->ON transitions so the anti-flap hold
+        compares against the threshold that was acceptable when charging
+        started, not the current SOC-relaxed threshold (which can drift down
+        as SOC rises and prematurely terminate the hold).
+        """
+        if "battery_grid_charging" in override_targets:
+            self._previous_battery_grid_charging = False
+            self._battery_grid_charging_changed_at = None
+            self._battery_grid_charging_locked_threshold = None
+            return
+
+        if automatic_battery_grid_charging != self._previous_battery_grid_charging:
+            self._battery_grid_charging_changed_at = dt_util.utcnow()
+            if automatic_battery_grid_charging:
+                # OFF -> ON: capture the threshold that justified the start
+                self._battery_grid_charging_locked_threshold = (
+                    float(effective_threshold)
+                    if effective_threshold is not None
+                    else None
+                )
+            else:
+                # ON -> OFF: hold expired or genuinely declined; clear the lock
+                self._battery_grid_charging_locked_threshold = None
+        self._previous_battery_grid_charging = automatic_battery_grid_charging
+
     def _build_price_timeline(
         self,
         prices_today: dict[str, Any] | None,
@@ -933,6 +1039,15 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
             # Add previous car charging state for hysteresis logic
             data["previous_car_charging"] = self._previous_car_charging
+            data["previous_battery_grid_charging"] = self._previous_battery_grid_charging
+            if self._battery_grid_charging_changed_at is not None:
+                data["battery_grid_charging_state_age_seconds"] = (
+                    dt_util.utcnow() - self._battery_grid_charging_changed_at
+                ).total_seconds()
+            if self._battery_grid_charging_locked_threshold is not None:
+                data["battery_grid_charging_locked_threshold"] = (
+                    self._battery_grid_charging_locked_threshold
+                )
 
             # Pass the stable threshold snapshot to decision engine
             if self._battery_threshold_snapshot is not None:
@@ -960,6 +1075,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             )
 
             charging_decision = await self.decision_engine.evaluate_charging_decision(data)
+            automatic_battery_grid_charging = bool(
+                charging_decision.get("battery_grid_charging", False)
+            )
+            automatic_effective_threshold = charging_decision.get(
+                "battery_effective_threshold"
+            )
             charging_decision, override_targets = self._apply_manual_overrides(charging_decision)
 
             if override_targets:
@@ -971,6 +1092,20 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
 
             # Update previous car charging state
             self._previous_car_charging = charging_decision.get("car_grid_charging", False)
+            previous_locked_threshold = self._battery_grid_charging_locked_threshold
+            previous_changed_at = self._battery_grid_charging_changed_at
+            previous_state = self._previous_battery_grid_charging
+            self._update_battery_charging_state_tracking(
+                automatic_battery_grid_charging,
+                override_targets,
+                effective_threshold=automatic_effective_threshold,
+            )
+            if (
+                self._previous_battery_grid_charging != previous_state
+                or self._battery_grid_charging_changed_at != previous_changed_at
+                or self._battery_grid_charging_locked_threshold != previous_locked_threshold
+            ):
+                await self._async_persist_battery_charging_state()
 
             # Check data availability and handle notifications
             await self._check_data_availability(data)

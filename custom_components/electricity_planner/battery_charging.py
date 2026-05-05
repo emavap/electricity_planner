@@ -16,6 +16,8 @@ if TYPE_CHECKING:
     from .decision_engine import CycleContext, EngineSettings
     from .strategies import StrategyManager
 
+_MIN_BATTERY_ON_HOLD_SECONDS = 5 * 60
+
 
 class BatteryChargingDecisionCalculator:
     """Decide battery grid-charging using strategy pattern with hysteresis."""
@@ -45,6 +47,30 @@ class BatteryChargingDecisionCalculator:
         time_context: dict[str, Any],
         ctx: "CycleContext",
     ) -> dict[str, Any]:
+        # Active arbitrage export is a hard automatic stop for the battery
+        # automation binary. It must run before Negative Arbitrage Buy because
+        # the grid-setpoint path also gives active export priority when both
+        # runtime plans overlap.
+        if ctx.arbitrage_mode_export_active:
+            export_power = ctx.arbitrage_mode_export_power
+            return {
+                "battery_grid_charging": False,
+                "battery_grid_charging_reason": (
+                    f"Arbitrage export active ({export_power}W) - battery grid charging suppressed"
+                ),
+                "strategy_trace": [
+                    {
+                        "strategy": "ArbitrageExportGuard",
+                        "priority": 0,
+                        "should_charge": False,
+                        "reason": (
+                            f"Arbitrage export active ({export_power}W) - "
+                            "battery grid charging suppressed"
+                        ),
+                    }
+                ],
+            }
+
         # Negative Arbitrage Buy is price-triggered by the planner. Once active,
         # request grid import even if the battery is already at a normal SOC
         # ceiling; the downstream inverter/battery system decides where that
@@ -97,14 +123,6 @@ class BatteryChargingDecisionCalculator:
                 "strategy_trace": [],
             }
 
-        # NOTE: Arbitrage mode does NOT block battery grid charging here.
-        # The normal price-based strategies decide whether to charge.
-        # Only the explicit "Disable Battery Charging" switch (manual override
-        # with value=False on battery_grid_charging) should prevent grid charging.
-        # During active arbitrage export windows the grid-setpoint calculation
-        # gives export priority over charging, so grid charging is naturally
-        # suppressed without an extra block here.
-
         significant_solar = power_analysis.get("significant_solar_surplus", False)
         solar_surplus = power_analysis.get("solar_surplus", 0)
         average_soc = battery_analysis.get("average_soc")
@@ -142,8 +160,82 @@ class BatteryChargingDecisionCalculator:
         should_charge, reason = self._strategy_manager.evaluate(context)
         trace = self._strategy_manager.get_last_trace()
 
-        return {
-            "battery_grid_charging": should_charge,
-            "battery_grid_charging_reason": reason,
-            "strategy_trace": trace,
-        }
+        return self._apply_on_hold(
+            {
+                "battery_grid_charging": should_charge,
+                "battery_grid_charging_reason": reason,
+                "strategy_trace": trace,
+            },
+            ctx,
+        )
+
+    @staticmethod
+    def _apply_on_hold(
+        decision: dict[str, Any],
+        ctx: "CycleContext",
+    ) -> dict[str, Any]:
+        """Avoid rapid ON->OFF cycling while the price remains acceptable.
+
+        Mirrors the car-charging "locked threshold" pattern: when an ON state
+        was entered at price threshold T, hold ON for up to
+        ``_MIN_BATTERY_ON_HOLD_SECONDS`` while ``current_price <= T``. The
+        threshold is captured at OFF->ON transition and reused throughout the
+        hold so SOC drift (which would otherwise shrink the SOC multiplier and
+        the effective threshold) cannot prematurely terminate the hold.
+        """
+        if decision.get("battery_grid_charging"):
+            return decision
+
+        if not ctx.previous_battery_grid_charging:
+            return decision
+
+        trace = list(decision.get("strategy_trace") or [])
+        # SolarPriorityStrategy is wired at priority 1 with a non-empty reason
+        # only when solar has actually taken over; that is a legitimate
+        # OFF transition and must not be held.
+        if any(
+            entry.get("priority") == 1 and entry.get("reason")
+            for entry in trace
+        ):
+            return decision
+
+        state_age = ctx.battery_grid_charging_state_age_seconds
+        if state_age is None or state_age >= _MIN_BATTERY_ON_HOLD_SECONDS:
+            return decision
+
+        current_price = ctx.current_price
+        if current_price is None:
+            return decision
+
+        # Prefer the threshold locked at hold-entry; fall back to the live
+        # effective threshold when no lock is recorded (e.g. first cycle
+        # after a restart, before the coordinator captured the lock).
+        hold_threshold = ctx.battery_grid_charging_locked_threshold
+        if hold_threshold is None:
+            hold_threshold = ctx.effective_battery_price_threshold
+
+        if current_price > hold_threshold:
+            return decision
+
+        remaining_seconds = max(0, int(_MIN_BATTERY_ON_HOLD_SECONDS - state_age))
+        reason = (
+            decision.get("battery_grid_charging_reason")
+            or "automatic decision changed"
+        )
+        held = dict(decision)
+        held["battery_grid_charging"] = True
+        held["battery_grid_charging_reason"] = (
+            "Continuing battery grid charging briefly to avoid rapid cycling "
+            f"({remaining_seconds}s hold remaining, locked threshold "
+            f"{hold_threshold:.3f}€/kWh); next automatic result: {reason}"
+        )
+        trace.append(
+            {
+                "strategy": "BatteryOnHold",
+                "priority": 997,
+                "should_charge": True,
+                "reason": held["battery_grid_charging_reason"],
+            }
+        )
+        held["strategy_trace"] = trace
+        return held

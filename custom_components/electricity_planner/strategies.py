@@ -91,8 +91,15 @@ class PredictiveChargingStrategy(ChargingStrategy):
         config = context.get("config", {}) or {}
         settings = context.get("settings")
 
-        # Only consider waiting if current price is already acceptable
-        if not price.get("is_low_price", False):
+        # Only consider waiting if current price is already acceptable for
+        # battery decisions. The StrategyManager may supply a stable threshold
+        # snapshot here without mutating shared price-analysis state used by
+        # car decisions and diagnostic sensors.
+        battery_is_low_price = context.get(
+            "battery_is_low_price",
+            price.get("is_low_price", False),
+        )
+        if not battery_is_low_price:
             return False, ""
 
         # Only wait if there's a significant price drop coming
@@ -188,7 +195,9 @@ class SOCBufferChargingStrategy(ChargingStrategy):
         # Get threshold info from context (set by StrategyManager.evaluate)
         effective_threshold = context.get("effective_threshold", 0.15)
         soc_multiplier = context.get("soc_price_multiplier", 1.0)
-        base_threshold = price.get("price_threshold", 0.15)
+        base_threshold = context.get("battery_stable_threshold")
+        if base_threshold is None:
+            base_threshold = price.get("price_threshold", 0.15)
 
         # Only trigger when price is BETWEEN base and effective threshold
         # If price is already below base threshold, let normal strategies handle it
@@ -226,7 +235,11 @@ class SOCBasedChargingStrategy(ChargingStrategy):
         power = context.get("power_analysis", {})
         config = context.get("config", {})
 
-        if not price.get("is_low_price", False):
+        battery_is_low_price = context.get(
+            "battery_is_low_price",
+            price.get("is_low_price", False),
+        )
+        if not battery_is_low_price:
             return False, ""
 
         average_soc = battery.get("average_soc")
@@ -550,6 +563,9 @@ class StrategyManager:
         context["effective_threshold"] = effective_threshold
         context["soc_price_multiplier"] = soc_multiplier
         context["threshold_relaxed"] = soc_multiplier > 1.0
+        context["battery_is_low_price"] = (
+            current_price is not None and current_price <= base_threshold
+        )
 
         last_reason = ""
 

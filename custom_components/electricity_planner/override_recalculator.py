@@ -235,6 +235,13 @@ class OverrideRecalculator:
             normalized_grid_components = self.normalize_grid_components(decision, ctx)
             decision["grid_components"] = normalized_grid_components
             combined_data["grid_components"] = normalized_grid_components
+            grid_setpoint_value = _safe_optional_float(decision.get("grid_setpoint"))
+            if grid_setpoint_value is not None and grid_setpoint_value < 0:
+                # Manual export overrides cannot coexist with a charging binary;
+                # use a true float comparison so values in (-1, 0) still suppress
+                # the charge flag (int() truncates toward zero).
+                decision["battery_grid_charging"] = False
+                combined_data["battery_grid_charging"] = False
             decision["grid_setpoint_reason"] = self.format_manual_grid_setpoint_reason(
                 decision,
                 normalized_grid_components,

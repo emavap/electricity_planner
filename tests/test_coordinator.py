@@ -201,6 +201,77 @@ def test_coordinator_merges_entry_options(fake_hass, monkeypatch):
     assert coordinator.config[CONF_DYNAMIC_THRESHOLD_CONFIDENCE] == 80
 
 
+def test_battery_state_tracking_uses_automatic_decisions(fake_hass, monkeypatch):
+    base_time = datetime(2025, 6, 1, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+
+    coordinator._update_battery_charging_state_tracking(
+        True, set(), effective_threshold=0.18
+    )
+
+    assert coordinator._previous_battery_grid_charging is True
+    assert coordinator._battery_grid_charging_changed_at == base_time
+    assert coordinator._battery_grid_charging_locked_threshold == 0.18
+
+
+def test_battery_state_tracking_ignores_manual_battery_override(
+    fake_hass, monkeypatch
+):
+    base_time = datetime(2025, 6, 1, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    coordinator._previous_battery_grid_charging = True
+    coordinator._battery_grid_charging_changed_at = base_time - timedelta(minutes=1)
+    coordinator._battery_grid_charging_locked_threshold = 0.18
+
+    coordinator._update_battery_charging_state_tracking(
+        True,
+        {"battery_grid_charging"},
+    )
+
+    assert coordinator._previous_battery_grid_charging is False
+    assert coordinator._battery_grid_charging_changed_at is None
+    assert coordinator._battery_grid_charging_locked_threshold is None
+
+
+def test_battery_state_tracking_clears_lock_on_off_transition(
+    fake_hass, monkeypatch
+):
+    base_time = datetime(2025, 6, 1, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    coordinator._previous_battery_grid_charging = True
+    coordinator._battery_grid_charging_changed_at = base_time - timedelta(minutes=10)
+    coordinator._battery_grid_charging_locked_threshold = 0.18
+
+    coordinator._update_battery_charging_state_tracking(False, set())
+
+    assert coordinator._previous_battery_grid_charging is False
+    assert coordinator._battery_grid_charging_changed_at == base_time
+    assert coordinator._battery_grid_charging_locked_threshold is None
+
+
+def test_battery_state_tracking_keeps_lock_while_state_unchanged(
+    fake_hass, monkeypatch
+):
+    base_time = datetime(2025, 6, 1, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    coordinator._previous_battery_grid_charging = True
+    coordinator._battery_grid_charging_changed_at = base_time - timedelta(minutes=2)
+    coordinator._battery_grid_charging_locked_threshold = 0.18
+
+    coordinator._update_battery_charging_state_tracking(
+        True, set(), effective_threshold=0.12
+    )
+
+    # No state flip → lock and timestamp must be preserved (not re-captured at the
+    # current, lower effective threshold).
+    assert coordinator._battery_grid_charging_locked_threshold == 0.18
+    assert coordinator._battery_grid_charging_changed_at == base_time - timedelta(minutes=2)
+
+
 def test_grid_setpoint_sensor_uses_configured_base_setpoint_in_attributes(fake_hass, monkeypatch):
     config = _base_config()
     config[CONF_BASE_GRID_SETPOINT] = 4200

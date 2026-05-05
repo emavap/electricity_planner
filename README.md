@@ -1,6 +1,6 @@
 # Electricity Planner
 
-**Version 6.5.0** | **Config Schema Version 23** | **Home Assistant 2024.4+**
+**Version 6.6.0** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
@@ -231,7 +231,7 @@ When enabled:
 - It derives a single arbitrage threshold from those selected slots and exports whenever the current feed-in price is at or above that threshold
 - The planner only considers eligible slots that finish before that next cutoff, so after the cutoff it automatically targets the following day
 - Export only uses energy above the configured Reserve SOC
-- Grid charging is blocked while the mode is enabled unless the current price is negative
+- Grid charging remains available while the mode is armed, but is suppressed during active arbitrage export slots
 - If there are not enough eligible slots to complete the full export, the planner still uses the best available slots and monetizes what it can
 
 The export recommendation appears as a **negative** `sensor.electricity_planner_grid_setpoint`.
@@ -249,7 +249,7 @@ alongside the normal battery controls (`Grid Max SOC`, `Grid Max SOC (high solar
 ### Negative Arbitrage Buy Mode
 
 Enable the **Negative Arbitrage Buy Mode** switch to monetize negative-price periods by
-requesting peak-limited grid import and curtailing solar export while the net buy price
+requesting peak-limited grid import while the net buy price
 sits at or below the configured `negative_buy_threshold` (default `-0.05 €/kWh`, configurable live
 via `number.electricity_planner_negative_buy_threshold`).
 
@@ -257,7 +257,7 @@ When enabled:
 
 - The planner detects upcoming negative-price slots that finish before the same cutoff hour shared with arbitrage mode (`arbitrage_mode_deadline_hour`)
 - During an active negative-price slot, the grid setpoint reserves the safe import budget up to the current peak-limited cap and `max_grid_power`
-- Solar export is curtailed via the inverter derating target so the site does not pay to export while net feed-in is negative
+- While importing during paid-to-consume slots, inverter output is not artificially capped; export-control derating remains reserved for normal feed-in suppression
 - Outside negative-price slots the mode is dormant; the planner falls back to its normal strategies
 
 The dashboards expose the `Negative Arbitrage Buy Mode` switch and `Negative Arbitrage Buy Threshold`
@@ -898,9 +898,9 @@ custom_components/electricity_planner/
 
 **A:** Migrations are automatic. The integration detects your config version and upgrades through each required schema step up to the current config schema version. Check logs for migration messages.
 
-### Q: Why does car charging have hysteresis but battery charging doesn't?
+### Q: Why does car charging have stricter hysteresis than battery charging?
 
-**A:** EV chargers often have minimum session requirements and frequent on/off cycling can damage equipment or confuse the vehicle. Batteries typically handle rapid state changes better.
+**A:** EV chargers often have minimum session requirements and frequent on/off cycling can damage equipment or confuse the vehicle. Batteries typically handle rapid state changes better, so battery charging only uses a short anti-flapping hold: after an automatic ON decision, it may stay ON briefly while price remains acceptable. Hard stops such as missing data, full battery, active arbitrage export, solar-priority stops, and manual overrides still take effect immediately.
 
 ---
 

@@ -194,6 +194,180 @@ def test_battery_decision_tree_strategy_branch_passes_through_result() -> None:
     assert captured_context["battery_stable_threshold"] == 0.12
 
 
+def test_battery_decision_holds_recent_on_state_to_avoid_flapping() -> None:
+    engine = _engine()
+    engine.strategy_manager.evaluate = lambda context: (False, "solar signal changed")
+    engine.strategy_manager.get_last_trace = lambda: [{"strategy": "Stub"}]
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={
+            "data_available": True,
+            "current_price": 0.10,
+            "price_threshold": 0.15,
+        },
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+            "average_soc": 45,
+        },
+        power_allocation={},
+        power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
+        time_context={},
+        data={
+            "previous_battery_grid_charging": True,
+            "battery_grid_charging_state_age_seconds": 60,
+        },
+    )
+
+    assert result["battery_grid_charging"] is True
+    assert "avoid rapid cycling" in result["battery_grid_charging_reason"]
+    assert result["strategy_trace"][-1]["strategy"] == "BatteryOnHold"
+
+
+def test_battery_decision_does_not_hold_on_state_when_price_is_too_high() -> None:
+    engine = _engine()
+    engine.strategy_manager.evaluate = lambda context: (False, "price too high")
+    engine.strategy_manager.get_last_trace = lambda: [{"strategy": "Stub"}]
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={
+            "data_available": True,
+            "current_price": 0.20,
+            "price_threshold": 0.15,
+        },
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+            "average_soc": 45,
+        },
+        power_allocation={},
+        power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
+        time_context={},
+        data={
+            "previous_battery_grid_charging": True,
+            "battery_grid_charging_state_age_seconds": 60,
+        },
+    )
+
+    assert result["battery_grid_charging"] is False
+    assert result["battery_grid_charging_reason"] == "price too high"
+
+
+def test_battery_decision_does_not_hold_solar_priority_stop() -> None:
+    engine = _engine()
+    engine.strategy_manager.evaluate = lambda context: (
+        False,
+        "Using allocated solar power (2000W) for batteries instead of grid",
+    )
+    # Detection must be by priority + reason, not class name, so the test
+    # uses a different class name on purpose.
+    engine.strategy_manager.get_last_trace = lambda: [
+        {
+            "strategy": "RenamedSolarStrategy",
+            "priority": 1,
+            "should_charge": False,
+            "reason": "Using allocated solar power (2000W) for batteries instead of grid",
+        }
+    ]
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={
+            "data_available": True,
+            "current_price": 0.10,
+            "price_threshold": 0.15,
+        },
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+            "average_soc": 45,
+        },
+        power_allocation={"solar_for_batteries": 2000},
+        power_analysis={"significant_solar_surplus": False, "solar_surplus": 2000},
+        time_context={},
+        data={
+            "previous_battery_grid_charging": True,
+            "battery_grid_charging_state_age_seconds": 60,
+        },
+    )
+
+    assert result["battery_grid_charging"] is False
+    assert "allocated solar power" in result["battery_grid_charging_reason"]
+
+
+def test_battery_decision_uses_locked_threshold_during_hold() -> None:
+    """Hold compares price against the locked threshold, not the live one.
+
+    A SOC bump that drops the SOC-relaxed effective threshold below the
+    current price must not break a hold that was entered at a higher
+    threshold.
+    """
+    engine = _engine()
+    engine.strategy_manager.evaluate = lambda context: (False, "price too high")
+    engine.strategy_manager.get_last_trace = lambda: []
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={
+            "data_available": True,
+            # Live (post-SOC-drift) threshold would reject this price...
+            "current_price": 0.16,
+            "price_threshold": 0.15,
+        },
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+            "average_soc": 60,
+        },
+        power_allocation={},
+        power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
+        time_context={},
+        data={
+            "previous_battery_grid_charging": True,
+            "battery_grid_charging_state_age_seconds": 60,
+            # ...but the threshold locked at hold entry tolerates it.
+            "battery_grid_charging_locked_threshold": 0.20,
+        },
+    )
+
+    assert result["battery_grid_charging"] is True
+    assert "0.200€/kWh" in result["battery_grid_charging_reason"]
+    assert result["strategy_trace"][-1]["strategy"] == "BatteryOnHold"
+
+
+def test_battery_decision_falls_back_to_live_threshold_without_lock() -> None:
+    """First cycle after a restart has no lock; live threshold is used."""
+    engine = _engine()
+    engine.strategy_manager.evaluate = lambda context: (False, "")
+    engine.strategy_manager.get_last_trace = lambda: []
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={
+            "data_available": True,
+            "current_price": 0.10,
+            "price_threshold": 0.15,
+        },
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+            "average_soc": 45,
+        },
+        power_allocation={},
+        power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
+        time_context={},
+        data={
+            "previous_battery_grid_charging": True,
+            "battery_grid_charging_state_age_seconds": 60,
+        },
+    )
+
+    assert result["battery_grid_charging"] is True
+    assert result["strategy_trace"][-1]["strategy"] == "BatteryOnHold"
+
+
 @pytest.mark.parametrize(
     ("price_analysis", "data", "expected_branch"),
     [

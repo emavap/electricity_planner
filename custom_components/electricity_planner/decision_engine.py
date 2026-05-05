@@ -126,6 +126,9 @@ _LOGGER = logging.getLogger(__name__)
 _CAR_CHARGING_LOCKED_THRESHOLD_KEY = "car_charging_locked_threshold"
 _PREVIOUS_CAR_CHARGING_KEY = "previous_car_charging"
 _HAS_MIN_CHARGING_WINDOW_KEY = "has_min_charging_window"
+_PREVIOUS_BATTERY_GRID_CHARGING_KEY = "previous_battery_grid_charging"
+_BATTERY_GRID_CHARGING_STATE_AGE_SECONDS_KEY = "battery_grid_charging_state_age_seconds"
+_BATTERY_GRID_CHARGING_LOCKED_THRESHOLD_KEY = "battery_grid_charging_locked_threshold"
 
 
 class CarChargingDecision(TypedDict, total=False):
@@ -536,6 +539,9 @@ class CycleContext:
     car_grid_import_allowed: bool
     car_permissive_mode_active: bool
     car_peak_limited: bool
+    previous_battery_grid_charging: bool
+    battery_grid_charging_state_age_seconds: float | None
+    battery_grid_charging_locked_threshold: float | None
     previous_car_charging: bool
     has_min_charging_window: bool
     battery_grid_charging: bool
@@ -605,6 +611,12 @@ class CycleContext:
         )
 
         previous_car_charging = bool(data.get(_PREVIOUS_CAR_CHARGING_KEY))
+        battery_grid_charging_state_age_seconds = _safe_optional_float(
+            data.get(_BATTERY_GRID_CHARGING_STATE_AGE_SECONDS_KEY)
+        )
+        battery_grid_charging_locked_threshold = _safe_optional_float(
+            data.get(_BATTERY_GRID_CHARGING_LOCKED_THRESHOLD_KEY)
+        )
         locked_car_threshold = _safe_optional_float(
             data.get(_CAR_CHARGING_LOCKED_THRESHOLD_KEY)
         )
@@ -725,6 +737,11 @@ class CycleContext:
             ),
             car_permissive_mode_active=car_permissive_mode_active,
             car_peak_limited=bool(data.get("car_peak_limited")),
+            previous_battery_grid_charging=bool(
+                data.get(_PREVIOUS_BATTERY_GRID_CHARGING_KEY, False)
+            ),
+            battery_grid_charging_state_age_seconds=battery_grid_charging_state_age_seconds,
+            battery_grid_charging_locked_threshold=battery_grid_charging_locked_threshold,
             previous_car_charging=previous_car_charging,
             has_min_charging_window=bool(data.get(_HAS_MIN_CHARGING_WINDOW_KEY)),
             battery_grid_charging=battery_grid_charging,
@@ -951,6 +968,12 @@ class ChargingDecisionEngine:
             time_context,
             data,
             ctx=cycle_ctx,
+        )
+        # Surface the effective battery price threshold so the coordinator can
+        # capture it at OFF->ON transitions (used to lock the anti-flap hold).
+        battery_decision.setdefault(
+            "battery_effective_threshold",
+            cycle_ctx.effective_battery_price_threshold,
         )
         decision_data.update(battery_decision)
 

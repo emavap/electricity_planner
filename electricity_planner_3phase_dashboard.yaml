@@ -313,7 +313,7 @@ views:
 
               - **Car permissive**: Relaxes car-charging hysteresis — accepts ~20% higher prices and bypasses the minimum-window check for ad-hoc top-ups.
               - **Arbitrage mode**: Enables battery-to-grid export during high feed-in prices, down to *Arbitrage Reserve SOC*, before the deadline hour.
-              - **Negative Arbitrage Buy Mode**: Enables peak-limited grid import (and solar export curtailment) during net-negative price slots.
+              - **Negative Arbitrage Buy Mode**: Enables peak-limited grid import during net-negative price slots.
               - **Disable Battery Charging**: Persistently blocks all grid charging into batteries, overriding every automatic strategy.
 
           - type: markdown

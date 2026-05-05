@@ -294,6 +294,31 @@ def test_strategy_manager_uses_stable_threshold_snapshot():
     assert "exceeds maximum threshold" in reason
 
 
+def test_strategy_manager_low_price_branches_use_stable_threshold_snapshot():
+    """Traditional low-price strategies should use the same stable threshold as the guard."""
+    manager = StrategyManager(use_dynamic_threshold=False)
+    price_analysis = {
+        "current_price": 0.13,
+        "price_threshold": 0.10,
+        "is_low_price": False,
+        "very_low_price": False,
+    }
+    context = {
+        "price_analysis": price_analysis,
+        "battery_analysis": {"average_soc": 45, "max_soc_threshold": 90},
+        "power_analysis": {"solar_surplus": 0, "significant_solar_surplus": False},
+        "power_allocation": {"solar_for_batteries": 0, "remaining_solar": 0},
+        "config": {"emergency_soc_threshold": 15},
+        "battery_stable_threshold": 0.15,
+    }
+
+    should_charge, reason = manager.evaluate(context)
+
+    assert should_charge is True
+    assert "Medium SOC" in reason
+    assert price_analysis["is_low_price"] is False
+
+
 def test_strategy_manager_hard_blocks_grid_when_battery_solar_is_allocated():
     """Allocated battery solar should stop later strategies from re-enabling grid charging."""
     manager = StrategyManager(use_dynamic_threshold=True)

@@ -28,6 +28,7 @@ from custom_components.electricity_planner.const import (
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
+    CONF_PRICE_THRESHOLD,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     CONF_PHASE_MODE,
     PHASE_MODE_SINGLE,
@@ -1235,6 +1236,70 @@ def test_recalculate_after_grid_setpoint_override_normalizes_phase_results():
     assert result["phase_results"]["phase_1"]["grid_components"]["car"] == 1875
 
 
+def test_recalculate_after_negative_grid_setpoint_override_suppresses_battery_charge_binary():
+    engine = _engine()
+
+    result = engine.recalculate_after_override(
+        baseline_data={
+            "battery_grid_charging": True,
+            "car_grid_charging": False,
+            "monthly_grid_peak": 0,
+        },
+        decision={
+            "price_analysis": {},
+            "battery_analysis": {"average_soc": 70, "max_soc_threshold": 90},
+            "power_analysis": {"solar_surplus": 0},
+            "power_allocation": {"remaining_solar": 0},
+            "battery_grid_charging": True,
+            "car_grid_charging": False,
+            "grid_setpoint": -3000,
+            "grid_components": {"battery": 3000, "car": 0},
+            "manual_overrides": {
+                "grid_setpoint": {"reason": "Manual export test"}
+            },
+        },
+        override_targets={"grid_setpoint"},
+    )
+
+    assert result["grid_setpoint"] == -3000
+    assert result["grid_components"]["battery"] == -3000
+    assert result["battery_grid_charging"] is False
+
+
+def test_recalculate_after_small_negative_grid_setpoint_still_suppresses_battery_charge_binary():
+    """Sub-watt negative export values must still flip the charge flag off.
+
+    Previously this code path used ``int(... or 0) < 0`` which truncated
+    toward zero and would have left ``battery_grid_charging=True`` for
+    values in (-1, 0). The fix uses a true float comparison.
+    """
+    engine = _engine()
+
+    result = engine.recalculate_after_override(
+        baseline_data={
+            "battery_grid_charging": True,
+            "car_grid_charging": False,
+            "monthly_grid_peak": 0,
+        },
+        decision={
+            "price_analysis": {},
+            "battery_analysis": {"average_soc": 70, "max_soc_threshold": 90},
+            "power_analysis": {"solar_surplus": 0},
+            "power_allocation": {"remaining_solar": 0},
+            "battery_grid_charging": True,
+            "car_grid_charging": False,
+            "grid_setpoint": -0.5,
+            "grid_components": {"battery": 1, "car": 0},
+            "manual_overrides": {
+                "grid_setpoint": {"reason": "Manual export test"}
+            },
+        },
+        override_targets={"grid_setpoint"},
+    )
+
+    assert result["battery_grid_charging"] is False
+
+
 def test_recalculate_after_battery_override_updates_charger_limit():
     engine = _engine({CONF_MAX_CAR_POWER: 11000})
 
@@ -1563,6 +1628,121 @@ def test_arbitrage_mode_does_not_block_battery_grid_charging():
     assert result["battery_grid_charging"] is True
     assert result["battery_grid_charging_reason"] == "low price - charge approved"
     assert "blocked" not in result["battery_grid_charging_reason"]
+
+
+def test_active_arbitrage_export_blocks_battery_grid_charging_binary():
+    """Active export must not expose a contradictory battery charge binary."""
+    engine = _engine()
+    engine.strategy_manager.evaluate = lambda context: (
+        True,
+        "low price - charge approved",
+    )
+    engine.strategy_manager.get_last_trace = lambda: [{"strategy": "Stub"}]
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={"data_available": True, "current_price": 0.08},
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+            "average_soc": 80,
+        },
+        power_allocation={},
+        power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
+        time_context={},
+        data={
+            "arbitrage_mode_enabled": True,
+            "arbitrage_mode_active": True,
+            "arbitrage_mode_export_power": 3000,
+            "arbitrage_mode_reason": "High-price export window",
+        },
+    )
+
+    assert result["battery_grid_charging"] is False
+    assert "Arbitrage export active" in result["battery_grid_charging_reason"]
+    assert result["strategy_trace"][-1]["strategy"] == "ArbitrageExportGuard"
+
+
+def test_active_arbitrage_export_not_overridden_by_battery_on_hold():
+    engine = _engine()
+    engine.strategy_manager.evaluate = lambda context: (True, "strategy approved")
+    engine.strategy_manager.get_last_trace = lambda: [{"strategy": "Stub"}]
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={"data_available": True, "current_price": 0.08},
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+            "average_soc": 80,
+        },
+        power_allocation={},
+        power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
+        time_context={},
+        data={
+            "previous_battery_grid_charging": True,
+            "battery_grid_charging_state_age_seconds": 60,
+            "arbitrage_mode_enabled": True,
+            "arbitrage_mode_active": True,
+            "arbitrage_mode_export_power": 3000,
+        },
+    )
+
+    assert result["battery_grid_charging"] is False
+    assert result["strategy_trace"][-1]["strategy"] == "ArbitrageExportGuard"
+
+
+def test_active_arbitrage_export_takes_precedence_over_negative_buy_binary():
+    engine = _engine()
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={"data_available": True, "current_price": -0.12},
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+            "average_soc": 80,
+        },
+        power_allocation={},
+        power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
+        time_context={},
+        data={
+            "arbitrage_mode_enabled": True,
+            "arbitrage_mode_active": True,
+            "arbitrage_mode_export_power": 3000,
+            "negative_buy_mode_enabled": True,
+            "negative_buy_mode_active": True,
+            "negative_buy_import_power": 4000,
+        },
+    )
+
+    assert result["battery_grid_charging"] is False
+    assert result["strategy_trace"][-1]["strategy"] == "ArbitrageExportGuard"
+
+
+@pytest.mark.asyncio
+async def test_battery_stable_threshold_does_not_mutate_public_low_price_flag():
+    engine = _engine({CONF_PRICE_THRESHOLD: 0.10})
+
+    result = await engine.evaluate_charging_decision(
+        {
+            "current_price": 0.13,
+            "highest_price": 0.30,
+            "lowest_price": 0.05,
+            "next_price": 0.20,
+            "battery_stable_threshold": 0.15,
+            "battery_soc": [{"entity_id": "sensor.battery_main", "soc": 45}],
+            "solar_production": 0,
+            "house_consumption": 1000,
+            "solar_surplus": 0,
+            "car_charging_power": 0,
+            "monthly_grid_peak": 0,
+        }
+    )
+
+    assert result["battery_grid_charging"] is True
+    assert result["price_analysis"]["price_threshold"] == 0.10
+    assert result["price_analysis"]["is_low_price"] is False
 
 
 def test_arbitrage_mode_strategy_evaluation_runs_at_any_price():
