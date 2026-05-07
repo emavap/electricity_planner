@@ -21,6 +21,7 @@ from .const import (
     CONF_PHASE_SOLAR_ENTITY,
     CONF_PHASE_CONSUMPTION_ENTITY,
     CONF_PHASE_CAR_ENTITY,
+    CONF_PHASE_GRID_POWER_ENTITY,
     CONF_PHASE_BATTERY_POWER_ENTITY,
     CONF_NORDPOOL_CONFIG_ENTRY,
     CONF_CURRENT_PRICE_ENTITY,
@@ -273,6 +274,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     solar_key = f"{phase_id}_{CONF_PHASE_SOLAR_ENTITY}"
                     consumption_key = f"{phase_id}_{CONF_PHASE_CONSUMPTION_ENTITY}"
                     car_key = f"{phase_id}_{CONF_PHASE_CAR_ENTITY}"
+                    grid_power_key = f"{phase_id}_{CONF_PHASE_GRID_POWER_ENTITY}"
                     battery_power_key = f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}"
 
                     existing_phase = existing_phases.get(phase_id, {})
@@ -297,6 +299,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         preserve_when_missing=True,
                     )
                     processed_input.pop(car_key, None)
+                    resolved_grid_power = _resolve_optional_entity_value(
+                        processed_input,
+                        grid_power_key,
+                        existing_phase.get(CONF_PHASE_GRID_POWER_ENTITY),
+                        preserve_when_missing=True,
+                    )
+                    processed_input.pop(grid_power_key, None)
                     resolved_battery_power = _resolve_optional_entity_value(
                         processed_input,
                         battery_power_key,
@@ -311,6 +320,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             resolved_solar,
                             resolved_consumption,
                             resolved_car,
+                            resolved_grid_power,
                             resolved_battery_power,
                         )
                     ):
@@ -325,6 +335,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             phase_entry[CONF_PHASE_CONSUMPTION_ENTITY] = resolved_consumption
                         if resolved_car is not None:
                             phase_entry[CONF_PHASE_CAR_ENTITY] = resolved_car
+                        if resolved_grid_power is not None:
+                            phase_entry[CONF_PHASE_GRID_POWER_ENTITY] = resolved_grid_power
                         if resolved_battery_power is not None:
                             phase_entry[CONF_PHASE_BATTERY_POWER_ENTITY] = resolved_battery_power
 
@@ -408,6 +420,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 solar_key = f"{phase_id}_{CONF_PHASE_SOLAR_ENTITY}"
                 consumption_key = f"{phase_id}_{CONF_PHASE_CONSUMPTION_ENTITY}"
                 car_key = f"{phase_id}_{CONF_PHASE_CAR_ENTITY}"
+                grid_power_key = f"{phase_id}_{CONF_PHASE_GRID_POWER_ENTITY}"
                 battery_power_key = f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}"
 
                 schema_dict[
@@ -422,6 +435,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 schema_dict[
                     _optional_entity_schema(car_key, existing.get(CONF_PHASE_CAR_ENTITY))
+                ] = selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )
+                schema_dict[
+                    _optional_entity_schema(grid_power_key, existing.get(CONF_PHASE_GRID_POWER_ENTITY))
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 )
@@ -1050,14 +1068,10 @@ def validate_config_consistency(config: dict[str, Any]) -> list[str]:
 
     # Power limit validation
     max_battery_power = config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)
-    max_car_power = config.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)
     max_grid_power = config.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER)
 
     if max_battery_power > max_grid_power:
         errors.append(f"max_battery_power ({max_battery_power}W) cannot exceed max_grid_power ({max_grid_power}W)")
-
-    if max_car_power > max_grid_power:
-        errors.append(f"max_car_power ({max_car_power}W) cannot exceed max_grid_power ({max_grid_power}W)")
 
     # Price threshold validation
     price_threshold = config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
@@ -1158,6 +1172,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     solar_key = f"{phase_id}_{CONF_PHASE_SOLAR_ENTITY}"
                     consumption_key = f"{phase_id}_{CONF_PHASE_CONSUMPTION_ENTITY}"
                     car_key = f"{phase_id}_{CONF_PHASE_CAR_ENTITY}"
+                    grid_power_key = f"{phase_id}_{CONF_PHASE_GRID_POWER_ENTITY}"
                     battery_power_key = f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}"
 
                     existing_phase = existing_phases.get(phase_id, {})
@@ -1182,6 +1197,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         preserve_when_missing=True,
                     )
                     processed_input.pop(car_key, None)
+                    resolved_grid_power = _resolve_optional_entity_value(
+                        processed_input,
+                        grid_power_key,
+                        existing_phase.get(CONF_PHASE_GRID_POWER_ENTITY),
+                        preserve_when_missing=True,
+                    )
+                    processed_input.pop(grid_power_key, None)
                     resolved_battery_power = _resolve_optional_entity_value(
                         processed_input,
                         battery_power_key,
@@ -1196,6 +1218,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                             resolved_solar,
                             resolved_consumption,
                             resolved_car,
+                            resolved_grid_power,
                             resolved_battery_power,
                         )
                     ):
@@ -1210,6 +1233,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                             phase_entry[CONF_PHASE_CONSUMPTION_ENTITY] = resolved_consumption
                         if resolved_car is not None:
                             phase_entry[CONF_PHASE_CAR_ENTITY] = resolved_car
+                        if resolved_grid_power is not None:
+                            phase_entry[CONF_PHASE_GRID_POWER_ENTITY] = resolved_grid_power
                         if resolved_battery_power is not None:
                             phase_entry[CONF_PHASE_BATTERY_POWER_ENTITY] = resolved_battery_power
                         phases_config[phase_id] = phase_entry
@@ -1304,6 +1329,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     _optional_entity_schema(
                         f"{phase_id}_{CONF_PHASE_CAR_ENTITY}",
                         existing.get(CONF_PHASE_CAR_ENTITY),
+                    )
+                ] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
+                schema_dict[
+                    _optional_entity_schema(
+                        f"{phase_id}_{CONF_PHASE_GRID_POWER_ENTITY}",
+                        existing.get(CONF_PHASE_GRID_POWER_ENTITY),
                     )
                 ] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
                 schema_dict[

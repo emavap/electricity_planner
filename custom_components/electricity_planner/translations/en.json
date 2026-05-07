@@ -153,17 +153,17 @@
                     "solar_forecast_start_hour": "Hour of the day (12-23) when the system starts reading tomorrow's solar forecast. Earlier = more time to react, later = more accurate forecast. Default: 20 (8 PM)",
                     "max_soc_threshold_sunny": "Max SOC for grid charging when tomorrow is sunny (%). Grid charging stops at this level to leave room for free solar energy",
                     "sunny_forecast_threshold_kwh": "Solar forecast threshold in kWh that activates sunny-day grid charging mode",
-                    "price_threshold": "Price threshold for charging decisions (\u20ac/kWh)",
+                    "price_threshold": "Price threshold for charging decisions (€/kWh)",
                     "price_adjustment_multiplier": "Multiplier applied to raw price (e.g. 1.04 for the Energie.be dynamic contract). Default: 1.04",
-                    "price_adjustment_offset": "Fixed \u20ac/kWh offset added after multiplier (e.g. 0.005 for 0.5 c\u20ac on an excl. VAT market basis). Default: 0.005",
+                    "price_adjustment_offset": "Fixed €/kWh offset added after multiplier (e.g. 0.005 for 0.5 c€ on an excl. VAT market basis). Default: 0.005",
                     "emergency_soc_threshold": "SOC level below which emergency charging is triggered regardless of price (%)",
                     "soc_buffer_target": "SOC level above which no price relaxation is applied. Below this, the price threshold is gradually relaxed (%)",
                     "soc_price_multiplier_max": "Maximum price threshold multiplier when battery is at/below emergency SOC (1.3 = accept 30% higher prices)",
                     "very_low_price_threshold": "Percentage of daily price range considered 'very low' (e.g., 30 = bottom 30%)",
                     "significant_solar_threshold": "Solar surplus power level considered significant enough to prefer over grid (W)",
-                    "feedin_price_threshold": "Price threshold above which solar export to grid is enabled (\u20ac/kWh)",
+                    "feedin_price_threshold": "Price threshold above which solar export to grid is enabled (€/kWh)",
                     "feedin_adjustment_multiplier": "Multiplier applied to raw price when calculating net feed-in value. Default: 1.0",
-                    "feedin_adjustment_offset": "Fixed \u20ac/kWh offset added to feed-in price (negative values model costs). Default: -0.0098",
+                    "feedin_adjustment_offset": "Fixed €/kWh offset added to feed-in price (negative values model costs). Default: -0.0098",
                     "use_dynamic_threshold": "Enable intelligent price analysis for more selective charging at better prices",
                     "dynamic_threshold_confidence": "Confidence required for dynamic charging decisions (higher = more selective)",
                     "use_average_threshold": "Use 24-hour rolling average of future prices as the charging threshold",
@@ -230,6 +230,9 @@
                             "phase_3_solar_entity": "Phase 3 Solar Entity (Optional)",
                             "phase_3_consumption_entity": "Phase 3 Consumption Entity (Optional)",
                             "phase_3_car_entity": "Phase 3 Car Power Entity (Optional)",
+                            "phase_1_grid_power_entity": "Phase 1 Grid Power Entity (Optional)",
+                            "phase_2_grid_power_entity": "Phase 2 Grid Power Entity (Optional)",
+                            "phase_3_grid_power_entity": "Phase 3 Grid Power Entity (Optional)",
                             "phase_3_battery_power_entity": "Phase 3 Battery Power Entity (Optional)"
                         },
                         "data_description": {
@@ -244,6 +247,9 @@
                             "phase_3_solar_entity": "Phase L3 solar production sensor (leave blank if unavailable)",
                             "phase_3_consumption_entity": "Phase L3 house consumption sensor (leave blank if unavailable)",
                             "phase_3_car_entity": "Phase L3 EV charger power sensor (leave blank if unavailable)",
+                            "phase_1_grid_power_entity": "Phase L1 grid power sensor in W (positive = import, negative = export, leave blank if unavailable)",
+                            "phase_2_grid_power_entity": "Phase L2 grid power sensor in W (positive = import, negative = export, leave blank if unavailable)",
+                            "phase_3_grid_power_entity": "Phase L3 grid power sensor in W (positive = import, negative = export, leave blank if unavailable)",
                             "phase_3_battery_power_entity": "Phase L3 battery power sensor in W (negative = charging, leave blank if unavailable)"
                         }
                     },
@@ -318,6 +324,9 @@
                     "phase_3_solar_entity": "Phase 3 Solar Entity (Optional)",
                     "phase_3_consumption_entity": "Phase 3 Consumption Entity (Optional)",
                     "phase_3_car_entity": "Phase 3 Car Power Entity (Optional)",
+                    "phase_1_grid_power_entity": "Phase 1 Grid Power Entity (Optional)",
+                    "phase_2_grid_power_entity": "Phase 2 Grid Power Entity (Optional)",
+                    "phase_3_grid_power_entity": "Phase 3 Grid Power Entity (Optional)",
                     "phase_3_battery_power_entity": "Phase 3 Battery Power Entity (Optional)"
                 },
                 "data_description": {
@@ -332,12 +341,12 @@
                     "car_charging_power_entity": "Car charging power in W",
                     "monthly_grid_peak_entity": "Current month grid peak in W for power management",
                     "p1_tariff_entity": "P1 meter tariff sensor (1=day, 2=night) for day/night transport cost switching",
-                    "transport_cost_day": "Fluvius network tariff for day hours (\u20ac/kWh, excl. VAT)",
-                    "transport_cost_night": "Fluvius network tariff for night and weekends (\u20ac/kWh, excl. VAT)",
-                    "energy_tax_accijns": "Bijzondere accijns op Energie (\u20ac/kWh)",
-                    "energy_tax_bijdrage": "Bijdrage op de Energie (\u20ac/kWh)",
-                    "energy_cost_gsc": "Groene stroom certificaten (\u20ac/kWh)",
-                    "energy_cost_wkk": "Warmte-krachtkoppeling (\u20ac/kWh)",
+                    "transport_cost_day": "Fluvius network tariff for day hours (€/kWh, excl. VAT)",
+                    "transport_cost_night": "Fluvius network tariff for night and weekends (€/kWh, excl. VAT)",
+                    "energy_tax_accijns": "Bijzondere accijns op Energie (€/kWh)",
+                    "energy_tax_bijdrage": "Bijdrage op de Energie (€/kWh)",
+                    "energy_cost_gsc": "Groene stroom certificaten (€/kWh)",
+                    "energy_cost_wkk": "Warmte-krachtkoppeling (€/kWh)",
                     "grid_power_entity": "Real-time grid power in W (positive = import, negative = export) used for peak detection and inverter derating diagnostics",
                     "solar_forecast_entity": "Tomorrow's solar production forecast in kWh (e.g. sensor.energy_production_tomorrow). Read from the forecast start hour onwards to decide overnight grid charging",
                     "solar_forecast_today_entity": "Today's solar production forecast in kWh (e.g. sensor.energy_production_today). Used between midnight and the forecast start hour to validate the cached forecast",
@@ -352,6 +361,9 @@
                     "phase_3_solar_entity": "Phase L3 solar production sensor (leave blank if unavailable)",
                     "phase_3_consumption_entity": "Phase L3 house consumption sensor (leave blank if unavailable)",
                     "phase_3_car_entity": "Phase L3 EV charger power sensor (leave blank if unavailable)",
+                    "phase_1_grid_power_entity": "Phase L1 grid power sensor in W (positive = import, negative = export, leave blank if unavailable)",
+                    "phase_2_grid_power_entity": "Phase L2 grid power sensor in W (positive = import, negative = export, leave blank if unavailable)",
+                    "phase_3_grid_power_entity": "Phase L3 grid power sensor in W (positive = import, negative = export, leave blank if unavailable)",
                     "phase_3_battery_power_entity": "Phase L3 battery power sensor in W (negative = charging, leave blank if unavailable)"
                 }
             },
@@ -681,7 +693,7 @@
                     },
                     "three_phase_entities": {
                         "name": "Three-Phase Power Sensors",
-                        "description": "Optional per-phase solar, consumption, car and battery power sensors.",
+                        "description": "Optional per-phase solar, consumption, car, grid power and battery power sensors.",
                         "data": {
                             "phase_1_solar_entity": "Phase 1 Solar Entity (Optional)",
                             "phase_1_consumption_entity": "Phase 1 Consumption Entity (Optional)",
@@ -694,6 +706,9 @@
                             "phase_3_solar_entity": "Phase 3 Solar Entity (Optional)",
                             "phase_3_consumption_entity": "Phase 3 Consumption Entity (Optional)",
                             "phase_3_car_entity": "Phase 3 Car Power Entity (Optional)",
+                            "phase_1_grid_power_entity": "Phase 1 Grid Power Entity (Optional)",
+                            "phase_2_grid_power_entity": "Phase 2 Grid Power Entity (Optional)",
+                            "phase_3_grid_power_entity": "Phase 3 Grid Power Entity (Optional)",
                             "phase_3_battery_power_entity": "Phase 3 Battery Power Entity (Optional)"
                         },
                         "data_description": {
@@ -708,6 +723,9 @@
                             "phase_3_solar_entity": "Phase L3 solar production sensor (leave blank if unavailable)",
                             "phase_3_consumption_entity": "Phase L3 house consumption sensor (leave blank if unavailable)",
                             "phase_3_car_entity": "Phase L3 EV charger power sensor (leave blank if unavailable)",
+                            "phase_1_grid_power_entity": "Phase L1 grid power sensor in W (positive = import, negative = export, leave blank if unavailable)",
+                            "phase_2_grid_power_entity": "Phase L2 grid power sensor in W (positive = import, negative = export, leave blank if unavailable)",
+                            "phase_3_grid_power_entity": "Phase L3 grid power sensor in W (positive = import, negative = export, leave blank if unavailable)",
                             "phase_3_battery_power_entity": "Phase L3 battery power sensor in W (negative = charging, leave blank if unavailable)"
                         }
                     }
@@ -778,6 +796,9 @@
                     "phase_3_solar_entity": "Phase 3 Solar Entity (Optional)",
                     "phase_3_consumption_entity": "Phase 3 Consumption Entity (Optional)",
                     "phase_3_car_entity": "Phase 3 Car Power Entity (Optional)",
+                    "phase_1_grid_power_entity": "Phase 1 Grid Power Entity (Optional)",
+                    "phase_2_grid_power_entity": "Phase 2 Grid Power Entity (Optional)",
+                    "phase_3_grid_power_entity": "Phase 3 Grid Power Entity (Optional)",
                     "phase_3_battery_power_entity": "Phase 3 Battery Power Entity (Optional)"
                 }
             },
@@ -816,6 +837,9 @@
                     "phase_3_solar_entity": "Phase 3 Solar Entity (Optional)",
                     "phase_3_consumption_entity": "Phase 3 Consumption Entity (Optional)",
                     "phase_3_car_entity": "Phase 3 Car Power Entity (Optional)",
+                    "phase_1_grid_power_entity": "Phase 1 Grid Power Entity (Optional)",
+                    "phase_2_grid_power_entity": "Phase 2 Grid Power Entity (Optional)",
+                    "phase_3_grid_power_entity": "Phase 3 Grid Power Entity (Optional)",
                     "phase_3_battery_power_entity": "Phase 3 Battery Power Entity (Optional)"
                 },
                 "data_description": {
@@ -850,6 +874,9 @@
                     "phase_3_solar_entity": "Phase L3 solar production sensor (leave blank if unavailable)",
                     "phase_3_consumption_entity": "Phase L3 house consumption sensor (leave blank if unavailable)",
                     "phase_3_car_entity": "Phase L3 EV charger power sensor (leave blank if unavailable)",
+                    "phase_1_grid_power_entity": "Phase L1 grid power sensor in W (positive = import, negative = export, leave blank if unavailable)",
+                    "phase_2_grid_power_entity": "Phase L2 grid power sensor in W (positive = import, negative = export, leave blank if unavailable)",
+                    "phase_3_grid_power_entity": "Phase L3 grid power sensor in W (positive = import, negative = export, leave blank if unavailable)",
                     "phase_3_battery_power_entity": "Phase L3 battery power sensor in W (negative = charging, leave blank if unavailable)"
                 }
             },

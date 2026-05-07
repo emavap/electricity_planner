@@ -1,10 +1,10 @@
 # Electricity Planner
 
-**Version 6.6.0** | **Config Schema Version 23** | **Home Assistant 2024.4+**
+**Version 6.6.1** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
-> Release note for v6.5.0: behaviour change — inverter derating no longer fires while Negative Arbitrage Buy is active. The `negative_buy_curtail_solar` branch in `inverter_derating.py` (introduced in v6.1.0) that pinned `inverter_derating_target = 0` during paid-to-consume slots has been removed. Derating is now strictly reserved for the *exporting* case via the existing export-deadband control loop around `inverter_export_limit`; while the site is importing — including arbitrage-buy slots — the inverter stays unrestricted, exactly like before v6.1.0. The rest of the Negative Arbitrage Buy planner (forced battery grid-charging via `battery_charging.py`, peak-limited grid setpoint via `grid_setpoint.py`) is unchanged. 495/495 tests passing.
+> Release note for v6.6.1: fixes the managed and bundled three-phase dashboard so it renders without the fragile Template Entity Row/card-mod dependency, allows EV charger capacity to exceed the grid import cap, and adds optional per-phase grid power sensors plus L1/L2/L3 grid setpoint sensors. The existing aggregate grid setpoint and single-phase setup remain unchanged. 516/516 Docker tests passing.
 
 ---
 
@@ -276,7 +276,8 @@ Enable three-phase mode for installations with phase-specific batteries or inver
    - Solar production per phase
    - House consumption per phase
    - Optional EV charger power per phase
-   - Battery power sensors per phase (optional)
+   - Optional grid import/export power per phase
+   - Optional battery power sensors per phase
 3. Select shared battery SOC entities in the Entities step
 4. Assign batteries to phases in the Battery Phase Assignment step
 
@@ -420,6 +421,7 @@ data:
 |--------|---------|------|
 | `sensor.electricity_planner_car_charger_limit` | Recommended EVSE power limit | W |
 | `sensor.electricity_planner_grid_setpoint` | Suggested grid import/export setpoint (negative = export) | W |
+| `sensor.electricity_planner_grid_setpoint_phase_1` / `_phase_2` / `_phase_3` | Three-phase only: suggested setpoint per phase while keeping the aggregate setpoint available | W |
 
 ### Sensors (Diagnostic)
 
@@ -734,8 +736,6 @@ Install these HACS frontend cards:
 | [**Gauge Card Pro**](https://github.com/benjamin-dcs/gauge-card-pro) | Dynamic price threshold gauges | HACS → Frontend → Search "Gauge Card Pro" |
 | [**ApexCharts Card**](https://github.com/RomRider/apexcharts-card) | Historical price charts | HACS → Frontend → Search "ApexCharts Card" |
 | [**Button Card**](https://github.com/custom-cards/button-card) | Manual override controls | HACS → Frontend → Search "Button Card" |
-| [**Template Entity Row**](https://github.com/thomasloven/lovelace-template-entity-row) | Three-phase phase detail rows | HACS → Frontend → Search "Template Entity Row" |
-| [**card-mod**](https://github.com/thomasloven/lovelace-card-mod) | Three-phase phase card highlighting | HACS → Frontend → Search "card-mod" |
 
 ### Dashboard Template
 

@@ -8,9 +8,11 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.electricity_planner.const import DOMAIN
 from custom_components.electricity_planner.binary_sensor import FeedinSolarBinarySensor
 from custom_components.electricity_planner.sensor import (
+    DecisionDiagnosticsSensor,
     EmergencySOCThresholdSensor,
     FeedinPriceThresholdSensor,
     InverterDeratingTargetSensor,
+    PhaseGridSetpointSensor,
     PowerAnalysisSensor,
     PriceThresholdSensor,
     VeryLowPriceThresholdSensor,
@@ -131,6 +133,74 @@ def test_inverter_derating_target_sensor_exposes_control_context():
     assert attrs["feedin_reason"] == "Blocked"
     assert attrs["grid_power"] == -80
     assert attrs["export_limit_w"] == 100
+
+
+def test_phase_grid_setpoint_sensor_exposes_phase_decision():
+    """Three-phase installs should expose per-phase setpoint sensors for automations."""
+    coordinator = SimpleNamespace(
+        data={
+            "grid_setpoint": 3000,
+            "phase_results": {
+                "phase_1": {
+                    "grid_setpoint": 1200,
+                    "grid_components": {"battery": 700, "car": 500},
+                    "charger_limit": 1400,
+                    "battery_grid_charging": True,
+                    "car_grid_charging": True,
+                    "battery_grid_charging_reason": "Battery allowed",
+                    "car_grid_charging_reason": "Car allowed",
+                    "battery_entities": ["sensor.battery_l1"],
+                    "capacity_share": 0.4,
+                    "capacity_share_kwh": 8.0,
+                }
+            },
+            "phase_details": {
+                "phase_1": {"name": "L1", "grid_power": 650},
+            },
+        },
+        config={"phase_mode": "three_phase"},
+        async_add_listener=lambda update_callback, context=None: lambda: None,
+        last_update_success=True,
+    )
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data={})
+
+    sensor = PhaseGridSetpointSensor(coordinator, entry, "phase_1")
+    attrs = sensor.extra_state_attributes
+
+    assert sensor.native_value == 1200
+    assert attrs["aggregate_grid_setpoint"] == 3000
+    assert attrs["actual_grid_power"] == 650
+    assert attrs["battery_component"] == 700
+    assert attrs["car_component"] == 500
+
+
+def test_decision_diagnostics_exposes_phase_grid_setpoints_as_decisions():
+    """Phase setpoints should also be available on the decision diagnostics payload."""
+    coordinator = SimpleNamespace(
+        data={
+            "phase_results": {
+                "phase_1": {"grid_setpoint": 1200},
+                "phase_2": {"grid_setpoint": 900},
+            },
+            "phase_mode": "three_phase",
+        },
+        config={},
+        async_add_listener=lambda update_callback, context=None: lambda: None,
+        last_update_success=True,
+    )
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data={})
+
+    sensor = DecisionDiagnosticsSensor(coordinator, entry)
+    attrs = sensor.extra_state_attributes
+
+    assert attrs["decisions"]["phase_grid_setpoints"] == {
+        "phase_1": 1200,
+        "phase_2": 900,
+    }
+    assert attrs["power_outputs"]["phase_grid_setpoints"] == {
+        "phase_1": 1200,
+        "phase_2": 900,
+    }
 
 
 def test_threshold_sensors_use_native_units():

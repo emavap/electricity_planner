@@ -16,6 +16,7 @@ CONF_PHASE_NAME = "name"
 CONF_PHASE_SOLAR_ENTITY = "solar_entity"
 CONF_PHASE_CONSUMPTION_ENTITY = "consumption_entity"
 CONF_PHASE_CAR_ENTITY = "car_entity"
+CONF_PHASE_GRID_POWER_ENTITY = "grid_power_entity"
 CONF_PHASE_BATTERY_POWER_ENTITY = "battery_power_entity"  # Actual battery power on this phase (W, negative = charging)
 
 CONF_NORDPOOL_CONFIG_ENTRY = "nordpool_config_entry"
@@ -221,4 +222,4 @@ MANUAL_OVERRIDE_TARGET_ALL = "all"
 MAX_POWER_VALIDATION_W = 50000  # Maximum reasonable power for solar/consumption/grid validation
 MAX_CAR_POWER_VALIDATION_W = 22000  # Maximum reasonable car charging power
 
-INTEGRATION_VERSION = "6.6.0"
+INTEGRATION_VERSION = "6.6.1"

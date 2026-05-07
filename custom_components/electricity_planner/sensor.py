@@ -23,7 +23,11 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
+    CONF_PHASE_MODE,
+    DEFAULT_PHASE_NAMES,
+    PHASE_IDS,
     PHASE_MODE_SINGLE,
+    PHASE_MODE_THREE,
     CONF_BASE_GRID_SETPOINT,
     CONF_INVERTER_EXPORT_DEADBAND,
     CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
@@ -92,6 +96,11 @@ async def async_setup_entry(
         GridSetpointSensor(coordinator, entry, "_automation"),
         InverterDeratingTargetSensor(coordinator, entry, "_automation"),
     ]
+    if coordinator.config.get(CONF_PHASE_MODE, PHASE_MODE_SINGLE) == PHASE_MODE_THREE:
+        automation_entities.extend(
+            PhaseGridSetpointSensor(coordinator, entry, phase_id, "_automation")
+            for phase_id in PHASE_IDS
+        )
 
     # DIAGNOSTIC SENSORS: For monitoring and troubleshooting only
     diagnostic_entities = [
@@ -634,6 +643,66 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
         return attributes
 
 
+class PhaseGridSetpointSensor(ElectricityPlannerSensorBase):
+    """AUTOMATION SENSOR: Per-phase grid power setpoint in Watts."""
+
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        phase_id: str,
+        device_suffix: str = "",
+    ) -> None:
+        """Initialize the phase grid setpoint sensor."""
+        super().__init__(coordinator, entry, device_suffix)
+        self._phase_id = phase_id
+        self._phase_label = DEFAULT_PHASE_NAMES.get(phase_id, phase_id)
+        self._attr_name = f"Grid Setpoint {self._phase_label}"
+        self._attr_unique_id = f"{entry.entry_id}_grid_setpoint_{phase_id}"
+        self._attr_icon = "mdi:transmission-tower"
+        self._attr_native_unit_of_measurement = "W"
+        self._attr_device_class = SensorDeviceClass.POWER
+
+    @property
+    def native_value(self) -> int:
+        """Return the recommended grid setpoint for this phase."""
+        if not self.coordinator.data:
+            return 0
+
+        phase_results = self.coordinator.data.get("phase_results") or {}
+        phase_result = phase_results.get(self._phase_id) or {}
+        return int(phase_result.get("grid_setpoint", 0) or 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return phase-specific setpoint attributes."""
+        if not self.coordinator.data:
+            return {}
+
+        phase_results = self.coordinator.data.get("phase_results") or {}
+        phase_result = phase_results.get(self._phase_id) or {}
+        phase_details = self.coordinator.data.get("phase_details") or {}
+        details = phase_details.get(self._phase_id) or {}
+        grid_components = phase_result.get("grid_components") or {}
+
+        return {
+            "phase_id": self._phase_id,
+            "phase_name": details.get("name", self._phase_label),
+            "aggregate_grid_setpoint": self.coordinator.data.get("grid_setpoint", 0),
+            "actual_grid_power": details.get("grid_power"),
+            "battery_component": grid_components.get("battery", 0),
+            "car_component": grid_components.get("car", 0),
+            "charger_limit": phase_result.get("charger_limit", 0),
+            "battery_grid_charging": phase_result.get("battery_grid_charging", False),
+            "car_grid_charging": phase_result.get("car_grid_charging", False),
+            "battery_grid_charging_reason": phase_result.get("battery_grid_charging_reason"),
+            "car_grid_charging_reason": phase_result.get("car_grid_charging_reason"),
+            "battery_entities": phase_result.get("battery_entities", []),
+            "capacity_share": phase_result.get("capacity_share"),
+            "capacity_share_kwh": phase_result.get("capacity_share_kwh"),
+        }
+
+
 class InverterDeratingTargetSensor(ElectricityPlannerSensorBase):
     """AUTOMATION SENSOR: Recommended inverter derating target in Watts."""
 
@@ -717,6 +786,11 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
         power_allocation = self.coordinator.data.get("power_allocation", {})
         solar_analysis = self.coordinator.data.get("solar_analysis", {})
         time_context = self.coordinator.data.get("time_context", {})
+        phase_results = self.coordinator.data.get("phase_results", {})
+        phase_grid_setpoints = {
+            phase: result.get("grid_setpoint", 0)
+            for phase, result in phase_results.items()
+        }
 
         # Configuration values (for validation)
         config = self.coordinator.config
@@ -733,6 +807,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "car_reason": self.coordinator.data.get("car_grid_charging_reason", ""),
                 "feedin_reason": self.coordinator.data.get("feedin_solar_reason", ""),
                 "arbitrage_reason": self.coordinator.data.get("arbitrage_mode_reason", ""),
+                "phase_grid_setpoints": phase_grid_setpoints,
                 "manual_overrides": self.coordinator.data.get("manual_overrides", {}),
             },
 
@@ -753,7 +828,8 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "arbitrage_mode_plan": self.coordinator.data.get("arbitrage_mode_plan", {}),
                 "grid_components": self.coordinator.data.get("grid_components", {}),
                 "phase_mode": self.coordinator.data.get("phase_mode", PHASE_MODE_SINGLE),
-                "phase_results": self.coordinator.data.get("phase_results", {}),
+                "phase_results": phase_results,
+                "phase_grid_setpoints": phase_grid_setpoints,
             },
             "phase_details": self.coordinator.data.get("phase_details", {}),
             "phase_capacity_map": self.coordinator.data.get("phase_capacity_map", {}),

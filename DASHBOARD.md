@@ -19,11 +19,6 @@ Managed dashboards require:
 - [ApexCharts Card](https://github.com/RomRider/apexcharts-card)
 - [Button Card](https://github.com/custom-cards/button-card)
 
-Three-phase managed and bundled dashboards additionally require:
-
-- [Template Entity Row](https://github.com/thomasloven/lovelace-template-entity-row)
-- [card-mod](https://github.com/thomasloven/lovelace-card-mod)
-
 ## Recommended Usage
 
 - Use the managed dashboard if you want the layout that stays in sync with the current integration release in either topology.
@@ -62,6 +57,9 @@ These are the primary entity IDs referenced by the shipped dashboard YAML:
 - `binary_sensor.electricity_planner_data_nord_pool_available`
 - `sensor.electricity_planner_battery_soc_average`
 - `sensor.electricity_planner_grid_setpoint`
+- `sensor.electricity_planner_grid_setpoint_phase_1`
+- `sensor.electricity_planner_grid_setpoint_phase_2`
+- `sensor.electricity_planner_grid_setpoint_phase_3`
 - `sensor.electricity_planner_decision_diagnostics`
 - `sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices`
 - `number.electricity_planner_arbitrage_mode_reserve_soc`
@@ -89,9 +87,9 @@ Both managed topologies now share the same pricing, threshold, forecast, and man
 
 Three-phase managed and bundled dashboards additionally include:
 
-- detailed L1/L2/L3 status with per-phase template rows
-- per-phase power/component summaries
-- a power-distribution chart for grid setpoints across phases
+- detailed L1/L2/L3 status with native markdown tables
+- per-phase actual grid power, setpoint, and component summaries
+- a power-distribution table for current grid setpoints across phases
 
 ## Manual Dashboard Setup
 

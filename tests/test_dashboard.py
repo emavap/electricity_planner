@@ -165,8 +165,14 @@ def test_dashboard_three_phase_appendix_contains_phase_specific_cards():
     assert "Phase 2 (L2) Status" in appendix
     assert "Phase 3 (L3) Status" in appendix
     assert "Grid Setpoint per Phase (Current)" in appendix
-    assert "custom:template-entity-row" in appendix
-    assert "card_mod:" in appendix
+    assert "Actual grid power" in appendix
+    assert "sensor.electricity_planner_grid_setpoint_phase_1" in appendix
+    assert "sensor.electricity_planner_grid_setpoint_phase_2" in appendix
+    assert "sensor.electricity_planner_grid_setpoint_phase_3" in appendix
+    assert "phase_details" in appendix
+    assert "Three-phase source entities" in appendix
+    assert "custom:template-entity-row" not in appendix
+    assert "card_mod:" not in appendix
 
 
 def test_three_phase_appendix_merges_as_dedicated_view():
@@ -407,15 +413,18 @@ def test_bundled_three_phase_dashboard_includes_shared_single_phase_sections():
     assert "target: all" in content
 
 
-def test_bundled_three_phase_dashboard_uses_template_rows_for_phase_details():
-    """Bundled three-phase dashboard should not use unsupported attribute-row formatting."""
+def test_bundled_three_phase_dashboard_uses_native_rows_for_phase_details():
+    """Bundled three-phase dashboard should avoid fragile custom rows on the phase view."""
     dashboard_path = Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
     content = dashboard_path.read_text(encoding="utf-8")
 
-    assert "type: custom:template-entity-row" in content
+    assert "type: custom:template-entity-row" not in content
     assert "Battery reason" in content
     assert "Car reason" in content
-    assert "~ ' W'" in content
+    assert "Actual grid power" in content
+    assert "sensor.electricity_planner_grid_setpoint_phase_1" in content
+    assert "Three-phase source entities" in content
+    assert "phase.grid_setpoint" in content
 
 
 def test_bundled_three_phase_dashboard_documents_required_custom_cards():
@@ -426,13 +435,9 @@ def test_bundled_three_phase_dashboard_documents_required_custom_cards():
     assert 'Install "Gauge Card Pro"' in content
     assert 'Install "ApexCharts Card"' in content
     assert 'Install "Button Card"' in content
-    assert 'Install "Template Entity Row"' in content
-    assert 'Install "card-mod"' in content
     assert "custom:gauge-card-pro" in content
     assert "custom:apexcharts-card" in content
     assert "custom:button-card" in content
-    assert "custom:template-entity-row" in content
-    assert "card_mod:" in content
 
 
 def test_manual_override_status_formats_numeric_overrides_as_watts():

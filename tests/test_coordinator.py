@@ -39,6 +39,7 @@ from custom_components.electricity_planner.const import (
     CONF_PHASE_SOLAR_ENTITY,
     CONF_PHASE_CONSUMPTION_ENTITY,
     CONF_PHASE_CAR_ENTITY,
+    CONF_PHASE_GRID_POWER_ENTITY,
     CONF_PHASE_BATTERY_POWER_ENTITY,
     CONF_BATTERY_CAPACITIES,
     CONF_BATTERY_PHASE_ASSIGNMENTS,
@@ -153,11 +154,13 @@ def _three_phase_config():
                 "phase_1": {
                     CONF_PHASE_SOLAR_ENTITY: "sensor.solar_l1",
                     CONF_PHASE_CONSUMPTION_ENTITY: "sensor.load_l1",
+                    CONF_PHASE_GRID_POWER_ENTITY: "sensor.grid_l1",
                 },
                 "phase_2": {
                     CONF_PHASE_SOLAR_ENTITY: "sensor.solar_l2",
                     CONF_PHASE_CONSUMPTION_ENTITY: "sensor.load_l2",
                     CONF_PHASE_CAR_ENTITY: "sensor.car_l2",
+                    CONF_PHASE_GRID_POWER_ENTITY: "sensor.grid_l2",
                 },
                 "phase_3": {
                     CONF_PHASE_SOLAR_ENTITY: "sensor.solar_l3",
@@ -334,9 +337,11 @@ async def test_fetch_all_data_three_phase_aggregates(fake_hass, monkeypatch):
     # Phase-specific sensors
     fake_hass.states.set("sensor.solar_l1", "1200")
     fake_hass.states.set("sensor.load_l1", "800")
+    fake_hass.states.set("sensor.grid_l1", "-250")
     fake_hass.states.set("sensor.solar_l2", "600")
     fake_hass.states.set("sensor.load_l2", "900")
     fake_hass.states.set("sensor.car_l2", "700")
+    fake_hass.states.set("sensor.grid_l2", "1050")
     fake_hass.states.set("sensor.solar_l3", "300")
     fake_hass.states.set("sensor.load_l3", "200")
 
@@ -350,8 +355,14 @@ async def test_fetch_all_data_three_phase_aggregates(fake_hass, monkeypatch):
 
     phase_details = data["phase_details"]
     assert phase_details["phase_1"]["solar_surplus"] == pytest.approx(400.0)
+    assert phase_details["phase_1"]["grid_power"] == pytest.approx(-250.0)
+    assert phase_details["phase_1"]["has_grid_power_sensor"] is True
     assert phase_details["phase_2"]["solar_surplus"] == 0
     assert phase_details["phase_2"]["car_charging_power"] == pytest.approx(700.0)
+    assert phase_details["phase_2"]["grid_power"] == pytest.approx(1050.0)
+    assert phase_details["phase_2"]["has_grid_power_sensor"] is True
+    assert phase_details["phase_3"]["grid_power"] is None
+    assert phase_details["phase_3"]["has_grid_power_sensor"] is False
 
     capacity_map = data["phase_capacity_map"]
     assert capacity_map["phase_1"] == pytest.approx(5.0)

@@ -28,6 +28,7 @@ from .const import (
     CONF_PHASE_SOLAR_ENTITY,
     CONF_PHASE_CONSUMPTION_ENTITY,
     CONF_PHASE_CAR_ENTITY,
+    CONF_PHASE_GRID_POWER_ENTITY,
     CONF_PHASE_BATTERY_POWER_ENTITY,
     CONF_NORDPOOL_CONFIG_ENTRY,
     CONF_CURRENT_PRICE_ENTITY,
@@ -1259,6 +1260,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     car_present = True
                     total_car_value += car_val
 
+                # Grid power: from per-phase sensor (optional, positive = import)
+                grid_power_entity = phase_config.get(CONF_PHASE_GRID_POWER_ENTITY)
+                grid_power_val = await self._get_state_value(grid_power_entity)
+
                 # Battery power: from per-phase sensor (optional, negative = charging)
                 battery_power_entity = phase_config.get(CONF_PHASE_BATTERY_POWER_ENTITY)
                 battery_power_val = await self._get_state_value(battery_power_entity)
@@ -1274,9 +1279,11 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     "solar_production": solar_val,
                     "house_consumption": consumption_val,
                     "car_charging_power": car_val,
+                    "grid_power": grid_power_val,
                     "battery_power": battery_power_val,  # Actual battery power (W, negative = charging)
                     "solar_surplus": phase_surplus,
                     "has_car_sensor": car_entity is not None,
+                    "has_grid_power_sensor": grid_power_entity is not None,
                     "has_battery_power_sensor": battery_power_entity is not None,
                 }
 

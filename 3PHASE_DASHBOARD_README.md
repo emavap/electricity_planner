@@ -10,6 +10,7 @@ Each phase displays:
 - **Battery charging ON/OFF** - Whether batteries on this phase should charge from grid
 - **Car charging ON/OFF** - Whether car chargers on this phase should charge from grid
 - **Grid setpoint** - Total watts to import from grid on this phase
+- **Actual grid power** - Optional live import/export measurement per phase
 - **Grid components breakdown** - Battery allocation + Car allocation
 - **Charger limit** - Maximum car charger power on this phase
 - **Assigned batteries** - Number of batteries and capacity share on this phase
@@ -19,7 +20,7 @@ Each phase displays:
 - **Price gauges** - Current buy price with dynamic thresholds
 - **Battery SOC** - Average state of charge across all batteries
 - **Aggregated decisions** - Overall battery/car charging status
-- **Power distribution chart** - Visual comparison of grid setpoints across phases
+- **Power distribution table** - Current grid setpoints and power components per phase
 
 ## Installation
 
@@ -27,17 +28,11 @@ Each phase displays:
 1. **Gauge Card Pro** – For price gauges  
    `https://github.com/benjamin-dcs/gauge-card-pro`
 
-2. **ApexCharts Card** – For power distribution visualization  
+2. **ApexCharts Card** - For shared price history charts
    `https://github.com/RomRider/apexcharts-card`
 
 3. **Button Card** – For manual override actions  
    `https://github.com/custom-cards/button-card`
-
-4. **Template Entity Row** – For dynamic per-phase data display  
-   `https://github.com/thomasloven/lovelace-template-entity-row`
-
-5. **card-mod** – For per-phase card highlighting  
-   `https://github.com/thomasloven/lovelace-card-mod`
 
 ### Setup Steps
 
@@ -89,10 +84,11 @@ The integration computes an **overall charging decision** based on aggregated sy
 
 #### Power Values
 ```
-Grid: 3000W          ← Total grid import on this phase
-Battery: 2000W       ← Portion allocated for battery charging
-Car: 1000W           ← Portion allocated for car charging
-Limit: 5500W         ← Maximum car charger can draw
+Actual grid power: 700W  ← Live import/export on this phase when configured
+Grid setpoint: 3000W     ← Planned grid import on this phase
+Battery: 2000W           ← Portion allocated for battery charging
+Car: 1000W               ← Portion allocated for car charging
+Limit: 5500W             ← Maximum car charger can draw
 ```
 
 #### Capacity Share
@@ -129,24 +125,12 @@ Shows what percentage of total battery capacity is on each phase:
 - Verify that phase sensors are configured for all three phases
 - Check that batteries are assigned to phases
 
-### Template errors in entities card
-- Ensure Home Assistant is at least version 2024.4.0
-- Install `custom:template-entity-row` from HACS if not working
-- Alternative: Use standard attribute display (less formatting)
-
-### Chart not showing data
-- Install ApexCharts Card from HACS
+### Phase table not showing data
 - Verify `phase_results` attribute exists on binary sensors:
   ```
   Developer Tools → States → binary_sensor.electricity_planner_battery_charge_from_grid
   Look for "phase_results" in attributes
   ```
-
-### Missing card_mod styling
-The colored backgrounds are optional enhancements. The dashboard works without them.
-To enable:
-1. Install `card-mod` from HACS: https://github.com/thomasloven/lovelace-card-mod
-2. Restart Home Assistant
 
 ## Integration with Automations
 
@@ -175,16 +159,13 @@ automation:
   - alias: "Phase 1 Grid Setpoint"
     trigger:
       - platform: state
-        entity_id: binary_sensor.electricity_planner_battery_charge_from_grid
+        entity_id: sensor.electricity_planner_grid_setpoint_phase_1
     action:
       - service: number.set_value
         target:
           entity_id: number.phase1_grid_import_limit
         data:
-          value: >
-            {% set phase_results = state_attr('binary_sensor.electricity_planner_battery_charge_from_grid', 'phase_results') %}
-            {% set phase1 = phase_results.phase_1 if phase_results else None %}
-            {{ phase1.grid_setpoint if phase1 else 0 }}
+          value: "{{ states('sensor.electricity_planner_grid_setpoint_phase_1') | int(0) }}"
 ```
 
 ## Support

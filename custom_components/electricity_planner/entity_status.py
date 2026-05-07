@@ -26,6 +26,7 @@ from .const import (
     CONF_PHASE_BATTERY_POWER_ENTITY,
     CONF_PHASE_CAR_ENTITY,
     CONF_PHASE_CONSUMPTION_ENTITY,
+    CONF_PHASE_GRID_POWER_ENTITY,
     CONF_PHASE_MODE,
     CONF_PHASE_SOLAR_ENTITY,
     CONF_PHASES,
@@ -161,6 +162,9 @@ class EntityStatusReporter:
                 )
                 power_entities[f"{phase_id}_car"] = self.get_entity_status(
                     phase_config.get(CONF_PHASE_CAR_ENTITY), is_required=False
+                )
+                power_entities[f"{phase_id}_grid_power"] = self.get_entity_status(
+                    phase_config.get(CONF_PHASE_GRID_POWER_ENTITY), is_required=False
                 )
                 power_entities[f"{phase_id}_battery_power"] = self.get_entity_status(
                     phase_config.get(CONF_PHASE_BATTERY_POWER_ENTITY), is_required=False

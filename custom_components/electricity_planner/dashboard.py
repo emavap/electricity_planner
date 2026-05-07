@@ -39,7 +39,7 @@ MANAGED_KEY = "electricity_planner_managed"
 # MUST be bumped whenever dashboard_template.yaml or the 3-phase appendix
 # changes so existing installs re-save on next reload. The deep-diff in
 # _save_dashboard is a defence-in-depth; this stamp is the primary signal.
-MANAGED_VERSION = 34  # Negative Arbitrage Buy: drop solar-curtailment phrasing
+MANAGED_VERSION = 36  # Three-phase appendix: native rows + phase setpoint entities
 TEMPLATE_FILENAME = "dashboard_template.yaml"
 THREE_PHASE_APPENDIX_FILENAME = "dashboard_template_3phase_appendix.yaml"
 
@@ -76,6 +76,9 @@ ENTITY_REFERENCES: tuple[EntityReference, ...] = (
     EntityReference("sensor.electricity_planner_battery_soc_average", "battery_analysis"),
     EntityReference("sensor.electricity_planner_car_charger_limit", "charger_limit"),
     EntityReference("sensor.electricity_planner_grid_setpoint", "grid_setpoint"),
+    EntityReference("sensor.electricity_planner_grid_setpoint_phase_1", "grid_setpoint_phase_1"),
+    EntityReference("sensor.electricity_planner_grid_setpoint_phase_2", "grid_setpoint_phase_2"),
+    EntityReference("sensor.electricity_planner_grid_setpoint_phase_3", "grid_setpoint_phase_3"),
     EntityReference("sensor.electricity_planner_inverter_derating_target", "inverter_derating_target"),
     EntityReference("sensor.electricity_planner_solar_surplus_power", "power_analysis"),
     EntityReference("sensor.electricity_planner_data_unavailable_duration", "data_unavailable_duration"),

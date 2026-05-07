@@ -21,6 +21,7 @@ from custom_components.electricity_planner.const import (
     CONF_CURRENT_PRICE_ENTITY,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     CONF_EMERGENCY_SOC_THRESHOLD,
+    CONF_GRID_POWER_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
     CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
@@ -36,6 +37,7 @@ from custom_components.electricity_planner.const import (
     CONF_MIN_CAR_CHARGING_THRESHOLD,
     CONF_MIN_SOC_THRESHOLD,
     CONF_NEXT_PRICE_ENTITY,
+    CONF_PHASE_GRID_POWER_ENTITY,
     CONF_PHASE_MODE,
     CONF_PHASE_NAME,
     CONF_PHASES,
@@ -497,6 +499,80 @@ async def test_options_flow_rejects_sunny_soc_above_normal_max_soc():
     assert result["type"] == FlowResultType.FORM
     assert result["errors"]["base"] == "invalid_config"
     assert "max_soc_threshold_sunny" in result["description_placeholders"]["validation_errors"]
+
+
+def test_validate_config_allows_car_power_above_grid_power():
+    """EV charger capacity may exceed grid import when solar or battery power is available."""
+    errors = validate_config_consistency(
+        {
+            CONF_MAX_CAR_POWER: 11000,
+            CONF_MAX_GRID_POWER: 5000,
+            CONF_MAX_BATTERY_POWER: 3000,
+        }
+    )
+
+    assert not any("max_car_power" in error for error in errors)
+
+
+@pytest.mark.asyncio
+async def test_options_flow_three_phase_preserves_phase_grid_power_sensor():
+    """Three-phase options should keep optional per-phase grid power telemetry."""
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    handler = _make_handler(entry)
+
+    await _go_to_entities(handler, phase_mode=PHASE_MODE_THREE)
+    result = await handler.async_step_entities(
+        {
+            CONF_CURRENT_PRICE_ENTITY: "sensor.current_price",
+            CONF_HIGHEST_PRICE_ENTITY: "sensor.highest_price",
+            CONF_LOWEST_PRICE_ENTITY: "sensor.lowest_price",
+            CONF_NEXT_PRICE_ENTITY: "sensor.next_price",
+            CONF_BATTERY_SOC_ENTITIES: [],
+            "phase_1_grid_power_entity": "sensor.grid_l1",
+        }
+    )
+    result = await handler.async_step_settings({})
+    result = await handler.async_step_safety_limits(
+        {
+            CONF_MAX_BATTERY_POWER: DEFAULT_MAX_BATTERY_POWER,
+            CONF_MAX_CAR_POWER: 11000,
+            CONF_MAX_GRID_POWER: 5000,
+        }
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_PHASES]["phase_1"][CONF_PHASE_GRID_POWER_ENTITY] == "sensor.grid_l1"
+
+
+@pytest.mark.asyncio
+async def test_options_flow_single_phase_keeps_global_grid_power_sensor_only():
+    """Single-phase setup should not create phase grid fields."""
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    handler = _make_handler(entry)
+
+    await _go_to_entities(handler, phase_mode=PHASE_MODE_SINGLE)
+    result = await handler.async_step_entities(
+        {
+            CONF_CURRENT_PRICE_ENTITY: "sensor.current_price",
+            CONF_HIGHEST_PRICE_ENTITY: "sensor.highest_price",
+            CONF_LOWEST_PRICE_ENTITY: "sensor.lowest_price",
+            CONF_NEXT_PRICE_ENTITY: "sensor.next_price",
+            CONF_BATTERY_SOC_ENTITIES: [],
+            CONF_GRID_POWER_ENTITY: "sensor.grid_total",
+        }
+    )
+    result = await handler.async_step_settings({})
+    result = await handler.async_step_safety_limits(
+        {
+            CONF_MAX_BATTERY_POWER: DEFAULT_MAX_BATTERY_POWER,
+            CONF_MAX_CAR_POWER: DEFAULT_MAX_CAR_POWER,
+            CONF_MAX_GRID_POWER: DEFAULT_MAX_GRID_POWER,
+        }
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_GRID_POWER_ENTITY] == "sensor.grid_total"
+    assert CONF_PHASES not in result["data"]
 
 
 @pytest.mark.asyncio

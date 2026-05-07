@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 6.6.0** | **Config Schema Version 23** | **Home Assistant 2024.4+**
+**Version 6.6.1** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Release note for v6.5.0: behaviour change in `inverter_derating.py` — the Negative Arbitrage Buy curtailment branch that forced `inverter_derating_target = 0` whenever `negative_buy_curtail_solar` was set has been removed. Inverter derating is now reserved for the *exporting* case (controlled by the export deadband around `inverter_export_limit`); while the site is importing — including paid-to-consume arbitrage-buy slots — the inverter is no longer artificially capped. Restores the pre-v6.1.0 derating behaviour while leaving the rest of the Negative Arbitrage Buy planner (forced battery grid-charging, peak-limited grid setpoint) intact. 495/495 tests passing.
+> Release note for v6.6.1: fixes the three-phase dashboard rendering, allows EV charger capacity above the grid import cap, and adds optional per-phase grid power plus L1/L2/L3 grid setpoint sensors while preserving the existing aggregate setpoint and single-phase setup. 516/516 Docker tests passing.
 
 ## Key Features
 

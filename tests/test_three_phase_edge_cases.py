@@ -17,6 +17,7 @@ from custom_components.electricity_planner.const import (
     CONF_PHASE_SOLAR_ENTITY,
     CONF_PHASE_CONSUMPTION_ENTITY,
     CONF_PHASE_CAR_ENTITY,
+    CONF_PHASE_GRID_POWER_ENTITY,
     CONF_PHASE_BATTERY_POWER_ENTITY,
     CONF_BATTERY_CAPACITIES,
     CONF_BATTERY_PHASE_ASSIGNMENTS,
@@ -152,6 +153,7 @@ async def test_three_phase_mixed_configuration(fake_hass, monkeypatch):
                 "solar_entity": "sensor.solar_l1",
                 "consumption_entity": "sensor.load_l1",
                 "car_entity": "sensor.car_l1",
+                CONF_PHASE_GRID_POWER_ENTITY: "sensor.grid_l1",
                 "battery_power_entity": "sensor.battery_power_l1",
             },
             # Phase 2: Only consumption (minimal viable)
@@ -177,6 +179,7 @@ async def test_three_phase_mixed_configuration(fake_hass, monkeypatch):
     fake_hass.states.set("sensor.solar_l1", "2000")
     fake_hass.states.set("sensor.load_l1", "1500")
     fake_hass.states.set("sensor.car_l1", "500")
+    fake_hass.states.set("sensor.grid_l1", "700")
     fake_hass.states.set("sensor.battery_power_l1", "-300")
     fake_hass.states.set("sensor.load_l2", "800")
 
@@ -192,12 +195,16 @@ async def test_three_phase_mixed_configuration(fake_hass, monkeypatch):
     assert phase_details["phase_1"]["solar_production"] == pytest.approx(2000.0)
     assert phase_details["phase_1"]["house_consumption"] == pytest.approx(1500.0)
     assert phase_details["phase_1"]["car_charging_power"] == pytest.approx(500.0)
+    assert phase_details["phase_1"]["grid_power"] == pytest.approx(700.0)
+    assert phase_details["phase_1"]["has_grid_power_sensor"] is True
     assert phase_details["phase_1"]["battery_power"] == pytest.approx(-300.0)
 
     # Phase 2 should have only consumption
     assert phase_details["phase_2"]["solar_production"] is None
     assert phase_details["phase_2"]["house_consumption"] == pytest.approx(800.0)
     assert phase_details["phase_2"]["car_charging_power"] is None
+    assert phase_details["phase_2"]["grid_power"] is None
+    assert phase_details["phase_2"]["has_grid_power_sensor"] is False
     assert phase_details["phase_2"]["battery_power"] is None
 
     # Aggregated totals should still work
