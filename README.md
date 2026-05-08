@@ -1,10 +1,10 @@
 # Electricity Planner
 
-**Version 6.6.1** | **Config Schema Version 23** | **Home Assistant 2024.4+**
+**Version 6.6.2** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
-> Release note for v6.6.1: fixes the managed and bundled three-phase dashboard so it renders without the fragile Template Entity Row/card-mod dependency, allows EV charger capacity to exceed the grid import cap, and adds optional per-phase grid power sensors plus L1/L2/L3 grid setpoint sensors. The existing aggregate grid setpoint and single-phase setup remain unchanged. 516/516 Docker tests passing.
+> Release note for v6.6.2: adds a 2% sunny-day battery SOC hysteresis band while grid charging is already active, preventing charge-from-grid flapping around the reduced sunny-day SOC ceiling. No config migration required. 519/519 Docker tests passing.
 
 ---
 

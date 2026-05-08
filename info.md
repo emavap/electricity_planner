@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 6.6.1** | **Config Schema Version 23** | **Home Assistant 2024.4+**
+**Version 6.6.2** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Release note for v6.6.1: fixes the three-phase dashboard rendering, allows EV charger capacity above the grid import cap, and adds optional per-phase grid power plus L1/L2/L3 grid setpoint sensors while preserving the existing aggregate setpoint and single-phase setup. 516/516 Docker tests passing.
+> Release note for v6.6.2: adds a 2% sunny-day battery SOC hysteresis band while grid charging is already active, preventing charge-from-grid flapping around the reduced sunny-day SOC ceiling. No config migration required. 519/519 Docker tests passing.
 
 ## Key Features
 

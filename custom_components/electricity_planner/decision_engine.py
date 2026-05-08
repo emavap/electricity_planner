@@ -129,6 +129,7 @@ _HAS_MIN_CHARGING_WINDOW_KEY = "has_min_charging_window"
 _PREVIOUS_BATTERY_GRID_CHARGING_KEY = "previous_battery_grid_charging"
 _BATTERY_GRID_CHARGING_STATE_AGE_SECONDS_KEY = "battery_grid_charging_state_age_seconds"
 _BATTERY_GRID_CHARGING_LOCKED_THRESHOLD_KEY = "battery_grid_charging_locked_threshold"
+_SUNNY_DAY_GRID_SOC_HYSTERESIS_PERCENT = 2.0
 
 
 class CarChargingDecision(TypedDict, total=False):
@@ -1309,10 +1310,17 @@ class ChargingDecisionEngine:
             # Create modified copy for grid charging decisions only
             grid_analysis = dict(battery_analysis)
             grid_analysis["max_soc_threshold"] = sunny_threshold
+            grid_analysis["sunny_day_grid_soc_hysteresis_percent"] = (
+                _SUNNY_DAY_GRID_SOC_HYSTERESIS_PERCENT
+            )
             average_soc = grid_analysis.get("average_soc")
             if average_soc is not None:
-                grid_analysis["batteries_full"] = average_soc >= sunny_threshold
-                grid_analysis["remaining_capacity_percent"] = sunny_threshold - average_soc
+                stop_threshold = sunny_threshold
+                if data.get(_PREVIOUS_BATTERY_GRID_CHARGING_KEY):
+                    stop_threshold += _SUNNY_DAY_GRID_SOC_HYSTERESIS_PERCENT
+                    grid_analysis["grid_charge_stop_soc_threshold"] = stop_threshold
+                grid_analysis["batteries_full"] = average_soc >= stop_threshold
+                grid_analysis["remaining_capacity_percent"] = stop_threshold - average_soc
             return grid_analysis
 
         _LOGGER.debug(

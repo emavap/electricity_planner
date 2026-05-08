@@ -3015,6 +3015,70 @@ def test_sunny_day_batteries_full_in_sunny_mode():
     assert result["remaining_capacity_percent"] == -5.0  # 50 - 55
 
 
+def test_sunny_day_hysteresis_keeps_active_grid_charge_inside_two_percent_band():
+    """Existing grid charging should not flap at the sunny-day SOC boundary."""
+    engine = _engine({
+        CONF_MAX_SOC_THRESHOLD: 90,
+        CONF_MAX_SOC_THRESHOLD_SUNNY: 35,
+        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
+    })
+    ba = _battery_analysis(average_soc=36.4, max_soc=90.0)
+    result = engine._apply_sunny_day_grid_limit(
+        ba,
+        {
+            "solar_forecast_production": 15.0,
+            "previous_battery_grid_charging": True,
+        },
+    )
+
+    assert result["max_soc_threshold"] == 35.0
+    assert result["grid_charge_stop_soc_threshold"] == 37.0
+    assert result["batteries_full"] is False
+    assert result["remaining_capacity_percent"] == pytest.approx(0.6)
+
+
+def test_sunny_day_hysteresis_stops_active_grid_charge_above_band():
+    """Active grid charging should still stop once SOC clears the hysteresis band."""
+    engine = _engine({
+        CONF_MAX_SOC_THRESHOLD: 90,
+        CONF_MAX_SOC_THRESHOLD_SUNNY: 35,
+        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
+    })
+    ba = _battery_analysis(average_soc=37.1, max_soc=90.0)
+    result = engine._apply_sunny_day_grid_limit(
+        ba,
+        {
+            "solar_forecast_production": 15.0,
+            "previous_battery_grid_charging": True,
+        },
+    )
+
+    assert result["grid_charge_stop_soc_threshold"] == 37.0
+    assert result["batteries_full"] is True
+    assert result["remaining_capacity_percent"] == pytest.approx(-0.1)
+
+
+def test_sunny_day_hysteresis_does_not_start_grid_charge_at_boundary():
+    """When charging is already off, the configured sunny threshold remains the ON gate."""
+    engine = _engine({
+        CONF_MAX_SOC_THRESHOLD: 90,
+        CONF_MAX_SOC_THRESHOLD_SUNNY: 35,
+        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
+    })
+    ba = _battery_analysis(average_soc=35.4, max_soc=90.0)
+    result = engine._apply_sunny_day_grid_limit(
+        ba,
+        {
+            "solar_forecast_production": 15.0,
+            "previous_battery_grid_charging": False,
+        },
+    )
+
+    assert "grid_charge_stop_soc_threshold" not in result
+    assert result["batteries_full"] is True
+    assert result["remaining_capacity_percent"] == pytest.approx(-0.4)
+
+
 def test_sunny_day_exactly_at_threshold():
     """Forecast exactly at configured threshold → should trigger sunny mode."""
     engine = _engine({
