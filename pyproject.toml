@@ -52,11 +52,7 @@ omit = [
 ]
 
 [tool.coverage.report]
-# The current test suite covers the core decision/planning logic but still
-# leaves several Home Assistant platform shims intentionally light. Keep the
-# gate aligned with the measured package coverage so CI catches regressions
-# without failing every green test run on an aspirational threshold.
-fail_under = 73
+fail_under = 80
 show_missing = true
 skip_covered = false
 exclude_lines = [
