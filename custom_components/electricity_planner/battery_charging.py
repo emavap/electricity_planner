@@ -212,7 +212,10 @@ class BatteryChargingDecisionCalculator:
         # after a restart, before the coordinator captured the lock).
         hold_threshold = ctx.battery_grid_charging_locked_threshold
         if hold_threshold is None:
-            hold_threshold = ctx.effective_battery_price_threshold
+            if ctx.battery_stable_threshold is not None:
+                hold_threshold = ctx.battery_stable_threshold
+            else:
+                hold_threshold = ctx.effective_battery_price_threshold
 
         if current_price > hold_threshold:
             return decision

@@ -87,7 +87,9 @@ class TransportCostResolver:
                 if state and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
                     p1_tariff_code = state.state
 
-        day = is_day_tariff(start_time_utc, p1_tariff_code)
+        day = is_day_tariff(start_time_utc, p1_tariff_code) if p1_tariff_code is None else is_day_tariff(start_time_utc, None)
+        if p1_tariff_code is not None and 0 <= current_interval_age < 900:
+            day = is_day_tariff(start_time_utc, p1_tariff_code)
 
         return calculate_transport_cost_from_components(
             is_day=day,
