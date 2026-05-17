@@ -1,6 +1,5 @@
 """Unit tests for helper utilities used by Electricity Planner."""
 
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 

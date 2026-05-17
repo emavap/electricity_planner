@@ -27,12 +27,10 @@ class ChargingStrategy(ABC):
     @abstractmethod
     def should_charge(self, context: dict[str, Any]) -> tuple[bool, str]:
         """Determine if charging should occur."""
-        pass
 
     @abstractmethod
     def get_priority(self) -> int:
         """Get strategy priority (lower = higher priority)."""
-        pass
 
 
 # NOTE: EmergencyChargingStrategy was removed - emergency logic is handled
@@ -254,7 +252,7 @@ class SOCBasedChargingStrategy(ChargingStrategy):
         price = context.get("price_analysis", {})
         battery = context.get("battery_analysis", {})
         power = context.get("power_analysis", {})
-        config = context.get("config", {})
+        context.get("config", {})
 
         battery_is_low_price = context.get(
             "battery_is_low_price",

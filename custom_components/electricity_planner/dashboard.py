@@ -475,7 +475,6 @@ async def _ensure_dashboard_record(
             _LOGGER.debug("Found existing dashboard item with id=%s", existing_item_id)
             break
 
-    created_item = False
     if dashboard_item is None:
         try:
             _LOGGER.debug(
@@ -483,7 +482,6 @@ async def _ensure_dashboard_record(
             )
             _LOGGER.debug("Create data: %s", create_data)
             dashboard_item = await handles.collection.async_create_item(create_data)
-            created_item = True
             existing_item_id = dashboard_item.get("id")
             _LOGGER.info(
                 "Successfully created dashboard item: %s (id=%s)",

@@ -21,8 +21,6 @@ from custom_components.electricity_planner import (
     async_reload_entry,
 )
 from custom_components.electricity_planner.const import (
-    ATTR_ACTION,
-    ATTR_DURATION,
     ATTR_GRID_SETPOINT_OVERRIDE,
     ATTR_TARGET,
     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,

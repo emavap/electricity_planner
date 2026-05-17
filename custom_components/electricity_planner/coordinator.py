@@ -20,8 +20,6 @@ from homeassistant.util import dt as dt_util
 from .arbitrage_mode import ArbitrageModePlanner
 from .charging_window import ChargingWindowValidator
 from .const import (
-    AVERAGE_THRESHOLD_DEFAULT_INTERVAL_SECONDS,
-    AVERAGE_THRESHOLD_HYSTERESIS_COUNT,
     BATTERY_CAPACITY_FALLBACK_WEIGHT,
     BATTERY_SOC_DECIMAL_THRESHOLD,
     CONF_BASE_GRID_SETPOINT,
@@ -61,8 +59,6 @@ from .const import (
     CONF_USE_AVERAGE_THRESHOLD,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
-    DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
-    DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_MAX_SOC,
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
     DEFAULT_MIN_SOC,
@@ -80,19 +76,14 @@ from .const import (
     PHASE_IDS,
     PHASE_MODE_SINGLE,
     PHASE_MODE_THREE,
-    PRICE_INTERVAL_GAP_TOLERANCE_SECONDS,
-    PRICE_INTERVAL_LOOKBACK_HOURS,
     PRICE_INTERVAL_MINUTES,
     PRICE_TIMELINE_MAX_AGE_HOURS,
-    PRICE_VALUE_MAX_EUR_MWH,
-    PRICE_VALUE_MIN_EUR_MWH,
 )
 from .decision_engine import ChargingDecisionEngine
 from .entity_status import EntityStatusReporter
 from .forecast_summary import ForecastSummaryCalculator
 from .helpers import (
     PriceInterval,
-    apply_price_adjustment,
     extract_price_from_interval,
     is_in_month_peak_transition_window,
     parse_datetime_cached,

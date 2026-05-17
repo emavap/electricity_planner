@@ -8,7 +8,6 @@ from custom_components.electricity_planner.defaults import (
 )
 from custom_components.electricity_planner.strategies import (
     DynamicPriceStrategy,
-    PredictiveChargingStrategy,
     SOCBasedChargingStrategy,
     SOCBufferChargingStrategy,
     SolarPriorityStrategy,

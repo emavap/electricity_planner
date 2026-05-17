@@ -921,7 +921,7 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
         battery_analysis = self.coordinator.data.get("battery_analysis", {})
         power_analysis = self.coordinator.data.get("power_analysis", {})
         power_allocation = self.coordinator.data.get("power_allocation", {})
-        solar_analysis = self.coordinator.data.get("solar_analysis", {})
+        self.coordinator.data.get("solar_analysis", {})
         time_context = self.coordinator.data.get("time_context", {})
         phase_results = self.coordinator.data.get("phase_results", {})
         phase_grid_setpoints = {

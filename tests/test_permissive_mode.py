@@ -1,7 +1,5 @@
 """Unit tests for car permissive mode functionality."""
 
-import pytest
-
 from custom_components.electricity_planner.decision_engine import ChargingDecisionEngine
 
 
