@@ -6,8 +6,8 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.electricity_planner.binary_sensor import (
     BatteryGridChargingBinarySensor,
@@ -65,7 +65,10 @@ async def test_async_setup_entry_adds_automation_and_diagnostic_entities():
         "abc123_data_availability",
     ]
     assert added[0].device_info["name"] == "Electricity Planner - Automation Controls"
-    assert added[-1].device_info["name"] == "Electricity Planner - Diagnostics & Monitoring"
+    assert (
+        added[-1].device_info["name"]
+        == "Electricity Planner - Diagnostics & Monitoring"
+    )
 
 
 @pytest.mark.parametrize(
@@ -175,8 +178,12 @@ def test_data_availability_binary_sensor_reports_timestamps_and_sources():
 
     assert sensor.is_on is False
     attrs = sensor.extra_state_attributes
-    assert attrs["last_successful_update"].startswith(str((now - timedelta(minutes=5)).date()))
-    assert attrs["data_unavailable_since"].startswith(str((now - timedelta(seconds=90)).date()))
+    assert attrs["last_successful_update"].startswith(
+        str((now - timedelta(minutes=5)).date())
+    )
+    assert attrs["data_unavailable_since"].startswith(
+        str((now - timedelta(seconds=90)).date())
+    )
     assert attrs["unavailable_duration_seconds"] >= 90
     assert attrs["current_price_available"] is True
     assert attrs["next_price_available"] is False

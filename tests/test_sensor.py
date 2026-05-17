@@ -353,7 +353,9 @@ def test_charging_decision_sensor_covers_all_decision_states():
         }
     )
     assert sensor.native_value == "charge_both_from_grid"
-    assert sensor.extra_state_attributes["phase_results"] == {"phase_1": {"battery_grid_charging": True}}
+    assert sensor.extra_state_attributes["phase_results"] == {
+        "phase_1": {"battery_grid_charging": True}
+    }
 
     coordinator.data["car_grid_charging"] = False
     assert sensor.native_value == "charge_battery: battery cheap"
@@ -375,7 +377,11 @@ def test_entity_status_sensor_summarizes_and_flattens_categories():
             "entity_status": {
                 "summary": {"available": 2, "unavailable": 1, "total_configured": 3},
                 "price_entities": {
-                    "current": {"configured": True, "entity_id": "sensor.price", "status": "available"}
+                    "current": {
+                        "configured": True,
+                        "entity_id": "sensor.price",
+                        "status": "available",
+                    }
                 },
                 "battery_entities": {
                     "soc": {
@@ -388,7 +394,11 @@ def test_entity_status_sensor_summarizes_and_flattens_categories():
                 },
                 "power_entities": {},
                 "optional_entities": {
-                    "solar": {"configured": False, "entity_id": "sensor.solar", "status": "unknown"}
+                    "solar": {
+                        "configured": False,
+                        "entity_id": "sensor.solar",
+                        "status": "unknown",
+                    }
                 },
             }
         }
@@ -400,14 +410,31 @@ def test_entity_status_sensor_summarizes_and_flattens_categories():
     attrs = sensor.extra_state_attributes
     assert attrs["available_entities"] == ["sensor.price"]
     assert attrs["unavailable_entities"] == [
-        {"entity_id": "sensor.soc", "status": "unavailable", "reason": "missing", "is_required": True}
+        {
+            "entity_id": "sensor.soc",
+            "status": "unavailable",
+            "reason": "missing",
+            "is_required": True,
+        }
     ]
 
-    coordinator.data["entity_status"]["summary"] = {"available": 0, "unavailable": 0, "total_configured": 0}
+    coordinator.data["entity_status"]["summary"] = {
+        "available": 0,
+        "unavailable": 0,
+        "total_configured": 0,
+    }
     assert sensor.native_value == "no_entities"
-    coordinator.data["entity_status"]["summary"] = {"available": 3, "unavailable": 0, "total_configured": 3}
+    coordinator.data["entity_status"]["summary"] = {
+        "available": 3,
+        "unavailable": 0,
+        "total_configured": 3,
+    }
     assert sensor.native_value == "all_available"
-    coordinator.data["entity_status"]["summary"] = {"available": 0, "unavailable": 3, "total_configured": 3}
+    coordinator.data["entity_status"]["summary"] = {
+        "available": 0,
+        "unavailable": 3,
+        "total_configured": 3,
+    }
     assert sensor.native_value == "all_unavailable"
 
 
@@ -421,14 +448,28 @@ def test_limit_and_setpoint_sensors_include_override_context():
             "grid_setpoint": 6500,
             "grid_setpoint_reason": "peak guard",
             "monthly_grid_peak": "5000",
-            "power_analysis": {"car_charging_power": 1500, "solar_surplus": 2200, "car_currently_charging": True},
+            "power_analysis": {
+                "car_charging_power": 1500,
+                "solar_surplus": 2200,
+                "car_currently_charging": True,
+            },
             "battery_analysis": {"average_soc": 61},
             "manual_overrides": {
-                "charger_limit": {"value": 1600, "reason": "manual", "expires_at": "soon"},
-                "grid_setpoint": {"value": -500, "reason": "export", "expires_at": "later"},
+                "charger_limit": {
+                    "value": 1600,
+                    "reason": "manual",
+                    "expires_at": "soon",
+                },
+                "grid_setpoint": {
+                    "value": -500,
+                    "reason": "export",
+                    "expires_at": "later",
+                },
             },
             "phase_mode": "three_phase",
-            "phase_results": {"phase_1": {"grid_setpoint": 2000, "grid_components": {"battery": 1200}}},
+            "phase_results": {
+                "phase_1": {"grid_setpoint": 2000, "grid_components": {"battery": 1200}}
+            },
         },
         config={"base_grid_setpoint": 3000},
     )
@@ -454,7 +495,13 @@ def test_forecast_and_data_availability_sensors():
     """Forecast and availability sensors cover available and empty data branches."""
     entry = _entry()
     coordinator = _coordinator(
-        {"forecast_summary": {"available": True, "cheapest_interval_price": 0.01, "window_count": 3}},
+        {
+            "forecast_summary": {
+                "available": True,
+                "cheapest_interval_price": 0.01,
+                "window_count": 3,
+            }
+        },
         data_unavailable_since=None,
         notification_sent=False,
         is_data_available=lambda: True,
@@ -479,10 +526,18 @@ def test_price_margin_and_threshold_sensors_cover_status_bands():
     entry = _entry()
     coordinator = _coordinator(
         {
-            "price_analysis": {"current_price": 0.10, "price_threshold": 0.12, "very_low_price": True, "price_position": 0.2},
+            "price_analysis": {
+                "current_price": 0.10,
+                "price_threshold": 0.12,
+                "very_low_price": True,
+                "price_position": 0.2,
+            },
             "feedin_effective_price": 0.07,
             "feedin_solar": True,
-            "power_analysis": {"solar_surplus": 1400, "significant_solar_surplus": True},
+            "power_analysis": {
+                "solar_surplus": 1400,
+                "significant_solar_surplus": True,
+            },
             "battery_analysis": {"average_soc": 10},
         },
         config={
@@ -530,7 +585,11 @@ def test_feedin_price_sensor_and_nordpool_price_helpers():
             "feedin_effective_price": 0.08,
             "feedin_solar": True,
             "feedin_solar_reason": "profitable",
-            "price_analysis": {"raw_current_price": 0.04, "price_adjustment_multiplier": 1.2, "price_adjustment_offset": 0.01},
+            "price_analysis": {
+                "raw_current_price": 0.04,
+                "price_adjustment_multiplier": 1.2,
+                "price_adjustment_offset": 0.01,
+            },
             "power_allocation": {"remaining_solar": 500},
             "transport_cost": 0.02,
             "nordpool_prices_today": {
@@ -541,7 +600,11 @@ def test_feedin_price_sensor_and_nordpool_price_helpers():
             },
             "transport_cost_status": "fallback_current",
         },
-        config={"feedin_adjustment_multiplier": 0.8, "feedin_adjustment_offset": -0.01, "feedin_price_threshold": 0.05},
+        config={
+            "feedin_adjustment_multiplier": 0.8,
+            "feedin_adjustment_offset": -0.01,
+            "feedin_price_threshold": 0.05,
+        },
     )
 
     feed = FeedinPriceSensor(coordinator, entry)
