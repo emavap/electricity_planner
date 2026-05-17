@@ -95,11 +95,11 @@ class FakeHass:
 
     def _async_update_entry(self, entry, *, data=None, options=None, version=None):
         if data is not None:
-            entry.data = data
+            object.__setattr__(entry, 'data', data)
         if options is not None:
-            entry.options = options
+            object.__setattr__(entry, 'options', options)
         if version is not None:
-            entry.version = version
+            object.__setattr__(entry, 'version', version)
         self.config_entries._entries[entry.entry_id] = entry
 
 
@@ -478,6 +478,7 @@ async def test_number_service_wrapper_rejects_invalid_sunny_threshold(fake_hass,
         await async_number_set_value(
             entity,
             ServiceCall(
+                fake_hass,
                 "number",
                 "set_value",
                 {"value": 75},

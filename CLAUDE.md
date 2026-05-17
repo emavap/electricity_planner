@@ -438,3 +438,74 @@ The integration is designed for dynamic electricity markets:
 - **Added**: 187 pytest tests with comprehensive coverage for forecast and sunny day logic
 - **Fixed**: Silent wrong-day fallback bug in forecast resolution after midnight
 - **Fixed**: ~30 missing UI translation keys across config and options flows
+
+---
+
+## Developer Setup
+
+This repo ships a fully configured developer environment. Use it.
+
+### Devcontainer (recommended)
+
+`.devcontainer/devcontainer.json` + `Dockerfile` provide a Python 3.12 image (works on amd64 and arm64) with every dev dep, pre-commit hooks, and VS Code extensions pre-installed.
+
+- Open in VS Code → "Reopen in Container".
+- Forwarded ports: 8000 (mkdocs), 8123 (HA).
+- Post-create installs `requirements-dev.txt` and runs `pre-commit install`.
+
+> **Docker group note (Pi host):** `marco` was added to the `docker` group, but already-open shells won't see it until a new login. Use `newgrp docker`, open a fresh terminal, or prefix one-off commands with `sg docker -c "..."`.
+>
+> **Host Python:** the Pi ships Python 3.13, which is **too new** for the pinned HA test deps (need 3.10–3.12). Stick to the devcontainer for `make test`, or install Python 3.12 via pyenv/uv if you really want a host venv.
+
+### Make targets
+
+Run `make help` for the full colored list. Most-used:
+
+```
+make test                       # pytest
+make test-coverage              # coverage (term + htmlcov/)
+make test-file f=tests/test_x.py
+make test-name n=pattern
+make lint                       # flake8
+make format                     # black + isort
+make format-check               # CI-style check
+make typecheck                  # mypy
+make docs-serve                 # mkdocs at :8000
+make pre-commit                 # all hooks on all files
+make commit                     # cz commit (conventional)
+```
+
+### Pre-commit
+
+Configured in `.pre-commit-config.yaml`: trailing whitespace, EOF fixer, yaml/json checks, large files, debug statements, black, isort, flake8, and (manual stage) mypy.
+
+```
+pre-commit install
+pre-commit run --all-files
+```
+
+### Docs
+
+MkDocs + Material under `docs/`. Build with `make docs`, serve with `make docs-serve`. Update `architecture.md` / `decision-engine.md` / `strategies.md` whenever the pipeline shape changes.
+
+### Git workflow
+
+- Conventional commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`). Use `make commit` for a guided prompt.
+- Feature branches `feat/<short-name>` → PR against `main`.
+- CI (`.github/workflows/ci.yml`) runs lint → typecheck → tests/coverage → docs build.
+
+### Testing patterns
+
+- `tests/` uses pytest-asyncio + pytest-homeassistant-custom-component.
+- Build snapshots via helpers in `tests/test_helpers.py`.
+- Decision-engine tests are split by concern (power / car / errors / trees).
+- Add a smoke test in `test_strategies_smoke.py` for every new strategy.
+- Coverage target: ≥ 80% (enforced by `pyproject.toml`).
+
+### Config locations
+
+- `pyproject.toml` — black, isort, pytest, coverage, mypy, flake8, commitizen
+- `Makefile` — task entry points
+- `mkdocs.yml` — docs site config
+- `.vscode/settings.json` + `extensions.json` — editor defaults
+- `.github/workflows/ci.yml` — CI pipeline

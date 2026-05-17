@@ -83,7 +83,7 @@ from custom_components.electricity_planner.const import (
 
 def _make_handler(entry: MockConfigEntry) -> OptionsFlowHandler:
     handler = OptionsFlowHandler()
-    object.__setattr__(handler, "config_entry", entry)
+    object.__setattr__(handler, "_config_entry", entry)
     return handler
 
 

@@ -1,0 +1,41 @@
+site_name: Electricity Planner
+site_description: Home Assistant custom integration for solar, battery, and EV scheduling
+repo_url: https://github.com/emavap/electricity_planner
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+    - content.code.annotate
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed
+  - tables
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Decision Engine: decision-engine.md
+  - Strategies: strategies.md
+  - Development: development.md

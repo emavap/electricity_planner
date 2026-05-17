@@ -2977,7 +2977,9 @@ def test_sunny_day_forecast_below_threshold_not_sunny():
     })
     ba = _battery_analysis()
     result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 9.0})
-    assert result is ba  # not modified
+    assert result is not ba
+    assert result["max_soc_threshold"] == 90.0
+    assert result["grid_charge_stop_soc_threshold"] == 90.0
 
 
 def test_sunny_day_forecast_above_threshold_applies_limit():
@@ -3074,7 +3076,7 @@ def test_sunny_day_hysteresis_does_not_start_grid_charge_at_boundary():
         },
     )
 
-    assert "grid_charge_stop_soc_threshold" not in result
+    assert result["grid_charge_stop_soc_threshold"] == 35.0
     assert result["batteries_full"] is True
     assert result["remaining_capacity_percent"] == pytest.approx(-0.4)
 

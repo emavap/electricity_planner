@@ -463,11 +463,11 @@ async def test_async_migrate_entry_derives_sunny_threshold_from_option_capacitie
 
     def _update_entry(config_entry, *, data=None, version=None, options=None):
         if data is not None:
-            config_entry.data = data
+            object.__setattr__(entry, 'data', data)
         if options is not None:
-            config_entry.options = options
+            object.__setattr__(entry, 'options', options)
         if version is not None:
-            config_entry.version = version
+            object.__setattr__(entry, 'version', version)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry),
@@ -493,11 +493,11 @@ async def test_async_migrate_entry_preserves_legacy_soc_defaults_for_sparse_v14_
 
     def _update_entry(config_entry, *, data=None, version=None, options=None):
         if data is not None:
-            config_entry.data = data
+            object.__setattr__(entry, 'data', data)
         if options is not None:
-            config_entry.options = options
+            object.__setattr__(entry, 'options', options)
         if version is not None:
-            config_entry.version = version
+            object.__setattr__(entry, 'version', version)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry),
@@ -522,11 +522,11 @@ async def test_async_migrate_entry_uses_legacy_sunny_default_for_pre_v12_entries
 
     def _update_entry(config_entry, *, data=None, version=None, options=None):
         if data is not None:
-            config_entry.data = data
+            object.__setattr__(entry, 'data', data)
         if options is not None:
-            config_entry.options = options
+            object.__setattr__(entry, 'options', options)
         if version is not None:
-            config_entry.version = version
+            object.__setattr__(entry, 'version', version)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry),
@@ -553,11 +553,11 @@ async def test_async_migrate_entry_replaces_legacy_transport_cost_sensor():
 
     def _update_entry(config_entry, *, data=None, version=None, options=None):
         if data is not None:
-            config_entry.data = data
+            object.__setattr__(entry, 'data', data)
         if options is not None:
-            config_entry.options = options
+            object.__setattr__(entry, 'options', options)
         if version is not None:
-            config_entry.version = version
+            object.__setattr__(entry, 'version', version)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry),
@@ -589,11 +589,11 @@ async def test_async_migrate_entry_adds_inverter_derating_defaults_for_v16():
 
     def _update_entry(config_entry, *, data=None, version=None, options=None):
         if data is not None:
-            config_entry.data = data
+            object.__setattr__(entry, 'data', data)
         if options is not None:
-            config_entry.options = options
+            object.__setattr__(entry, 'options', options)
         if version is not None:
-            config_entry.version = version
+            object.__setattr__(entry, 'version', version)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry),
@@ -629,11 +629,11 @@ async def test_async_migrate_entry_adds_arbitrage_mode_deadline_hour_for_v19():
 
     def _update_entry(config_entry, *, data=None, version=None, options=None):
         if data is not None:
-            config_entry.data = data
+            object.__setattr__(entry, 'data', data)
         if options is not None:
-            config_entry.options = options
+            object.__setattr__(entry, 'options', options)
         if version is not None:
-            config_entry.version = version
+            object.__setattr__(entry, 'version', version)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry),
@@ -673,11 +673,11 @@ async def test_async_migrate_entry_normalizes_arbitrage_mode_deadline_hour_for_v
 
     def _update_entry(config_entry, *, data=None, version=None, options=None):
         if data is not None:
-            config_entry.data = data
+            object.__setattr__(entry, 'data', data)
         if options is not None:
-            config_entry.options = options
+            object.__setattr__(entry, 'options', options)
         if version is not None:
-            config_entry.version = version
+            object.__setattr__(entry, 'version', version)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry),

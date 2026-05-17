@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "electricity-planner"
+version = "0.0.0"
+description = "Home Assistant custom integration: Electricity Planner"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "emavap" }]
+dependencies = ["aiohttp>=3.8.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["custom_components*"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310", "py311", "py312"]
+extend-exclude = '''
+/(
+    \.git
+  | \.venv
+  | build
+  | dist
+  | site
+  | htmlcov
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 88
+known_first_party = ["custom_components"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q --timeout=60"
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["custom_components"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+warn_unused_configs = true
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]
+exclude = [".git", "__pycache__", "build", "dist", ".venv", "site"]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "v$version"
