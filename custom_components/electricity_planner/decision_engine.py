@@ -1317,8 +1317,11 @@ class ChargingDecisionEngine:
             if average_soc is not None:
                 stop_threshold = sunny_threshold
                 if data.get(_PREVIOUS_BATTERY_GRID_CHARGING_KEY):
-                    stop_threshold += _SUNNY_DAY_GRID_SOC_HYSTERESIS_PERCENT
-                    grid_analysis["grid_charge_stop_soc_threshold"] = stop_threshold
+                    stop_threshold = min(
+                        sunny_threshold + _SUNNY_DAY_GRID_SOC_HYSTERESIS_PERCENT,
+                        100.0,
+                    )
+                grid_analysis["grid_charge_stop_soc_threshold"] = stop_threshold
                 grid_analysis["batteries_full"] = average_soc >= stop_threshold
                 grid_analysis["remaining_capacity_percent"] = stop_threshold - average_soc
             return grid_analysis
@@ -1328,7 +1331,22 @@ class ChargingDecisionEngine:
             solar_forecast,
             sunny_production_threshold,
         )
-        return battery_analysis
+        # Apply general SOC hysteresis to prevent boundary oscillation.
+        # Once charging reaches the max threshold, raise the stop point by 2%
+        # so small SOC fluctuations don't toggle charging on/off.
+        grid_analysis = dict(battery_analysis)
+        average_soc = grid_analysis.get("average_soc")
+        if average_soc is not None:
+            stop_threshold = normal_threshold
+            if data.get(_PREVIOUS_BATTERY_GRID_CHARGING_KEY):
+                stop_threshold = min(
+                    normal_threshold + _SUNNY_DAY_GRID_SOC_HYSTERESIS_PERCENT,
+                    100.0,
+                )
+            grid_analysis["grid_charge_stop_soc_threshold"] = stop_threshold
+            grid_analysis["batteries_full"] = average_soc >= stop_threshold
+            grid_analysis["remaining_capacity_percent"] = stop_threshold - average_soc
+        return grid_analysis
 
     def _calculate_weighted_average_soc(self, batteries: list[dict[str, Any]]) -> float:
         """Delegate to the battery analysis calculator collaborator."""
