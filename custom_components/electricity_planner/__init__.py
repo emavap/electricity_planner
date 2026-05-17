@@ -1,11 +1,11 @@
 """The Electricity Planner integration."""
+
 from __future__ import annotations
 
 import logging
 from datetime import timedelta
 
 import voluptuous as vol
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -24,8 +24,8 @@ from .const import (
     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_MAX_SOC_THRESHOLD,
-    CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_MAX_SOC_THRESHOLD_SOLAR,
+    CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_NEGATIVE_BUY_THRESHOLD,
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
@@ -47,7 +47,12 @@ from .migrations import CURRENT_VERSION, async_migrate_entry
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH, Platform.NUMBER]
+PLATFORMS: list[Platform] = [
+    Platform.SENSOR,
+    Platform.BINARY_SENSOR,
+    Platform.SWITCH,
+    Platform.NUMBER,
+]
 
 NUMBER_ENTITY_ID_SUFFIXES: tuple[tuple[str, str], ...] = (
     # First column is the unique_id suffix (preserved across the v22→v23 rename
@@ -78,10 +83,16 @@ MANUAL_OVERRIDE_SERVICE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_ACTION): vol.In(
             (MANUAL_OVERRIDE_ACTION_FORCE_CHARGE, MANUAL_OVERRIDE_ACTION_FORCE_WAIT)
         ),
-        vol.Optional(ATTR_DURATION): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
+        vol.Optional(ATTR_DURATION): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=1440)
+        ),
         vol.Optional(ATTR_REASON): vol.Coerce(str),
-        vol.Optional(ATTR_CHARGER_LIMIT_OVERRIDE): vol.All(vol.Coerce(int), vol.Range(min=0, max=50000)),
-        vol.Optional(ATTR_GRID_SETPOINT_OVERRIDE): vol.All(vol.Coerce(int), vol.Range(min=-50000, max=50000)),
+        vol.Optional(ATTR_CHARGER_LIMIT_OVERRIDE): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=50000)
+        ),
+        vol.Optional(ATTR_GRID_SETPOINT_OVERRIDE): vol.All(
+            vol.Coerce(int), vol.Range(min=-50000, max=50000)
+        ),
     }
 )
 
@@ -140,12 +151,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
-async def _async_migrate_number_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _async_migrate_number_entity_ids(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     """Rename number entities to stable IDs used by dashboard templates."""
     await _async_migrate_entity_ids(hass, entry, "number", NUMBER_ENTITY_ID_SUFFIXES)
 
 
-async def _async_migrate_switch_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _async_migrate_switch_entity_ids(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     """Rename arbitrage switch entity IDs and unique IDs to the new internal key."""
     registry = er.async_get(hass)
     title_slug = slugify(entry.title or "electricity_planner")
@@ -156,7 +171,9 @@ async def _async_migrate_switch_entity_ids(hass: HomeAssistant, entry: ConfigEnt
         return
 
     target_entity_id = f"switch.{title_slug}_arbitrage_mode"
-    existing_new_entry_id = registry.async_get_entity_id("switch", DOMAIN, new_unique_id)
+    existing_new_entry_id = registry.async_get_entity_id(
+        "switch", DOMAIN, new_unique_id
+    )
     if existing_new_entry_id and existing_new_entry_id != current_entity_id:
         _LOGGER.warning(
             "Skipping switch unique ID migration for %s because %s already exists",
@@ -324,7 +341,9 @@ def _register_services_once(hass: HomeAssistant) -> None:
         if provided_id:
             if provided_id in coordinators:
                 return provided_id
-            raise HomeAssistantError(f"No Electricity Planner config entry with id {provided_id}")
+            raise HomeAssistantError(
+                f"No Electricity Planner config entry with id {provided_id}"
+            )
 
         if not coordinators:
             raise HomeAssistantError("No Electricity Planner config entries loaded.")
@@ -338,22 +357,33 @@ def _register_services_once(hass: HomeAssistant) -> None:
 
     async def _async_handle_set_override(call):
         entry_id = _resolve_entry_id(call.data.get(ATTR_ENTRY_ID))
-        coordinator: ElectricityPlannerCoordinator | None = hass.data.get(DOMAIN, {}).get(entry_id)
+        coordinator: ElectricityPlannerCoordinator | None = hass.data.get(
+            DOMAIN, {}
+        ).get(entry_id)
 
         if not coordinator:
-            raise HomeAssistantError(f"Coordinator for entry {entry_id} is no longer available")
+            raise HomeAssistantError(
+                f"Coordinator for entry {entry_id} is no longer available"
+            )
 
         target = call.data[ATTR_TARGET]
         action = call.data.get(ATTR_ACTION)
         reason = call.data.get(ATTR_REASON)
         duration_minutes = call.data.get(ATTR_DURATION)
-        duration = timedelta(minutes=duration_minutes) if duration_minutes is not None else None
+        duration = (
+            timedelta(minutes=duration_minutes)
+            if duration_minutes is not None
+            else None
+        )
         charger_limit = call.data.get(ATTR_CHARGER_LIMIT_OVERRIDE)
         grid_setpoint = call.data.get(ATTR_GRID_SETPOINT_OVERRIDE)
 
         # For numeric-only targets, action is optional
         # For boolean targets (battery/car/both), action is required
-        if target in (MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT, MANUAL_OVERRIDE_TARGET_GRID_SETPOINT):
+        if target in (
+            MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
+            MANUAL_OVERRIDE_TARGET_GRID_SETPOINT,
+        ):
             if target == MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT and charger_limit is None:
                 raise HomeAssistantError(
                     "charger_limit is required when target is charger_limit"
@@ -379,10 +409,14 @@ def _register_services_once(hass: HomeAssistant) -> None:
 
     async def _async_handle_clear_override(call):
         entry_id = _resolve_entry_id(call.data.get(ATTR_ENTRY_ID))
-        coordinator: ElectricityPlannerCoordinator | None = hass.data.get(DOMAIN, {}).get(entry_id)
+        coordinator: ElectricityPlannerCoordinator | None = hass.data.get(
+            DOMAIN, {}
+        ).get(entry_id)
 
         if not coordinator:
-            raise HomeAssistantError(f"Coordinator for entry {entry_id} is no longer available")
+            raise HomeAssistantError(
+                f"Coordinator for entry {entry_id} is no longer available"
+            )
 
         target = call.data.get(ATTR_TARGET, MANUAL_OVERRIDE_TARGET_ALL)
         await coordinator.async_clear_manual_override(target)

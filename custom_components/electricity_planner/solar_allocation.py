@@ -6,6 +6,7 @@ car-state-aware policy that mirrors the behaviour documented in
 ``CLAUDE.md`` ("Solar Allocation Policy"). The engine retains thin
 delegators so existing tests and monkeypatches keep working.
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,9 +24,7 @@ _LOGGER = logging.getLogger(__name__)
 class SolarAllocationCalculator:
     """Allocate post-house solar surplus between batteries and the EV."""
 
-    def __init__(
-        self, settings: "EngineSettings", validator: DataValidator
-    ) -> None:
+    def __init__(self, settings: "EngineSettings", validator: DataValidator) -> None:
         self._settings = settings
         self._validator = validator
 
@@ -83,7 +82,8 @@ class SolarAllocationCalculator:
             car_current_solar_usage = int(car_current_solar_usage * scale_factor)
             _LOGGER.warning(
                 "Power allocation %dW exceeds available solar %dW - scaled down",
-                total_allocated, solar_surplus
+                total_allocated,
+                solar_surplus,
             )
 
         remaining_solar = max(
@@ -99,7 +99,9 @@ class SolarAllocationCalculator:
             "solar_for_car": solar_for_car,
             "car_current_solar_usage": car_current_solar_usage,
             "remaining_solar": remaining_solar,
-            "total_allocated": solar_for_batteries + solar_for_car + car_current_solar_usage,
+            "total_allocated": solar_for_batteries
+            + solar_for_car
+            + car_current_solar_usage,
             "allocation_reason": format_reason(
                 "Power allocation",
                 f"Car using {car_current_solar_usage}W",

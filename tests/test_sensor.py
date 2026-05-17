@@ -1,12 +1,13 @@
 """Sensor entity tests for Electricity Planner."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.electricity_planner.const import DOMAIN
 from custom_components.electricity_planner.binary_sensor import FeedinSolarBinarySensor
+from custom_components.electricity_planner.const import DOMAIN
 from custom_components.electricity_planner.sensor import (
     DecisionDiagnosticsSensor,
     EmergencySOCThresholdSensor,
@@ -213,7 +214,18 @@ def test_threshold_sensors_use_native_units():
     )
     entry = MockConfigEntry(domain=DOMAIN, title="Planner", data={})
 
-    assert PriceThresholdSensor(coordinator, entry).native_unit_of_measurement == "€/kWh"
-    assert FeedinPriceThresholdSensor(coordinator, entry).native_unit_of_measurement == "€/kWh"
-    assert VeryLowPriceThresholdSensor(coordinator, entry).native_unit_of_measurement == "%"
-    assert EmergencySOCThresholdSensor(coordinator, entry).native_unit_of_measurement == "%"
+    assert (
+        PriceThresholdSensor(coordinator, entry).native_unit_of_measurement == "€/kWh"
+    )
+    assert (
+        FeedinPriceThresholdSensor(coordinator, entry).native_unit_of_measurement
+        == "€/kWh"
+    )
+    assert (
+        VeryLowPriceThresholdSensor(coordinator, entry).native_unit_of_measurement
+        == "%"
+    )
+    assert (
+        EmergencySOCThresholdSensor(coordinator, entry).native_unit_of_measurement
+        == "%"
+    )

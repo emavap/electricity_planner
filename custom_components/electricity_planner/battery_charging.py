@@ -6,6 +6,7 @@ decide whether batteries should be charged from the grid for a given
 cycle. The engine retains a thin ``_decide_battery_grid_charging``
 delegator so existing tests and monkeypatches keep working.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -32,9 +33,7 @@ class BatteryChargingDecisionCalculator:
         self._strategy_manager = strategy_manager
         self._config = config
 
-    def refresh(
-        self, settings: "EngineSettings", config: dict[str, Any]
-    ) -> None:
+    def refresh(self, settings: "EngineSettings", config: dict[str, Any]) -> None:
         self._settings = settings
         self._config = config
 
@@ -193,10 +192,7 @@ class BatteryChargingDecisionCalculator:
         # SolarPriorityStrategy is wired at priority 1 with a non-empty reason
         # only when solar has actually taken over; that is a legitimate
         # OFF transition and must not be held.
-        if any(
-            entry.get("priority") == 1 and entry.get("reason")
-            for entry in trace
-        ):
+        if any(entry.get("priority") == 1 and entry.get("reason") for entry in trace):
             return decision
 
         state_age = ctx.battery_grid_charging_state_age_seconds
@@ -222,8 +218,7 @@ class BatteryChargingDecisionCalculator:
 
         remaining_seconds = max(0, int(_MIN_BATTERY_ON_HOLD_SECONDS - state_age))
         reason = (
-            decision.get("battery_grid_charging_reason")
-            or "automatic decision changed"
+            decision.get("battery_grid_charging_reason") or "automatic decision changed"
         )
         held = dict(decision)
         held["battery_grid_charging"] = True

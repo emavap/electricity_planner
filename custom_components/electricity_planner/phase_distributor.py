@@ -4,6 +4,7 @@ Extracted from ``decision_engine.py``. Breaks down the aggregated
 single-phase decision into per-phase guidance using capacity-weighted
 battery allocations and equal-share car allocations.
 """
+
 from __future__ import annotations
 
 import logging
@@ -36,7 +37,9 @@ class PhaseDistributor:
         sign = -1 if total < 0 else 1
         abs_total = abs(total)
 
-        positive_weights = {phase: max(weights.get(phase, 0.0), 0.0) for phase in phases}
+        positive_weights = {
+            phase: max(weights.get(phase, 0.0), 0.0) for phase in phases
+        }
         weight_sum = sum(positive_weights.values())
 
         if weight_sum <= 0:
@@ -48,7 +51,8 @@ class PhaseDistributor:
             return {phase: allocation[phase] * sign for phase in phases}
 
         raw_allocations = {
-            phase: (abs_total * positive_weights[phase] / weight_sum) for phase in phases
+            phase: (abs_total * positive_weights[phase] / weight_sum)
+            for phase in phases
         }
         allocation = {phase: int(raw_allocations[phase] // 1) for phase in phases}
         remainder = int(abs_total - sum(allocation.values()))
@@ -83,7 +87,9 @@ class PhaseDistributor:
             ordered_phases = list(phase_details.keys())
 
         phase_capacity_map: dict[str, float] = data.get("phase_capacity_map", {})
-        phase_batteries: dict[str, list[dict[str, Any]]] = data.get("phase_batteries", {})
+        phase_batteries: dict[str, list[dict[str, Any]]] = data.get(
+            "phase_batteries", {}
+        )
         total_capacity_weight = sum(
             max(phase_capacity_map.get(phase, 0.0), 0.0) for phase in ordered_phases
         )
@@ -161,7 +167,9 @@ class PhaseDistributor:
             grid_setpoint = grid_from_battery + grid_from_car
 
             has_battery = bool(phase_batteries.get(phase))
-            battery_allowed = overall_decision.get("battery_grid_charging", False) and has_battery
+            battery_allowed = (
+                overall_decision.get("battery_grid_charging", False) and has_battery
+            )
 
             if overall_decision.get("battery_grid_charging", False) and not has_battery:
                 phase_battery_reason = "No batteries assigned to this phase"

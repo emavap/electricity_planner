@@ -1,18 +1,19 @@
 """Tests for number platform entities."""
+
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 import pytz
 from homeassistant.components.number import async_set_value as async_number_set_value
 from homeassistant.core import ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.electricity_planner import coordinator as coordinator_module
 from custom_components.electricity_planner.const import (
@@ -30,7 +31,9 @@ from custom_components.electricity_planner.const import (
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     DOMAIN,
 )
-from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
+from custom_components.electricity_planner.coordinator import (
+    ElectricityPlannerCoordinator,
+)
 from custom_components.electricity_planner.number import (
     ArbitrageModeDeadlineHourNumber,
     ArbitrageModeReserveSocNumber,
@@ -95,11 +98,11 @@ class FakeHass:
 
     def _async_update_entry(self, entry, *, data=None, options=None, version=None):
         if data is not None:
-            object.__setattr__(entry, 'data', data)
+            object.__setattr__(entry, "data", data)
         if options is not None:
-            object.__setattr__(entry, 'options', options)
+            object.__setattr__(entry, "options", options)
         if version is not None:
-            object.__setattr__(entry, 'version', version)
+            object.__setattr__(entry, "version", version)
         self.config_entries._entries[entry.entry_id] = entry
 
 
@@ -119,7 +122,9 @@ def _base_config() -> dict[str, object]:
 
 
 @pytest.mark.asyncio
-async def test_number_setup_always_adds_standard_and_sunny_entities(fake_hass, monkeypatch):
+async def test_number_setup_always_adds_standard_and_sunny_entities(
+    fake_hass, monkeypatch
+):
     """Sunny SOC and sunny forecast threshold numbers should always be exposed."""
     config = _base_config()
     entry = MockConfigEntry(domain=DOMAIN, data=config, options={})
@@ -147,7 +152,9 @@ async def test_number_setup_always_adds_standard_and_sunny_entities(fake_hass, m
 
 
 @pytest.mark.asyncio
-async def test_number_setup_with_forecast_entity_keeps_same_three_entities(fake_hass, monkeypatch):
+async def test_number_setup_with_forecast_entity_keeps_same_three_entities(
+    fake_hass, monkeypatch
+):
     """Providing forecast entity should not change number entity count."""
     config = _base_config()
     config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
@@ -176,7 +183,9 @@ async def test_number_setup_with_forecast_entity_keeps_same_three_entities(fake_
 
 
 @pytest.mark.asyncio
-async def test_number_entities_use_stable_dashboard_friendly_entity_ids(fake_hass, monkeypatch):
+async def test_number_entities_use_stable_dashboard_friendly_entity_ids(
+    fake_hass, monkeypatch
+):
     """Number entities should expose stable IDs expected by dashboard templates."""
     config = _base_config()
     entry = MockConfigEntry(
@@ -199,7 +208,9 @@ async def test_number_entities_use_stable_dashboard_friendly_entity_ids(fake_has
     forecast_entity = SunnyForecastThresholdNumber(coordinator, entry)
     reserve_entity = ArbitrageModeReserveSocNumber(coordinator, entry)
     assert max_entity.entity_id == "number.electricity_planner_max_soc_threshold"
-    assert sunny_entity.entity_id == "number.electricity_planner_max_soc_threshold_sunny"
+    assert (
+        sunny_entity.entity_id == "number.electricity_planner_max_soc_threshold_sunny"
+    )
     assert (
         forecast_entity.entity_id
         == "number.electricity_planner_sunny_forecast_threshold_kwh"
@@ -211,7 +222,9 @@ async def test_number_entities_use_stable_dashboard_friendly_entity_ids(fake_has
 
 
 @pytest.mark.asyncio
-async def test_sunny_number_attributes_use_live_forecast_fallback_before_start_hour(fake_hass, monkeypatch):
+async def test_sunny_number_attributes_use_live_forecast_fallback_before_start_hour(
+    fake_hass, monkeypatch
+):
     """When coordinator data is empty, UI attrs should still show today's forecast value."""
     config = _base_config()
     config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
@@ -271,12 +284,16 @@ async def test_max_soc_number_update_preserves_other_options(fake_hass, monkeypa
     assert entry.options[CONF_MAX_SOC_THRESHOLD_SUNNY] == 35
     assert entry.options[CONF_SUNNY_FORECAST_THRESHOLD_KWH] == 5.0
     assert coordinator.config[CONF_MAX_SOC_THRESHOLD] == 80
-    coordinator.decision_engine.refresh_settings.assert_called_once_with(coordinator.config)
+    coordinator.decision_engine.refresh_settings.assert_called_once_with(
+        coordinator.config
+    )
     coordinator.async_request_refresh.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_arbitrage_mode_reserve_update_persists_in_options(fake_hass, monkeypatch):
+async def test_arbitrage_mode_reserve_update_persists_in_options(
+    fake_hass, monkeypatch
+):
     """Reserve SOC should persist like the other live number controls."""
     config = _base_config()
     entry = MockConfigEntry(domain=DOMAIN, data=config, options={})
@@ -299,12 +316,16 @@ async def test_arbitrage_mode_reserve_update_persists_in_options(fake_hass, monk
 
     assert entry.options[CONF_ARBITRAGE_MODE_RESERVE_SOC] == 25
     assert coordinator.config[CONF_ARBITRAGE_MODE_RESERVE_SOC] == 25
-    coordinator.decision_engine.refresh_settings.assert_called_once_with(coordinator.config)
+    coordinator.decision_engine.refresh_settings.assert_called_once_with(
+        coordinator.config
+    )
     coordinator.async_request_refresh.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_arbitrage_mode_reserve_attributes_show_threshold_state_not_windows(fake_hass, monkeypatch):
+async def test_arbitrage_mode_reserve_attributes_show_threshold_state_not_windows(
+    fake_hass, monkeypatch
+):
     """Reserve number attributes should reflect threshold-based planning state."""
     config = _base_config()
     entry = MockConfigEntry(domain=DOMAIN, data=config, options={})
@@ -342,7 +363,9 @@ async def test_arbitrage_mode_reserve_attributes_show_threshold_state_not_window
 
 
 @pytest.mark.asyncio
-async def test_sunny_max_soc_update_preserves_live_max_soc_from_coordinator(fake_hass, monkeypatch):
+async def test_sunny_max_soc_update_preserves_live_max_soc_from_coordinator(
+    fake_hass, monkeypatch
+):
     """Saving one live number should not drop sibling live values from the active config."""
     config = _base_config()
     config[CONF_MAX_SOC_THRESHOLD] = 90
@@ -377,7 +400,9 @@ async def test_sunny_max_soc_update_preserves_live_max_soc_from_coordinator(fake
 
 
 @pytest.mark.asyncio
-async def test_max_soc_update_rejects_value_below_existing_sunny_threshold(fake_hass, monkeypatch):
+async def test_max_soc_update_rejects_value_below_existing_sunny_threshold(
+    fake_hass, monkeypatch
+):
     """Normal max SOC cannot be lowered below the active sunny threshold."""
     config = _base_config()
     entry = MockConfigEntry(
@@ -413,7 +438,9 @@ async def test_max_soc_update_rejects_value_below_existing_sunny_threshold(fake_
 
 
 @pytest.mark.asyncio
-async def test_sunny_max_soc_update_rejects_value_above_normal_threshold(fake_hass, monkeypatch):
+async def test_sunny_max_soc_update_rejects_value_above_normal_threshold(
+    fake_hass, monkeypatch
+):
     """Sunny max SOC cannot be raised above the active normal threshold."""
     config = _base_config()
     entry = MockConfigEntry(
@@ -449,7 +476,9 @@ async def test_sunny_max_soc_update_rejects_value_above_normal_threshold(fake_ha
 
 
 @pytest.mark.asyncio
-async def test_number_service_wrapper_rejects_invalid_sunny_threshold(fake_hass, monkeypatch):
+async def test_number_service_wrapper_rejects_invalid_sunny_threshold(
+    fake_hass, monkeypatch
+):
     """Home Assistant's number service wrapper should propagate the sunny/max invariant."""
     config = _base_config()
     entry = MockConfigEntry(

@@ -1,7 +1,8 @@
 """Unit tests for helper utilities used by Electricity Planner."""
+
+import re
 from datetime import datetime, timezone
 from pathlib import Path
-import re
 
 import pytest
 
@@ -16,7 +17,12 @@ class TestDataValidator:
 
         assert validator.validate_power_value(-50, min_value=0, name="test") == 0
         assert validator.validate_power_value(5000, max_value=3000, name="test") == 3000
-        assert validator.validate_power_value(1500, min_value=0, max_value=3000, name="test") == 1500
+        assert (
+            validator.validate_power_value(
+                1500, min_value=0, max_value=3000, name="test"
+            )
+            == 1500
+        )
 
     def test_validate_battery_data_counts_valid(self, caplog):
         validator = helpers.DataValidator()
@@ -142,7 +148,9 @@ class TestPowerAllocationValidator:
 
 
 def test_apply_price_adjustment():
-    assert helpers.apply_price_adjustment(0.10, 1.12, 0.008) == pytest.approx(0.10 * 1.12 + 0.008)
+    assert helpers.apply_price_adjustment(0.10, 1.12, 0.008) == pytest.approx(
+        0.10 * 1.12 + 0.008
+    )
     assert helpers.apply_price_adjustment(None, 1.1, 0.0) is None
 
 
@@ -186,7 +194,12 @@ def test_version_consistency():
     from custom_components.electricity_planner.const import INTEGRATION_VERSION
 
     # Load manifest.json
-    manifest_path = Path(__file__).parent.parent / "custom_components" / "electricity_planner" / "manifest.json"
+    manifest_path = (
+        Path(__file__).parent.parent
+        / "custom_components"
+        / "electricity_planner"
+        / "manifest.json"
+    )
     with open(manifest_path) as f:
         manifest = json.load(f)
 
@@ -225,5 +238,6 @@ def test_info_release_notes_link_matches_existing_file():
     repo_root = Path(__file__).parent.parent
     info_content = (repo_root / "info.md").read_text(encoding="utf-8")
     assert (
-        "[Releases](https://github.com/emavap/electricity_planner/releases)" in info_content
+        "[Releases](https://github.com/emavap/electricity_planner/releases)"
+        in info_content
     ), "info.md should link to the GitHub releases page"

@@ -1,70 +1,75 @@
 """Sensor platform for Electricity Planner."""
+
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from enum import Enum
-import logging
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
+
 try:
     from homeassistant.const import EntityCategory
 except ImportError:
+
     class EntityCategory(str, Enum):
         """Fallback entity-category enum for older Home Assistant test deps."""
 
         CONFIG = "config"
         DIAGNOSTIC = "diagnostic"
+
+
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    DOMAIN,
+    CONF_BASE_GRID_SETPOINT,
+    CONF_EMERGENCY_SOC_THRESHOLD,
+    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    CONF_FEEDIN_ADJUSTMENT_OFFSET,
+    CONF_FEEDIN_PRICE_THRESHOLD,
+    CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    CONF_INVERTER_EXPORT_DEADBAND,
+    CONF_INVERTER_EXPORT_LIMIT,
+    CONF_MAX_INVERTER_POWER,
     CONF_PHASE_MODE,
+    CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+    CONF_PRICE_ADJUSTMENT_OFFSET,
+    CONF_PRICE_THRESHOLD,
+    CONF_SIGNIFICANT_SOLAR_THRESHOLD,
+    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+    CONF_VERY_LOW_PRICE_THRESHOLD,
+    DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_EMERGENCY_SOC,
+    DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
+    DEFAULT_FEEDIN_PRICE_THRESHOLD,
+    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    DEFAULT_INVERTER_EXPORT_DEADBAND,
+    DEFAULT_INVERTER_EXPORT_LIMIT,
+    DEFAULT_MAX_INVERTER_POWER,
+    DEFAULT_MAX_SOC,
+    DEFAULT_MAX_SOC_SOLAR,
+    DEFAULT_MAX_SOC_SUNNY,
+    DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN,
     DEFAULT_PHASE_NAMES,
+    DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_PRICE_ADJUSTMENT_OFFSET,
+    DEFAULT_PRICE_THRESHOLD,
+    DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
+    DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
+    DEFAULT_VERY_LOW_PRICE_THRESHOLD,
+    DOMAIN,
+    INTEGRATION_VERSION,
     PHASE_IDS,
     PHASE_MODE_SINGLE,
     PHASE_MODE_THREE,
-    CONF_BASE_GRID_SETPOINT,
-    CONF_INVERTER_EXPORT_DEADBAND,
-    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
-    CONF_INVERTER_EXPORT_LIMIT,
-    CONF_PRICE_THRESHOLD,
-    CONF_FEEDIN_PRICE_THRESHOLD,
-    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
-    CONF_FEEDIN_ADJUSTMENT_OFFSET,
-    CONF_PRICE_ADJUSTMENT_MULTIPLIER,
-    CONF_PRICE_ADJUSTMENT_OFFSET,
-    CONF_VERY_LOW_PRICE_THRESHOLD,
-    CONF_SIGNIFICANT_SOLAR_THRESHOLD,
-    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
-    CONF_EMERGENCY_SOC_THRESHOLD,
-    CONF_MAX_INVERTER_POWER,
-    CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
-    DEFAULT_PRICE_THRESHOLD,
-    DEFAULT_FEEDIN_PRICE_THRESHOLD,
-    DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
-    DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
-    DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
-    DEFAULT_PRICE_ADJUSTMENT_OFFSET,
-    DEFAULT_VERY_LOW_PRICE_THRESHOLD,
-    DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
-    DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
-    DEFAULT_MAX_SOC,
-    DEFAULT_MAX_SOC_SUNNY,
-    DEFAULT_MAX_SOC_SOLAR,
-    DEFAULT_EMERGENCY_SOC,
-    DEFAULT_BASE_GRID_SETPOINT,
-    DEFAULT_INVERTER_EXPORT_DEADBAND,
-    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
-    DEFAULT_MAX_INVERTER_POWER,
-    DEFAULT_INVERTER_EXPORT_LIMIT,
-    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
-    DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN,
-    INTEGRATION_VERSION,
 )
 from .coordinator import ElectricityPlannerCoordinator
 from .helpers import (
@@ -131,7 +136,12 @@ async def async_setup_entry(
 class ElectricityPlannerSensorBase(CoordinatorEntity, SensorEntity):
     """Base class for Electricity Planner sensors."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self.entry = entry
@@ -158,7 +168,12 @@ class ElectricityPlannerSensorBase(CoordinatorEntity, SensorEntity):
 class ChargingDecisionSensor(ElectricityPlannerSensorBase):
     """Sensor for grid charging decision status."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the charging decision sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Charging Recommendation & Reason"
@@ -177,14 +192,18 @@ class ChargingDecisionSensor(ElectricityPlannerSensorBase):
         if battery_grid and car_grid:
             return "charge_both_from_grid"
         elif battery_grid:
-            battery_reason = self.coordinator.data.get("battery_grid_charging_reason", "")
+            battery_reason = self.coordinator.data.get(
+                "battery_grid_charging_reason", ""
+            )
             return f"charge_battery: {battery_reason}"
         elif car_grid:
             car_reason = self.coordinator.data.get("car_grid_charging_reason", "")
             return f"charge_car: {car_reason}"
         else:
             # Show the most relevant reason for not charging
-            battery_reason = self.coordinator.data.get("battery_grid_charging_reason", "")
+            battery_reason = self.coordinator.data.get(
+                "battery_grid_charging_reason", ""
+            )
             return f"no_charging: {battery_reason}"
 
     @property
@@ -193,13 +212,19 @@ class ChargingDecisionSensor(ElectricityPlannerSensorBase):
         if not self.coordinator.data:
             return {"data_available": False}
 
-        price_data_available = self.coordinator.data.get("price_analysis", {}).get("data_available", False)
+        price_data_available = self.coordinator.data.get("price_analysis", {}).get(
+            "data_available", False
+        )
 
         attributes = {
             "battery_grid_charging": self.coordinator.data.get("battery_grid_charging"),
             "car_grid_charging": self.coordinator.data.get("car_grid_charging"),
-            "battery_grid_charging_reason": self.coordinator.data.get("battery_grid_charging_reason"),
-            "car_grid_charging_reason": self.coordinator.data.get("car_grid_charging_reason"),
+            "battery_grid_charging_reason": self.coordinator.data.get(
+                "battery_grid_charging_reason"
+            ),
+            "car_grid_charging_reason": self.coordinator.data.get(
+                "car_grid_charging_reason"
+            ),
             "next_evaluation": self.coordinator.data.get("next_evaluation"),
             "data_available": True,
             "price_data_available": price_data_available,
@@ -216,7 +241,12 @@ class ChargingDecisionSensor(ElectricityPlannerSensorBase):
 class BatteryAnalysisSensor(ElectricityPlannerSensorBase):
     """Sensor for battery analysis."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the battery analysis sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Battery SOC Average"
@@ -248,14 +278,21 @@ class BatteryAnalysisSensor(ElectricityPlannerSensorBase):
             "batteries_full": battery_analysis.get("batteries_full"),
             "min_soc_threshold": battery_analysis.get("min_soc_threshold"),
             "max_soc_threshold": battery_analysis.get("max_soc_threshold"),
-            "remaining_capacity_percent": battery_analysis.get("remaining_capacity_percent"),
+            "remaining_capacity_percent": battery_analysis.get(
+                "remaining_capacity_percent"
+            ),
         }
 
 
 class PriceAnalysisSensor(ElectricityPlannerSensorBase):
     """Sensor for price analysis."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the price analysis sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Current Electricity Price"
@@ -288,7 +325,9 @@ class PriceAnalysisSensor(ElectricityPlannerSensorBase):
             "raw_highest_price": price_analysis.get("raw_highest_price"),
             "raw_lowest_price": price_analysis.get("raw_lowest_price"),
             "raw_next_price": price_analysis.get("raw_next_price"),
-            "price_adjustment_multiplier": price_analysis.get("price_adjustment_multiplier"),
+            "price_adjustment_multiplier": price_analysis.get(
+                "price_adjustment_multiplier"
+            ),
             "price_adjustment_offset": price_analysis.get("price_adjustment_offset"),
             "transport_cost": price_analysis.get("transport_cost"),
             "price_threshold": price_analysis.get("price_threshold"),
@@ -305,7 +344,12 @@ class PriceAnalysisSensor(ElectricityPlannerSensorBase):
 class PowerAnalysisSensor(ElectricityPlannerSensorBase):
     """Sensor for power flow analysis."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the power analysis sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Solar Surplus Power"
@@ -332,16 +376,28 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
         attributes = {
             "solar_production": power_analysis.get("solar_production"),
             "house_consumption": power_analysis.get("house_consumption"),
-            "house_consumption_without_car": power_analysis.get("house_consumption_without_car"),
-            "solar_surplus": power_analysis.get("solar_surplus"),  # Available excess for batteries/car/export
+            "house_consumption_without_car": power_analysis.get(
+                "house_consumption_without_car"
+            ),
+            "solar_surplus": power_analysis.get(
+                "solar_surplus"
+            ),  # Available excess for batteries/car/export
             "car_charging_power": power_analysis.get("car_charging_power"),
             "has_solar_production": power_analysis.get("has_solar_production"),
-            "has_solar_surplus": power_analysis.get("has_solar_surplus"),  # Has available excess solar
-            "significant_solar_surplus": power_analysis.get("significant_solar_surplus"),
+            "has_solar_surplus": power_analysis.get(
+                "has_solar_surplus"
+            ),  # Has available excess solar
+            "significant_solar_surplus": power_analysis.get(
+                "significant_solar_surplus"
+            ),
             "car_currently_charging": power_analysis.get("car_currently_charging"),
-            "available_surplus_for_batteries": power_analysis.get("available_surplus_for_batteries"),
+            "available_surplus_for_batteries": power_analysis.get(
+                "available_surplus_for_batteries"
+            ),
             "solar_coverage_ratio": power_analysis.get("solar_coverage_ratio"),
-            "has_excess_solar_available": power_analysis.get("has_excess_solar_available"),  # Available for any use
+            "has_excess_solar_available": power_analysis.get(
+                "has_excess_solar_available"
+            ),  # Available for any use
         }
 
         # Add grid power snapshot (if configured)
@@ -349,10 +405,14 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
         if grid_power is not None:
             attributes["grid_power"] = grid_power
             attributes["grid_import"] = max(0, grid_power)  # Positive value for import
-            attributes["grid_export"] = abs(min(0, grid_power))  # Positive value for export
+            attributes["grid_export"] = abs(
+                min(0, grid_power)
+            )  # Positive value for export
 
         # Expose peak import limiting status
-        attributes["car_peak_limited"] = bool(self.coordinator.data.get("car_peak_limited", False))
+        attributes["car_peak_limited"] = bool(
+            self.coordinator.data.get("car_peak_limited", False)
+        )
         peak_threshold = self.coordinator.data.get("car_peak_limit_threshold")
         if peak_threshold is not None:
             attributes["car_peak_limit_threshold_w"] = peak_threshold
@@ -363,7 +423,12 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
 class DataAvailabilitySensor(ElectricityPlannerSensorBase):
     """Sensor for data availability duration tracking."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the data availability sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Data Unavailable Duration"
@@ -378,7 +443,9 @@ class DataAvailabilitySensor(ElectricityPlannerSensorBase):
         if not self.coordinator.data_unavailable_since:
             return 0  # Data is available or never was unavailable
 
-        unavailable_duration = dt_util.utcnow() - self.coordinator.data_unavailable_since
+        unavailable_duration = (
+            dt_util.utcnow() - self.coordinator.data_unavailable_since
+        )
         return int(unavailable_duration.total_seconds())
 
     @property
@@ -391,15 +458,21 @@ class DataAvailabilitySensor(ElectricityPlannerSensorBase):
 
         # Add availability information
         if self.coordinator.last_successful_update:
-            attributes["last_successful_update"] = self.coordinator.last_successful_update.isoformat()
+            attributes["last_successful_update"] = (
+                self.coordinator.last_successful_update.isoformat()
+            )
 
         if self.coordinator.data_unavailable_since:
-            attributes["data_unavailable_since"] = self.coordinator.data_unavailable_since.isoformat()
+            attributes["data_unavailable_since"] = (
+                self.coordinator.data_unavailable_since.isoformat()
+            )
 
-        attributes.update({
-            "notification_sent": self.coordinator.notification_sent,
-            "data_currently_available": self.coordinator.is_data_available(),
-        })
+        attributes.update(
+            {
+                "notification_sent": self.coordinator.notification_sent,
+                "data_currently_available": self.coordinator.is_data_available(),
+            }
+        )
 
         return attributes
 
@@ -411,7 +484,12 @@ class EntityStatusSensor(ElectricityPlannerSensorBase):
     helping users understand which data the planner is considering.
     """
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the entity status sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Entity Status"
@@ -474,7 +552,12 @@ class EntityStatusSensor(ElectricityPlannerSensorBase):
         unavailable_entities = []
         available_entities = []
 
-        for category_name in ["price_entities", "battery_entities", "power_entities", "optional_entities"]:
+        for category_name in [
+            "price_entities",
+            "battery_entities",
+            "power_entities",
+            "optional_entities",
+        ]:
             category = entity_status.get(category_name, {})
             for name, status in category.items():
                 if not status.get("configured"):
@@ -485,12 +568,14 @@ class EntityStatusSensor(ElectricityPlannerSensorBase):
                 if entity_state == "available":
                     available_entities.append(entity_id)
                 else:
-                    unavailable_entities.append({
-                        "entity_id": entity_id,
-                        "status": entity_state,
-                        "reason": status.get("reason", "Unknown"),
-                        "is_required": status.get("is_required", False),
-                    })
+                    unavailable_entities.append(
+                        {
+                            "entity_id": entity_id,
+                            "status": entity_state,
+                            "reason": status.get("reason", "Unknown"),
+                            "is_required": status.get("is_required", False),
+                        }
+                    )
 
         attributes["available_entities"] = available_entities
         attributes["unavailable_entities"] = unavailable_entities
@@ -507,7 +592,12 @@ class EntityStatusSensor(ElectricityPlannerSensorBase):
 class ChargerLimitSensor(ElectricityPlannerSensorBase):
     """AUTOMATION SENSOR (4/5): Car charger power limit in Watts."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the charger limit sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Car Charger Limit"
@@ -531,10 +621,18 @@ class ChargerLimitSensor(ElectricityPlannerSensorBase):
             return {}
 
         attributes = {
-            "charger_limit_reason": self.coordinator.data.get("charger_limit_reason", ""),
-            "current_car_power": self.coordinator.data.get("power_analysis", {}).get("car_charging_power", 0),
-            "solar_surplus": self.coordinator.data.get("power_analysis", {}).get("solar_surplus", 0),
-            "car_currently_charging": self.coordinator.data.get("power_analysis", {}).get("car_currently_charging", False),
+            "charger_limit_reason": self.coordinator.data.get(
+                "charger_limit_reason", ""
+            ),
+            "current_car_power": self.coordinator.data.get("power_analysis", {}).get(
+                "car_charging_power", 0
+            ),
+            "solar_surplus": self.coordinator.data.get("power_analysis", {}).get(
+                "solar_surplus", 0
+            ),
+            "car_currently_charging": self.coordinator.data.get(
+                "power_analysis", {}
+            ).get("car_currently_charging", False),
         }
 
         # Add override status
@@ -554,7 +652,12 @@ class ChargerLimitSensor(ElectricityPlannerSensorBase):
 class GridSetpointSensor(ElectricityPlannerSensorBase):
     """AUTOMATION SENSOR (5/5): Grid power setpoint in Watts."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the grid setpoint sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Grid Setpoint"
@@ -596,15 +699,29 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
         max_grid_setpoint = peak_based_grid_setpoint
 
         attributes = {
-            "grid_setpoint_reason": self.coordinator.data.get("grid_setpoint_reason", ""),
+            "grid_setpoint_reason": self.coordinator.data.get(
+                "grid_setpoint_reason", ""
+            ),
             "charger_limit": self.coordinator.data.get("charger_limit", 0),
-            "current_car_power": self.coordinator.data.get("power_analysis", {}).get("car_charging_power", 0),
-            "solar_surplus": self.coordinator.data.get("power_analysis", {}).get("solar_surplus", 0),
-            "battery_average_soc": self.coordinator.data.get("battery_analysis", {}).get("average_soc", 0),
-            "arbitrage_mode_active": self.coordinator.data.get("arbitrage_mode_active", False),
-            "arbitrage_mode_export_power": self.coordinator.data.get("arbitrage_mode_export_power", 0),
+            "current_car_power": self.coordinator.data.get("power_analysis", {}).get(
+                "car_charging_power", 0
+            ),
+            "solar_surplus": self.coordinator.data.get("power_analysis", {}).get(
+                "solar_surplus", 0
+            ),
+            "battery_average_soc": self.coordinator.data.get(
+                "battery_analysis", {}
+            ).get("average_soc", 0),
+            "arbitrage_mode_active": self.coordinator.data.get(
+                "arbitrage_mode_active", False
+            ),
+            "arbitrage_mode_export_power": self.coordinator.data.get(
+                "arbitrage_mode_export_power", 0
+            ),
             "arbitrage_mode_configured_export_cap_w": (
-                self.coordinator.data.get("arbitrage_mode_plan", {}).get("configured_export_cap_w")
+                self.coordinator.data.get("arbitrage_mode_plan", {}).get(
+                    "configured_export_cap_w"
+                )
             ),
             "monthly_grid_peak": monthly_peak,
             "applied_monthly_grid_peak": applied_monthly_peak,
@@ -615,7 +732,9 @@ class GridSetpointSensor(ElectricityPlannerSensorBase):
             "max_grid_setpoint": max_grid_setpoint,
         }
 
-        attributes["phase_mode"] = self.coordinator.data.get("phase_mode", PHASE_MODE_SINGLE)
+        attributes["phase_mode"] = self.coordinator.data.get(
+            "phase_mode", PHASE_MODE_SINGLE
+        )
 
         phase_results = self.coordinator.data.get("phase_results") or {}
         if phase_results:
@@ -695,7 +814,9 @@ class PhaseGridSetpointSensor(ElectricityPlannerSensorBase):
             "charger_limit": phase_result.get("charger_limit", 0),
             "battery_grid_charging": phase_result.get("battery_grid_charging", False),
             "car_grid_charging": phase_result.get("car_grid_charging", False),
-            "battery_grid_charging_reason": phase_result.get("battery_grid_charging_reason"),
+            "battery_grid_charging_reason": phase_result.get(
+                "battery_grid_charging_reason"
+            ),
             "car_grid_charging_reason": phase_result.get("car_grid_charging_reason"),
             "battery_entities": phase_result.get("battery_entities", []),
             "capacity_share": phase_result.get("capacity_share"),
@@ -706,7 +827,12 @@ class PhaseGridSetpointSensor(ElectricityPlannerSensorBase):
 class InverterDeratingTargetSensor(ElectricityPlannerSensorBase):
     """AUTOMATION SENSOR: Recommended inverter derating target in Watts."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the inverter derating target sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Inverter Derating Target"
@@ -730,9 +856,15 @@ class InverterDeratingTargetSensor(ElectricityPlannerSensorBase):
             return {}
 
         return {
-            "inverter_derating_reason": self.coordinator.data.get("inverter_derating_reason", ""),
-            "inverter_derating_alarm": self.coordinator.data.get("inverter_derating_alarm", False),
-            "inverter_derating_alarm_reason": self.coordinator.data.get("inverter_derating_alarm_reason", ""),
+            "inverter_derating_reason": self.coordinator.data.get(
+                "inverter_derating_reason", ""
+            ),
+            "inverter_derating_alarm": self.coordinator.data.get(
+                "inverter_derating_alarm", False
+            ),
+            "inverter_derating_alarm_reason": self.coordinator.data.get(
+                "inverter_derating_alarm_reason", ""
+            ),
             "feedin_allowed": self.coordinator.data.get("feedin_solar", False),
             "feedin_reason": self.coordinator.data.get("feedin_solar_reason", ""),
             "grid_power": self.coordinator.data.get("grid_power"),
@@ -747,7 +879,12 @@ class InverterDeratingTargetSensor(ElectricityPlannerSensorBase):
 class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
     """Comprehensive diagnostics sensor exposing all decision parameters for validation."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the decision diagnostics sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Decision Diagnostics"
@@ -798,43 +935,68 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
         return {
             # Main decisions
             "decisions": {
-                "battery_grid_charging": self.coordinator.data.get("battery_grid_charging", False),
-                "car_grid_charging": self.coordinator.data.get("car_grid_charging", False),
+                "battery_grid_charging": self.coordinator.data.get(
+                    "battery_grid_charging", False
+                ),
+                "car_grid_charging": self.coordinator.data.get(
+                    "car_grid_charging", False
+                ),
                 "feedin_solar": self.coordinator.data.get("feedin_solar", False),
-                "arbitrage_mode_enabled": self.coordinator.data.get("arbitrage_mode_enabled", False),
-                "arbitrage_mode_active": self.coordinator.data.get("arbitrage_mode_active", False),
-                "battery_reason": self.coordinator.data.get("battery_grid_charging_reason", ""),
+                "arbitrage_mode_enabled": self.coordinator.data.get(
+                    "arbitrage_mode_enabled", False
+                ),
+                "arbitrage_mode_active": self.coordinator.data.get(
+                    "arbitrage_mode_active", False
+                ),
+                "battery_reason": self.coordinator.data.get(
+                    "battery_grid_charging_reason", ""
+                ),
                 "car_reason": self.coordinator.data.get("car_grid_charging_reason", ""),
                 "feedin_reason": self.coordinator.data.get("feedin_solar_reason", ""),
-                "arbitrage_reason": self.coordinator.data.get("arbitrage_mode_reason", ""),
+                "arbitrage_reason": self.coordinator.data.get(
+                    "arbitrage_mode_reason", ""
+                ),
                 "phase_grid_setpoints": phase_grid_setpoints,
                 "manual_overrides": self.coordinator.data.get("manual_overrides", {}),
             },
-
             # Strategy evaluation order
             "strategy_trace": self.coordinator.data.get("strategy_trace", []),
             "forecast_summary": self.coordinator.data.get("forecast_summary", {}),
-
             # Power outputs
             "power_outputs": {
                 "charger_limit": self.coordinator.data.get("charger_limit", 0),
                 "grid_setpoint": self.coordinator.data.get("grid_setpoint", 0),
-                "inverter_derating_target": self.coordinator.data.get("inverter_derating_target", 0),
-                "charger_limit_reason": self.coordinator.data.get("charger_limit_reason", ""),
-                "grid_setpoint_reason": self.coordinator.data.get("grid_setpoint_reason", ""),
-                "inverter_derating_reason": self.coordinator.data.get("inverter_derating_reason", ""),
-                "inverter_derating_alarm": self.coordinator.data.get("inverter_derating_alarm", False),
-                "inverter_derating_alarm_reason": self.coordinator.data.get("inverter_derating_alarm_reason", ""),
-                "arbitrage_mode_plan": self.coordinator.data.get("arbitrage_mode_plan", {}),
+                "inverter_derating_target": self.coordinator.data.get(
+                    "inverter_derating_target", 0
+                ),
+                "charger_limit_reason": self.coordinator.data.get(
+                    "charger_limit_reason", ""
+                ),
+                "grid_setpoint_reason": self.coordinator.data.get(
+                    "grid_setpoint_reason", ""
+                ),
+                "inverter_derating_reason": self.coordinator.data.get(
+                    "inverter_derating_reason", ""
+                ),
+                "inverter_derating_alarm": self.coordinator.data.get(
+                    "inverter_derating_alarm", False
+                ),
+                "inverter_derating_alarm_reason": self.coordinator.data.get(
+                    "inverter_derating_alarm_reason", ""
+                ),
+                "arbitrage_mode_plan": self.coordinator.data.get(
+                    "arbitrage_mode_plan", {}
+                ),
                 "grid_components": self.coordinator.data.get("grid_components", {}),
-                "phase_mode": self.coordinator.data.get("phase_mode", PHASE_MODE_SINGLE),
+                "phase_mode": self.coordinator.data.get(
+                    "phase_mode", PHASE_MODE_SINGLE
+                ),
                 "phase_results": phase_results,
                 "phase_grid_setpoints": phase_grid_setpoints,
             },
             "phase_details": self.coordinator.data.get("phase_details", {}),
             "phase_capacity_map": self.coordinator.data.get("phase_capacity_map", {}),
             "phase_batteries": self.coordinator.data.get("phase_batteries", {}),
-
             # Price analysis (for validation)
             "price_analysis": {
                 "current_price": price_analysis.get("current_price"),
@@ -845,17 +1007,22 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "raw_highest_price": price_analysis.get("raw_highest_price"),
                 "raw_lowest_price": price_analysis.get("raw_lowest_price"),
                 "raw_next_price": price_analysis.get("raw_next_price"),
-                "price_adjustment_multiplier": price_analysis.get("price_adjustment_multiplier"),
-                "price_adjustment_offset": price_analysis.get("price_adjustment_offset"),
+                "price_adjustment_multiplier": price_analysis.get(
+                    "price_adjustment_multiplier"
+                ),
+                "price_adjustment_offset": price_analysis.get(
+                    "price_adjustment_offset"
+                ),
                 "price_threshold": price_analysis.get("price_threshold"),
                 "average_threshold": self.coordinator.data.get("average_threshold"),
                 "is_low_price": price_analysis.get("is_low_price", False),
                 "very_low_price": price_analysis.get("very_low_price", False),
                 "price_position": price_analysis.get("price_position"),
-                "significant_price_drop": price_analysis.get("significant_price_drop", False),
+                "significant_price_drop": price_analysis.get(
+                    "significant_price_drop", False
+                ),
                 "data_available": price_analysis.get("data_available", False),
             },
-
             # Battery analysis (for validation)
             "battery_analysis": {
                 "average_soc": battery_analysis.get("average_soc"),
@@ -863,50 +1030,64 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "max_soc": battery_analysis.get("max_soc"),
                 "batteries_count": battery_analysis.get("batteries_count", 0),
                 "batteries_full": battery_analysis.get("batteries_full", False),
-                "batteries_available": battery_analysis.get("batteries_available", True),
+                "batteries_available": battery_analysis.get(
+                    "batteries_available", True
+                ),
                 "min_soc_threshold": battery_analysis.get("min_soc_threshold"),
                 "max_soc_threshold": battery_analysis.get("max_soc_threshold"),
             },
-
             # Power analysis (for validation)
             "power_analysis": {
                 "solar_surplus": power_analysis.get("solar_surplus"),
                 "car_charging_power": power_analysis.get("car_charging_power"),
                 "has_solar_surplus": power_analysis.get("has_solar_surplus", False),
-                "significant_solar_surplus": power_analysis.get("significant_solar_surplus", False),
-                "car_currently_charging": power_analysis.get("car_currently_charging", False),
+                "significant_solar_surplus": power_analysis.get(
+                    "significant_solar_surplus", False
+                ),
+                "car_currently_charging": power_analysis.get(
+                    "car_currently_charging", False
+                ),
             },
-
             # Power allocation (critical for validation)
             "power_allocation": {
                 "solar_for_batteries": power_allocation.get("solar_for_batteries", 0),
                 "solar_for_car": power_allocation.get("solar_for_car", 0),
-                "car_current_solar_usage": power_allocation.get("car_current_solar_usage", 0),
+                "car_current_solar_usage": power_allocation.get(
+                    "car_current_solar_usage", 0
+                ),
                 "remaining_solar": power_allocation.get("remaining_solar", 0),
                 "total_allocated": power_allocation.get("total_allocated", 0),
                 "allocation_reason": power_allocation.get("allocation_reason", ""),
             },
-
             # Time context (for validation)
             "time_context": {
                 "current_hour": time_context.get("current_hour"),
             },
-
             # Configuration values (for validation)
             "configured_limits": {
                 "emergency_soc": config.get("emergency_soc_threshold", 15),
                 "max_battery_power": config.get("max_battery_power", 3000),
                 "max_car_power": config.get("max_car_power", 11000),
                 "max_grid_power": config.get("max_grid_power", 15000),
-                "max_inverter_power": config.get(CONF_MAX_INVERTER_POWER, DEFAULT_MAX_INVERTER_POWER),
-                "min_car_charging_threshold": config.get("min_car_charging_threshold", 100),
+                "max_inverter_power": config.get(
+                    CONF_MAX_INVERTER_POWER, DEFAULT_MAX_INVERTER_POWER
+                ),
+                "min_car_charging_threshold": config.get(
+                    "min_car_charging_threshold", 100
+                ),
                 "min_car_charging_duration": config.get("min_car_charging_duration", 2),
-                "predictive_charging_min_soc": config.get("predictive_charging_min_soc", 30),
-                "significant_solar_threshold": config.get("significant_solar_threshold", 1000),
+                "predictive_charging_min_soc": config.get(
+                    "predictive_charging_min_soc", 30
+                ),
+                "significant_solar_threshold": config.get(
+                    "significant_solar_threshold", 1000
+                ),
                 "very_low_price_threshold": config.get("very_low_price_threshold", 30),
                 "price_threshold": config.get("price_threshold", 0.15),
                 "feedin_price_threshold": config.get("feedin_price_threshold", 0.05),
-                "inverter_export_limit": config.get(CONF_INVERTER_EXPORT_LIMIT, DEFAULT_INVERTER_EXPORT_LIMIT),
+                "inverter_export_limit": config.get(
+                    CONF_INVERTER_EXPORT_LIMIT, DEFAULT_INVERTER_EXPORT_LIMIT
+                ),
                 "inverter_export_deadband": config.get(
                     CONF_INVERTER_EXPORT_DEADBAND, DEFAULT_INVERTER_EXPORT_DEADBAND
                 ),
@@ -919,32 +1100,46 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                     DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
                 ),
                 "max_soc_threshold": config.get("max_soc_threshold", DEFAULT_MAX_SOC),
-                "max_soc_threshold_sunny": config.get("max_soc_threshold_sunny", DEFAULT_MAX_SOC_SUNNY),
-                "max_soc_threshold_solar": config.get("max_soc_threshold_solar", DEFAULT_MAX_SOC_SOLAR),
+                "max_soc_threshold_sunny": config.get(
+                    "max_soc_threshold_sunny", DEFAULT_MAX_SOC_SUNNY
+                ),
+                "max_soc_threshold_solar": config.get(
+                    "max_soc_threshold_solar", DEFAULT_MAX_SOC_SOLAR
+                ),
                 "sunny_forecast_threshold_kwh": config.get(
                     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
                     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
                 ),
             },
-
             # Solar forecast / sunny day status
             "solar_forecast": {
-                "sunny_day_active": self.coordinator.data.get("sunny_day_active", False),
-                "solar_forecast_kwh": self.coordinator.data.get("solar_forecast_production"),
-                "solar_forecast_source": self.coordinator.data.get("solar_forecast_source"),
+                "sunny_day_active": self.coordinator.data.get(
+                    "sunny_day_active", False
+                ),
+                "solar_forecast_kwh": self.coordinator.data.get(
+                    "solar_forecast_production"
+                ),
+                "solar_forecast_source": self.coordinator.data.get(
+                    "solar_forecast_source"
+                ),
                 "solar_forecast_entity": config.get("solar_forecast_entity"),
-                "solar_forecast_today_entity": config.get("solar_forecast_today_entity"),
+                "solar_forecast_today_entity": config.get(
+                    "solar_forecast_today_entity"
+                ),
             },
-
             # Validation flags (for quick problem identification)
             "validation_flags": {
                 "price_data_valid": price_analysis.get("data_available", False),
                 "battery_data_valid": battery_analysis.get("batteries_available", True),
-                "power_allocation_valid": power_allocation.get("total_allocated", 0) <= power_analysis.get("solar_surplus", 0),
-                "emergency_override_active": self._check_emergency_override(battery_analysis, config),
-                "predictive_logic_active": self._check_predictive_logic(price_analysis, battery_analysis, config),
+                "power_allocation_valid": power_allocation.get("total_allocated", 0)
+                <= power_analysis.get("solar_surplus", 0),
+                "emergency_override_active": self._check_emergency_override(
+                    battery_analysis, config
+                ),
+                "predictive_logic_active": self._check_predictive_logic(
+                    price_analysis, battery_analysis, config
+                ),
             },
-
             # Last update
             "last_evaluation": self.coordinator.data.get("next_evaluation", "unknown"),
         }
@@ -958,7 +1153,9 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
         emergency_soc = config.get("emergency_soc_threshold", 15)
         return average_soc < emergency_soc
 
-    def _check_predictive_logic(self, price_analysis: dict, battery_analysis: dict, config: dict) -> bool:
+    def _check_predictive_logic(
+        self, price_analysis: dict, battery_analysis: dict, config: dict
+    ) -> bool:
         """Check if predictive charging logic is active."""
         significant_price_drop = price_analysis.get("significant_price_drop", False)
         is_low_price = price_analysis.get("is_low_price", False)
@@ -968,13 +1165,20 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
         if average_soc is None:
             return False
 
-        return is_low_price and significant_price_drop and average_soc > predictive_min_soc
+        return (
+            is_low_price and significant_price_drop and average_soc > predictive_min_soc
+        )
 
 
 class ForecastInsightsSensor(ElectricityPlannerSensorBase):
     """Sensor exposing upcoming price forecast insights."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the forecast sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Price Forecast Insights"
@@ -1006,7 +1210,12 @@ class ForecastInsightsSensor(ElectricityPlannerSensorBase):
 class PriceThresholdSensor(ElectricityPlannerSensorBase):
     """Sensor displaying the configured price threshold for charging decisions."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the price threshold sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Price Threshold"
@@ -1018,7 +1227,9 @@ class PriceThresholdSensor(ElectricityPlannerSensorBase):
     @property
     def native_value(self) -> float:
         """Return the configured price threshold."""
-        return self.coordinator.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
+        return self.coordinator.config.get(
+            CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -1026,21 +1237,34 @@ class PriceThresholdSensor(ElectricityPlannerSensorBase):
         if not self.coordinator.data:
             return {}
 
-        current_price = self.coordinator.data.get("price_analysis", {}).get("current_price")
+        current_price = self.coordinator.data.get("price_analysis", {}).get(
+            "current_price"
+        )
         threshold = self.native_value
 
         return {
             "description": "Price below which grid charging is considered favorable",
             "current_price": current_price,
-            "price_below_threshold": current_price < threshold if current_price is not None else None,
-            "margin": round(current_price - threshold, 3) if current_price is not None else None,
+            "price_below_threshold": (
+                current_price < threshold if current_price is not None else None
+            ),
+            "margin": (
+                round(current_price - threshold, 3)
+                if current_price is not None
+                else None
+            ),
         }
 
 
 class FeedinPriceThresholdSensor(ElectricityPlannerSensorBase):
     """Sensor displaying the configured feed-in price threshold."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the feed-in price threshold sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Feed-in Price Threshold"
@@ -1052,7 +1276,9 @@ class FeedinPriceThresholdSensor(ElectricityPlannerSensorBase):
     @property
     def native_value(self) -> float:
         """Return the configured feed-in price threshold."""
-        return self.coordinator.config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
+        return self.coordinator.config.get(
+            CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -1067,8 +1293,14 @@ class FeedinPriceThresholdSensor(ElectricityPlannerSensorBase):
             "description": "Price above which solar export to grid is enabled",
             "current_price": effective_price,
             "effective_price": effective_price,
-            "price_above_threshold": effective_price >= threshold if effective_price is not None else None,
-            "margin": round(effective_price - threshold, 3) if effective_price is not None else None,
+            "price_above_threshold": (
+                effective_price >= threshold if effective_price is not None else None
+            ),
+            "margin": (
+                round(effective_price - threshold, 3)
+                if effective_price is not None
+                else None
+            ),
             "feedin_enabled": self.coordinator.data.get("feedin_solar", False),
         }
 
@@ -1076,7 +1308,12 @@ class FeedinPriceThresholdSensor(ElectricityPlannerSensorBase):
 class FeedinPriceSensor(ElectricityPlannerSensorBase):
     """Sensor showing the effective feed-in price used for decisions."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Current Feed-in Price"
         self._attr_unique_id = f"{entry.entry_id}_feedin_price"
@@ -1122,7 +1359,12 @@ class FeedinPriceSensor(ElectricityPlannerSensorBase):
 class BuyPriceMarginSensor(ElectricityPlannerSensorBase):
     """Sensor exposing the difference between current price and threshold."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Buy Price Margin"
         self._attr_unique_id = f"{entry.entry_id}_buy_price_margin"
@@ -1155,7 +1397,11 @@ class BuyPriceMarginSensor(ElectricityPlannerSensorBase):
         price_analysis = self.coordinator.data.get("price_analysis", {})
         threshold = price_analysis.get("price_threshold")
         current_price = price_analysis.get("current_price")
-        margin = (current_price - threshold) if (current_price is not None and threshold is not None) else None
+        margin = (
+            (current_price - threshold)
+            if (current_price is not None and threshold is not None)
+            else None
+        )
         return {
             "current_price": current_price,
             "price_threshold": threshold,
@@ -1167,7 +1413,12 @@ class BuyPriceMarginSensor(ElectricityPlannerSensorBase):
 class FeedinPriceMarginSensor(ElectricityPlannerSensorBase):
     """Sensor exposing the difference between feed-in price and threshold."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Feed-in Price Margin"
         self._attr_unique_id = f"{entry.entry_id}_feedin_price_margin"
@@ -1213,7 +1464,12 @@ class FeedinPriceMarginSensor(ElectricityPlannerSensorBase):
 class VeryLowPriceThresholdSensor(ElectricityPlannerSensorBase):
     """Sensor displaying the very low price threshold percentage."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the very low price threshold sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Very Low Price Threshold"
@@ -1225,7 +1481,9 @@ class VeryLowPriceThresholdSensor(ElectricityPlannerSensorBase):
     @property
     def native_value(self) -> int:
         """Return the configured very low price threshold."""
-        return self.coordinator.config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
+        return self.coordinator.config.get(
+            CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -1240,7 +1498,9 @@ class VeryLowPriceThresholdSensor(ElectricityPlannerSensorBase):
 
         return {
             "description": "Bottom percentage of daily price range considered 'very low'",
-            "price_position": f"{price_position:.0%}" if price_position is not None else None,
+            "price_position": (
+                f"{price_position:.0%}" if price_position is not None else None
+            ),
             "is_very_low_price": very_low_price,
             "threshold_decimal": threshold,
         }
@@ -1249,7 +1509,12 @@ class VeryLowPriceThresholdSensor(ElectricityPlannerSensorBase):
 class SignificantSolarThresholdSensor(ElectricityPlannerSensorBase):
     """Sensor displaying the significant solar threshold."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the significant solar threshold sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Significant Solar Threshold"
@@ -1261,7 +1526,9 @@ class SignificantSolarThresholdSensor(ElectricityPlannerSensorBase):
     @property
     def native_value(self) -> int:
         """Return the configured significant solar threshold."""
-        return self.coordinator.config.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)
+        return self.coordinator.config.get(
+            CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -1284,7 +1551,12 @@ class SignificantSolarThresholdSensor(ElectricityPlannerSensorBase):
 class EmergencySOCThresholdSensor(ElectricityPlannerSensorBase):
     """Sensor displaying the emergency SOC threshold."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the emergency SOC threshold sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Emergency SOC Threshold"
@@ -1296,7 +1568,9 @@ class EmergencySOCThresholdSensor(ElectricityPlannerSensorBase):
     @property
     def native_value(self) -> int:
         """Return the configured emergency SOC threshold."""
-        return self.coordinator.config.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC)
+        return self.coordinator.config.get(
+            CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -1306,20 +1580,29 @@ class EmergencySOCThresholdSensor(ElectricityPlannerSensorBase):
 
         battery_analysis = self.coordinator.data.get("battery_analysis", {})
         average_soc = battery_analysis.get("average_soc")
-        is_emergency = average_soc < self.native_value if average_soc is not None else None
+        is_emergency = (
+            average_soc < self.native_value if average_soc is not None else None
+        )
 
         return {
             "description": "SOC level below which emergency charging is triggered regardless of price",
             "average_soc": average_soc,
             "is_emergency": is_emergency,
-            "margin": average_soc - self.native_value if average_soc is not None else None,
+            "margin": (
+                average_soc - self.native_value if average_soc is not None else None
+            ),
         }
 
 
 class NordPoolPricesSensor(ElectricityPlannerSensorBase):
     """Sensor exposing Nord Pool prices for today and tomorrow for dashboard visualization."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the Nord Pool prices sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Nord Pool Prices"
@@ -1343,8 +1626,16 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             return "unavailable"
 
         # Count total entries across all areas
-        today_count = sum(len(v) for v in prices_today.values() if isinstance(v, list)) if prices_today else 0
-        tomorrow_count = sum(len(v) for v in prices_tomorrow.values() if isinstance(v, list)) if prices_tomorrow else 0
+        today_count = (
+            sum(len(v) for v in prices_today.values() if isinstance(v, list))
+            if prices_today
+            else 0
+        )
+        tomorrow_count = (
+            sum(len(v) for v in prices_tomorrow.values() if isinstance(v, list))
+            if prices_tomorrow
+            else 0
+        )
 
         if today_count > 0 and tomorrow_count > 0:
             return f"today+tomorrow ({today_count + tomorrow_count} intervals)"
@@ -1364,7 +1655,9 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
 
         # Transport cost lookup/status provided by coordinator
         transport_lookup = self.coordinator.data.get("transport_cost_lookup") or []
-        transport_status = self.coordinator.data.get("transport_cost_status", "not_configured")
+        transport_status = self.coordinator.data.get(
+            "transport_cost_status", "not_configured"
+        )
         now = dt_util.now()
 
         signature = self._attribute_cache_signature(
@@ -1388,7 +1681,9 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             area_code = next(iter(prices_today.keys()), None)
             if area_code:
                 for interval in prices_today[area_code]:
-                    normalized = self._normalize_price_interval(interval, transport_lookup)
+                    normalized = self._normalize_price_interval(
+                        interval, transport_lookup
+                    )
                     if normalized:
                         compact = self._compact_price_interval(normalized)
                         if compact:
@@ -1398,7 +1693,9 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             area_code = next(iter(prices_tomorrow.keys()), None)
             if area_code:
                 for interval in prices_tomorrow[area_code]:
-                    normalized = self._normalize_price_interval(interval, transport_lookup)
+                    normalized = self._normalize_price_interval(
+                        interval, transport_lookup
+                    )
                     if normalized:
                         compact = self._compact_price_interval(normalized)
                         if compact:
@@ -1447,13 +1744,15 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             "min_price": round(min_price, 4) if min_price is not None else None,
             "max_price": round(max_price, 4) if max_price is not None else None,
             "avg_price": round(avg_price, 4) if avg_price is not None else None,
-            "price_range": round(max_price - min_price, 4) if (max_price is not None and min_price is not None) else None,
+            "price_range": (
+                round(max_price - min_price, 4)
+                if (max_price is not None and min_price is not None)
+                else None
+            ),
             "transport_cost_applied": (
                 True
                 if transport_status in ("applied", "fallback_current", "builtin")
-                else False
-                if transport_status in ("pending_history", "error")
-                else None
+                else False if transport_status in ("pending_history", "error") else None
             ),
             "transport_cost_status": transport_status,
             "last_update": self._cached_attributes_last_update,
@@ -1493,7 +1792,9 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             coordinator_data.get("transport_cost"),
         )
 
-    def _compact_price_interval(self, interval: dict[str, Any]) -> dict[str, Any] | None:
+    def _compact_price_interval(
+        self, interval: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """Return a recorder-friendly interval payload for dashboard rendering.
 
         Only fields consumed by the managed dashboard chart are kept so the
@@ -1516,7 +1817,9 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             "transport_cost": round(float(transport_cost), 6),
         }
 
-    def _normalize_price_interval(self, interval: Any, transport_cost_lookup: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+    def _normalize_price_interval(
+        self, interval: Any, transport_cost_lookup: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any] | None:
         """Return a normalized interval dict with a guaranteed price key.
 
         Converts price from €/MWh to €/kWh and applies contract adjustments
@@ -1545,8 +1848,12 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
 
         transport_cost = 0.0
         start_time_str = interval.get("start")
-        interval_start = parse_datetime_cached(start_time_str) if start_time_str else None
-        interval_start_utc = dt_util.as_utc(interval_start) if interval_start is not None else None
+        interval_start = (
+            parse_datetime_cached(start_time_str) if start_time_str else None
+        )
+        interval_start_utc = (
+            dt_util.as_utc(interval_start) if interval_start is not None else None
+        )
 
         # Use coordinator's unified transport cost resolution (handles both built-in and legacy)
         if interval_start_utc is not None:
@@ -1558,11 +1865,19 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             if resolved is not None:
                 transport_cost = resolved
             else:
-                fallback_transport = self.coordinator.data.get("transport_cost") if self.coordinator.data else None
+                fallback_transport = (
+                    self.coordinator.data.get("transport_cost")
+                    if self.coordinator.data
+                    else None
+                )
                 if fallback_transport is not None:
                     transport_cost = fallback_transport
         else:
-            fallback_transport = self.coordinator.data.get("transport_cost") if self.coordinator.data else None
+            fallback_transport = (
+                self.coordinator.data.get("transport_cost")
+                if self.coordinator.data
+                else None
+            )
             if fallback_transport is not None:
                 transport_cost = fallback_transport
 

@@ -1,4 +1,5 @@
 """Integration-oriented tests for Electricity Planner coordinator."""
+
 from __future__ import annotations
 
 import asyncio
@@ -8,13 +9,12 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 import pytz
-
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.electricity_planner import coordinator as coordinator_module
-from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
 from custom_components.electricity_planner.const import (
     ATTR_ACTION,
     ATTR_ENTRY_ID,
@@ -23,34 +23,34 @@ from custom_components.electricity_planner.const import (
     CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_BASE_GRID_SETPOINT,
+    CONF_BATTERY_CAPACITIES,
+    CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_BATTERY_SOC_ENTITIES,
-    CONF_MAX_SOC_THRESHOLD,
-    CONF_NEGATIVE_BUY_THRESHOLD,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+    CONF_GRID_POWER_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
     CONF_HOUSE_CONSUMPTION_ENTITY,
-    CONF_GRID_POWER_ENTITY,
-    CONF_MONTHLY_GRID_PEAK_ENTITY,
-    CONF_PHASE_MODE,
-    CONF_PHASES,
-    CONF_PHASE_SOLAR_ENTITY,
-    CONF_PHASE_CONSUMPTION_ENTITY,
-    CONF_PHASE_CAR_ENTITY,
-    CONF_PHASE_GRID_POWER_ENTITY,
-    CONF_PHASE_BATTERY_POWER_ENTITY,
-    CONF_BATTERY_CAPACITIES,
-    CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_LOWEST_PRICE_ENTITY,
+    CONF_MAX_SOC_THRESHOLD,
+    CONF_MONTHLY_GRID_PEAK_ENTITY,
+    CONF_NEGATIVE_BUY_THRESHOLD,
     CONF_NEXT_PRICE_ENTITY,
-    CONF_PRICE_THRESHOLD,
     CONF_P1_TARIFF_ENTITY,
-    CONF_SOLAR_PRODUCTION_ENTITY,
+    CONF_PHASE_BATTERY_POWER_ENTITY,
+    CONF_PHASE_CAR_ENTITY,
+    CONF_PHASE_CONSUMPTION_ENTITY,
+    CONF_PHASE_GRID_POWER_ENTITY,
+    CONF_PHASE_MODE,
+    CONF_PHASE_SOLAR_ENTITY,
+    CONF_PHASES,
+    CONF_PRICE_THRESHOLD,
     CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
-    CONF_SOLAR_FORECAST_TODAY_ENTITY,
     CONF_SOLAR_FORECAST_START_HOUR,
+    CONF_SOLAR_FORECAST_TODAY_ENTITY,
+    CONF_SOLAR_PRODUCTION_ENTITY,
     CONF_TRANSPORT_COST_DAY,
     CONF_TRANSPORT_COST_ENTITY,
     CONF_TRANSPORT_COST_NIGHT,
@@ -59,21 +59,23 @@ from custom_components.electricity_planner.const import (
     DEFAULT_ENERGY_COST_WKK,
     DEFAULT_ENERGY_TAX_ACCIJNS,
     DEFAULT_ENERGY_TAX_BIJDRAGE,
-    DEFAULT_TRANSPORT_COST_DAY,
-    DEFAULT_TRANSPORT_COST_NIGHT,
     DEFAULT_MIN_CAR_CHARGING_DURATION,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
+    DEFAULT_TRANSPORT_COST_DAY,
+    DEFAULT_TRANSPORT_COST_NIGHT,
     DOMAIN,
     MANUAL_OVERRIDE_ACTION_FORCE_CHARGE,
     MANUAL_OVERRIDE_ACTION_FORCE_WAIT,
     MANUAL_OVERRIDE_TARGET_BATTERY,
     MANUAL_OVERRIDE_TARGET_CAR,
+    PHASE_MODE_THREE,
     SERVICE_CLEAR_MANUAL_OVERRIDE,
     SERVICE_SET_MANUAL_OVERRIDE,
-    PHASE_MODE_THREE,
+)
+from custom_components.electricity_planner.coordinator import (
+    ElectricityPlannerCoordinator,
 )
 from custom_components.electricity_planner.sensor import GridSetpointSensor
-from homeassistant.exceptions import HomeAssistantError
 
 
 class FakeState:
@@ -218,9 +220,7 @@ def test_battery_state_tracking_uses_automatic_decisions(fake_hass, monkeypatch)
     assert coordinator._battery_grid_charging_locked_threshold == 0.18
 
 
-def test_battery_state_tracking_ignores_manual_battery_override(
-    fake_hass, monkeypatch
-):
+def test_battery_state_tracking_ignores_manual_battery_override(fake_hass, monkeypatch):
     base_time = datetime(2025, 6, 1, 6, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
@@ -238,9 +238,7 @@ def test_battery_state_tracking_ignores_manual_battery_override(
     assert coordinator._battery_grid_charging_locked_threshold is None
 
 
-def test_battery_state_tracking_clears_lock_on_off_transition(
-    fake_hass, monkeypatch
-):
+def test_battery_state_tracking_clears_lock_on_off_transition(fake_hass, monkeypatch):
     base_time = datetime(2025, 6, 1, 6, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
@@ -272,10 +270,14 @@ def test_battery_state_tracking_keeps_lock_while_state_unchanged(
     # No state flip → lock and timestamp must be preserved (not re-captured at the
     # current, lower effective threshold).
     assert coordinator._battery_grid_charging_locked_threshold == 0.18
-    assert coordinator._battery_grid_charging_changed_at == base_time - timedelta(minutes=2)
+    assert coordinator._battery_grid_charging_changed_at == base_time - timedelta(
+        minutes=2
+    )
 
 
-def test_grid_setpoint_sensor_uses_configured_base_setpoint_in_attributes(fake_hass, monkeypatch):
+def test_grid_setpoint_sensor_uses_configured_base_setpoint_in_attributes(
+    fake_hass, monkeypatch
+):
     config = _base_config()
     config[CONF_BASE_GRID_SETPOINT] = 4200
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
@@ -298,7 +300,9 @@ def test_grid_setpoint_sensor_uses_configured_base_setpoint_in_attributes(fake_h
 
 
 @pytest.mark.asyncio
-async def test_fetch_all_data_computes_surplus_and_filters_unavailable(fake_hass, monkeypatch):
+async def test_fetch_all_data_computes_surplus_and_filters_unavailable(
+    fake_hass, monkeypatch
+):
     config = _base_config()
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
@@ -370,7 +374,9 @@ async def test_fetch_all_data_three_phase_aggregates(fake_hass, monkeypatch):
     assert capacity_map["phase_3"] == pytest.approx(0.0)
 
     phase_batteries = data["phase_batteries"]
-    assert [b["entity_id"] for b in phase_batteries["phase_1"]] == ["sensor.battery_soc_1"]
+    assert [b["entity_id"] for b in phase_batteries["phase_1"]] == [
+        "sensor.battery_soc_1"
+    ]
     assert [b["entity_id"] for b in phase_batteries["phase_2"]] == [
         "sensor.battery_soc_1",
         "sensor.battery_soc_2",
@@ -384,12 +390,18 @@ async def test_fetch_all_data_three_phase_aggregates(fake_hass, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fetch_all_data_three_phase_with_battery_power_sensors(fake_hass, monkeypatch):
+async def test_fetch_all_data_three_phase_with_battery_power_sensors(
+    fake_hass, monkeypatch
+):
     """Test that battery power sensors are correctly read in three-phase mode."""
     config = _three_phase_config()
     # Add battery power sensors to phase configuration
-    config[CONF_PHASES]["phase_1"][CONF_PHASE_BATTERY_POWER_ENTITY] = "sensor.battery_power_l1"
-    config[CONF_PHASES]["phase_2"][CONF_PHASE_BATTERY_POWER_ENTITY] = "sensor.battery_power_l2"
+    config[CONF_PHASES]["phase_1"][
+        CONF_PHASE_BATTERY_POWER_ENTITY
+    ] = "sensor.battery_power_l1"
+    config[CONF_PHASES]["phase_2"][
+        CONF_PHASE_BATTERY_POWER_ENTITY
+    ] = "sensor.battery_power_l2"
 
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
@@ -604,7 +616,9 @@ async def test_handle_entity_change_respects_throttle(fake_hass, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_handle_entity_change_includes_three_phase_entities(fake_hass, monkeypatch):
+async def test_handle_entity_change_includes_three_phase_entities(
+    fake_hass, monkeypatch
+):
     config = _three_phase_config()
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
@@ -653,7 +667,9 @@ async def test_handle_entity_change_includes_three_phase_entities(fake_hass, mon
 
 
 @pytest.mark.asyncio
-async def test_throttled_update_does_not_retrigger_after_slow_refresh(fake_hass, monkeypatch):
+async def test_throttled_update_does_not_retrigger_after_slow_refresh(
+    fake_hass, monkeypatch
+):
     """Events that arrive inside the throttle window should stay throttled even if refresh is slow."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
 
@@ -696,7 +712,9 @@ async def test_throttled_update_does_not_retrigger_after_slow_refresh(fake_hass,
 
 
 @pytest.mark.asyncio
-async def test_handle_entity_change_triggers_for_peak_and_tariff_entities(fake_hass, monkeypatch):
+async def test_handle_entity_change_triggers_for_peak_and_tariff_entities(
+    fake_hass, monkeypatch
+):
     """Tracked non-power entities should refresh immediately on state changes."""
     config = _base_config()
     config[CONF_MONTHLY_GRID_PEAK_ENTITY] = "sensor.monthly_peak"
@@ -737,8 +755,16 @@ def test_get_current_price_interval_start_uses_active_timeline(fake_hass, monkey
     _freeze_time(monkeypatch, base_time)
 
     coordinator._last_price_timeline = [
-        (datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc), datetime(2025, 10, 14, 9, 0, tzinfo=timezone.utc), 0.10),
-        (datetime(2025, 10, 14, 9, 0, tzinfo=timezone.utc), datetime(2025, 10, 14, 10, 0, tzinfo=timezone.utc), 0.12),
+        (
+            datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc),
+            datetime(2025, 10, 14, 9, 0, tzinfo=timezone.utc),
+            0.10,
+        ),
+        (
+            datetime(2025, 10, 14, 9, 0, tzinfo=timezone.utc),
+            datetime(2025, 10, 14, 10, 0, tzinfo=timezone.utc),
+            0.12,
+        ),
     ]
 
     assert coordinator._get_current_price_interval_start() == datetime(
@@ -759,8 +785,16 @@ async def test_nordpool_fetch_prices_calls_service(fake_hass, monkeypatch):
     fake_hass.services.async_call = AsyncMock(
         return_value={
             "BE": [
-                {"start": "2025-10-14T00:00:00+00:00", "end": "2025-10-14T00:15:00+00:00", "price": 104.85},
-                {"start": "2025-10-14T00:15:00+00:00", "end": "2025-10-14T00:30:00+00:00", "price": 97.53},
+                {
+                    "start": "2025-10-14T00:00:00+00:00",
+                    "end": "2025-10-14T00:15:00+00:00",
+                    "price": 104.85,
+                },
+                {
+                    "start": "2025-10-14T00:15:00+00:00",
+                    "end": "2025-10-14T00:30:00+00:00",
+                    "price": 97.53,
+                },
             ]
         }
     )
@@ -803,7 +837,11 @@ async def test_nordpool_cache_prevents_redundant_calls(fake_hass, monkeypatch):
 
     mock_response = {
         "BE": [
-            {"start": "2025-10-14T00:00:00+00:00", "end": "2025-10-14T00:15:00+00:00", "price": 104.85},
+            {
+                "start": "2025-10-14T00:00:00+00:00",
+                "end": "2025-10-14T00:15:00+00:00",
+                "price": 104.85,
+            },
         ]
     }
     fake_hass.services.async_call = AsyncMock(return_value=mock_response)
@@ -868,7 +906,9 @@ async def test_nordpool_handles_service_failure(fake_hass, monkeypatch):
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
     # Mock service to raise exception
-    fake_hass.services.async_call = AsyncMock(side_effect=Exception("Service unavailable"))
+    fake_hass.services.async_call = AsyncMock(
+        side_effect=Exception("Service unavailable")
+    )
 
     result = await coordinator._fetch_nordpool_prices("test_config_entry_id", "today")
 
@@ -908,13 +948,32 @@ async def test_fetch_all_data_includes_nordpool_prices(fake_hass, monkeypatch):
     fake_hass.states.set("sensor.car_power", "0")
 
     # Mock Nord Pool service responses
-    today_prices = {"BE": [{"start": "2025-10-14T10:00:00+00:00", "end": "2025-10-14T10:15:00+00:00", "price": 100.0}]}
-    tomorrow_prices = {"BE": [{"start": "2025-10-15T10:00:00+00:00", "end": "2025-10-15T10:15:00+00:00", "price": 110.0}]}
+    today_prices = {
+        "BE": [
+            {
+                "start": "2025-10-14T10:00:00+00:00",
+                "end": "2025-10-14T10:15:00+00:00",
+                "price": 100.0,
+            }
+        ]
+    }
+    tomorrow_prices = {
+        "BE": [
+            {
+                "start": "2025-10-15T10:00:00+00:00",
+                "end": "2025-10-15T10:15:00+00:00",
+                "price": 110.0,
+            }
+        ]
+    }
     target_today = base_time.date().isoformat()
     target_tomorrow = (base_time + timedelta(days=1)).date().isoformat()
 
     call_count = [0]
-    async def mock_service_call(domain, service, data, blocking=False, return_response=False):
+
+    async def mock_service_call(
+        domain, service, data, blocking=False, return_response=False
+    ):
         call_count[0] += 1
         if data["date"] == target_today:
             return today_prices
@@ -944,8 +1003,12 @@ def _make_price_interval(start, value):
 
 
 def _freeze_time(monkeypatch, base_time):
-    monkeypatch.setattr(coordinator_module.dt_util, "now", lambda: base_time, raising=False)
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "now", lambda: base_time, raising=False
+    )
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False
+    )
 
 
 @pytest.mark.parametrize(
@@ -973,7 +1036,9 @@ def _freeze_time(monkeypatch, base_time):
         ),
     ],
 )
-def test_calculate_average_threshold(fake_hass, monkeypatch, multiplier, offset, transport_lookup, expected):
+def test_calculate_average_threshold(
+    fake_hass, monkeypatch, multiplier, offset, transport_lookup, expected
+):
     """Average threshold should use week-old transport costs for future prices (€/kWh)."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -991,12 +1056,18 @@ def test_calculate_average_threshold(fake_hass, monkeypatch, multiplier, offset,
     # Two future intervals (15 and 60 minutes ahead)
     prices_today = {
         "BE": [
-            _make_price_interval(base_time + timedelta(minutes=15), 100.0),  # 0.1 €/kWh base
-            _make_price_interval(base_time + timedelta(hours=1), 120.0),      # 0.12 €/kWh base
+            _make_price_interval(
+                base_time + timedelta(minutes=15), 100.0
+            ),  # 0.1 €/kWh base
+            _make_price_interval(
+                base_time + timedelta(hours=1), 120.0
+            ),  # 0.12 €/kWh base
         ]
     }
 
-    result = coordinator._calculate_average_threshold(prices_today, None, transport_lookup)
+    result = coordinator._calculate_average_threshold(
+        prices_today, None, transport_lookup
+    )
     assert result == pytest.approx(expected, rel=1e-6)
 
 
@@ -1010,8 +1081,10 @@ def test_calculate_average_threshold_skips_past(fake_hass, monkeypatch):
 
     prices_today = {
         "BE": [
-            _make_price_interval(base_time - timedelta(hours=1), 80.0),       # past interval
-            _make_price_interval(base_time + timedelta(minutes=30), 100.0),   # future interval
+            _make_price_interval(base_time - timedelta(hours=1), 80.0),  # past interval
+            _make_price_interval(
+                base_time + timedelta(minutes=30), 100.0
+            ),  # future interval
         ]
     }
 
@@ -1044,7 +1117,9 @@ def test_calculate_average_threshold_backfills_with_past(fake_hass, monkeypatch)
     assert result == pytest.approx(0.101, rel=1e-6)
 
 
-def test_calculate_average_threshold_insufficient_past_uses_future_only(fake_hass, monkeypatch):
+def test_calculate_average_threshold_insufficient_past_uses_future_only(
+    fake_hass, monkeypatch
+):
     """If there aren't enough historical slots, fall back to future-only average."""
     base_time = datetime(2025, 10, 14, 2, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -1100,7 +1175,9 @@ def test_check_minimum_charging_window(fake_hass, monkeypatch, use_average):
     ]
     prices_today = {"BE": intervals}
 
-    average = coordinator._calculate_average_threshold(prices_today, None, transport_lookup)
+    average = coordinator._calculate_average_threshold(
+        prices_today, None, transport_lookup
+    )
     if use_average:
         coordinator._average_threshold_enabled = True
 
@@ -1119,7 +1196,9 @@ def test_check_minimum_charging_window(fake_hass, monkeypatch, use_average):
         assert result is False
 
 
-def test_check_minimum_charging_window_ignores_average_until_enabled(fake_hass, monkeypatch):
+def test_check_minimum_charging_window_ignores_average_until_enabled(
+    fake_hass, monkeypatch
+):
     """Average-threshold warm-up should not affect window checks until enabled."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -1147,21 +1226,28 @@ def test_check_minimum_charging_window_ignores_average_until_enabled(fake_hass, 
         ]
     }
 
-    average = coordinator._calculate_average_threshold(prices_today, None, transport_lookup)
+    average = coordinator._calculate_average_threshold(
+        prices_today, None, transport_lookup
+    )
 
     assert coordinator._average_threshold_enabled is False
     assert average is not None
-    assert coordinator._check_minimum_charging_window(
-        prices_today,
-        None,
-        transport_lookup,
-        None,
-        average,
-    ) is False
+    assert (
+        coordinator._check_minimum_charging_window(
+            prices_today,
+            None,
+            transport_lookup,
+            None,
+            average,
+        )
+        is False
+    )
 
 
 @pytest.mark.asyncio
-async def test_async_update_data_masks_average_threshold_until_enabled(fake_hass, monkeypatch):
+async def test_async_update_data_masks_average_threshold_until_enabled(
+    fake_hass, monkeypatch
+):
     """Decision payload should not activate average threshold during hysteresis warm-up."""
     config = _base_config()
     config.update(
@@ -1188,9 +1274,13 @@ async def test_async_update_data_masks_average_threshold_until_enabled(fake_hass
 
     await coordinator._async_update_data()
 
-    decision_input = coordinator.decision_engine.evaluate_charging_decision.await_args.args[0]
+    decision_input = (
+        coordinator.decision_engine.evaluate_charging_decision.await_args.args[0]
+    )
     assert decision_input["average_threshold"] is None
-    assert decision_input["average_threshold_candidate"] == pytest.approx(0.05, rel=1e-6)
+    assert decision_input["average_threshold_candidate"] == pytest.approx(
+        0.05, rel=1e-6
+    )
     assert decision_input["average_threshold_active"] is False
 
 
@@ -1212,7 +1302,9 @@ def test_check_minimum_charging_window_respects_duration(fake_hass, monkeypatch)
     # Only one low-price interval (30 minutes) < required duration
     intervals = [
         _make_price_interval(base_time + timedelta(minutes=0), 60.0),
-        _make_price_interval(base_time + timedelta(minutes=30), 120.0),  # high price breaks window
+        _make_price_interval(
+            base_time + timedelta(minutes=30), 120.0
+        ),  # high price breaks window
     ]
     prices_today = {"BE": intervals}
 
@@ -1269,7 +1361,9 @@ def test_minimum_charging_window_uses_permissive_threshold(fake_hass, monkeypatc
     assert permissive_window is True
 
 
-def test_check_minimum_charging_window_single_interval_too_short(fake_hass, monkeypatch):
+def test_check_minimum_charging_window_single_interval_too_short(
+    fake_hass, monkeypatch
+):
     """Single 15-minute low-price interval should not satisfy 2-hour requirement."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -1399,7 +1493,8 @@ async def test_manual_override_recomputes_gridpoint(fake_hass, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_manual_car_wait_override_recomputes_stale_car_grid_usage(
-    fake_hass, monkeypatch,
+    fake_hass,
+    monkeypatch,
 ):
     """An active car wait override must keep derived grid usage clamped to zero."""
     base_time = datetime(2025, 6, 1, 6, 0, tzinfo=timezone.utc)
@@ -1518,7 +1613,9 @@ async def test_arbitrage_mode_persists_across_restart(fake_hass, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_runtime_modes_migrate_from_legacy_manual_override_store(fake_hass, monkeypatch):
+async def test_runtime_modes_migrate_from_legacy_manual_override_store(
+    fake_hass, monkeypatch
+):
     """Legacy runtime-mode entries should move out of the manual override store."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
@@ -1557,7 +1654,10 @@ async def test_runtime_modes_migrate_from_legacy_manual_override_store(fake_hass
     assert coordinator.get_negative_buy_mode_state()["reason"] == "legacy negative buy"
     assert coordinator.get_manual_override("arbitrage_mode") is None
     assert coordinator.get_manual_override("negative_buy_mode") is None
-    assert coordinator.get_manual_override("car_grid_charging")["reason"] == "legacy car override"
+    assert (
+        coordinator.get_manual_override("car_grid_charging")["reason"]
+        == "legacy car override"
+    )
     assert "arbitrage_mode" in runtime_store.data["modes"]
     assert "negative_buy_mode" in runtime_store.data["modes"]
     assert "arbitrage_mode" not in legacy_store.data["overrides"]
@@ -1688,7 +1788,9 @@ def test_arbitrage_mode_plan_honors_configured_export_cap(fake_hass, monkeypatch
     assert plan["configured_export_cap_w"] == 4500
 
 
-def test_arbitrage_mode_plan_derives_threshold_from_selected_slots(fake_hass, monkeypatch):
+def test_arbitrage_mode_plan_derives_threshold_from_selected_slots(
+    fake_hass, monkeypatch
+):
     """The arbitrage threshold should be the lowest price among the selected top slots."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -1745,7 +1847,9 @@ def test_arbitrage_mode_plan_derives_threshold_from_selected_slots(fake_hass, mo
     assert "arbitrage threshold 0.080€/kWh" in plan["reason"]
 
 
-def test_arbitrage_mode_plan_stops_when_fleet_net_energy_is_at_reserve(fake_hass, monkeypatch):
+def test_arbitrage_mode_plan_stops_when_fleet_net_energy_is_at_reserve(
+    fake_hass, monkeypatch
+):
     """Batteries below reserve must offset those above it when computing arbitrage energy."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -1858,7 +1962,9 @@ def test_arbitrage_mode_plan_uses_net_fleet_headroom_when_some_batteries_are_bel
     assert plan["export_power"] == 2000
 
 
-def test_arbitrage_mode_plan_activates_during_current_selected_window(fake_hass, monkeypatch):
+def test_arbitrage_mode_plan_activates_during_current_selected_window(
+    fake_hass, monkeypatch
+):
     """Export should activate when the current price is at or above the arbitrage threshold."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -1911,11 +2017,16 @@ def test_arbitrage_mode_plan_activates_during_current_selected_window(fake_hass,
     assert plan["selected_slots_count"] == 4
     assert plan["arbitrage_price_threshold"] == pytest.approx(0.11, rel=1e-6)
     assert plan["current_slot_price"] == pytest.approx(0.12, rel=1e-6)
-    assert "Dumping battery to grid until 20% across the selected high-price windows" not in plan["reason"]
+    assert (
+        "Dumping battery to grid until 20% across the selected high-price windows"
+        not in plan["reason"]
+    )
     assert "Arbitrage export active at 0.120€/kWh" in plan["reason"]
 
 
-def test_arbitrage_mode_plan_falls_back_when_total_eligible_duration_is_insufficient(fake_hass, monkeypatch):
+def test_arbitrage_mode_plan_falls_back_when_total_eligible_duration_is_insufficient(
+    fake_hass, monkeypatch
+):
     """If there are too few eligible slots, the planner should still arm the best available threshold."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -1971,7 +2082,9 @@ def test_arbitrage_mode_plan_falls_back_when_total_eligible_duration_is_insuffic
     assert "using the best available slots" in plan["reason"]
 
 
-def test_arbitrage_mode_plan_uses_whole_slots_without_partial_truncation(fake_hass, monkeypatch):
+def test_arbitrage_mode_plan_uses_whole_slots_without_partial_truncation(
+    fake_hass, monkeypatch
+):
     """The planner should select whole slots rather than truncating the last interval."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -2022,7 +2135,9 @@ def test_arbitrage_mode_plan_uses_whole_slots_without_partial_truncation(fake_ha
     assert dt_util.as_utc(parsed_end) == base_time + timedelta(hours=1, minutes=15)
 
 
-def test_arbitrage_mode_plan_targets_same_day_deadline_before_cutoff(fake_hass, monkeypatch):
+def test_arbitrage_mode_plan_targets_same_day_deadline_before_cutoff(
+    fake_hass, monkeypatch
+):
     """Before the cutoff, arbitrage planning should target today's configured deadline."""
     base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -2109,7 +2224,9 @@ def test_arbitrage_mode_plan_rolls_to_next_day_after_cutoff(fake_hass, monkeypat
         for slot in range(4)
     ]
     after_next_deadline = [
-        _make_price_interval(base_time + timedelta(days=1, hours=1, minutes=15 * slot), 150.0)
+        _make_price_interval(
+            base_time + timedelta(days=1, hours=1, minutes=15 * slot), 150.0
+        )
         for slot in range(4)
     ]
 
@@ -2131,13 +2248,19 @@ def test_arbitrage_mode_plan_rolls_to_next_day_after_cutoff(fake_hass, monkeypat
     parsed_deadline = dt_util.parse_datetime(plan["deadline"])
     parsed_last_end = dt_util.parse_datetime(plan["selected_slots"][-1]["end"])
     assert dt_util.as_local(parsed_deadline).hour == 9
-    assert dt_util.as_utc(parsed_deadline) == datetime(2025, 10, 15, 9, 0, tzinfo=timezone.utc)
+    assert dt_util.as_utc(parsed_deadline) == datetime(
+        2025, 10, 15, 9, 0, tzinfo=timezone.utc
+    )
     assert parsed_last_end <= parsed_deadline
 
 
-def test_arbitrage_mode_deadline_skips_nonexistent_local_hour_on_dst_start(fake_hass, monkeypatch):
+def test_arbitrage_mode_deadline_skips_nonexistent_local_hour_on_dst_start(
+    fake_hass, monkeypatch
+):
     """A missing local cutoff hour should move to the first valid instant after the gap."""
-    base_time = datetime(2026, 3, 29, 0, 30, tzinfo=timezone.utc)  # 01:30 local Brussels
+    base_time = datetime(
+        2026, 3, 29, 0, 30, tzinfo=timezone.utc
+    )  # 01:30 local Brussels
     _freeze_time(monkeypatch, base_time)
 
     config = _base_config()
@@ -2158,9 +2281,13 @@ def test_arbitrage_mode_deadline_skips_nonexistent_local_hour_on_dst_start(fake_
     assert deadline_local.minute == 0
 
 
-def test_arbitrage_mode_deadline_uses_first_ambiguous_local_hour_on_dst_end(fake_hass, monkeypatch):
+def test_arbitrage_mode_deadline_uses_first_ambiguous_local_hour_on_dst_end(
+    fake_hass, monkeypatch
+):
     """A repeated local cutoff hour should resolve to the earliest matching instant."""
-    base_time = datetime(2026, 10, 24, 23, 30, tzinfo=timezone.utc)  # 01:30 local Brussels
+    base_time = datetime(
+        2026, 10, 24, 23, 30, tzinfo=timezone.utc
+    )  # 01:30 local Brussels
     _freeze_time(monkeypatch, base_time)
 
     config = _base_config()
@@ -2215,7 +2342,9 @@ def test_select_buy_slots_picks_cheapest_within_deadline(fake_hass, monkeypatch)
         assert slot["price"] == pytest.approx(-0.10, rel=1e-6)
 
 
-def test_select_buy_slots_returns_none_when_no_slot_below_threshold(fake_hass, monkeypatch):
+def test_select_buy_slots_returns_none_when_no_slot_below_threshold(
+    fake_hass, monkeypatch
+):
     """select_buy_slots should return None when every slot is above the maximum price."""
     base_time = datetime(2025, 10, 14, 6, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -2264,7 +2393,9 @@ def test_negative_buy_plan_disabled_when_mode_off(fake_hass, monkeypatch):
     assert "disabled" in plan["reason"].lower()
 
 
-def test_negative_buy_plan_allows_import_without_battery_details(fake_hass, monkeypatch):
+def test_negative_buy_plan_allows_import_without_battery_details(
+    fake_hass, monkeypatch
+):
     """Negative-buy is a grid import request and should not require battery details."""
     base_time = datetime(2025, 10, 14, 6, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -2308,7 +2439,9 @@ def test_negative_buy_plan_allows_import_without_battery_details(fake_hass, monk
     assert "Negative Arbitrage Buy active" in plan["reason"]
 
 
-def test_negative_buy_plan_calculates_required_energy_and_duration(fake_hass, monkeypatch):
+def test_negative_buy_plan_calculates_required_energy_and_duration(
+    fake_hass, monkeypatch
+):
     """When armed, the planner should expose full-battery headroom but not gate by it."""
     base_time = datetime(2025, 10, 14, 6, 0, tzinfo=timezone.utc)
     _freeze_time(monkeypatch, base_time)
@@ -2478,10 +2611,12 @@ def test_forecast_summary_uses_price_timeline(fake_hass, monkeypatch):
     _freeze_time(monkeypatch, base_time)
 
     config = _base_config()
-    config.update({
-        "price_adjustment_multiplier": 1.0,
-        "price_adjustment_offset": 0.0,
-    })
+    config.update(
+        {
+            "price_adjustment_multiplier": 1.0,
+            "price_adjustment_offset": 0.0,
+        }
+    )
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
     intervals = []
@@ -2493,9 +2628,7 @@ def test_forecast_summary_uses_price_timeline(fake_hass, monkeypatch):
     prices_today = {"BE": intervals}
 
     average = coordinator._calculate_average_threshold(prices_today, None, None)
-    coordinator._check_minimum_charging_window(
-        prices_today, None, None, None, average
-    )
+    coordinator._check_minimum_charging_window(prices_today, None, None, None, average)
 
     summary = coordinator._calculate_forecast_summary(
         prices_today,
@@ -2631,7 +2764,9 @@ async def test_service_defaults_to_single_entry(fake_hass, monkeypatch):
 
     _register_services_once(fake_hass)
 
-    handler = fake_hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
+    handler = fake_hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)][
+        "handler"
+    ]
 
     call = FakeServiceCall(
         {
@@ -2660,7 +2795,9 @@ async def test_service_requires_entry_when_multiple(fake_hass, monkeypatch):
 
     _register_services_once(fake_hass)
 
-    handler = fake_hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
+    handler = fake_hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)][
+        "handler"
+    ]
 
     with pytest.raises(HomeAssistantError):
         await handler(
@@ -2687,7 +2824,9 @@ async def test_service_accepts_explicit_entry(fake_hass, monkeypatch):
 
     _register_services_once(fake_hass)
 
-    handler = fake_hass.services.registered[(DOMAIN, SERVICE_CLEAR_MANUAL_OVERRIDE)]["handler"]
+    handler = fake_hass.services.registered[(DOMAIN, SERVICE_CLEAR_MANUAL_OVERRIDE)][
+        "handler"
+    ]
 
     await handler(
         FakeServiceCall(
@@ -2698,7 +2837,9 @@ async def test_service_accepts_explicit_entry(fake_hass, monkeypatch):
         )
     )
 
-    coordinator.async_clear_manual_override.assert_awaited_once_with(MANUAL_OVERRIDE_TARGET_CAR)
+    coordinator.async_clear_manual_override.assert_awaited_once_with(
+        MANUAL_OVERRIDE_TARGET_CAR
+    )
     coordinator.async_request_refresh.assert_awaited_once()
 
 
@@ -2728,7 +2869,9 @@ async def test_transport_cost_lookup_uses_local_hour(fake_hass, monkeypatch):
         fake_history_module.get_significant_states = fake_history
         fake_recorder.history = fake_history_module
 
-        monkeypatch.setitem(sys.modules, "homeassistant.components.recorder", fake_recorder)
+        monkeypatch.setitem(
+            sys.modules, "homeassistant.components.recorder", fake_recorder
+        )
         monkeypatch.setitem(
             sys.modules,
             "homeassistant.components.recorder.history",
@@ -2749,7 +2892,8 @@ async def test_transport_cost_lookup_uses_local_hour(fake_hass, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_transport_cost_lookup_refreshes_fallback_when_current_cost_changes(
-    fake_hass, monkeypatch,
+    fake_hass,
+    monkeypatch,
 ):
     """Fallback transport lookups should not stay stale for the full cache TTL."""
     base_time = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
@@ -2811,9 +2955,13 @@ def test_resolve_transport_cost_matches_local_week_across_dst(fake_hass, monkeyp
         dt_util.set_default_time_zone(original_tz)
 
 
-def test_resolve_builtin_transport_cost_uses_schedule_for_future_boundary(fake_hass, monkeypatch):
+def test_resolve_builtin_transport_cost_uses_schedule_for_future_boundary(
+    fake_hass, monkeypatch
+):
     """A near-future boundary interval must not inherit the current P1 tariff code."""
-    reference_now = datetime(2026, 4, 6, 19, 55, tzinfo=timezone.utc)  # 21:55 local Brussels
+    reference_now = datetime(
+        2026, 4, 6, 19, 55, tzinfo=timezone.utc
+    )  # 21:55 local Brussels
     _freeze_time(monkeypatch, reference_now)
 
     config = _base_config()
@@ -2832,7 +2980,9 @@ def test_resolve_builtin_transport_cost_uses_schedule_for_future_boundary(fake_h
 
     try:
         result = coordinator._resolve_builtin_transport_cost(
-            datetime(2026, 4, 6, 20, 0, tzinfo=timezone.utc),  # 22:00 local -> night tariff
+            datetime(
+                2026, 4, 6, 20, 0, tzinfo=timezone.utc
+            ),  # 22:00 local -> night tariff
             reference_now=reference_now,
         )
     finally:
@@ -2889,7 +3039,9 @@ async def test_fetch_all_data_populates_builtin_transport_cost(fake_hass, monkey
     assert data["transport_cost"] == pytest.approx(expected, rel=1e-6)
 
 
-def test_build_price_analysis_overrides_uses_interval_specific_transport(fake_hass, monkeypatch):
+def test_build_price_analysis_overrides_uses_interval_specific_transport(
+    fake_hass, monkeypatch
+):
     """Current and next price should use their own tariff slot transport costs."""
     reference_now = datetime(2026, 4, 6, 19, 55, tzinfo=timezone.utc)  # 21:55 Brussels
     _freeze_time(monkeypatch, reference_now)
@@ -2907,10 +3059,26 @@ def test_build_price_analysis_overrides_uses_interval_specific_transport(fake_ha
 
     prices_today = {
         "BE": [
-            {"start": "2026-04-06T19:45:00+00:00", "end": "2026-04-06T20:00:00+00:00", "value": 100.0},
-            {"start": "2026-04-06T20:00:00+00:00", "end": "2026-04-06T20:15:00+00:00", "value": 100.0},
-            {"start": "2026-04-06T21:00:00+00:00", "end": "2026-04-06T21:15:00+00:00", "value": 150.0},
-            {"start": "2026-04-06T18:00:00+00:00", "end": "2026-04-06T18:15:00+00:00", "value": 50.0},
+            {
+                "start": "2026-04-06T19:45:00+00:00",
+                "end": "2026-04-06T20:00:00+00:00",
+                "value": 100.0,
+            },
+            {
+                "start": "2026-04-06T20:00:00+00:00",
+                "end": "2026-04-06T20:15:00+00:00",
+                "value": 100.0,
+            },
+            {
+                "start": "2026-04-06T21:00:00+00:00",
+                "end": "2026-04-06T21:15:00+00:00",
+                "value": 150.0,
+            },
+            {
+                "start": "2026-04-06T18:00:00+00:00",
+                "end": "2026-04-06T18:15:00+00:00",
+                "value": 50.0,
+            },
         ]
     }
 
@@ -2950,7 +3118,6 @@ def test_build_price_analysis_overrides_uses_interval_specific_transport(fake_ha
     assert overrides["transport_cost"] == pytest.approx(day_transport, rel=1e-6)
 
 
-
 # ---------------------------------------------------------------------------
 # Solar Forecast Caching (_resolve_solar_forecast) Tests
 # ---------------------------------------------------------------------------
@@ -2971,7 +3138,9 @@ async def test_solar_forecast_after_start_hour_caches_value(fake_hass, monkeypat
 
     fake_hass.states.set("sensor.energy_production_tomorrow", "15.5")
 
-    result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    result = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert result == pytest.approx(15.5)
     assert coordinator._cached_solar_forecast == pytest.approx(15.5)
     assert coordinator._solar_forecast_cache_date == fake_now.date()
@@ -2992,24 +3161,34 @@ async def test_solar_forecast_cache_refreshes_hourly(fake_hass, monkeypatch):
     # First call at 20:00 → caches 10.0
     fake_hass.states.set("sensor.energy_production_tomorrow", "10.0")
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 15, 20, 0, tzinfo=tz))
-    result1 = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    result1 = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert result1 == pytest.approx(10.0)
 
     # Same hour, entity updated → still returns cached value
     fake_hass.states.set("sensor.energy_production_tomorrow", "12.0")
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 15, 20, 30, tzinfo=tz))
-    result2 = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    monkeypatch.setattr(
+        dt_util, "now", lambda: datetime(2025, 6, 15, 20, 30, tzinfo=tz)
+    )
+    result2 = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert result2 == pytest.approx(10.0)
 
     # Next hour → cache refreshes
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 15, 21, 0, tzinfo=tz))
-    result3 = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    result3 = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert result3 == pytest.approx(12.0)
     assert coordinator._solar_forecast_cache_hour == 21
 
 
 @pytest.mark.asyncio
-async def test_solar_forecast_before_start_hour_uses_today_entity(fake_hass, monkeypatch):
+async def test_solar_forecast_before_start_hour_uses_today_entity(
+    fake_hass, monkeypatch
+):
     """Before start hour with 'today' entity configured, should use today's value."""
     config = _base_config()
     config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
@@ -3023,13 +3202,17 @@ async def test_solar_forecast_before_start_hour_uses_today_entity(fake_hass, mon
     fake_hass.states.set("sensor.energy_production_tomorrow", "8.0")  # wrong day!
     fake_hass.states.set("sensor.energy_production_today", "15.0")  # correct day
 
-    result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    result = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert result == pytest.approx(15.0)
     assert coordinator._solar_forecast_source == "today_live"
 
 
 @pytest.mark.asyncio
-async def test_get_state_value_parses_localized_or_unit_appended_numbers(fake_hass, monkeypatch):
+async def test_get_state_value_parses_localized_or_unit_appended_numbers(
+    fake_hass, monkeypatch
+):
     """Numeric parsing should tolerate decimal comma and unit suffixes."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
 
@@ -3044,7 +3227,9 @@ async def test_get_state_value_parses_localized_or_unit_appended_numbers(fake_ha
 
 
 @pytest.mark.asyncio
-async def test_solar_forecast_before_start_hour_uses_cache_when_no_today(fake_hass, monkeypatch):
+async def test_solar_forecast_before_start_hour_uses_cache_when_no_today(
+    fake_hass, monkeypatch
+):
     """Before start hour without today entity, should use cached value from previous evening."""
     config = _base_config()
     config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
@@ -3062,13 +3247,17 @@ async def test_solar_forecast_before_start_hour_uses_cache_when_no_today(fake_ha
     # Now it's 3 AM on June 16 — before start hour, no today entity
     fake_hass.states.set("sensor.energy_production_tomorrow", "9.0")  # wrong day value
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 3, 0, tzinfo=tz))
-    result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    result = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert result == pytest.approx(14.0)  # uses cached, not live
     assert coordinator._solar_forecast_source == "overnight_cache"
 
 
 @pytest.mark.asyncio
-async def test_solar_forecast_before_start_hour_no_cache_no_today_returns_none(fake_hass, monkeypatch):
+async def test_solar_forecast_before_start_hour_no_cache_no_today_returns_none(
+    fake_hass, monkeypatch
+):
     """Before start hour with no cache and no today entity should return None."""
     config = _base_config()
     config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
@@ -3080,12 +3269,16 @@ async def test_solar_forecast_before_start_hour_no_cache_no_today_returns_none(f
 
     fake_hass.states.set("sensor.energy_production_tomorrow", "9.0")  # wrong day
 
-    result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    result = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert result is None
 
 
 @pytest.mark.asyncio
-async def test_solar_forecast_before_start_hour_today_unavailable_falls_to_cache(fake_hass, monkeypatch):
+async def test_solar_forecast_before_start_hour_today_unavailable_falls_to_cache(
+    fake_hass, monkeypatch
+):
     """Today entity configured but unavailable → fall back to cache."""
     config = _base_config()
     config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
@@ -3102,12 +3295,16 @@ async def test_solar_forecast_before_start_hour_today_unavailable_falls_to_cache
 
     # 3 AM - today entity not set (unavailable)
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 3, 0, tzinfo=tz))
-    result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    result = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert result == pytest.approx(13.0)  # cached value
 
 
 @pytest.mark.asyncio
-async def test_solar_forecast_entity_unavailable_after_start_hour(fake_hass, monkeypatch):
+async def test_solar_forecast_entity_unavailable_after_start_hour(
+    fake_hass, monkeypatch
+):
     """After start hour with entity unavailable and no cache → returns None."""
     config = _base_config()
     config[CONF_SOLAR_FORECAST_ENTITY_TOMORROW] = "sensor.energy_production_tomorrow"
@@ -3118,7 +3315,9 @@ async def test_solar_forecast_entity_unavailable_after_start_hour(fake_hass, mon
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 15, 21, 0, tzinfo=tz))
 
     # Entity not set → _get_state_value returns None
-    result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    result = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert result is None
 
 
@@ -3137,23 +3336,35 @@ async def test_solar_forecast_after_start_hour_ignores_previous_day_cache_if_una
     # Populate previous-day cache
     fake_hass.states.set("sensor.energy_production_tomorrow", "16.0")
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 15, 22, 0, tzinfo=tz))
-    cached = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    cached = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert cached == pytest.approx(16.0)
-    assert coordinator._solar_forecast_cache_date == datetime(2025, 6, 15, tzinfo=tz).date()
+    assert (
+        coordinator._solar_forecast_cache_date
+        == datetime(2025, 6, 15, tzinfo=tz).date()
+    )
 
     # New day after start hour: live forecast unavailable -> stale cache must be ignored
     fake_hass.states.set("sensor.energy_production_tomorrow", "unknown")
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 20, 0, tzinfo=tz))
-    stale_result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    stale_result = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert stale_result is None
     assert coordinator._cached_solar_forecast is None
-    assert coordinator._solar_forecast_cache_date == datetime(2025, 6, 16, tzinfo=tz).date()
+    assert (
+        coordinator._solar_forecast_cache_date
+        == datetime(2025, 6, 16, tzinfo=tz).date()
+    )
     assert coordinator._solar_forecast_cache_hour == 20
 
     # Once live data returns, cache should refresh normally
     fake_hass.states.set("sensor.energy_production_tomorrow", "18.0")
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 21, 0, tzinfo=tz))
-    refreshed = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    refreshed = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert refreshed == pytest.approx(18.0)
 
 
@@ -3174,16 +3385,24 @@ async def test_solar_forecast_cache_persists_through_midnight(fake_hass, monkeyp
 
     # 00:30 next day - no today entity
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 0, 30, tzinfo=tz))
-    result = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    result = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert result == pytest.approx(16.0)
 
     # 19:59 next day — still before start hour, still uses cache
-    monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 19, 59, tzinfo=tz))
-    result2 = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    monkeypatch.setattr(
+        dt_util, "now", lambda: datetime(2025, 6, 16, 19, 59, tzinfo=tz)
+    )
+    result2 = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert result2 == pytest.approx(16.0)
 
     # 20:00 next day — after start hour, should refresh cache with new value
     fake_hass.states.set("sensor.energy_production_tomorrow", "20.0")
     monkeypatch.setattr(dt_util, "now", lambda: datetime(2025, 6, 16, 20, 0, tzinfo=tz))
-    result3 = await coordinator._resolve_solar_forecast("sensor.energy_production_tomorrow")
+    result3 = await coordinator._resolve_solar_forecast(
+        "sensor.energy_production_tomorrow"
+    )
     assert result3 == pytest.approx(20.0)

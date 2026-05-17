@@ -6,6 +6,7 @@ underlying ``_manual_overrides`` dict and storage handle remain on the
 coordinator so tests and sensors that read those attributes keep
 working.
 """
+
 from __future__ import annotations
 
 import logging
@@ -87,7 +88,9 @@ class ManualOverrideManager:
             if isinstance(err, (KeyboardInterrupt, SystemExit)):
                 raise
             _LOGGER.warning(
-                "Unable to load manual overrides for %s: %s", coordinator.entry.entry_id, err
+                "Unable to load manual overrides for %s: %s",
+                coordinator.entry.entry_id,
+                err,
             )
             return
 
@@ -144,10 +147,14 @@ class ManualOverrideManager:
                 "value": override.get("value"),
                 "reason": override.get("reason"),
                 "set_at": self.serialize_stored_datetime(override.get("set_at")),
-                "expires_at": self.serialize_stored_datetime(override.get("expires_at")),
+                "expires_at": self.serialize_stored_datetime(
+                    override.get("expires_at")
+                ),
             }
 
-        await coordinator._manual_override_store.async_save({"overrides": overrides_to_save})
+        await coordinator._manual_override_store.async_save(
+            {"overrides": overrides_to_save}
+        )
 
     def schedule_persist(self) -> None:
         """Persist manual overrides without blocking sync callers."""
@@ -263,21 +270,29 @@ class ManualOverrideManager:
                 reason_key = f"{coordinator_key}_reason"
                 existing_reason = decision.get(reason_key)
                 if existing_reason:
-                    decision[reason_key] = f"{existing_reason} (override: {manual_reason})"
+                    decision[reason_key] = (
+                        f"{existing_reason} (override: {manual_reason})"
+                    )
                 else:
                     decision[reason_key] = f"Manual override: {manual_reason}"
 
                 overrides_info[coordinator_key] = {
                     "value": override_value,
                     "reason": manual_reason,
-                    "set_at": override.get("set_at").isoformat() if override.get("set_at") else None,
+                    "set_at": (
+                        override.get("set_at").isoformat()
+                        if override.get("set_at")
+                        else None
+                    ),
                     "expires_at": expires_at.isoformat() if expires_at else None,
                 }
 
             else:
                 if not manual_reason or manual_reason == "Manual override":
                     manual_reason = (
-                        "Manual override to charge" if override_value else "Manual override to wait"
+                        "Manual override to charge"
+                        if override_value
+                        else "Manual override to wait"
                     )
 
                 previous_value = decision.get(coordinator_key)
@@ -291,14 +306,20 @@ class ManualOverrideManager:
                 reason_key = f"{coordinator_key}_reason"
                 existing_reason = decision.get(reason_key)
                 if existing_reason:
-                    decision[reason_key] = f"{existing_reason} (override: {manual_reason})"
+                    decision[reason_key] = (
+                        f"{existing_reason} (override: {manual_reason})"
+                    )
                 else:
                     decision[reason_key] = f"Manual override: {manual_reason}"
 
                 overrides_info[coordinator_key] = {
                     "value": override_value,
                     "reason": manual_reason,
-                    "set_at": override.get("set_at").isoformat() if override.get("set_at") else None,
+                    "set_at": (
+                        override.get("set_at").isoformat()
+                        if override.get("set_at")
+                        else None
+                    ),
                     "expires_at": expires_at.isoformat() if expires_at else None,
                 }
 

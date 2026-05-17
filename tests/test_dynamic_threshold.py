@@ -1,7 +1,10 @@
 """Tests for the dynamic threshold analyser."""
+
 import pytest
 
-from custom_components.electricity_planner.dynamic_threshold import DynamicThresholdAnalyzer
+from custom_components.electricity_planner.dynamic_threshold import (
+    DynamicThresholdAnalyzer,
+)
 
 
 def test_price_above_threshold_short_circuits():

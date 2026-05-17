@@ -4,6 +4,7 @@ Extracted from ``coordinator.py`` as a standalone collaborator. Evaluates
 whether the upcoming price timeline contains a contiguous low-price window
 long enough to justify starting a new car charging session.
 """
+
 from __future__ import annotations
 
 import logging
@@ -53,7 +54,9 @@ class ChargingWindowValidator:
         if coordinator._should_use_average_threshold(average_threshold):
             base_threshold = average_threshold
         else:
-            base_threshold = coordinator.config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
+            base_threshold = coordinator.config.get(
+                CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD
+            )
 
         try:
             multiplier_value = float(permissive_multiplier)
@@ -83,8 +86,8 @@ class ChargingWindowValidator:
 
         coordinator._last_price_timeline = timeline
         coordinator._last_price_timeline_generated_at = now
-        coordinator._last_price_timeline_data_hash = coordinator._compute_price_data_hash(
-            prices_today, prices_tomorrow
+        coordinator._last_price_timeline_data_hash = (
+            coordinator._compute_price_data_hash(prices_today, prices_tomorrow)
         )
 
         current_idx: int | None = None
@@ -96,7 +99,9 @@ class ChargingWindowValidator:
                 break
 
         if current_idx is None:
-            _LOGGER.debug("No active Nord Pool interval covering current time %s", now.isoformat())
+            _LOGGER.debug(
+                "No active Nord Pool interval covering current time %s", now.isoformat()
+            )
             return False
 
         min_duration_hours = coordinator.config.get(
@@ -137,7 +142,9 @@ class ChargingWindowValidator:
         for next_idx in range(current_idx + 1, len(timeline)):
             next_start, next_end, next_price = timeline[next_idx]
 
-            if next_start > previous_end + timedelta(seconds=PRICE_INTERVAL_GAP_TOLERANCE_SECONDS):
+            if next_start > previous_end + timedelta(
+                seconds=PRICE_INTERVAL_GAP_TOLERANCE_SECONDS
+            ):
                 _LOGGER.debug(
                     "Charging window broken by gap between %s and %s",
                     previous_end.isoformat(),

@@ -1,5 +1,7 @@
 """Config flow for Electricity Planner integration."""
+
 from __future__ import annotations
+
 import logging
 from typing import Any
 
@@ -10,124 +12,124 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
 
 from .const import (
-    DOMAIN,
-    CONF_PHASE_MODE,
-    PHASE_MODE_SINGLE,
-    PHASE_MODE_THREE,
-    CONF_PHASES,
-    PHASE_IDS,
-    DEFAULT_PHASE_NAMES,
-    CONF_PHASE_NAME,
-    CONF_PHASE_SOLAR_ENTITY,
-    CONF_PHASE_CONSUMPTION_ENTITY,
-    CONF_PHASE_CAR_ENTITY,
-    CONF_PHASE_GRID_POWER_ENTITY,
-    CONF_PHASE_BATTERY_POWER_ENTITY,
-    CONF_NORDPOOL_CONFIG_ENTRY,
-    CONF_CURRENT_PRICE_ENTITY,
-    CONF_HIGHEST_PRICE_ENTITY,
-    CONF_LOWEST_PRICE_ENTITY,
-    CONF_NEXT_PRICE_ENTITY,
-    CONF_BATTERY_SOC_ENTITIES,
+    CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+    CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
+    CONF_BASE_GRID_SETPOINT,
     CONF_BATTERY_CAPACITIES,
     CONF_BATTERY_PHASE_ASSIGNMENTS,
-    CONF_ARBITRAGE_MODE_RESERVE_SOC,
-    CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
-    CONF_SOLAR_PRODUCTION_ENTITY,
-    CONF_HOUSE_CONSUMPTION_ENTITY,
+    CONF_BATTERY_SOC_ENTITIES,
     CONF_CAR_CHARGING_POWER_ENTITY,
-    CONF_MONTHLY_GRID_PEAK_ENTITY,
-    CONF_TRANSPORT_COST_ENTITY,
-    CONF_GRID_POWER_ENTITY,
-    CONF_P1_TARIFF_ENTITY,
-    CONF_TRANSPORT_COST_DAY,
-    CONF_TRANSPORT_COST_NIGHT,
-    CONF_ENERGY_TAX_ACCIJNS,
-    CONF_ENERGY_TAX_BIJDRAGE,
+    CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+    CONF_CAR_USE_BATTERY_ARBITRAGE,
+    CONF_CURRENT_PRICE_ENTITY,
+    CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+    CONF_EMERGENCY_SOC_THRESHOLD,
     CONF_ENERGY_COST_GSC,
     CONF_ENERGY_COST_WKK,
-    CONF_MIN_SOC_THRESHOLD,
-    CONF_MAX_SOC_THRESHOLD,
-    CONF_PRICE_THRESHOLD,
-    CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
-    CONF_NEGATIVE_BUY_THRESHOLD,
-    CONF_EMERGENCY_SOC_THRESHOLD,
-    CONF_VERY_LOW_PRICE_THRESHOLD,
-    CONF_SIGNIFICANT_SOLAR_THRESHOLD,
+    CONF_ENERGY_TAX_ACCIJNS,
+    CONF_ENERGY_TAX_BIJDRAGE,
+    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    CONF_FEEDIN_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_PRICE_THRESHOLD,
-    CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
-    CONF_SOLAR_FORECAST_TODAY_ENTITY,
-    CONF_SOLAR_FORECAST_START_HOUR,
-    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
-    CONF_MAX_SOC_THRESHOLD_SUNNY,
-    CONF_MAX_SOC_THRESHOLD_SOLAR,
+    CONF_GRID_POWER_ENTITY,
+    CONF_HIGHEST_PRICE_ENTITY,
+    CONF_HOUSE_CONSUMPTION_ENTITY,
+    CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    CONF_INVERTER_EXPORT_DEADBAND,
+    CONF_INVERTER_EXPORT_LIMIT,
+    CONF_LOWEST_PRICE_ENTITY,
     CONF_MAX_BATTERY_POWER,
     CONF_MAX_CAR_POWER,
     CONF_MAX_GRID_POWER,
-    CONF_MIN_CAR_CHARGING_THRESHOLD,
-    CONF_PREDICTIVE_CHARGING_MIN_SOC,
-    CONF_BASE_GRID_SETPOINT,
     CONF_MAX_INVERTER_POWER,
-    CONF_INVERTER_EXPORT_LIMIT,
-    CONF_INVERTER_EXPORT_DEADBAND,
-    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
-    CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
-    CONF_USE_DYNAMIC_THRESHOLD,
-    CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
-    CONF_USE_AVERAGE_THRESHOLD,
+    CONF_MAX_SOC_THRESHOLD,
+    CONF_MAX_SOC_THRESHOLD_SOLAR,
+    CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_MIN_CAR_CHARGING_DURATION,
-    CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
-    CONF_CAR_USE_BATTERY_ARBITRAGE,
+    CONF_MIN_CAR_CHARGING_THRESHOLD,
+    CONF_MIN_SOC_THRESHOLD,
+    CONF_MONTHLY_GRID_PEAK_ENTITY,
+    CONF_NEGATIVE_BUY_THRESHOLD,
+    CONF_NEXT_PRICE_ENTITY,
+    CONF_NORDPOOL_CONFIG_ENTRY,
+    CONF_P1_TARIFF_ENTITY,
+    CONF_PHASE_BATTERY_POWER_ENTITY,
+    CONF_PHASE_CAR_ENTITY,
+    CONF_PHASE_CONSUMPTION_ENTITY,
+    CONF_PHASE_GRID_POWER_ENTITY,
+    CONF_PHASE_MODE,
+    CONF_PHASE_NAME,
+    CONF_PHASE_SOLAR_ENTITY,
+    CONF_PHASES,
+    CONF_PREDICTIVE_CHARGING_MIN_SOC,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
-    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
-    CONF_FEEDIN_ADJUSTMENT_OFFSET,
-    CONF_SOC_PRICE_MULTIPLIER_MAX,
+    CONF_PRICE_THRESHOLD,
+    CONF_SIGNIFICANT_SOLAR_THRESHOLD,
     CONF_SOC_BUFFER_TARGET,
-    DEFAULT_MIN_SOC,
-    DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
+    CONF_SOC_PRICE_MULTIPLIER_MAX,
+    CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
+    CONF_SOLAR_FORECAST_START_HOUR,
+    CONF_SOLAR_FORECAST_TODAY_ENTITY,
+    CONF_SOLAR_PRODUCTION_ENTITY,
+    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+    CONF_TRANSPORT_COST_DAY,
+    CONF_TRANSPORT_COST_ENTITY,
+    CONF_TRANSPORT_COST_NIGHT,
+    CONF_USE_AVERAGE_THRESHOLD,
+    CONF_USE_DYNAMIC_THRESHOLD,
+    CONF_VERY_LOW_PRICE_THRESHOLD,
     DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
-    DEFAULT_NEGATIVE_BUY_THRESHOLD,
-    DEFAULT_MAX_SOC,
-    DEFAULT_PRICE_THRESHOLD,
+    DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER,
+    DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
+    DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+    DEFAULT_CAR_USE_BATTERY_ARBITRAGE,
+    DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_EMERGENCY_SOC,
-    DEFAULT_VERY_LOW_PRICE_THRESHOLD,
-    DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
+    DEFAULT_ENERGY_COST_GSC,
+    DEFAULT_ENERGY_COST_WKK,
+    DEFAULT_ENERGY_TAX_ACCIJNS,
+    DEFAULT_ENERGY_TAX_BIJDRAGE,
+    DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
+    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    DEFAULT_INVERTER_EXPORT_DEADBAND,
+    DEFAULT_INVERTER_EXPORT_LIMIT,
     DEFAULT_MAX_BATTERY_POWER,
     DEFAULT_MAX_CAR_POWER,
     DEFAULT_MAX_GRID_POWER,
-    DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
-    DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
-    DEFAULT_BASE_GRID_SETPOINT,
-    DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER,
     DEFAULT_MAX_INVERTER_POWER,
-    DEFAULT_INVERTER_EXPORT_LIMIT,
-    DEFAULT_INVERTER_EXPORT_DEADBAND,
-    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
-    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
-    DEFAULT_USE_DYNAMIC_THRESHOLD,
-    DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
-    DEFAULT_USE_AVERAGE_THRESHOLD,
+    DEFAULT_MAX_SOC,
+    DEFAULT_MAX_SOC_SOLAR,
+    DEFAULT_MAX_SOC_SUNNY,
     DEFAULT_MIN_CAR_CHARGING_DURATION,
-    DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
-    DEFAULT_CAR_USE_BATTERY_ARBITRAGE,
+    DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
+    DEFAULT_MIN_SOC,
+    DEFAULT_NEGATIVE_BUY_THRESHOLD,
+    DEFAULT_PHASE_NAMES,
+    DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
-    DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
-    DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
-    DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
+    DEFAULT_PRICE_THRESHOLD,
+    DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
     DEFAULT_SOC_BUFFER_TARGET,
-    DEFAULT_MAX_SOC_SUNNY,
-    DEFAULT_MAX_SOC_SOLAR,
+    DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
     DEFAULT_TRANSPORT_COST_DAY,
     DEFAULT_TRANSPORT_COST_NIGHT,
-    DEFAULT_ENERGY_TAX_ACCIJNS,
-    DEFAULT_ENERGY_TAX_BIJDRAGE,
-    DEFAULT_ENERGY_COST_GSC,
-    DEFAULT_ENERGY_COST_WKK,
+    DEFAULT_USE_AVERAGE_THRESHOLD,
+    DEFAULT_USE_DYNAMIC_THRESHOLD,
+    DEFAULT_VERY_LOW_PRICE_THRESHOLD,
+    DOMAIN,
+    PHASE_IDS,
+    PHASE_MODE_SINGLE,
+    PHASE_MODE_THREE,
 )
 from .helpers import coerce_integral_range
 from .migrations import CURRENT_VERSION
@@ -147,6 +149,7 @@ OPTIONAL_ENTITY_KEYS = {
     CONF_SOLAR_FORECAST_TODAY_ENTITY,
     CONF_P1_TARIFF_ENTITY,
 }
+
 
 def normalize_entity_values(data: dict[str, Any]) -> dict[str, Any]:
     """Normalize empty strings to None for optional entity fields.
@@ -231,7 +234,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         default_mode = self.data.get(CONF_PHASE_MODE, PHASE_MODE_SINGLE)
         schema = vol.Schema(
             {
-                vol.Required(CONF_PHASE_MODE, default=default_mode): selector.SelectSelector(
+                vol.Required(
+                    CONF_PHASE_MODE, default=default_mode
+                ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=[
                             {
@@ -332,13 +337,19 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         if resolved_solar is not None:
                             phase_entry[CONF_PHASE_SOLAR_ENTITY] = resolved_solar
                         if resolved_consumption is not None:
-                            phase_entry[CONF_PHASE_CONSUMPTION_ENTITY] = resolved_consumption
+                            phase_entry[CONF_PHASE_CONSUMPTION_ENTITY] = (
+                                resolved_consumption
+                            )
                         if resolved_car is not None:
                             phase_entry[CONF_PHASE_CAR_ENTITY] = resolved_car
                         if resolved_grid_power is not None:
-                            phase_entry[CONF_PHASE_GRID_POWER_ENTITY] = resolved_grid_power
+                            phase_entry[CONF_PHASE_GRID_POWER_ENTITY] = (
+                                resolved_grid_power
+                            )
                         if resolved_battery_power is not None:
-                            phase_entry[CONF_PHASE_BATTERY_POWER_ENTITY] = resolved_battery_power
+                            phase_entry[CONF_PHASE_BATTERY_POWER_ENTITY] = (
+                                resolved_battery_power
+                            )
 
                         phases_config[phase_id] = phase_entry
 
@@ -361,27 +372,19 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Required(
                 CONF_CURRENT_PRICE_ENTITY,
                 default=self.data.get(CONF_CURRENT_PRICE_ENTITY),
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
+            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
             vol.Required(
                 CONF_HIGHEST_PRICE_ENTITY,
                 default=self.data.get(CONF_HIGHEST_PRICE_ENTITY),
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
+            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
             vol.Required(
                 CONF_LOWEST_PRICE_ENTITY,
                 default=self.data.get(CONF_LOWEST_PRICE_ENTITY),
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
+            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
             vol.Required(
                 CONF_NEXT_PRICE_ENTITY,
                 default=self.data.get(CONF_NEXT_PRICE_ENTITY),
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
+            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
             vol.Required(
                 CONF_BATTERY_SOC_ENTITIES,
                 default=self.data.get(CONF_BATTERY_SOC_ENTITIES, []),
@@ -424,27 +427,37 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 battery_power_key = f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}"
 
                 schema_dict[
-                    _optional_entity_schema(solar_key, existing.get(CONF_PHASE_SOLAR_ENTITY))
+                    _optional_entity_schema(
+                        solar_key, existing.get(CONF_PHASE_SOLAR_ENTITY)
+                    )
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 )
                 schema_dict[
-                    _optional_entity_schema(consumption_key, existing.get(CONF_PHASE_CONSUMPTION_ENTITY))
+                    _optional_entity_schema(
+                        consumption_key, existing.get(CONF_PHASE_CONSUMPTION_ENTITY)
+                    )
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 )
                 schema_dict[
-                    _optional_entity_schema(car_key, existing.get(CONF_PHASE_CAR_ENTITY))
+                    _optional_entity_schema(
+                        car_key, existing.get(CONF_PHASE_CAR_ENTITY)
+                    )
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 )
                 schema_dict[
-                    _optional_entity_schema(grid_power_key, existing.get(CONF_PHASE_GRID_POWER_ENTITY))
+                    _optional_entity_schema(
+                        grid_power_key, existing.get(CONF_PHASE_GRID_POWER_ENTITY)
+                    )
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 )
                 schema_dict[
-                    _optional_entity_schema(battery_power_key, existing.get(CONF_PHASE_BATTERY_POWER_ENTITY))
+                    _optional_entity_schema(
+                        battery_power_key, existing.get(CONF_PHASE_BATTERY_POWER_ENTITY)
+                    )
                 ] = selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 )
@@ -465,39 +478,87 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(
                     CONF_TRANSPORT_COST_DAY,
-                    default=self.data.get(CONF_TRANSPORT_COST_DAY, DEFAULT_TRANSPORT_COST_DAY),
+                    default=self.data.get(
+                        CONF_TRANSPORT_COST_DAY, DEFAULT_TRANSPORT_COST_DAY
+                    ),
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=1,
+                        step="any",
+                        mode=selector.NumberSelectorMode.BOX,
+                        unit_of_measurement="€/kWh",
+                    )
                 ),
                 vol.Optional(
                     CONF_TRANSPORT_COST_NIGHT,
-                    default=self.data.get(CONF_TRANSPORT_COST_NIGHT, DEFAULT_TRANSPORT_COST_NIGHT),
+                    default=self.data.get(
+                        CONF_TRANSPORT_COST_NIGHT, DEFAULT_TRANSPORT_COST_NIGHT
+                    ),
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=1,
+                        step="any",
+                        mode=selector.NumberSelectorMode.BOX,
+                        unit_of_measurement="€/kWh",
+                    )
                 ),
                 vol.Optional(
                     CONF_ENERGY_TAX_ACCIJNS,
-                    default=self.data.get(CONF_ENERGY_TAX_ACCIJNS, DEFAULT_ENERGY_TAX_ACCIJNS),
+                    default=self.data.get(
+                        CONF_ENERGY_TAX_ACCIJNS, DEFAULT_ENERGY_TAX_ACCIJNS
+                    ),
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=1,
+                        step="any",
+                        mode=selector.NumberSelectorMode.BOX,
+                        unit_of_measurement="€/kWh",
+                    )
                 ),
                 vol.Optional(
                     CONF_ENERGY_TAX_BIJDRAGE,
-                    default=self.data.get(CONF_ENERGY_TAX_BIJDRAGE, DEFAULT_ENERGY_TAX_BIJDRAGE),
+                    default=self.data.get(
+                        CONF_ENERGY_TAX_BIJDRAGE, DEFAULT_ENERGY_TAX_BIJDRAGE
+                    ),
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=1,
+                        step="any",
+                        mode=selector.NumberSelectorMode.BOX,
+                        unit_of_measurement="€/kWh",
+                    )
                 ),
                 vol.Optional(
                     CONF_ENERGY_COST_GSC,
-                    default=self.data.get(CONF_ENERGY_COST_GSC, DEFAULT_ENERGY_COST_GSC),
+                    default=self.data.get(
+                        CONF_ENERGY_COST_GSC, DEFAULT_ENERGY_COST_GSC
+                    ),
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=1,
+                        step="any",
+                        mode=selector.NumberSelectorMode.BOX,
+                        unit_of_measurement="€/kWh",
+                    )
                 ),
                 vol.Optional(
                     CONF_ENERGY_COST_WKK,
-                    default=self.data.get(CONF_ENERGY_COST_WKK, DEFAULT_ENERGY_COST_WKK),
+                    default=self.data.get(
+                        CONF_ENERGY_COST_WKK, DEFAULT_ENERGY_COST_WKK
+                    ),
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=1,
+                        step="any",
+                        mode=selector.NumberSelectorMode.BOX,
+                        unit_of_measurement="€/kWh",
+                    )
                 ),
                 _optional_entity_schema(
                     CONF_GRID_POWER_ENTITY,
@@ -541,10 +602,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     battery_capacities[entity_id] = user_input[entity_key]
 
             self.data[CONF_BATTERY_CAPACITIES] = battery_capacities
-            if (
-                self.data.get(CONF_PHASE_MODE) == PHASE_MODE_THREE
-                and battery_entities
-            ):
+            if self.data.get(CONF_PHASE_MODE) == PHASE_MODE_THREE and battery_entities:
                 return await self.async_step_battery_phase_assignment()
             return await self.async_step_settings()
 
@@ -559,13 +617,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         for entity_id in battery_entities:
             entity_key = f"capacity_{entity_id.replace('.', '_')}"
             default_capacity = current_capacities.get(entity_id, 10.0)
-            battery_capacities[vol.Optional(entity_key, default=default_capacity)] = selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1.0,
-                    max=200.0,
-                    step=0.5,
-                    unit_of_measurement="kWh",
-                    mode=selector.NumberSelectorMode.BOX
+            battery_capacities[vol.Optional(entity_key, default=default_capacity)] = (
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1.0,
+                        max=200.0,
+                        step=0.5,
+                        unit_of_measurement="kWh",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
                 )
             )
 
@@ -580,9 +640,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         for entity_id in battery_entities:
             entity_entry = entity_registry.async_get(entity_id)
-            friendly_name = entity_entry.name if entity_entry and entity_entry.name else entity_id.split(".")[-1]
+            friendly_name = (
+                entity_entry.name
+                if entity_entry and entity_entry.name
+                else entity_id.split(".")[-1]
+            )
             entity_key = f"capacity_{entity_id.replace('.', '_')}"
-            description_placeholders[entity_key] = f"Nominal capacity for {friendly_name}"
+            description_placeholders[entity_key] = (
+                f"Nominal capacity for {friendly_name}"
+            )
 
         return self.async_show_form(
             step_id="battery_capacities",
@@ -608,9 +674,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             assignments: dict[str, list[str]] = {}
             for entity_id in battery_entities:
                 key = f"phase_assignment_{entity_id.replace('.', '_')}"
-                selected = user_input.get(key) or existing_assignments.get(
-                    entity_id
-                )
+                selected = user_input.get(key) or existing_assignments.get(entity_id)
                 if not selected:
                     selected = [PHASE_IDS[0]]
                 assignments[entity_id] = list(selected)
@@ -631,13 +695,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             key = f"phase_assignment_{entity_id.replace('.', '_')}"
             default_assignment = existing_assignments.get(entity_id, [PHASE_IDS[0]])
 
-            schema_fields[
-                vol.Optional(key, default=default_assignment)
-            ] = selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=options,
-                    multiple=True,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
+            schema_fields[vol.Optional(key, default=default_assignment)] = (
+                selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=options,
+                        multiple=True,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
                 )
             )
 
@@ -667,264 +731,311 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.data.update(user_input)
             return await self.async_step_safety_limits()
 
-        schema = vol.Schema({
-            vol.Optional(
-                CONF_MIN_SOC_THRESHOLD,
-                default=self.data.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=100, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_MAX_SOC_THRESHOLD,
-                default=self.data.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=100, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_ARBITRAGE_MODE_RESERVE_SOC,
-                default=self.data.get(
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_MIN_SOC_THRESHOLD,
+                    default=self.data.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=100, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAX_SOC_THRESHOLD,
+                    default=self.data.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=100, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
                     CONF_ARBITRAGE_MODE_RESERVE_SOC,
-                    DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
-                )
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=100, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
-                default=self.data.get(
+                    default=self.data.get(
+                        CONF_ARBITRAGE_MODE_RESERVE_SOC,
+                        DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=100, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
                     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
-                    DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
-                )
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=23, step=1, unit_of_measurement="hour", mode="slider"
-                )
-            ),
-            vol.Optional(
-                CONF_NEGATIVE_BUY_THRESHOLD,
-                default=self.data.get(
+                    default=self.data.get(
+                        CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+                        DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=23, step=1, unit_of_measurement="hour", mode="slider"
+                    )
+                ),
+                vol.Optional(
                     CONF_NEGATIVE_BUY_THRESHOLD,
-                    DEFAULT_NEGATIVE_BUY_THRESHOLD,
-                )
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=-1, max=1, step=0.01, unit_of_measurement="€/kWh"
-                )
-            ),
-            vol.Optional(
-                CONF_SOLAR_FORECAST_START_HOUR,
-                default=self.data.get(CONF_SOLAR_FORECAST_START_HOUR, DEFAULT_SOLAR_FORECAST_START_HOUR)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=12, max=23, step=1, mode="slider"
-                )
-            ),
-            vol.Optional(
-                CONF_MAX_SOC_THRESHOLD_SUNNY,
-                default=self.data.get(CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=100, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_MAX_SOC_THRESHOLD_SOLAR,
-                default=self.data.get(CONF_MAX_SOC_THRESHOLD_SOLAR, DEFAULT_MAX_SOC_SOLAR)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=100, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_SUNNY_FORECAST_THRESHOLD_KWH,
-                default=_default_sunny_forecast_threshold_kwh(self.data),
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=100, step=0.5, unit_of_measurement="kWh", mode="slider"
-                )
-            ),
-            vol.Optional(
-                CONF_PRICE_THRESHOLD,
-                default=self.data.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=1, step=0.01, unit_of_measurement="€/kWh"
-                )
-            ),
-            vol.Optional(
-                CONF_PRICE_ADJUSTMENT_MULTIPLIER,
-                default=self.data.get(CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=5, step=0.01
-                )
-            ),
-            vol.Optional(
-                CONF_PRICE_ADJUSTMENT_OFFSET,
-                default=self.data.get(CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
-                )
-            ),
-            vol.Optional(
-                CONF_EMERGENCY_SOC_THRESHOLD,
-                default=self.data.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=5, max=50, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_SOC_BUFFER_TARGET,
-                default=self.data.get(CONF_SOC_BUFFER_TARGET, DEFAULT_SOC_BUFFER_TARGET)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=30, max=80, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_SOC_PRICE_MULTIPLIER_MAX,
-                default=self.data.get(CONF_SOC_PRICE_MULTIPLIER_MAX, DEFAULT_SOC_PRICE_MULTIPLIER_MAX)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1.0, max=2.0, step=0.05
-                )
-            ),
-            vol.Optional(
-                CONF_VERY_LOW_PRICE_THRESHOLD,
-                default=self.data.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=10, max=50, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_SIGNIFICANT_SOLAR_THRESHOLD,
-                default=self.data.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=500, max=5000, step=100, unit_of_measurement="W"
-                )
-            ),
-            vol.Optional(
-                CONF_FEEDIN_PRICE_THRESHOLD,
-                default=self.data.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0.0, max=1.0, step=0.01, unit_of_measurement="€/kWh"
-                )
-            ),
-            vol.Optional(
-                CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
-                default=self.data.get(CONF_FEEDIN_ADJUSTMENT_MULTIPLIER, DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=-1, max=5, step=0.01
-                )
-            ),
-            vol.Optional(
-                CONF_FEEDIN_ADJUSTMENT_OFFSET,
-                default=self.data.get(CONF_FEEDIN_ADJUSTMENT_OFFSET, DEFAULT_FEEDIN_ADJUSTMENT_OFFSET)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
-                )
-            ),
-            vol.Optional(
-                CONF_USE_DYNAMIC_THRESHOLD,
-                default=self.data.get(CONF_USE_DYNAMIC_THRESHOLD, DEFAULT_USE_DYNAMIC_THRESHOLD)
-            ): selector.BooleanSelector(),
-            vol.Optional(
-                CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
-                default=self.data.get(CONF_DYNAMIC_THRESHOLD_CONFIDENCE, DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=30, max=90, step=5, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_USE_AVERAGE_THRESHOLD,
-                default=self.data.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)
-            ): selector.BooleanSelector(),
-            vol.Optional(
-                CONF_MIN_CAR_CHARGING_DURATION,
-                default=self.data.get(CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1, max=6, step=1, unit_of_measurement="hours"
-                )
-            ),
-            vol.Optional(
-                CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
-                default=self.data.get(CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER, DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1.1, max=1.5, step=0.1, mode="slider"
-                )
-            ),
-            vol.Optional(
-                CONF_CAR_USE_BATTERY_ARBITRAGE,
-                default=self.data.get(
+                    default=self.data.get(
+                        CONF_NEGATIVE_BUY_THRESHOLD,
+                        DEFAULT_NEGATIVE_BUY_THRESHOLD,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-1, max=1, step=0.01, unit_of_measurement="€/kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_SOLAR_FORECAST_START_HOUR,
+                    default=self.data.get(
+                        CONF_SOLAR_FORECAST_START_HOUR,
+                        DEFAULT_SOLAR_FORECAST_START_HOUR,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=12, max=23, step=1, mode="slider")
+                ),
+                vol.Optional(
+                    CONF_MAX_SOC_THRESHOLD_SUNNY,
+                    default=self.data.get(
+                        CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=100, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAX_SOC_THRESHOLD_SOLAR,
+                    default=self.data.get(
+                        CONF_MAX_SOC_THRESHOLD_SOLAR, DEFAULT_MAX_SOC_SOLAR
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=100, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+                    default=_default_sunny_forecast_threshold_kwh(self.data),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=100,
+                        step=0.5,
+                        unit_of_measurement="kWh",
+                        mode="slider",
+                    )
+                ),
+                vol.Optional(
+                    CONF_PRICE_THRESHOLD,
+                    default=self.data.get(
+                        CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=1, step=0.01, unit_of_measurement="€/kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+                    default=self.data.get(
+                        CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+                        DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=5, step=0.01)
+                ),
+                vol.Optional(
+                    CONF_PRICE_ADJUSTMENT_OFFSET,
+                    default=self.data.get(
+                        CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_EMERGENCY_SOC_THRESHOLD,
+                    default=self.data.get(
+                        CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5, max=50, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_SOC_BUFFER_TARGET,
+                    default=self.data.get(
+                        CONF_SOC_BUFFER_TARGET, DEFAULT_SOC_BUFFER_TARGET
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=30, max=80, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_SOC_PRICE_MULTIPLIER_MAX,
+                    default=self.data.get(
+                        CONF_SOC_PRICE_MULTIPLIER_MAX, DEFAULT_SOC_PRICE_MULTIPLIER_MAX
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1.0, max=2.0, step=0.05)
+                ),
+                vol.Optional(
+                    CONF_VERY_LOW_PRICE_THRESHOLD,
+                    default=self.data.get(
+                        CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=10, max=50, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_SIGNIFICANT_SOLAR_THRESHOLD,
+                    default=self.data.get(
+                        CONF_SIGNIFICANT_SOLAR_THRESHOLD,
+                        DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=500, max=5000, step=100, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_FEEDIN_PRICE_THRESHOLD,
+                    default=self.data.get(
+                        CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.0, max=1.0, step=0.01, unit_of_measurement="€/kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+                    default=self.data.get(
+                        CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+                        DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=-1, max=5, step=0.01)
+                ),
+                vol.Optional(
+                    CONF_FEEDIN_ADJUSTMENT_OFFSET,
+                    default=self.data.get(
+                        CONF_FEEDIN_ADJUSTMENT_OFFSET, DEFAULT_FEEDIN_ADJUSTMENT_OFFSET
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_USE_DYNAMIC_THRESHOLD,
+                    default=self.data.get(
+                        CONF_USE_DYNAMIC_THRESHOLD, DEFAULT_USE_DYNAMIC_THRESHOLD
+                    ),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+                    default=self.data.get(
+                        CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+                        DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=30, max=90, step=5, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_USE_AVERAGE_THRESHOLD,
+                    default=self.data.get(
+                        CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD
+                    ),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_MIN_CAR_CHARGING_DURATION,
+                    default=self.data.get(
+                        CONF_MIN_CAR_CHARGING_DURATION,
+                        DEFAULT_MIN_CAR_CHARGING_DURATION,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, max=6, step=1, unit_of_measurement="hours"
+                    )
+                ),
+                vol.Optional(
+                    CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+                    default=self.data.get(
+                        CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+                        DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1.1, max=1.5, step=0.1, mode="slider"
+                    )
+                ),
+                vol.Optional(
                     CONF_CAR_USE_BATTERY_ARBITRAGE,
-                    DEFAULT_CAR_USE_BATTERY_ARBITRAGE,
-                )
-            ): selector.BooleanSelector(),
-            vol.Optional(
-                CONF_MAX_INVERTER_POWER,
-                default=self.data.get(CONF_MAX_INVERTER_POWER, DEFAULT_MAX_INVERTER_POWER)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=500, max=50000, step=100, unit_of_measurement="W"
-                )
-            ),
-            vol.Optional(
-                CONF_INVERTER_EXPORT_LIMIT,
-                default=self.data.get(CONF_INVERTER_EXPORT_LIMIT, DEFAULT_INVERTER_EXPORT_LIMIT)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=5000, step=10, unit_of_measurement="W"
-                )
-            ),
-            vol.Optional(
-                CONF_INVERTER_EXPORT_DEADBAND,
-                default=self.data.get(
-                    CONF_INVERTER_EXPORT_DEADBAND, DEFAULT_INVERTER_EXPORT_DEADBAND
-                )
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=500, step=5, unit_of_measurement="W"
-                )
-            ),
-            vol.Optional(
-                CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
-                default=self.data.get(
+                    default=self.data.get(
+                        CONF_CAR_USE_BATTERY_ARBITRAGE,
+                        DEFAULT_CAR_USE_BATTERY_ARBITRAGE,
+                    ),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_MAX_INVERTER_POWER,
+                    default=self.data.get(
+                        CONF_MAX_INVERTER_POWER, DEFAULT_MAX_INVERTER_POWER
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=500, max=50000, step=100, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_INVERTER_EXPORT_LIMIT,
+                    default=self.data.get(
+                        CONF_INVERTER_EXPORT_LIMIT, DEFAULT_INVERTER_EXPORT_LIMIT
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=5000, step=10, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_INVERTER_EXPORT_DEADBAND,
+                    default=self.data.get(
+                        CONF_INVERTER_EXPORT_DEADBAND, DEFAULT_INVERTER_EXPORT_DEADBAND
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=500, step=5, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
                     CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
-                    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
-                )
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=120, step=1, unit_of_measurement="minutes"
-                )
-            ),
-            vol.Optional(
-                CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
-                default=self.data.get(
+                    default=self.data.get(
+                        CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+                        DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=120, step=1, unit_of_measurement="minutes"
+                    )
+                ),
+                vol.Optional(
                     CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
-                    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
-                )
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=100, step=1, unit_of_measurement="%"
-                )
-            ),
-        })
+                    default=self.data.get(
+                        CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+                        DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=100, step=1, unit_of_measurement="%"
+                    )
+                ),
+            }
+        )
 
         return self.async_show_form(
             step_id="settings",
@@ -948,63 +1059,76 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if validation_errors:
                 errors["base"] = "invalid_config"
                 validation_error_text = "; ".join(validation_errors)
-                _LOGGER.warning("Configuration validation errors: %s", validation_errors)
+                _LOGGER.warning(
+                    "Configuration validation errors: %s", validation_errors
+                )
             else:
                 return self.async_create_entry(
-                    title="Electricity Planner",
-                    data=self.data
+                    title="Electricity Planner", data=self.data
                 )
 
-        schema = vol.Schema({
-            vol.Optional(
-                CONF_MAX_BATTERY_POWER,
-                default=self.data.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1000, max=10000, step=500, unit_of_measurement="W"
-                )
-            ),
-            vol.Optional(
-                CONF_MAX_CAR_POWER,
-                default=self.data.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1000, max=22000, step=1000, unit_of_measurement="W"
-                )
-            ),
-            vol.Optional(
-                CONF_MAX_GRID_POWER,
-                default=self.data.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=3000, max=30000, step=1000, unit_of_measurement="W"
-                )
-            ),
-            vol.Optional(
-                CONF_MIN_CAR_CHARGING_THRESHOLD,
-                default=self.data.get(CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=50, max=500, step=50, unit_of_measurement="W"
-                )
-            ),
-            vol.Optional(
-                CONF_PREDICTIVE_CHARGING_MIN_SOC,
-                default=self.data.get(CONF_PREDICTIVE_CHARGING_MIN_SOC, DEFAULT_PREDICTIVE_CHARGING_MIN_SOC)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=20, max=60, unit_of_measurement="%"
-                )
-            ),
-            vol.Optional(
-                CONF_BASE_GRID_SETPOINT,
-                default=self.data.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT)
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1000, max=10000, step=100, unit_of_measurement="W"
-                )
-            ),
-        })
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_MAX_BATTERY_POWER,
+                    default=self.data.get(
+                        CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1000, max=10000, step=500, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAX_CAR_POWER,
+                    default=self.data.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1000, max=22000, step=1000, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAX_GRID_POWER,
+                    default=self.data.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=3000, max=30000, step=1000, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_MIN_CAR_CHARGING_THRESHOLD,
+                    default=self.data.get(
+                        CONF_MIN_CAR_CHARGING_THRESHOLD,
+                        DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=50, max=500, step=50, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_PREDICTIVE_CHARGING_MIN_SOC,
+                    default=self.data.get(
+                        CONF_PREDICTIVE_CHARGING_MIN_SOC,
+                        DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=20, max=60, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_BASE_GRID_SETPOINT,
+                    default=self.data.get(
+                        CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1000, max=10000, step=100, unit_of_measurement="W"
+                    )
+                ),
+            }
+        )
 
         return self.async_show_form(
             step_id="safety_limits",
@@ -1054,8 +1178,7 @@ def validate_config_consistency(config: dict[str, Any]) -> list[str]:
     max_soc_solar = config.get(CONF_MAX_SOC_THRESHOLD_SOLAR, DEFAULT_MAX_SOC_SOLAR)
     if not 0 <= max_soc_solar <= 100:
         errors.append(
-            "max_soc_threshold_solar "
-            f"({max_soc_solar}%) must be between 0 and 100"
+            "max_soc_threshold_solar " f"({max_soc_solar}%) must be between 0 and 100"
         )
     if max_soc_solar < min_soc:
         errors.append(
@@ -1064,14 +1187,18 @@ def validate_config_consistency(config: dict[str, Any]) -> list[str]:
         )
 
     if emergency_soc > min_soc:
-        errors.append(f"emergency_soc ({emergency_soc}%) should be below min_soc ({min_soc}%)")
+        errors.append(
+            f"emergency_soc ({emergency_soc}%) should be below min_soc ({min_soc}%)"
+        )
 
     # Power limit validation
     max_battery_power = config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)
     max_grid_power = config.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER)
 
     if max_battery_power > max_grid_power:
-        errors.append(f"max_battery_power ({max_battery_power}W) cannot exceed max_grid_power ({max_grid_power}W)")
+        errors.append(
+            f"max_battery_power ({max_battery_power}W) cannot exceed max_grid_power ({max_grid_power}W)"
+        )
 
     # Price threshold validation
     price_threshold = config.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)
@@ -1079,9 +1206,13 @@ def validate_config_consistency(config: dict[str, Any]) -> list[str]:
         errors.append(f"price_threshold ({price_threshold}€/kWh) cannot be negative")
 
     # Very low price threshold validation
-    very_low_price = config.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)
+    very_low_price = config.get(
+        CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD
+    )
     if not 0 <= very_low_price <= 100:
-        errors.append(f"very_low_price_threshold ({very_low_price}%) must be between 0 and 100")
+        errors.append(
+            f"very_low_price_threshold ({very_low_price}%) must be between 0 and 100"
+        )
 
     sunny_forecast_threshold_kwh = config.get(
         CONF_SUNNY_FORECAST_THRESHOLD_KWH,
@@ -1145,8 +1276,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=[
-                            {"label": "Single-phase system", "value": PHASE_MODE_SINGLE},
-                            {"label": "Three-phase system (L1/L2/L3)", "value": PHASE_MODE_THREE},
+                            {
+                                "label": "Single-phase system",
+                                "value": PHASE_MODE_SINGLE,
+                            },
+                            {
+                                "label": "Three-phase system (L1/L2/L3)",
+                                "value": PHASE_MODE_THREE,
+                            },
                         ],
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     )
@@ -1230,13 +1367,19 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         if resolved_solar is not None:
                             phase_entry[CONF_PHASE_SOLAR_ENTITY] = resolved_solar
                         if resolved_consumption is not None:
-                            phase_entry[CONF_PHASE_CONSUMPTION_ENTITY] = resolved_consumption
+                            phase_entry[CONF_PHASE_CONSUMPTION_ENTITY] = (
+                                resolved_consumption
+                            )
                         if resolved_car is not None:
                             phase_entry[CONF_PHASE_CAR_ENTITY] = resolved_car
                         if resolved_grid_power is not None:
-                            phase_entry[CONF_PHASE_GRID_POWER_ENTITY] = resolved_grid_power
+                            phase_entry[CONF_PHASE_GRID_POWER_ENTITY] = (
+                                resolved_grid_power
+                            )
                         if resolved_battery_power is not None:
-                            phase_entry[CONF_PHASE_BATTERY_POWER_ENTITY] = resolved_battery_power
+                            phase_entry[CONF_PHASE_BATTERY_POWER_ENTITY] = (
+                                resolved_battery_power
+                            )
                         phases_config[phase_id] = phase_entry
 
                 self.data[CONF_PHASES] = phases_config
@@ -1257,27 +1400,19 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             vol.Required(
                 CONF_CURRENT_PRICE_ENTITY,
                 default=self.data.get(CONF_CURRENT_PRICE_ENTITY),
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
+            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
             vol.Required(
                 CONF_HIGHEST_PRICE_ENTITY,
                 default=self.data.get(CONF_HIGHEST_PRICE_ENTITY),
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
+            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
             vol.Required(
                 CONF_LOWEST_PRICE_ENTITY,
                 default=self.data.get(CONF_LOWEST_PRICE_ENTITY),
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
+            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
             vol.Required(
                 CONF_NEXT_PRICE_ENTITY,
                 default=self.data.get(CONF_NEXT_PRICE_ENTITY),
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
+            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
             vol.Required(
                 CONF_BATTERY_SOC_ENTITIES,
                 default=self.data.get(CONF_BATTERY_SOC_ENTITIES, []),
@@ -1318,93 +1453,163 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         f"{phase_id}_{CONF_PHASE_SOLAR_ENTITY}",
                         existing.get(CONF_PHASE_SOLAR_ENTITY),
                     )
-                ] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
+                ] = selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )
                 schema_dict[
                     _optional_entity_schema(
                         f"{phase_id}_{CONF_PHASE_CONSUMPTION_ENTITY}",
                         existing.get(CONF_PHASE_CONSUMPTION_ENTITY),
                     )
-                ] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
+                ] = selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )
                 schema_dict[
                     _optional_entity_schema(
                         f"{phase_id}_{CONF_PHASE_CAR_ENTITY}",
                         existing.get(CONF_PHASE_CAR_ENTITY),
                     )
-                ] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
+                ] = selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )
                 schema_dict[
                     _optional_entity_schema(
                         f"{phase_id}_{CONF_PHASE_GRID_POWER_ENTITY}",
                         existing.get(CONF_PHASE_GRID_POWER_ENTITY),
                     )
-                ] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
+                ] = selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )
                 schema_dict[
                     _optional_entity_schema(
                         f"{phase_id}_{CONF_PHASE_BATTERY_POWER_ENTITY}",
                         existing.get(CONF_PHASE_BATTERY_POWER_ENTITY),
                     )
-                ] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
+                ] = selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )
 
         schema_dict.update(
             {
                 _optional_entity_schema(
                     CONF_MONTHLY_GRID_PEAK_ENTITY,
                     self.data.get(CONF_MONTHLY_GRID_PEAK_ENTITY),
-                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
                 _optional_entity_schema(
                     CONF_P1_TARIFF_ENTITY,
                     self.data.get(CONF_P1_TARIFF_ENTITY),
-                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
                 vol.Optional(
                     CONF_TRANSPORT_COST_DAY,
-                    default=self.data.get(CONF_TRANSPORT_COST_DAY, DEFAULT_TRANSPORT_COST_DAY),
+                    default=self.data.get(
+                        CONF_TRANSPORT_COST_DAY, DEFAULT_TRANSPORT_COST_DAY
+                    ),
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=1,
+                        step="any",
+                        mode=selector.NumberSelectorMode.BOX,
+                        unit_of_measurement="€/kWh",
+                    )
                 ),
                 vol.Optional(
                     CONF_TRANSPORT_COST_NIGHT,
-                    default=self.data.get(CONF_TRANSPORT_COST_NIGHT, DEFAULT_TRANSPORT_COST_NIGHT),
+                    default=self.data.get(
+                        CONF_TRANSPORT_COST_NIGHT, DEFAULT_TRANSPORT_COST_NIGHT
+                    ),
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=1,
+                        step="any",
+                        mode=selector.NumberSelectorMode.BOX,
+                        unit_of_measurement="€/kWh",
+                    )
                 ),
                 vol.Optional(
                     CONF_ENERGY_TAX_ACCIJNS,
-                    default=self.data.get(CONF_ENERGY_TAX_ACCIJNS, DEFAULT_ENERGY_TAX_ACCIJNS),
+                    default=self.data.get(
+                        CONF_ENERGY_TAX_ACCIJNS, DEFAULT_ENERGY_TAX_ACCIJNS
+                    ),
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=1,
+                        step="any",
+                        mode=selector.NumberSelectorMode.BOX,
+                        unit_of_measurement="€/kWh",
+                    )
                 ),
                 vol.Optional(
                     CONF_ENERGY_TAX_BIJDRAGE,
-                    default=self.data.get(CONF_ENERGY_TAX_BIJDRAGE, DEFAULT_ENERGY_TAX_BIJDRAGE),
+                    default=self.data.get(
+                        CONF_ENERGY_TAX_BIJDRAGE, DEFAULT_ENERGY_TAX_BIJDRAGE
+                    ),
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=1,
+                        step="any",
+                        mode=selector.NumberSelectorMode.BOX,
+                        unit_of_measurement="€/kWh",
+                    )
                 ),
                 vol.Optional(
                     CONF_ENERGY_COST_GSC,
-                    default=self.data.get(CONF_ENERGY_COST_GSC, DEFAULT_ENERGY_COST_GSC),
+                    default=self.data.get(
+                        CONF_ENERGY_COST_GSC, DEFAULT_ENERGY_COST_GSC
+                    ),
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=1,
+                        step="any",
+                        mode=selector.NumberSelectorMode.BOX,
+                        unit_of_measurement="€/kWh",
+                    )
                 ),
                 vol.Optional(
                     CONF_ENERGY_COST_WKK,
-                    default=self.data.get(CONF_ENERGY_COST_WKK, DEFAULT_ENERGY_COST_WKK),
+                    default=self.data.get(
+                        CONF_ENERGY_COST_WKK, DEFAULT_ENERGY_COST_WKK
+                    ),
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=1, step="any", mode=selector.NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=1,
+                        step="any",
+                        mode=selector.NumberSelectorMode.BOX,
+                        unit_of_measurement="€/kWh",
+                    )
                 ),
                 _optional_entity_schema(
                     CONF_GRID_POWER_ENTITY,
                     self.data.get(CONF_GRID_POWER_ENTITY),
-                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
                 _optional_entity_schema(
                     CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
                     self.data.get(CONF_SOLAR_FORECAST_ENTITY_TOMORROW),
-                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
                 _optional_entity_schema(
                     CONF_SOLAR_FORECAST_TODAY_ENTITY,
                     self.data.get(CONF_SOLAR_FORECAST_TODAY_ENTITY),
-                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
             }
         )
-        return self.async_show_form(step_id="entities", data_schema=vol.Schema(schema_dict))
+        return self.async_show_form(
+            step_id="entities", data_schema=vol.Schema(schema_dict)
+        )
 
     async def async_step_battery_capacities(
         self, user_input: dict[str, Any] | None = None
@@ -1436,7 +1641,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         schema_dict: dict[Any, Any] = {}
         for entity_id in battery_entities:
             entity_key = f"capacity_{entity_id.replace('.', '_')}"
-            schema_dict[vol.Optional(entity_key, default=current_capacities.get(entity_id, 10.0))] = selector.NumberSelector(
+            schema_dict[
+                vol.Optional(
+                    entity_key, default=current_capacities.get(entity_id, 10.0)
+                )
+            ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1.0,
                     max=200.0,
@@ -1476,11 +1685,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             self.data[CONF_BATTERY_PHASE_ASSIGNMENTS] = assignments
             return await self.async_step_settings()
 
-        options = [{"value": phase_id, "label": DEFAULT_PHASE_NAMES[phase_id]} for phase_id in PHASE_IDS]
+        options = [
+            {"value": phase_id, "label": DEFAULT_PHASE_NAMES[phase_id]}
+            for phase_id in PHASE_IDS
+        ]
         schema_dict: dict[Any, Any] = {}
         for entity_id in battery_entities:
             key = f"phase_assignment_{entity_id.replace('.', '_')}"
-            schema_dict[vol.Optional(key, default=existing_assignments.get(entity_id, [PHASE_IDS[0]]))] = selector.SelectSelector(
+            schema_dict[
+                vol.Optional(
+                    key, default=existing_assignments.get(entity_id, [PHASE_IDS[0]])
+                )
+            ] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=options,
                     multiple=True,
@@ -1502,39 +1718,310 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             self.data.update(user_input)
             return await self.async_step_safety_limits()
 
-        schema = vol.Schema({
-            vol.Optional(CONF_MIN_SOC_THRESHOLD, default=self.data.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")),
-            vol.Optional(CONF_MAX_SOC_THRESHOLD, default=self.data.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")),
-            vol.Optional(CONF_ARBITRAGE_MODE_RESERVE_SOC, default=self.data.get(CONF_ARBITRAGE_MODE_RESERVE_SOC, DEFAULT_ARBITRAGE_MODE_RESERVE_SOC)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")),
-            vol.Optional(CONF_ARBITRAGE_MODE_DEADLINE_HOUR, default=self.data.get(CONF_ARBITRAGE_MODE_DEADLINE_HOUR, DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=23, step=1, unit_of_measurement="hour", mode="slider")),
-            vol.Optional(CONF_NEGATIVE_BUY_THRESHOLD, default=self.data.get(CONF_NEGATIVE_BUY_THRESHOLD, DEFAULT_NEGATIVE_BUY_THRESHOLD)): selector.NumberSelector(selector.NumberSelectorConfig(min=-1, max=1, step=0.01, unit_of_measurement="€/kWh")),
-            vol.Optional(CONF_SOLAR_FORECAST_START_HOUR, default=self.data.get(CONF_SOLAR_FORECAST_START_HOUR, DEFAULT_SOLAR_FORECAST_START_HOUR)): selector.NumberSelector(selector.NumberSelectorConfig(min=12, max=23, step=1, mode="slider")),
-            vol.Optional(CONF_MAX_SOC_THRESHOLD_SUNNY, default=self.data.get(CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")),
-            vol.Optional(CONF_MAX_SOC_THRESHOLD_SOLAR, default=self.data.get(CONF_MAX_SOC_THRESHOLD_SOLAR, DEFAULT_MAX_SOC_SOLAR)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, unit_of_measurement="%")),
-            vol.Optional(CONF_SUNNY_FORECAST_THRESHOLD_KWH, default=_default_sunny_forecast_threshold_kwh(self.data)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, step=0.5, unit_of_measurement="kWh", mode="slider")),
-            vol.Optional(CONF_PRICE_THRESHOLD, default=self.data.get(CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=1, step=0.01, unit_of_measurement="€/kWh")),
-            vol.Optional(CONF_PRICE_ADJUSTMENT_MULTIPLIER, default=self.data.get(CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=5, step=0.01)),
-            vol.Optional(CONF_PRICE_ADJUSTMENT_OFFSET, default=self.data.get(CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET)): selector.NumberSelector(selector.NumberSelectorConfig(min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh")),
-            vol.Optional(CONF_EMERGENCY_SOC_THRESHOLD, default=self.data.get(CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC)): selector.NumberSelector(selector.NumberSelectorConfig(min=5, max=50, unit_of_measurement="%")),
-            vol.Optional(CONF_SOC_BUFFER_TARGET, default=self.data.get(CONF_SOC_BUFFER_TARGET, DEFAULT_SOC_BUFFER_TARGET)): selector.NumberSelector(selector.NumberSelectorConfig(min=30, max=80, unit_of_measurement="%")),
-            vol.Optional(CONF_SOC_PRICE_MULTIPLIER_MAX, default=self.data.get(CONF_SOC_PRICE_MULTIPLIER_MAX, DEFAULT_SOC_PRICE_MULTIPLIER_MAX)): selector.NumberSelector(selector.NumberSelectorConfig(min=1.0, max=2.0, step=0.05)),
-            vol.Optional(CONF_VERY_LOW_PRICE_THRESHOLD, default=self.data.get(CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD)): selector.NumberSelector(selector.NumberSelectorConfig(min=10, max=50, unit_of_measurement="%")),
-            vol.Optional(CONF_SIGNIFICANT_SOLAR_THRESHOLD, default=self.data.get(CONF_SIGNIFICANT_SOLAR_THRESHOLD, DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD)): selector.NumberSelector(selector.NumberSelectorConfig(min=500, max=5000, step=100, unit_of_measurement="W")),
-            vol.Optional(CONF_FEEDIN_PRICE_THRESHOLD, default=self.data.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)): selector.NumberSelector(selector.NumberSelectorConfig(min=0.0, max=1.0, step=0.01, unit_of_measurement="€/kWh")),
-            vol.Optional(CONF_FEEDIN_ADJUSTMENT_MULTIPLIER, default=self.data.get(CONF_FEEDIN_ADJUSTMENT_MULTIPLIER, DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER)): selector.NumberSelector(selector.NumberSelectorConfig(min=-1, max=5, step=0.01)),
-            vol.Optional(CONF_FEEDIN_ADJUSTMENT_OFFSET, default=self.data.get(CONF_FEEDIN_ADJUSTMENT_OFFSET, DEFAULT_FEEDIN_ADJUSTMENT_OFFSET)): selector.NumberSelector(selector.NumberSelectorConfig(min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh")),
-            vol.Optional(CONF_USE_DYNAMIC_THRESHOLD, default=self.data.get(CONF_USE_DYNAMIC_THRESHOLD, DEFAULT_USE_DYNAMIC_THRESHOLD)): selector.BooleanSelector(),
-            vol.Optional(CONF_DYNAMIC_THRESHOLD_CONFIDENCE, default=self.data.get(CONF_DYNAMIC_THRESHOLD_CONFIDENCE, DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE)): selector.NumberSelector(selector.NumberSelectorConfig(min=30, max=90, step=5, unit_of_measurement="%")),
-            vol.Optional(CONF_USE_AVERAGE_THRESHOLD, default=self.data.get(CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD)): selector.BooleanSelector(),
-            vol.Optional(CONF_MIN_CAR_CHARGING_DURATION, default=self.data.get(CONF_MIN_CAR_CHARGING_DURATION, DEFAULT_MIN_CAR_CHARGING_DURATION)): selector.NumberSelector(selector.NumberSelectorConfig(min=1, max=6, step=1, unit_of_measurement="hours")),
-            vol.Optional(CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER, default=self.data.get(CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER, DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER)): selector.NumberSelector(selector.NumberSelectorConfig(min=1.1, max=1.5, step=0.1, mode="slider")),
-            vol.Optional(CONF_CAR_USE_BATTERY_ARBITRAGE, default=self.data.get(CONF_CAR_USE_BATTERY_ARBITRAGE, DEFAULT_CAR_USE_BATTERY_ARBITRAGE)): selector.BooleanSelector(),
-            vol.Optional(CONF_MAX_INVERTER_POWER, default=self.data.get(CONF_MAX_INVERTER_POWER, DEFAULT_MAX_INVERTER_POWER)): selector.NumberSelector(selector.NumberSelectorConfig(min=500, max=50000, step=100, unit_of_measurement="W")),
-            vol.Optional(CONF_INVERTER_EXPORT_LIMIT, default=self.data.get(CONF_INVERTER_EXPORT_LIMIT, DEFAULT_INVERTER_EXPORT_LIMIT)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=5000, step=10, unit_of_measurement="W")),
-            vol.Optional(CONF_INVERTER_EXPORT_DEADBAND, default=self.data.get(CONF_INVERTER_EXPORT_DEADBAND, DEFAULT_INVERTER_EXPORT_DEADBAND)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=500, step=5, unit_of_measurement="W")),
-            vol.Optional(CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES, default=self.data.get(CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES, DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=120, step=1, unit_of_measurement="minutes")),
-            vol.Optional(CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD, default=self.data.get(CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD, DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=100, step=1, unit_of_measurement="%")),
-        })
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_MIN_SOC_THRESHOLD,
+                    default=self.data.get(CONF_MIN_SOC_THRESHOLD, DEFAULT_MIN_SOC),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=100, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAX_SOC_THRESHOLD,
+                    default=self.data.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=100, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_ARBITRAGE_MODE_RESERVE_SOC,
+                    default=self.data.get(
+                        CONF_ARBITRAGE_MODE_RESERVE_SOC,
+                        DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=100, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+                    default=self.data.get(
+                        CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
+                        DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=23, step=1, unit_of_measurement="hour", mode="slider"
+                    )
+                ),
+                vol.Optional(
+                    CONF_NEGATIVE_BUY_THRESHOLD,
+                    default=self.data.get(
+                        CONF_NEGATIVE_BUY_THRESHOLD, DEFAULT_NEGATIVE_BUY_THRESHOLD
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-1, max=1, step=0.01, unit_of_measurement="€/kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_SOLAR_FORECAST_START_HOUR,
+                    default=self.data.get(
+                        CONF_SOLAR_FORECAST_START_HOUR,
+                        DEFAULT_SOLAR_FORECAST_START_HOUR,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=12, max=23, step=1, mode="slider")
+                ),
+                vol.Optional(
+                    CONF_MAX_SOC_THRESHOLD_SUNNY,
+                    default=self.data.get(
+                        CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=100, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAX_SOC_THRESHOLD_SOLAR,
+                    default=self.data.get(
+                        CONF_MAX_SOC_THRESHOLD_SOLAR, DEFAULT_MAX_SOC_SOLAR
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=100, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+                    default=_default_sunny_forecast_threshold_kwh(self.data),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=100,
+                        step=0.5,
+                        unit_of_measurement="kWh",
+                        mode="slider",
+                    )
+                ),
+                vol.Optional(
+                    CONF_PRICE_THRESHOLD,
+                    default=self.data.get(
+                        CONF_PRICE_THRESHOLD, DEFAULT_PRICE_THRESHOLD
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=1, step=0.01, unit_of_measurement="€/kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+                    default=self.data.get(
+                        CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+                        DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=5, step=0.01)
+                ),
+                vol.Optional(
+                    CONF_PRICE_ADJUSTMENT_OFFSET,
+                    default=self.data.get(
+                        CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_EMERGENCY_SOC_THRESHOLD,
+                    default=self.data.get(
+                        CONF_EMERGENCY_SOC_THRESHOLD, DEFAULT_EMERGENCY_SOC
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5, max=50, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_SOC_BUFFER_TARGET,
+                    default=self.data.get(
+                        CONF_SOC_BUFFER_TARGET, DEFAULT_SOC_BUFFER_TARGET
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=30, max=80, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_SOC_PRICE_MULTIPLIER_MAX,
+                    default=self.data.get(
+                        CONF_SOC_PRICE_MULTIPLIER_MAX, DEFAULT_SOC_PRICE_MULTIPLIER_MAX
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1.0, max=2.0, step=0.05)
+                ),
+                vol.Optional(
+                    CONF_VERY_LOW_PRICE_THRESHOLD,
+                    default=self.data.get(
+                        CONF_VERY_LOW_PRICE_THRESHOLD, DEFAULT_VERY_LOW_PRICE_THRESHOLD
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=10, max=50, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_SIGNIFICANT_SOLAR_THRESHOLD,
+                    default=self.data.get(
+                        CONF_SIGNIFICANT_SOLAR_THRESHOLD,
+                        DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=500, max=5000, step=100, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_FEEDIN_PRICE_THRESHOLD,
+                    default=self.data.get(
+                        CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.0, max=1.0, step=0.01, unit_of_measurement="€/kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+                    default=self.data.get(
+                        CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+                        DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=-1, max=5, step=0.01)
+                ),
+                vol.Optional(
+                    CONF_FEEDIN_ADJUSTMENT_OFFSET,
+                    default=self.data.get(
+                        CONF_FEEDIN_ADJUSTMENT_OFFSET, DEFAULT_FEEDIN_ADJUSTMENT_OFFSET
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_USE_DYNAMIC_THRESHOLD,
+                    default=self.data.get(
+                        CONF_USE_DYNAMIC_THRESHOLD, DEFAULT_USE_DYNAMIC_THRESHOLD
+                    ),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+                    default=self.data.get(
+                        CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+                        DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=30, max=90, step=5, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_USE_AVERAGE_THRESHOLD,
+                    default=self.data.get(
+                        CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD
+                    ),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_MIN_CAR_CHARGING_DURATION,
+                    default=self.data.get(
+                        CONF_MIN_CAR_CHARGING_DURATION,
+                        DEFAULT_MIN_CAR_CHARGING_DURATION,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, max=6, step=1, unit_of_measurement="hours"
+                    )
+                ),
+                vol.Optional(
+                    CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+                    default=self.data.get(
+                        CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+                        DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1.1, max=1.5, step=0.1, mode="slider"
+                    )
+                ),
+                vol.Optional(
+                    CONF_CAR_USE_BATTERY_ARBITRAGE,
+                    default=self.data.get(
+                        CONF_CAR_USE_BATTERY_ARBITRAGE,
+                        DEFAULT_CAR_USE_BATTERY_ARBITRAGE,
+                    ),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_MAX_INVERTER_POWER,
+                    default=self.data.get(
+                        CONF_MAX_INVERTER_POWER, DEFAULT_MAX_INVERTER_POWER
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=500, max=50000, step=100, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_INVERTER_EXPORT_LIMIT,
+                    default=self.data.get(
+                        CONF_INVERTER_EXPORT_LIMIT, DEFAULT_INVERTER_EXPORT_LIMIT
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=5000, step=10, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_INVERTER_EXPORT_DEADBAND,
+                    default=self.data.get(
+                        CONF_INVERTER_EXPORT_DEADBAND, DEFAULT_INVERTER_EXPORT_DEADBAND
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=500, step=5, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+                    default=self.data.get(
+                        CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+                        DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=120, step=1, unit_of_measurement="minutes"
+                    )
+                ),
+                vol.Optional(
+                    CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+                    default=self.data.get(
+                        CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+                        DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=100, step=1, unit_of_measurement="%"
+                    )
+                ),
+            }
+        )
         return self.async_show_form(step_id="settings", data_schema=schema)
 
     async def async_step_safety_limits(
@@ -1554,15 +2041,79 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             else:
                 return self.async_create_entry(title="", data=self.data)
 
-        schema = vol.Schema({
-            vol.Optional(CONF_MAX_BATTERY_POWER, default=self.data.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)): selector.NumberSelector(selector.NumberSelectorConfig(min=1000, max=10000, step=500, unit_of_measurement="W")),
-            vol.Optional(CONF_MAX_CAR_POWER, default=self.data.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER)): selector.NumberSelector(selector.NumberSelectorConfig(min=1000, max=22000, step=1000, unit_of_measurement="W")),
-            vol.Optional(CONF_MAX_GRID_POWER, default=self.data.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER)): selector.NumberSelector(selector.NumberSelectorConfig(min=3000, max=30000, step=1000, unit_of_measurement="W")),
-            vol.Optional(CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER, default=self.data.get(CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER, DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER)): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=50000, step=100, unit_of_measurement="W")),
-            vol.Optional(CONF_MIN_CAR_CHARGING_THRESHOLD, default=self.data.get(CONF_MIN_CAR_CHARGING_THRESHOLD, DEFAULT_MIN_CAR_CHARGING_THRESHOLD)): selector.NumberSelector(selector.NumberSelectorConfig(min=50, max=500, step=50, unit_of_measurement="W")),
-            vol.Optional(CONF_PREDICTIVE_CHARGING_MIN_SOC, default=self.data.get(CONF_PREDICTIVE_CHARGING_MIN_SOC, DEFAULT_PREDICTIVE_CHARGING_MIN_SOC)): selector.NumberSelector(selector.NumberSelectorConfig(min=20, max=60, unit_of_measurement="%")),
-            vol.Optional(CONF_BASE_GRID_SETPOINT, default=self.data.get(CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT)): selector.NumberSelector(selector.NumberSelectorConfig(min=1000, max=10000, step=100, unit_of_measurement="W")),
-        })
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_MAX_BATTERY_POWER,
+                    default=self.data.get(
+                        CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1000, max=10000, step=500, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAX_CAR_POWER,
+                    default=self.data.get(CONF_MAX_CAR_POWER, DEFAULT_MAX_CAR_POWER),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1000, max=22000, step=1000, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAX_GRID_POWER,
+                    default=self.data.get(CONF_MAX_GRID_POWER, DEFAULT_MAX_GRID_POWER),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=3000, max=30000, step=1000, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
+                    default=self.data.get(
+                        CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
+                        DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=50000, step=100, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_MIN_CAR_CHARGING_THRESHOLD,
+                    default=self.data.get(
+                        CONF_MIN_CAR_CHARGING_THRESHOLD,
+                        DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=50, max=500, step=50, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_PREDICTIVE_CHARGING_MIN_SOC,
+                    default=self.data.get(
+                        CONF_PREDICTIVE_CHARGING_MIN_SOC,
+                        DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=20, max=60, unit_of_measurement="%"
+                    )
+                ),
+                vol.Optional(
+                    CONF_BASE_GRID_SETPOINT,
+                    default=self.data.get(
+                        CONF_BASE_GRID_SETPOINT, DEFAULT_BASE_GRID_SETPOINT
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1000, max=10000, step=100, unit_of_measurement="W"
+                    )
+                ),
+            }
+        )
         return self.async_show_form(
             step_id="safety_limits",
             data_schema=schema,

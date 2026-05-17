@@ -45,6 +45,7 @@ v22 → v23: Renamed legacy ``battery_dump_*`` storage keys in ``entry.data`` an
            ``battery_dump_deadline_hour`` → ``arbitrage_mode_deadline_hour``,
            ``battery_dump_max_export_power`` → ``arbitrage_mode_max_export_power``).
 """
+
 from __future__ import annotations
 
 import logging
@@ -53,71 +54,71 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .helpers import coerce_integral_range
 from .const import (
-    CONF_BASE_GRID_SETPOINT,
-    CONF_MAX_SOC_THRESHOLD,
-    CONF_USE_DYNAMIC_THRESHOLD,
-    CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
-    CONF_PRICE_ADJUSTMENT_MULTIPLIER,
-    CONF_PRICE_ADJUSTMENT_OFFSET,
-    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
-    CONF_FEEDIN_ADJUSTMENT_OFFSET,
-    CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
-    CONF_PHASE_MODE,
-    CONF_PHASES,
-    CONF_BATTERY_PHASE_ASSIGNMENTS,
-    CONF_SOC_PRICE_MULTIPLIER_MAX,
-    CONF_SOC_BUFFER_TARGET,
-    CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
     CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
-    CONF_NEGATIVE_BUY_THRESHOLD,
-    CONF_MAX_SOC_THRESHOLD_SUNNY,
-    CONF_MAX_SOC_THRESHOLD_SOLAR,
-    CONF_SOLAR_FORECAST_START_HOUR,
+    CONF_ARBITRAGE_MODE_RESERVE_SOC,
+    CONF_BASE_GRID_SETPOINT,
     CONF_BATTERY_CAPACITIES,
-    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
-    CONF_TRANSPORT_COST_ENTITY,
-    CONF_TRANSPORT_COST_DAY,
-    CONF_TRANSPORT_COST_NIGHT,
-    CONF_ENERGY_TAX_ACCIJNS,
-    CONF_ENERGY_TAX_BIJDRAGE,
+    CONF_BATTERY_PHASE_ASSIGNMENTS,
+    CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+    CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
     CONF_ENERGY_COST_GSC,
     CONF_ENERGY_COST_WKK,
-    CONF_MAX_INVERTER_POWER,
-    CONF_INVERTER_EXPORT_LIMIT,
-    CONF_INVERTER_EXPORT_DEADBAND,
-    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    CONF_ENERGY_TAX_ACCIJNS,
+    CONF_ENERGY_TAX_BIJDRAGE,
+    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    CONF_FEEDIN_ADJUSTMENT_OFFSET,
     CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+    CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    CONF_INVERTER_EXPORT_DEADBAND,
+    CONF_INVERTER_EXPORT_LIMIT,
+    CONF_MAX_INVERTER_POWER,
+    CONF_MAX_SOC_THRESHOLD,
+    CONF_MAX_SOC_THRESHOLD_SOLAR,
+    CONF_MAX_SOC_THRESHOLD_SUNNY,
+    CONF_NEGATIVE_BUY_THRESHOLD,
+    CONF_PHASE_MODE,
+    CONF_PHASES,
+    CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+    CONF_PRICE_ADJUSTMENT_OFFSET,
+    CONF_SOC_BUFFER_TARGET,
+    CONF_SOC_PRICE_MULTIPLIER_MAX,
+    CONF_SOLAR_FORECAST_START_HOUR,
+    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+    CONF_TRANSPORT_COST_DAY,
+    CONF_TRANSPORT_COST_ENTITY,
+    CONF_TRANSPORT_COST_NIGHT,
+    CONF_USE_DYNAMIC_THRESHOLD,
+    DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
     DEFAULT_BASE_GRID_SETPOINT,
-    DEFAULT_USE_DYNAMIC_THRESHOLD,
+    DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
-    DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
-    DEFAULT_PRICE_ADJUSTMENT_OFFSET,
+    DEFAULT_ENERGY_COST_GSC,
+    DEFAULT_ENERGY_COST_WKK,
+    DEFAULT_ENERGY_TAX_ACCIJNS,
+    DEFAULT_ENERGY_TAX_BIJDRAGE,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
-    DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
-    DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
-    DEFAULT_SOC_BUFFER_TARGET,
-    DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
-    DEFAULT_NEGATIVE_BUY_THRESHOLD,
+    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    DEFAULT_INVERTER_EXPORT_DEADBAND,
+    DEFAULT_INVERTER_EXPORT_LIMIT,
+    DEFAULT_MAX_INVERTER_POWER,
     DEFAULT_MAX_SOC_SOLAR,
+    DEFAULT_NEGATIVE_BUY_THRESHOLD,
+    DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
+    DEFAULT_PRICE_ADJUSTMENT_OFFSET,
+    DEFAULT_SOC_BUFFER_TARGET,
+    DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
     DEFAULT_TRANSPORT_COST_DAY,
     DEFAULT_TRANSPORT_COST_NIGHT,
-    DEFAULT_ENERGY_TAX_ACCIJNS,
-    DEFAULT_ENERGY_TAX_BIJDRAGE,
-    DEFAULT_ENERGY_COST_GSC,
-    DEFAULT_ENERGY_COST_WKK,
-    DEFAULT_MAX_INVERTER_POWER,
-    DEFAULT_INVERTER_EXPORT_LIMIT,
-    DEFAULT_INVERTER_EXPORT_DEADBAND,
-    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
-    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+    DEFAULT_USE_DYNAMIC_THRESHOLD,
     PHASE_MODE_SINGLE,
 )
+from .helpers import coerce_integral_range
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -134,7 +135,7 @@ def _validate_numeric_config(
     min_val: float,
     max_val: float,
     default: float,
-    name: str
+    name: str,
 ) -> None:
     """Validate and clamp numeric configuration values."""
     if key in config:
@@ -143,13 +144,19 @@ def _validate_numeric_config(
             if not min_val <= value <= max_val:
                 _LOGGER.warning(
                     "Migration: %s value %.2f out of range [%.2f, %.2f], resetting to default %.2f",
-                    name, value, min_val, max_val, default
+                    name,
+                    value,
+                    min_val,
+                    max_val,
+                    default,
                 )
                 config[key] = default
         except (TypeError, ValueError):
             _LOGGER.warning(
                 "Migration: %s value %s invalid, resetting to default %.2f",
-                name, config[key], default
+                name,
+                config[key],
+                default,
             )
             config[key] = default
 
@@ -216,16 +223,16 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # Validate the new value
         _validate_numeric_config(
-            new_data, CONF_BASE_GRID_SETPOINT, 1000, 15000,
-            DEFAULT_BASE_GRID_SETPOINT, "base_grid_setpoint"
+            new_data,
+            CONF_BASE_GRID_SETPOINT,
+            1000,
+            15000,
+            DEFAULT_BASE_GRID_SETPOINT,
+            "base_grid_setpoint",
         )
 
         # Update entry with new data
-        hass.config_entries.async_update_entry(
-            entry,
-            data=new_data,
-            version=2
-        )
+        hass.config_entries.async_update_entry(entry, data=new_data, version=2)
 
         _LOGGER.info("Migration to version 2 complete")
 
@@ -236,18 +243,21 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Add dynamic threshold configuration options
         if CONF_USE_DYNAMIC_THRESHOLD not in new_data:
             new_data[CONF_USE_DYNAMIC_THRESHOLD] = DEFAULT_USE_DYNAMIC_THRESHOLD
-            _LOGGER.info("Added use_dynamic_threshold: %s", DEFAULT_USE_DYNAMIC_THRESHOLD)
+            _LOGGER.info(
+                "Added use_dynamic_threshold: %s", DEFAULT_USE_DYNAMIC_THRESHOLD
+            )
 
         if CONF_DYNAMIC_THRESHOLD_CONFIDENCE not in new_data:
-            new_data[CONF_DYNAMIC_THRESHOLD_CONFIDENCE] = DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE
-            _LOGGER.info("Added dynamic_threshold_confidence: %s%%", DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE)
+            new_data[CONF_DYNAMIC_THRESHOLD_CONFIDENCE] = (
+                DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE
+            )
+            _LOGGER.info(
+                "Added dynamic_threshold_confidence: %s%%",
+                DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
+            )
 
         # Update entry with new data
-        hass.config_entries.async_update_entry(
-            entry,
-            data=new_data,
-            version=3
-        )
+        hass.config_entries.async_update_entry(entry, data=new_data, version=3)
 
         _LOGGER.info("Migration to version 3 complete")
 
@@ -265,14 +275,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.info("Removed deprecated config option: %s", key)
 
         if removed_count > 0:
-            _LOGGER.info("Removed %d deprecated time-based config options", removed_count)
+            _LOGGER.info(
+                "Removed %d deprecated time-based config options", removed_count
+            )
 
         # Update entry with cleaned data
-        hass.config_entries.async_update_entry(
-            entry,
-            data=new_data,
-            version=4
-        )
+        hass.config_entries.async_update_entry(entry, data=new_data, version=4)
 
         _LOGGER.info("Migration to version 4 complete")
 
@@ -286,11 +294,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.info("Removed unused config: grid_battery_charging_limit_soc")
 
         # Update entry with cleaned data
-        hass.config_entries.async_update_entry(
-            entry,
-            data=new_data,
-            version=5
-        )
+        hass.config_entries.async_update_entry(entry, data=new_data, version=5)
 
         _LOGGER.info("Migration to version 5 complete")
 
@@ -299,22 +303,22 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         new_data = {**entry.data}
 
         if CONF_PRICE_ADJUSTMENT_MULTIPLIER not in new_data:
-            new_data[CONF_PRICE_ADJUSTMENT_MULTIPLIER] = DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+            new_data[CONF_PRICE_ADJUSTMENT_MULTIPLIER] = (
+                DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+            )
 
         if CONF_PRICE_ADJUSTMENT_OFFSET not in new_data:
             new_data[CONF_PRICE_ADJUSTMENT_OFFSET] = DEFAULT_PRICE_ADJUSTMENT_OFFSET
 
         if CONF_FEEDIN_ADJUSTMENT_MULTIPLIER not in new_data:
-            new_data[CONF_FEEDIN_ADJUSTMENT_MULTIPLIER] = DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER
+            new_data[CONF_FEEDIN_ADJUSTMENT_MULTIPLIER] = (
+                DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER
+            )
 
         if CONF_FEEDIN_ADJUSTMENT_OFFSET not in new_data:
             new_data[CONF_FEEDIN_ADJUSTMENT_OFFSET] = DEFAULT_FEEDIN_ADJUSTMENT_OFFSET
 
-        hass.config_entries.async_update_entry(
-            entry,
-            data=new_data,
-            version=6
-        )
+        hass.config_entries.async_update_entry(entry, data=new_data, version=6)
 
         _LOGGER.info("Migration to version 6 complete")
 
@@ -322,11 +326,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Migrate from version 6 to version 7
         # No data changes needed - only adds optional nordpool_config_entry field
         # which will be added through UI if user chooses to configure it
-        hass.config_entries.async_update_entry(
-            entry,
-            data={**entry.data},
-            version=7
-        )
+        hass.config_entries.async_update_entry(entry, data={**entry.data}, version=7)
         _LOGGER.info("Migration to version 7 complete")
 
     if entry.version == 7:
@@ -335,14 +335,15 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # Add car permissive mode multiplier configuration
         if CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER not in new_data:
-            new_data[CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER] = DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER
-            _LOGGER.info("Added car_permissive_threshold_multiplier: %.1f", DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER)
+            new_data[CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER] = (
+                DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER
+            )
+            _LOGGER.info(
+                "Added car_permissive_threshold_multiplier: %.1f",
+                DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+            )
 
-        hass.config_entries.async_update_entry(
-            entry,
-            data=new_data,
-            version=8
-        )
+        hass.config_entries.async_update_entry(entry, data=new_data, version=8)
 
         _LOGGER.info("Migration to version 8 complete")
 
@@ -357,11 +358,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         new_data.setdefault(CONF_PHASES, {})
         new_data.setdefault(CONF_BATTERY_PHASE_ASSIGNMENTS, {})
 
-        hass.config_entries.async_update_entry(
-            entry,
-            data=new_data,
-            version=9
-        )
+        hass.config_entries.async_update_entry(entry, data=new_data, version=9)
 
         _LOGGER.info("Migration to version 9 complete")
 
@@ -369,11 +366,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Migrate from version 9 to version 10
         # No data changes needed - version 10 adds optional battery_power_entity per phase
         # which will be added through UI if user chooses to configure it
-        hass.config_entries.async_update_entry(
-            entry,
-            data={**entry.data},
-            version=10
-        )
+        hass.config_entries.async_update_entry(entry, data={**entry.data}, version=10)
         _LOGGER.info("Migration to version 10 complete")
 
     if entry.version == 10:
@@ -383,17 +376,15 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Add SOC-based price multiplier settings
         if CONF_SOC_PRICE_MULTIPLIER_MAX not in new_data:
             new_data[CONF_SOC_PRICE_MULTIPLIER_MAX] = DEFAULT_SOC_PRICE_MULTIPLIER_MAX
-            _LOGGER.info("Added soc_price_multiplier_max: %.2f", DEFAULT_SOC_PRICE_MULTIPLIER_MAX)
+            _LOGGER.info(
+                "Added soc_price_multiplier_max: %.2f", DEFAULT_SOC_PRICE_MULTIPLIER_MAX
+            )
 
         if CONF_SOC_BUFFER_TARGET not in new_data:
             new_data[CONF_SOC_BUFFER_TARGET] = DEFAULT_SOC_BUFFER_TARGET
             _LOGGER.info("Added soc_buffer_target: %d%%", DEFAULT_SOC_BUFFER_TARGET)
 
-        hass.config_entries.async_update_entry(
-            entry,
-            data=new_data,
-            version=11
-        )
+        hass.config_entries.async_update_entry(entry, data=new_data, version=11)
 
         _LOGGER.info("Migration to version 11 complete")
 
@@ -411,11 +402,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # solar_forecast_entity is optional, no default needed
 
-        hass.config_entries.async_update_entry(
-            entry,
-            data=new_data,
-            version=12
-        )
+        hass.config_entries.async_update_entry(entry, data=new_data, version=12)
 
         _LOGGER.info("Migration to version 12 complete")
 
@@ -426,13 +413,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Add configurable solar forecast start hour
         if CONF_SOLAR_FORECAST_START_HOUR not in new_data:
             new_data[CONF_SOLAR_FORECAST_START_HOUR] = DEFAULT_SOLAR_FORECAST_START_HOUR
-            _LOGGER.info("Added solar_forecast_start_hour: %d", DEFAULT_SOLAR_FORECAST_START_HOUR)
+            _LOGGER.info(
+                "Added solar_forecast_start_hour: %d", DEFAULT_SOLAR_FORECAST_START_HOUR
+            )
 
-        hass.config_entries.async_update_entry(
-            entry,
-            data=new_data,
-            version=13
-        )
+        hass.config_entries.async_update_entry(entry, data=new_data, version=13)
 
         _LOGGER.info("Migration to version 13 complete")
 
@@ -542,10 +527,14 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         if CONF_INVERTER_EXPORT_LIMIT not in new_data:
             new_data[CONF_INVERTER_EXPORT_LIMIT] = DEFAULT_INVERTER_EXPORT_LIMIT
-            _LOGGER.info("Added inverter_export_limit: %dW", DEFAULT_INVERTER_EXPORT_LIMIT)
+            _LOGGER.info(
+                "Added inverter_export_limit: %dW", DEFAULT_INVERTER_EXPORT_LIMIT
+            )
 
         if CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD not in new_data:
-            new_data[CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD] = DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD
+            new_data[CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD] = (
+                DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD
+            )
             _LOGGER.info(
                 "Added inverter_derating_soc_bypass_threshold: %d%%",
                 DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
@@ -707,7 +696,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 if legacy_key in source_dict and new_key not in source_dict:
                     source_dict[new_key] = source_dict.pop(legacy_key)
                     _LOGGER.info(
-                        "Renamed %s → %s", legacy_key, new_key,
+                        "Renamed %s → %s",
+                        legacy_key,
+                        new_key,
                     )
                 elif legacy_key in source_dict:
                     # New key already present; drop the legacy duplicate.

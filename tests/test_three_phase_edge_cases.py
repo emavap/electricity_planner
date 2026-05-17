@@ -1,28 +1,31 @@
 """Edge case tests for three-phase electrical system support."""
+
 from __future__ import annotations
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.electricity_planner import coordinator as coordinator_module
-from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
 from custom_components.electricity_planner.const import (
+    CONF_BATTERY_CAPACITIES,
+    CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
     CONF_LOWEST_PRICE_ENTITY,
     CONF_NEXT_PRICE_ENTITY,
-    CONF_PHASE_MODE,
-    CONF_PHASES,
-    CONF_PHASE_SOLAR_ENTITY,
-    CONF_PHASE_CONSUMPTION_ENTITY,
-    CONF_PHASE_CAR_ENTITY,
-    CONF_PHASE_GRID_POWER_ENTITY,
     CONF_PHASE_BATTERY_POWER_ENTITY,
-    CONF_BATTERY_CAPACITIES,
-    CONF_BATTERY_PHASE_ASSIGNMENTS,
+    CONF_PHASE_CAR_ENTITY,
+    CONF_PHASE_CONSUMPTION_ENTITY,
+    CONF_PHASE_GRID_POWER_ENTITY,
+    CONF_PHASE_MODE,
+    CONF_PHASE_SOLAR_ENTITY,
+    CONF_PHASES,
     DOMAIN,
     PHASE_MODE_THREE,
+)
+from custom_components.electricity_planner.coordinator import (
+    ElectricityPlannerCoordinator,
 )
 
 
@@ -254,7 +257,10 @@ async def test_three_phase_partial_solar_surplus_calculation(fake_hass, monkeypa
     assert phase_details["phase_1"]["solar_surplus"] == pytest.approx(2000.0)
 
     # Phase 2 should have None surplus (no solar)
-    assert phase_details["phase_2"]["solar_surplus"] is None or phase_details["phase_2"]["solar_surplus"] == 0
+    assert (
+        phase_details["phase_2"]["solar_surplus"] is None
+        or phase_details["phase_2"]["solar_surplus"] == 0
+    )
 
     # Overall surplus should be calculated correctly
     assert data["solar_surplus"] == pytest.approx(1500.0)  # 3000 - (1000 + 500)

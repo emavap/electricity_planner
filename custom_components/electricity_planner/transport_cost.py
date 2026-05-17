@@ -5,6 +5,7 @@ for resolving per-interval transport costs (either from built-in day/night
 components or from a legacy external entity with recorder history) and
 maintaining the cached lookup used by the price timeline builder.
 """
+
 from __future__ import annotations
 
 import logging
@@ -87,7 +88,11 @@ class TransportCostResolver:
                 if state and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
                     p1_tariff_code = state.state
 
-        day = is_day_tariff(start_time_utc, p1_tariff_code) if p1_tariff_code is None else is_day_tariff(start_time_utc, None)
+        day = (
+            is_day_tariff(start_time_utc, p1_tariff_code)
+            if p1_tariff_code is None
+            else is_day_tariff(start_time_utc, None)
+        )
         if p1_tariff_code is not None and 0 <= current_interval_age < 900:
             day = is_day_tariff(start_time_utc, p1_tariff_code)
 
@@ -109,9 +114,7 @@ class TransportCostResolver:
             wkk=coordinator.config.get(CONF_ENERGY_COST_WKK, DEFAULT_ENERGY_COST_WKK),
         )
 
-    def maybe_log_status(
-        self, status: str, message: str | None, *args: Any
-    ) -> None:
+    def maybe_log_status(self, status: str, message: str | None, *args: Any) -> None:
         """Log transport cost status changes without spamming."""
         coordinator = self._coordinator
         if status == coordinator._transport_cost_last_log or message is None:
@@ -157,16 +160,24 @@ class TransportCostResolver:
                 else None
             )
             if not (
-                coordinator._transport_cost_status in {"fallback_current", "pending_history"}
+                coordinator._transport_cost_status
+                in {"fallback_current", "pending_history"}
                 and cached_cost != current_transport_cost
             ):
-                return coordinator._transport_cost_lookup, coordinator._transport_cost_status
+                return (
+                    coordinator._transport_cost_lookup,
+                    coordinator._transport_cost_status,
+                )
 
         try:
             try:
-                from homeassistant.components.recorder import get_instance as get_recorder_instance
+                from homeassistant.components.recorder import (
+                    get_instance as get_recorder_instance,
+                )
             except ImportError:
-                get_recorder_instance = None  # Older HA or test shims may not expose get_instance
+                get_recorder_instance = (
+                    None  # Older HA or test shims may not expose get_instance
+                )
 
             from homeassistant.components.recorder.history import get_significant_states
 
@@ -211,7 +222,10 @@ class TransportCostResolver:
                         transport_entity,
                     )
                 coordinator._transport_cost_lookup_time = now
-                return coordinator._transport_cost_lookup, coordinator._transport_cost_status
+                return (
+                    coordinator._transport_cost_lookup,
+                    coordinator._transport_cost_status,
+                )
 
             # First collect all valid cost changes with timestamps. Pre-parse
             # the local-time representation here so resolve() doesn't have to
@@ -249,7 +263,9 @@ class TransportCostResolver:
                     last_cost = cost
 
             coordinator._transport_cost_lookup = changes
-            coordinator._transport_cost_status = "applied" if changes else "pending_history"
+            coordinator._transport_cost_status = (
+                "applied" if changes else "pending_history"
+            )
             coordinator._transport_cost_lookup_time = now
 
             if coordinator._transport_cost_status == "pending_history":
@@ -262,7 +278,10 @@ class TransportCostResolver:
             else:
                 self.maybe_log_status("applied", None)
 
-            return coordinator._transport_cost_lookup, coordinator._transport_cost_status
+            return (
+                coordinator._transport_cost_lookup,
+                coordinator._transport_cost_status,
+            )
 
         except Exception as err:
             if isinstance(err, (KeyboardInterrupt, SystemExit)):
@@ -286,4 +305,7 @@ class TransportCostResolver:
                     err,
                 )
             coordinator._transport_cost_lookup_time = now
-            return coordinator._transport_cost_lookup, coordinator._transport_cost_status
+            return (
+                coordinator._transport_cost_lookup,
+                coordinator._transport_cost_status,
+            )

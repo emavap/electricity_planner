@@ -1,4 +1,5 @@
 """Dashboard automation tests for Electricity Planner."""
+
 from __future__ import annotations
 
 import json
@@ -143,10 +144,12 @@ def test_dashboard_template_keeps_dump_threshold_on_sell_graph():
     """The managed dashboard should surface the arbitrage threshold only on the sell chart."""
     template = Path(dashboard.__file__).with_name("dashboard_template.yaml").read_text()
 
-    sell_section = template.split("title: Electricity Sell Prices (History + Future)", 1)[1]
-    buy_section = template.split("title: Electricity Buy Prices (History + Future)", 1)[1].split(
+    sell_section = template.split(
         "title: Electricity Sell Prices (History + Future)", 1
-    )[0]
+    )[1]
+    buy_section = template.split("title: Electricity Buy Prices (History + Future)", 1)[
+        1
+    ].split("title: Electricity Sell Prices (History + Future)", 1)[0]
 
     assert "name: Arbitrage Threshold" in template
     assert "name: Arbitrage Threshold" in sell_section
@@ -158,7 +161,11 @@ def test_dashboard_template_keeps_dump_threshold_on_sell_graph():
 
 def test_dashboard_three_phase_appendix_contains_phase_specific_cards():
     """The managed three-phase appendix should add per-phase cards on top of the shared template."""
-    appendix = Path(dashboard.__file__).with_name("dashboard_template_3phase_appendix.yaml").read_text()
+    appendix = (
+        Path(dashboard.__file__)
+        .with_name("dashboard_template_3phase_appendix.yaml")
+        .read_text()
+    )
 
     assert "## 🔀 Three-Phase Details" in appendix
     assert "Phase 1 (L1) Status" in appendix
@@ -180,9 +187,15 @@ def test_three_phase_appendix_merges_as_dedicated_view():
     dashboard_config = {"views": [{"title": "Overview", "cards": []}]}
     appendix_cards = [{"type": "markdown", "content": "three phase"}]
 
-    assert dashboard._append_cards_to_primary_stack(dashboard_config, appendix_cards) is True
+    assert (
+        dashboard._append_cards_to_primary_stack(dashboard_config, appendix_cards)
+        is True
+    )
 
-    assert [view["title"] for view in dashboard_config["views"]] == ["Overview", "Three Phase"]
+    assert [view["title"] for view in dashboard_config["views"]] == [
+        "Overview",
+        "Three Phase",
+    ]
     three_phase_view = dashboard_config["views"][1]
     assert three_phase_view["path"] == "three-phase"
     assert three_phase_view["cards"][0]["cards"] == appendix_cards
@@ -218,19 +231,23 @@ def test_bundled_single_phase_dashboard_documents_required_custom_cards():
 
 def test_bundled_dashboards_keep_dump_toggle_but_not_export_cap_number():
     """Arbitrage mode should stay toggleable from dashboards, but export cap lives in config flow."""
-    single_phase = (Path(__file__).parent.parent / "electricity_planner_dashboard.yaml").read_text(encoding="utf-8")
-    three_phase = (Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml").read_text(encoding="utf-8")
+    single_phase = (
+        Path(__file__).parent.parent / "electricity_planner_dashboard.yaml"
+    ).read_text(encoding="utf-8")
+    three_phase = (
+        Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    ).read_text(encoding="utf-8")
 
     assert "switch.electricity_planner_arbitrage_mode" in single_phase
     assert "switch.electricity_planner_arbitrage_mode" in three_phase
     assert "name: Arbitrage Threshold" in single_phase
     assert "name: Arbitrage Threshold" in three_phase
-    single_phase_buy_section = single_phase.split("title: Electricity Buy Prices (History + Future)", 1)[1].split(
-        "title: Electricity Sell Prices (History + Future)", 1
-    )[0]
-    three_phase_buy_section = three_phase.split("title: Electricity Buy Prices (History + Future)", 1)[1].split(
-        "title: Electricity Sell Prices (History + Future)", 1
-    )[0]
+    single_phase_buy_section = single_phase.split(
+        "title: Electricity Buy Prices (History + Future)", 1
+    )[1].split("title: Electricity Sell Prices (History + Future)", 1)[0]
+    three_phase_buy_section = three_phase.split(
+        "title: Electricity Buy Prices (History + Future)", 1
+    )[1].split("title: Electricity Sell Prices (History + Future)", 1)[0]
     assert "name: Arbitrage Threshold" not in single_phase_buy_section
     assert "name: Arbitrage Threshold" not in three_phase_buy_section
     assert "name: Net feed-in price" in single_phase
@@ -244,14 +261,22 @@ def test_bundled_dashboards_keep_dump_toggle_but_not_export_cap_number():
     assert "number.electricity_planner_max_soc_threshold_solar" in three_phase
     assert "title: Battery Dump Plan" not in single_phase
     assert "title: Battery Dump Plan" not in three_phase
-    assert "number.electricity_planner_arbitrage_mode_max_export_power" not in single_phase
-    assert "number.electricity_planner_arbitrage_mode_max_export_power" not in three_phase
+    assert (
+        "number.electricity_planner_arbitrage_mode_max_export_power" not in single_phase
+    )
+    assert (
+        "number.electricity_planner_arbitrage_mode_max_export_power" not in three_phase
+    )
 
 
 def test_bundled_dashboards_include_arbitrage_reason():
     """Both bundled dashboards should expose the arbitrage reason line."""
-    single_phase = (Path(__file__).parent.parent / "electricity_planner_dashboard.yaml").read_text(encoding="utf-8")
-    three_phase = (Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml").read_text(encoding="utf-8")
+    single_phase = (
+        Path(__file__).parent.parent / "electricity_planner_dashboard.yaml"
+    ).read_text(encoding="utf-8")
+    three_phase = (
+        Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    ).read_text(encoding="utf-8")
 
     assert "name: Arbitrage reason" in single_phase
     assert "name: Arbitrage reason" in three_phase
@@ -259,8 +284,12 @@ def test_bundled_dashboards_include_arbitrage_reason():
 
 def test_bundled_dashboards_include_negative_arbitrage_buy_reason():
     """Both bundled dashboards should expose the Negative Arbitrage Buy reason attribute row."""
-    single_phase = (Path(__file__).parent.parent / "electricity_planner_dashboard.yaml").read_text(encoding="utf-8")
-    three_phase = (Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml").read_text(encoding="utf-8")
+    single_phase = (
+        Path(__file__).parent.parent / "electricity_planner_dashboard.yaml"
+    ).read_text(encoding="utf-8")
+    three_phase = (
+        Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    ).read_text(encoding="utf-8")
 
     assert "name: Negative Arbitrage Buy reason" in single_phase
     assert "name: Negative Arbitrage Buy reason" in three_phase
@@ -278,17 +307,23 @@ def test_managed_dashboard_template_includes_negative_arbitrage_buy_reason():
 
 def test_bundled_dashboards_include_negative_buy_threshold_line_on_buy_chart():
     """The Negative Arbitrage Buy threshold line should appear only on the buy chart."""
-    single_phase = (Path(__file__).parent.parent / "electricity_planner_dashboard.yaml").read_text(encoding="utf-8")
-    three_phase = (Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml").read_text(encoding="utf-8")
+    single_phase = (
+        Path(__file__).parent.parent / "electricity_planner_dashboard.yaml"
+    ).read_text(encoding="utf-8")
+    three_phase = (
+        Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    ).read_text(encoding="utf-8")
 
     for content in (single_phase, three_phase):
-        buy_section = content.split("title: Electricity Buy Prices (History + Future)", 1)[1].split(
+        buy_section = content.split(
+            "title: Electricity Buy Prices (History + Future)", 1
+        )[1].split("title: Electricity Sell Prices (History + Future)", 1)[0]
+        sell_section = content.split(
             "title: Electricity Sell Prices (History + Future)", 1
-        )[0]
-        sell_section = content.split("title: Electricity Sell Prices (History + Future)", 1)[1]
-        negative_threshold_section = buy_section.split("name: Negative Arbitrage Buy Threshold", 1)[1].split(
-            "data_generator:", 1
-        )[0]
+        )[1]
+        negative_threshold_section = buy_section.split(
+            "name: Negative Arbitrage Buy Threshold", 1
+        )[1].split("data_generator:", 1)[0]
 
         assert "name: Negative Arbitrage Buy Threshold" in buy_section
         assert "name: Negative Arbitrage Buy Threshold" not in sell_section
@@ -300,13 +335,15 @@ def test_bundled_dashboards_include_negative_buy_threshold_line_on_buy_chart():
 def test_managed_dashboard_template_includes_negative_buy_threshold_line_on_buy_chart():
     """Managed dashboard should show the Negative Arbitrage Buy threshold only on the buy chart."""
     template = Path(dashboard.__file__).with_name("dashboard_template.yaml").read_text()
-    buy_section = template.split("title: Electricity Buy Prices (History + Future)", 1)[1].split(
+    buy_section = template.split("title: Electricity Buy Prices (History + Future)", 1)[
+        1
+    ].split("title: Electricity Sell Prices (History + Future)", 1)[0]
+    sell_section = template.split(
         "title: Electricity Sell Prices (History + Future)", 1
-    )[0]
-    sell_section = template.split("title: Electricity Sell Prices (History + Future)", 1)[1]
-    negative_threshold_section = buy_section.split("name: Negative Arbitrage Buy Threshold", 1)[1].split(
-        "data_generator:", 1
-    )[0]
+    )[1]
+    negative_threshold_section = buy_section.split(
+        "name: Negative Arbitrage Buy Threshold", 1
+    )[1].split("data_generator:", 1)[0]
 
     assert "name: Negative Arbitrage Buy Threshold" in buy_section
     assert "name: Negative Arbitrage Buy Threshold" not in sell_section
@@ -317,8 +354,12 @@ def test_managed_dashboard_template_includes_negative_buy_threshold_line_on_buy_
 
 def test_bundled_dashboards_drop_top_section_buttons():
     """The redundant top-of-dashboard Car permissive / Arbitrage mode buttons should be removed."""
-    single_phase = (Path(__file__).parent.parent / "electricity_planner_dashboard.yaml").read_text(encoding="utf-8")
-    three_phase = (Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml").read_text(encoding="utf-8")
+    single_phase = (
+        Path(__file__).parent.parent / "electricity_planner_dashboard.yaml"
+    ).read_text(encoding="utf-8")
+    three_phase = (
+        Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    ).read_text(encoding="utf-8")
 
     for content in (single_phase, three_phase):
         # Entries above the "Active Grid Charging Limit" markdown card represent the top section.
@@ -345,12 +386,18 @@ def test_managed_dashboard_template_drops_top_section_buttons():
 
 def test_bundled_dashboards_include_battery_controls_quick_reference():
     """Battery Controls section should be followed by an explanatory markdown card."""
-    single_phase = (Path(__file__).parent.parent / "electricity_planner_dashboard.yaml").read_text(encoding="utf-8")
-    three_phase = (Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml").read_text(encoding="utf-8")
+    single_phase = (
+        Path(__file__).parent.parent / "electricity_planner_dashboard.yaml"
+    ).read_text(encoding="utf-8")
+    three_phase = (
+        Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    ).read_text(encoding="utf-8")
 
     for content in (single_phase, three_phase):
         # The explainer card lives between Battery Controls and the next entities card (Decisions).
-        battery_section = content.split("title: Battery Controls", 1)[1].split("title: Decisions", 1)[0]
+        battery_section = content.split("title: Battery Controls", 1)[1].split(
+            "title: Decisions", 1
+        )[0]
 
         assert "Battery Controls — quick reference" in battery_section
         # Each control name from the entities row should appear in the explanations.
@@ -370,7 +417,9 @@ def test_bundled_dashboards_include_battery_controls_quick_reference():
 def test_managed_dashboard_template_includes_battery_controls_quick_reference():
     """Managed template should ship the same Battery Controls explanations card."""
     template = Path(dashboard.__file__).with_name("dashboard_template.yaml").read_text()
-    battery_section = template.split("title: Battery Controls", 1)[1].split("title: Decisions", 1)[0]
+    battery_section = template.split("title: Battery Controls", 1)[1].split(
+        "title: Decisions", 1
+    )[0]
 
     assert "Battery Controls — quick reference" in battery_section
     assert "**Grid Max SOC**" in battery_section
@@ -388,7 +437,9 @@ def test_managed_dashboard_template_includes_battery_controls_quick_reference():
 
 def test_bundled_three_phase_dashboard_includes_shared_single_phase_sections():
     """Three-phase dashboard should include the same shared charts and diagnostics as single-phase."""
-    dashboard_path = Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    dashboard_path = (
+        Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    )
     content = dashboard_path.read_text(encoding="utf-8")
 
     assert "title: Electricity Buy Prices (History + Future)" in content
@@ -415,7 +466,9 @@ def test_bundled_three_phase_dashboard_includes_shared_single_phase_sections():
 
 def test_bundled_three_phase_dashboard_uses_native_rows_for_phase_details():
     """Bundled three-phase dashboard should avoid fragile custom rows on the phase view."""
-    dashboard_path = Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    dashboard_path = (
+        Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    )
     content = dashboard_path.read_text(encoding="utf-8")
 
     assert "type: custom:template-entity-row" not in content
@@ -429,7 +482,9 @@ def test_bundled_three_phase_dashboard_uses_native_rows_for_phase_details():
 
 def test_bundled_three_phase_dashboard_documents_required_custom_cards():
     """Bundled three-phase dashboard should declare every custom card it uses."""
-    dashboard_path = Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    dashboard_path = (
+        Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    )
     content = dashboard_path.read_text(encoding="utf-8")
 
     assert 'Install "Gauge Card Pro"' in content
@@ -443,7 +498,10 @@ def test_bundled_three_phase_dashboard_documents_required_custom_cards():
 def test_manual_override_status_formats_numeric_overrides_as_watts():
     """Dashboard status should format numeric override values as watts."""
     paths = [
-        Path(__file__).parent.parent / "custom_components" / "electricity_planner" / "dashboard_template.yaml",
+        Path(__file__).parent.parent
+        / "custom_components"
+        / "electricity_planner"
+        / "dashboard_template.yaml",
         Path(__file__).parent.parent / "electricity_planner_dashboard.yaml",
         Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml",
     ]
@@ -472,7 +530,9 @@ def test_bundled_single_phase_dashboard_clear_all_targets_per_decision_overrides
 
 def test_bundled_three_phase_template_rows_define_backing_entities():
     """Every template row in the bundled three-phase dashboard should define an entity."""
-    dashboard_path = Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    dashboard_path = (
+        Path(__file__).parent.parent / "electricity_planner_3phase_dashboard.yaml"
+    )
     content = dashboard_path.read_text(encoding="utf-8")
     parsed = yaml.safe_load(content)
 
@@ -480,7 +540,10 @@ def test_bundled_three_phase_template_rows_define_backing_entities():
 
     def walk(node):
         if isinstance(node, dict):
-            if node.get("type") == "custom:template-entity-row" and "entity" not in node:
+            if (
+                node.get("type") == "custom:template-entity-row"
+                and "entity" not in node
+            ):
                 missing_entity_rows.append(node.get("name", "<unnamed>"))
             for value in node.values():
                 walk(value)
@@ -530,14 +593,23 @@ async def test_dashboard_creation_uses_registered_entities():
 
     storage = FakeStorage()
 
-    with patch.object(
-        dashboard, "_get_lovelace_handles", return_value=dashboard.DashboardHandles(collection=None, dashboards={})
-    ), patch.object(
-        dashboard, "_ensure_dashboard_record", new=AsyncMock(return_value=storage)
-    ) as ensure_mock, patch.object(
-        dashboard, "_async_wait_for_entity_map", new=AsyncMock(return_value=entity_map)
-    ), patch.object(
-        dashboard, "_async_load_template_text", new=AsyncMock(return_value=template)
+    with (
+        patch.object(
+            dashboard,
+            "_get_lovelace_handles",
+            return_value=dashboard.DashboardHandles(collection=None, dashboards={}),
+        ),
+        patch.object(
+            dashboard, "_ensure_dashboard_record", new=AsyncMock(return_value=storage)
+        ) as ensure_mock,
+        patch.object(
+            dashboard,
+            "_async_wait_for_entity_map",
+            new=AsyncMock(return_value=entity_map),
+        ),
+        patch.object(
+            dashboard, "_async_load_template_text", new=AsyncMock(return_value=template)
+        ),
     ):
         await dashboard.async_setup_or_update_dashboard(hass, entry)
 
@@ -587,11 +659,7 @@ async def test_dashboard_creation_appends_three_phase_cards_when_enabled():
         "          - type: markdown\n"
         "            content: base\n"
     )
-    appendix_template = (
-        "- type: markdown\n"
-        "  content: |\n"
-        "    three phase\n"
-    )
+    appendix_template = "- type: markdown\n" "  content: |\n" "    three phase\n"
     storage = FakeStorage()
 
     async def _load_text(_hass, template_filename=dashboard.TEMPLATE_FILENAME):
@@ -599,14 +667,25 @@ async def test_dashboard_creation_appends_three_phase_cards_when_enabled():
             return appendix_template
         return base_template
 
-    with patch.object(
-        dashboard, "_get_lovelace_handles", return_value=dashboard.DashboardHandles(collection=None, dashboards={})
-    ), patch.object(
-        dashboard, "_ensure_dashboard_record", new=AsyncMock(return_value=storage)
-    ), patch.object(
-        dashboard, "_async_wait_for_entity_map", new=AsyncMock(return_value=entity_map)
-    ), patch.object(
-        dashboard, "_async_load_template_text", new=AsyncMock(side_effect=_load_text)
+    with (
+        patch.object(
+            dashboard,
+            "_get_lovelace_handles",
+            return_value=dashboard.DashboardHandles(collection=None, dashboards={}),
+        ),
+        patch.object(
+            dashboard, "_ensure_dashboard_record", new=AsyncMock(return_value=storage)
+        ),
+        patch.object(
+            dashboard,
+            "_async_wait_for_entity_map",
+            new=AsyncMock(return_value=entity_map),
+        ),
+        patch.object(
+            dashboard,
+            "_async_load_template_text",
+            new=AsyncMock(side_effect=_load_text),
+        ),
     ):
         await dashboard.async_setup_or_update_dashboard(hass, entry)
 
@@ -624,15 +703,20 @@ async def test_dashboard_setup_skips_when_no_entities():
     entry = MockConfigEntry(domain=DOMAIN, title="Planner Instance", data={})
     hass = SimpleNamespace(loop=FakeLoop(), data={})
 
-    with patch.object(
-        dashboard, "_get_lovelace_handles", return_value=dashboard.DashboardHandles(collection=None, dashboards={})
-    ), patch.object(
-        dashboard, "_async_wait_for_entity_map", new=AsyncMock(return_value={})
-    ), patch.object(
-        dashboard, "_ensure_dashboard_record", new=AsyncMock()
-    ) as ensure_mock, patch.object(
-        dashboard, "_schedule_entity_map_retry"
-    ) as retry_mock:
+    with (
+        patch.object(
+            dashboard,
+            "_get_lovelace_handles",
+            return_value=dashboard.DashboardHandles(collection=None, dashboards={}),
+        ),
+        patch.object(
+            dashboard, "_async_wait_for_entity_map", new=AsyncMock(return_value={})
+        ),
+        patch.object(
+            dashboard, "_ensure_dashboard_record", new=AsyncMock()
+        ) as ensure_mock,
+        patch.object(dashboard, "_schedule_entity_map_retry") as retry_mock,
+    ):
         await dashboard.async_setup_or_update_dashboard(hass, entry)
 
     ensure_mock.assert_not_called()
@@ -654,15 +738,22 @@ async def test_dashboard_setup_retries_when_core_entities_missing():
         # Missing sunny_forecast_threshold_kwh on purpose
     }
 
-    with patch.object(
-        dashboard, "_get_lovelace_handles", return_value=dashboard.DashboardHandles(collection=None, dashboards={})
-    ), patch.object(
-        dashboard, "_async_wait_for_entity_map", new=AsyncMock(return_value=entity_map)
-    ), patch.object(
-        dashboard, "_ensure_dashboard_record", new=AsyncMock()
-    ) as ensure_mock, patch.object(
-        dashboard, "_schedule_entity_map_retry"
-    ) as retry_mock:
+    with (
+        patch.object(
+            dashboard,
+            "_get_lovelace_handles",
+            return_value=dashboard.DashboardHandles(collection=None, dashboards={}),
+        ),
+        patch.object(
+            dashboard,
+            "_async_wait_for_entity_map",
+            new=AsyncMock(return_value=entity_map),
+        ),
+        patch.object(
+            dashboard, "_ensure_dashboard_record", new=AsyncMock()
+        ) as ensure_mock,
+        patch.object(dashboard, "_schedule_entity_map_retry") as retry_mock,
+    ):
         await dashboard.async_setup_or_update_dashboard(hass, entry)
 
     ensure_mock.assert_not_called()
@@ -689,17 +780,25 @@ async def test_dashboard_setup_retries_when_rendered_template_has_unresolved_pla
         "      - entity: binary_sensor.electricity_planner_solar_derating_alarm\n"
     )
 
-    with patch.object(
-        dashboard, "_get_lovelace_handles", return_value=dashboard.DashboardHandles(collection=None, dashboards={})
-    ), patch.object(
-        dashboard, "_async_wait_for_entity_map", new=AsyncMock(return_value=entity_map)
-    ), patch.object(
-        dashboard, "_async_load_template_text", new=AsyncMock(return_value=template)
-    ), patch.object(
-        dashboard, "_ensure_dashboard_record", new=AsyncMock()
-    ) as ensure_mock, patch.object(
-        dashboard, "_schedule_entity_map_retry"
-    ) as retry_mock:
+    with (
+        patch.object(
+            dashboard,
+            "_get_lovelace_handles",
+            return_value=dashboard.DashboardHandles(collection=None, dashboards={}),
+        ),
+        patch.object(
+            dashboard,
+            "_async_wait_for_entity_map",
+            new=AsyncMock(return_value=entity_map),
+        ),
+        patch.object(
+            dashboard, "_async_load_template_text", new=AsyncMock(return_value=template)
+        ),
+        patch.object(
+            dashboard, "_ensure_dashboard_record", new=AsyncMock()
+        ) as ensure_mock,
+        patch.object(dashboard, "_schedule_entity_map_retry") as retry_mock,
+    ):
         await dashboard.async_setup_or_update_dashboard(hass, entry)
 
     ensure_mock.assert_not_called()
@@ -732,17 +831,25 @@ async def test_dashboard_setup_accepts_canonical_entity_ids_as_resolved_placehol
     )
     storage = FakeStorage()
 
-    with patch.object(
-        dashboard, "_get_lovelace_handles", return_value=dashboard.DashboardHandles(collection=None, dashboards={})
-    ), patch.object(
-        dashboard, "_async_wait_for_entity_map", new=AsyncMock(return_value=entity_map)
-    ), patch.object(
-        dashboard, "_async_load_template_text", new=AsyncMock(return_value=template)
-    ), patch.object(
-        dashboard, "_ensure_dashboard_record", new=AsyncMock(return_value=storage)
-    ) as ensure_mock, patch.object(
-        dashboard, "_schedule_entity_map_retry"
-    ) as retry_mock:
+    with (
+        patch.object(
+            dashboard,
+            "_get_lovelace_handles",
+            return_value=dashboard.DashboardHandles(collection=None, dashboards={}),
+        ),
+        patch.object(
+            dashboard,
+            "_async_wait_for_entity_map",
+            new=AsyncMock(return_value=entity_map),
+        ),
+        patch.object(
+            dashboard, "_async_load_template_text", new=AsyncMock(return_value=template)
+        ),
+        patch.object(
+            dashboard, "_ensure_dashboard_record", new=AsyncMock(return_value=storage)
+        ) as ensure_mock,
+        patch.object(dashboard, "_schedule_entity_map_retry") as retry_mock,
+    ):
         await dashboard.async_setup_or_update_dashboard(hass, entry)
 
     ensure_mock.assert_called_once()
@@ -761,14 +868,20 @@ async def test_dashboard_removal_only_deletes_managed_dashboard():
         config_id="managed-id",
         saved={
             "views": [],
-            dashboard.MANAGED_KEY: {"entry_id": entry.entry_id, "version": dashboard.MANAGED_VERSION},
+            dashboard.MANAGED_KEY: {
+                "entry_id": entry.entry_id,
+                "version": dashboard.MANAGED_VERSION,
+            },
         },
     )
     unmanaged_storage = FakeStorage(
         config_id="other-id",
         saved={
             "views": [],
-            dashboard.MANAGED_KEY: {"entry_id": "different", "version": dashboard.MANAGED_VERSION},
+            dashboard.MANAGED_KEY: {
+                "entry_id": "different",
+                "version": dashboard.MANAGED_VERSION,
+            },
         },
     )
 
@@ -781,17 +894,31 @@ async def test_dashboard_removal_only_deletes_managed_dashboard():
         dashboards={"electricity-planner-planner-": unmanaged_storage},
     )
 
-    with patch.object(dashboard, "_dashboard_url_path", return_value="electricity-planner-planner-"), patch.object(
-        dashboard, "_get_lovelace_handles", return_value=handles_managed
-    ), patch.object(dashboard.frontend, "async_remove_panel") as remove_panel:
+    with (
+        patch.object(
+            dashboard,
+            "_dashboard_url_path",
+            return_value="electricity-planner-planner-",
+        ),
+        patch.object(dashboard, "_get_lovelace_handles", return_value=handles_managed),
+        patch.object(dashboard.frontend, "async_remove_panel") as remove_panel,
+    ):
         await dashboard.async_remove_dashboard(hass, entry)
     assert collection.deleted == ["managed-id"]
     remove_panel.assert_called_once_with(hass, "electricity-planner-planner-")
 
     collection.deleted.clear()
-    with patch.object(dashboard, "_dashboard_url_path", return_value="electricity-planner-planner-"), patch.object(
-        dashboard, "_get_lovelace_handles", return_value=handles_unmanaged
-    ), patch.object(dashboard.frontend, "async_remove_panel") as remove_panel:
+    with (
+        patch.object(
+            dashboard,
+            "_dashboard_url_path",
+            return_value="electricity-planner-planner-",
+        ),
+        patch.object(
+            dashboard, "_get_lovelace_handles", return_value=handles_unmanaged
+        ),
+        patch.object(dashboard.frontend, "async_remove_panel") as remove_panel,
+    ):
         await dashboard.async_remove_dashboard(hass, entry)
     assert collection.deleted == []
     remove_panel.assert_called_once_with(hass, "electricity-planner-planner-")

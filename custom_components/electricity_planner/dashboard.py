@@ -10,6 +10,7 @@ The generated dashboard expects these HACS cards to be installed:
 - apexcharts-card – historical charts
 - button-card – manual override buttons
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +22,6 @@ from typing import Any
 
 import voluptuous as vol
 import yaml
-
 from homeassistant.components import frontend
 from homeassistant.components.lovelace import const as ll_const
 from homeassistant.components.lovelace import dashboard as ll_dashboard
@@ -62,46 +62,135 @@ class EntityReference:
 
 
 ENTITY_REFERENCES: tuple[EntityReference, ...] = (
-    EntityReference("binary_sensor.electricity_planner_battery_charge_from_grid", "battery_grid_charging"),
-    EntityReference("binary_sensor.electricity_planner_car_charge_from_grid", "car_grid_charging"),
-    EntityReference("binary_sensor.electricity_planner_data_nord_pool_available", "data_availability"),
-    EntityReference("binary_sensor.electricity_planner_price_below_threshold", "low_price"),
-    EntityReference("binary_sensor.electricity_planner_solar_producing_power", "solar_production"),
-    EntityReference("binary_sensor.electricity_planner_solar_feed_in_grid", "feedin_solar"),
-    EntityReference("binary_sensor.electricity_planner_solar_derating_alarm", "inverter_derating_alarm"),
+    EntityReference(
+        "binary_sensor.electricity_planner_battery_charge_from_grid",
+        "battery_grid_charging",
+    ),
+    EntityReference(
+        "binary_sensor.electricity_planner_car_charge_from_grid", "car_grid_charging"
+    ),
+    EntityReference(
+        "binary_sensor.electricity_planner_data_nord_pool_available",
+        "data_availability",
+    ),
+    EntityReference(
+        "binary_sensor.electricity_planner_price_below_threshold", "low_price"
+    ),
+    EntityReference(
+        "binary_sensor.electricity_planner_solar_producing_power", "solar_production"
+    ),
+    EntityReference(
+        "binary_sensor.electricity_planner_solar_feed_in_grid", "feedin_solar"
+    ),
+    EntityReference(
+        "binary_sensor.electricity_planner_solar_derating_alarm",
+        "inverter_derating_alarm",
+    ),
     EntityReference("binary_sensor.solar_feed_in_grid", "feedin_solar"),
-    EntityReference("sensor.electricity_planner_current_electricity_price", "price_analysis"),
-    EntityReference("sensor.electricity_planner_decision_diagnostics", "decision_diagnostics"),
-    EntityReference("sensor.electricity_planner_decision_diagnostics_diagnostic", "decision_diagnostics"),
-    EntityReference("sensor.electricity_planner_battery_soc_average", "battery_analysis"),
+    EntityReference(
+        "sensor.electricity_planner_current_electricity_price", "price_analysis"
+    ),
+    EntityReference(
+        "sensor.electricity_planner_decision_diagnostics", "decision_diagnostics"
+    ),
+    EntityReference(
+        "sensor.electricity_planner_decision_diagnostics_diagnostic",
+        "decision_diagnostics",
+    ),
+    EntityReference(
+        "sensor.electricity_planner_battery_soc_average", "battery_analysis"
+    ),
     EntityReference("sensor.electricity_planner_car_charger_limit", "charger_limit"),
     EntityReference("sensor.electricity_planner_grid_setpoint", "grid_setpoint"),
-    EntityReference("sensor.electricity_planner_grid_setpoint_phase_1", "grid_setpoint_phase_1"),
-    EntityReference("sensor.electricity_planner_grid_setpoint_phase_2", "grid_setpoint_phase_2"),
-    EntityReference("sensor.electricity_planner_grid_setpoint_phase_3", "grid_setpoint_phase_3"),
-    EntityReference("sensor.electricity_planner_inverter_derating_target", "inverter_derating_target"),
+    EntityReference(
+        "sensor.electricity_planner_grid_setpoint_phase_1", "grid_setpoint_phase_1"
+    ),
+    EntityReference(
+        "sensor.electricity_planner_grid_setpoint_phase_2", "grid_setpoint_phase_2"
+    ),
+    EntityReference(
+        "sensor.electricity_planner_grid_setpoint_phase_3", "grid_setpoint_phase_3"
+    ),
+    EntityReference(
+        "sensor.electricity_planner_inverter_derating_target",
+        "inverter_derating_target",
+    ),
     EntityReference("sensor.electricity_planner_solar_surplus_power", "power_analysis"),
-    EntityReference("sensor.electricity_planner_data_unavailable_duration", "data_unavailable_duration"),
-    EntityReference("sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price", "feedin_price"),
-    EntityReference("sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold", "feedin_price_threshold"),
-    EntityReference("sensor.electricity_planner_diagnostics_monitoring_price_threshold", "price_threshold"),
-    EntityReference("sensor.electricity_planner_diagnostics_monitoring_price_forecast_insights", "forecast_insights"),
-    EntityReference("sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices", "nordpool_prices"),
-    EntityReference("sensor.electricity_planner_diagnostics_monitoring_significant_solar_threshold", "significant_solar_threshold"),
-    EntityReference("sensor.electricity_planner_diagnostics_monitoring_very_low_price_threshold", "very_low_price_threshold"),
-    EntityReference("sensor.electricity_planner_diagnostics_monitoring_emergency_soc_threshold", "emergency_soc_threshold"),
-    EntityReference("sensor.electricity_planner_diagnostics_monitoring_entity_status", "entity_status"),
-    EntityReference("switch.electricity_planner_car_permissive_mode", "car_permissive_mode"),
+    EntityReference(
+        "sensor.electricity_planner_data_unavailable_duration",
+        "data_unavailable_duration",
+    ),
+    EntityReference(
+        "sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price",
+        "feedin_price",
+    ),
+    EntityReference(
+        "sensor.electricity_planner_diagnostics_monitoring_feed_in_price_threshold",
+        "feedin_price_threshold",
+    ),
+    EntityReference(
+        "sensor.electricity_planner_diagnostics_monitoring_price_threshold",
+        "price_threshold",
+    ),
+    EntityReference(
+        "sensor.electricity_planner_diagnostics_monitoring_price_forecast_insights",
+        "forecast_insights",
+    ),
+    EntityReference(
+        "sensor.electricity_planner_diagnostics_monitoring_nord_pool_prices",
+        "nordpool_prices",
+    ),
+    EntityReference(
+        "sensor.electricity_planner_diagnostics_monitoring_significant_solar_threshold",
+        "significant_solar_threshold",
+    ),
+    EntityReference(
+        "sensor.electricity_planner_diagnostics_monitoring_very_low_price_threshold",
+        "very_low_price_threshold",
+    ),
+    EntityReference(
+        "sensor.electricity_planner_diagnostics_monitoring_emergency_soc_threshold",
+        "emergency_soc_threshold",
+    ),
+    EntityReference(
+        "sensor.electricity_planner_diagnostics_monitoring_entity_status",
+        "entity_status",
+    ),
+    EntityReference(
+        "switch.electricity_planner_car_permissive_mode", "car_permissive_mode"
+    ),
     EntityReference("switch.electricity_planner_arbitrage_mode", "arbitrage_mode"),
-    EntityReference("switch.electricity_planner_negative_arbitrage_buy_mode", "negative_buy_mode"),
-    EntityReference("switch.electricity_planner_disable_battery_charging", "disable_battery_charging"),
-    EntityReference("number.electricity_planner_arbitrage_mode_reserve_soc", "battery_dump_target_soc"),
-    EntityReference("number.electricity_planner_arbitrage_mode_deadline_hour", "arbitrage_mode_deadline_hour"),
-    EntityReference("number.electricity_planner_negative_buy_threshold", "negative_buy_threshold"),
-    EntityReference("number.electricity_planner_max_soc_threshold", "max_soc_threshold"),
-    EntityReference("number.electricity_planner_max_soc_threshold_sunny", "max_soc_threshold_sunny"),
-    EntityReference("number.electricity_planner_max_soc_threshold_solar", "max_soc_threshold_solar"),
-    EntityReference("number.electricity_planner_sunny_forecast_threshold_kwh", "sunny_forecast_threshold_kwh"),
+    EntityReference(
+        "switch.electricity_planner_negative_arbitrage_buy_mode", "negative_buy_mode"
+    ),
+    EntityReference(
+        "switch.electricity_planner_disable_battery_charging",
+        "disable_battery_charging",
+    ),
+    EntityReference(
+        "number.electricity_planner_arbitrage_mode_reserve_soc",
+        "battery_dump_target_soc",
+    ),
+    EntityReference(
+        "number.electricity_planner_arbitrage_mode_deadline_hour",
+        "arbitrage_mode_deadline_hour",
+    ),
+    EntityReference(
+        "number.electricity_planner_negative_buy_threshold", "negative_buy_threshold"
+    ),
+    EntityReference(
+        "number.electricity_planner_max_soc_threshold", "max_soc_threshold"
+    ),
+    EntityReference(
+        "number.electricity_planner_max_soc_threshold_sunny", "max_soc_threshold_sunny"
+    ),
+    EntityReference(
+        "number.electricity_planner_max_soc_threshold_solar", "max_soc_threshold_solar"
+    ),
+    EntityReference(
+        "number.electricity_planner_sunny_forecast_threshold_kwh",
+        "sunny_forecast_threshold_kwh",
+    ),
 )
 
 CORE_ENTITY_SUFFIXES: tuple[str, ...] = (
@@ -125,7 +214,11 @@ class DashboardHandles:
 
 async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
     """Create or update the managed dashboard for the given config entry."""
-    _LOGGER.info("Starting dashboard creation for entry: %s (title: %s)", entry.entry_id, entry.title)
+    _LOGGER.info(
+        "Starting dashboard creation for entry: %s (title: %s)",
+        entry.entry_id,
+        entry.title,
+    )
 
     handles = _get_lovelace_handles(hass)
     if handles is None:
@@ -137,7 +230,7 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
 
     # Load the dashboards collection if needed
     try:
-        if hasattr(handles.collection, 'async_load'):
+        if hasattr(handles.collection, "async_load"):
             await handles.collection.async_load()
             _LOGGER.debug("DashboardsCollection loaded successfully")
     except Exception as err:
@@ -150,17 +243,23 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
         entity_map = await _async_wait_for_entity_map(hass, entry)
         _LOGGER.debug("Entity map built with %d entities", len(entity_map))
     except asyncio.TimeoutError:
-        _LOGGER.warning("Timed out waiting for entities before building dashboard for %s", entry.entry_id)
+        _LOGGER.warning(
+            "Timed out waiting for entities before building dashboard for %s",
+            entry.entry_id,
+        )
         entity_map = _build_entity_map(hass, entry)
         _LOGGER.debug("Fallback entity map built with %d entities", len(entity_map))
 
     if not entity_map:
-        _LOGGER.warning("No registered entities for %s; skipping dashboard creation", entry.entry_id)
+        _LOGGER.warning(
+            "No registered entities for %s; skipping dashboard creation", entry.entry_id
+        )
         _schedule_entity_map_retry(hass, entry, "no entities registered")
         return
 
     missing_core = [
-        suffix for suffix in CORE_ENTITY_SUFFIXES
+        suffix
+        for suffix in CORE_ENTITY_SUFFIXES
         if f"{entry.entry_id}_{suffix}" not in entity_map
     ]
     if missing_core:
@@ -169,15 +268,21 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
             entry.entry_id,
             ", ".join(missing_core),
         )
-        _schedule_entity_map_retry(hass, entry, f"missing core entities: {', '.join(missing_core)}")
+        _schedule_entity_map_retry(
+            hass, entry, f"missing core entities: {', '.join(missing_core)}"
+        )
         return
 
     template_text = await _async_load_template_text(hass, TEMPLATE_FILENAME)
     if not template_text:
-        _LOGGER.error("Dashboard template %s missing; skipping creation", TEMPLATE_FILENAME)
+        _LOGGER.error(
+            "Dashboard template %s missing; skipping creation", TEMPLATE_FILENAME
+        )
         return
 
-    _LOGGER.debug("Dashboard template loaded successfully (%d chars)", len(template_text))
+    _LOGGER.debug(
+        "Dashboard template loaded successfully (%d chars)", len(template_text)
+    )
 
     replacements = _build_replacements(entry, entity_map)
     _LOGGER.debug("Built %d entity replacements", len(replacements))
@@ -204,14 +309,26 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
         return
 
     if not isinstance(dashboard_config, dict) or "views" not in dashboard_config:
-        _LOGGER.error("Rendered dashboard template invalid; skipping (type=%s, has_views=%s)",
-                     type(dashboard_config), "views" in dashboard_config if isinstance(dashboard_config, dict) else False)
+        _LOGGER.error(
+            "Rendered dashboard template invalid; skipping (type=%s, has_views=%s)",
+            type(dashboard_config),
+            (
+                "views" in dashboard_config
+                if isinstance(dashboard_config, dict)
+                else False
+            ),
+        )
         return
 
     if _entry_phase_mode(entry) == PHASE_MODE_THREE:
-        appendix_text = await _async_load_template_text(hass, THREE_PHASE_APPENDIX_FILENAME)
+        appendix_text = await _async_load_template_text(
+            hass, THREE_PHASE_APPENDIX_FILENAME
+        )
         if not appendix_text:
-            _LOGGER.error("Dashboard appendix %s missing; skipping creation", THREE_PHASE_APPENDIX_FILENAME)
+            _LOGGER.error(
+                "Dashboard appendix %s missing; skipping creation",
+                THREE_PHASE_APPENDIX_FILENAME,
+            )
             return
 
         unresolved_appendix_placeholders = _find_unresolved_placeholders(
@@ -237,7 +354,9 @@ async def async_setup_or_update_dashboard(hass: HomeAssistant, entry) -> None:
             return
 
         if not _append_cards_to_primary_stack(dashboard_config, appendix_cards):
-            _LOGGER.error("Unable to merge dashboard appendix into managed dashboard structure")
+            _LOGGER.error(
+                "Unable to merge dashboard appendix into managed dashboard structure"
+            )
             return
 
     dashboard_config[MANAGED_KEY] = {
@@ -294,7 +413,9 @@ async def async_remove_dashboard(hass: HomeAssistant, entry) -> None:
     except ll_dashboard.ConfigNotFound:
         existing_config = None
     except HomeAssistantError as error:
-        _LOGGER.debug("Unable to inspect dashboard %s during removal: %s", url_path, error)
+        _LOGGER.debug(
+            "Unable to inspect dashboard %s during removal: %s", url_path, error
+        )
         return
 
     is_managed = (
@@ -331,7 +452,7 @@ async def _ensure_dashboard_record(
     }
 
     # Add CONF_ALLOW_SINGLE_WORD only if it exists (added in newer HA versions)
-    if hasattr(ll_const, 'CONF_ALLOW_SINGLE_WORD'):
+    if hasattr(ll_const, "CONF_ALLOW_SINGLE_WORD"):
         create_data[ll_const.CONF_ALLOW_SINGLE_WORD] = True
 
     # Check if dashboard already exists in the collection
@@ -357,22 +478,43 @@ async def _ensure_dashboard_record(
     created_item = False
     if dashboard_item is None:
         try:
-            _LOGGER.debug("Creating new dashboard with url_path=%s, title=%s", url_path, title)
+            _LOGGER.debug(
+                "Creating new dashboard with url_path=%s, title=%s", url_path, title
+            )
             _LOGGER.debug("Create data: %s", create_data)
             dashboard_item = await handles.collection.async_create_item(create_data)
             created_item = True
             existing_item_id = dashboard_item.get("id")
-            _LOGGER.info("Successfully created dashboard item: %s (id=%s)", title, existing_item_id)
+            _LOGGER.info(
+                "Successfully created dashboard item: %s (id=%s)",
+                title,
+                existing_item_id,
+            )
         except vol.Invalid as error:
-            _LOGGER.error("Validation error creating dashboard %s: %s", url_path, error, exc_info=True)
+            _LOGGER.error(
+                "Validation error creating dashboard %s: %s",
+                url_path,
+                error,
+                exc_info=True,
+            )
             return None
         except HomeAssistantError as error:
-            _LOGGER.error("Home Assistant error creating dashboard %s: %s", url_path, error, exc_info=True)
+            _LOGGER.error(
+                "Home Assistant error creating dashboard %s: %s",
+                url_path,
+                error,
+                exc_info=True,
+            )
             return None
         except Exception as error:
             if isinstance(error, (KeyboardInterrupt, SystemExit)):
                 raise
-            _LOGGER.error("Unexpected error creating dashboard %s: %s", url_path, error, exc_info=True)
+            _LOGGER.error(
+                "Unexpected error creating dashboard %s: %s",
+                url_path,
+                error,
+                exc_info=True,
+            )
             return None
     else:
         # Dashboard item exists, check if we need to update metadata
@@ -389,12 +531,18 @@ async def _ensure_dashboard_record(
         }
         if updates and existing_item_id:
             try:
-                dashboard_item = await handles.collection.async_update_item(existing_item_id, updates)
-                _LOGGER.debug("Updated dashboard metadata for %s: %s", url_path, updates)
+                dashboard_item = await handles.collection.async_update_item(
+                    existing_item_id, updates
+                )
+                _LOGGER.debug(
+                    "Updated dashboard metadata for %s: %s", url_path, updates
+                )
             except Exception as error:
                 if isinstance(error, (KeyboardInterrupt, SystemExit)):
                     raise
-                _LOGGER.warning("Unable to update dashboard metadata for %s: %s", url_path, error)
+                _LOGGER.warning(
+                    "Unable to update dashboard metadata for %s: %s", url_path, error
+                )
 
     if dashboard_item is None:
         _LOGGER.error("dashboard_item is None after create/update")
@@ -414,7 +562,9 @@ async def _ensure_dashboard_record(
     return storage
 
 
-async def _save_dashboard(storage: ll_dashboard.LovelaceStorage, config: dict[str, Any]) -> None:
+async def _save_dashboard(
+    storage: ll_dashboard.LovelaceStorage, config: dict[str, Any]
+) -> None:
     """Persist the Lovelace dashboard if it changed."""
     try:
         existing = await storage.async_load(False)
@@ -431,7 +581,9 @@ async def _save_dashboard(storage: ll_dashboard.LovelaceStorage, config: dict[st
         return
 
     try:
-        _LOGGER.debug("Saving dashboard config with %d views", len(config.get("views", [])))
+        _LOGGER.debug(
+            "Saving dashboard config with %d views", len(config.get("views", []))
+        )
         await storage.async_save(config)
         _LOGGER.info("Dashboard config saved successfully")
     except HomeAssistantError as error:
@@ -458,7 +610,9 @@ def _register_dashboard_panel(
     # Add sidebar info if dashboard should be visible
     if dashboard_config.get(ll_const.CONF_SHOW_IN_SIDEBAR, True):
         panel_kwargs["sidebar_title"] = dashboard_config.get(ll_const.CONF_TITLE, title)
-        panel_kwargs["sidebar_icon"] = dashboard_config.get(ll_const.CONF_ICON, "mdi:lightning-bolt")
+        panel_kwargs["sidebar_icon"] = dashboard_config.get(
+            ll_const.CONF_ICON, "mdi:lightning-bolt"
+        )
 
     try:
         _LOGGER.debug("Registering frontend panel for %s", url_path)
@@ -470,7 +624,9 @@ def _register_dashboard_panel(
         _LOGGER.info("Successfully registered dashboard panel in sidebar: %s", title)
     except ValueError as err:
         # Panel already registered (e.g., from previous setup)
-        _LOGGER.debug("Panel registration skipped for %s (already exists): %s", url_path, err)
+        _LOGGER.debug(
+            "Panel registration skipped for %s (already exists): %s", url_path, err
+        )
     except Exception as err:
         if isinstance(err, (KeyboardInterrupt, SystemExit)):
             raise
@@ -493,14 +649,24 @@ def _unregister_dashboard_panel(hass: HomeAssistant, url_path: str) -> None:
 def _get_lovelace_handles(hass: HomeAssistant) -> DashboardHandles | None:
     """Return Lovelace storage handles when running in storage mode."""
     # Use LOVELACE_DATA constant (not DOMAIN) to get the lovelace data structure
-    lovelace_data_key = getattr(ll_const, 'LOVELACE_DATA', 'lovelace')
+    lovelace_data_key = getattr(ll_const, "LOVELACE_DATA", "lovelace")
     lovelace_data = hass.data.get(lovelace_data_key)
 
     if not lovelace_data:
-        _LOGGER.debug("Lovelace data not found at key '%s' (HA may not be fully started or Lovelace not in storage mode)", lovelace_data_key)
+        _LOGGER.debug(
+            "Lovelace data not found at key '%s' (HA may not be fully started or Lovelace not in storage mode)",
+            lovelace_data_key,
+        )
         return None
 
-    _LOGGER.debug("Found lovelace_data with keys: %s", list(lovelace_data.keys()) if isinstance(lovelace_data, dict) else type(lovelace_data))
+    _LOGGER.debug(
+        "Found lovelace_data with keys: %s",
+        (
+            list(lovelace_data.keys())
+            if isinstance(lovelace_data, dict)
+            else type(lovelace_data)
+        ),
+    )
 
     # Create a new DashboardsCollection instance (as HeatingControl does)
     try:
@@ -527,7 +693,10 @@ def _get_lovelace_handles(hass: HomeAssistant) -> DashboardHandles | None:
 def _maybe_schedule_retry(hass: HomeAssistant, entry) -> None:
     """Retry once Home Assistant finishes starting if Lovelace is not ready yet."""
     if hass.is_running:
-        _LOGGER.debug("Lovelace storage not available; dashboard creation skipped for %s", entry.entry_id)
+        _LOGGER.debug(
+            "Lovelace storage not available; dashboard creation skipped for %s",
+            entry.entry_id,
+        )
         return
 
     data = hass.data.setdefault(DOMAIN, {})
@@ -623,7 +792,10 @@ async def _async_wait_for_entity_map(hass: HomeAssistant, entry) -> dict[str, st
     end = hass.loop.time() + ENTITY_WAIT_TIMEOUT
     while True:
         entity_map = _build_entity_map(hass, entry)
-        if all(f"{entry.entry_id}_{suffix}" in entity_map for suffix in CORE_ENTITY_SUFFIXES):
+        if all(
+            f"{entry.entry_id}_{suffix}" in entity_map
+            for suffix in CORE_ENTITY_SUFFIXES
+        ):
             return entity_map
         if hass.loop.time() >= end:
             raise asyncio.TimeoutError
@@ -680,7 +852,9 @@ def _entry_phase_mode(entry) -> str:
     """Return the effective phase mode for the config entry."""
     options = getattr(entry, "options", None) or {}
     data = getattr(entry, "data", None) or {}
-    return options.get(CONF_PHASE_MODE) or data.get(CONF_PHASE_MODE) or PHASE_MODE_SINGLE
+    return (
+        options.get(CONF_PHASE_MODE) or data.get(CONF_PHASE_MODE) or PHASE_MODE_SINGLE
+    )
 
 
 def _append_cards_to_primary_stack(

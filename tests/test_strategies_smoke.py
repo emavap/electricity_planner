@@ -1,17 +1,20 @@
 """Smoke tests for charging strategies - basic sanity checks."""
+
 import pytest
+
+from custom_components.electricity_planner.const import DEFAULT_MAX_SOC
+from custom_components.electricity_planner.defaults import (
+    calculate_soc_price_multiplier,
+)
 from custom_components.electricity_planner.strategies import (
-    SolarPriorityStrategy,
-    VeryLowPriceStrategy,
     DynamicPriceStrategy,
     PredictiveChargingStrategy,
     SOCBasedChargingStrategy,
     SOCBufferChargingStrategy,
+    SolarPriorityStrategy,
     StrategyManager,
+    VeryLowPriceStrategy,
 )
-from custom_components.electricity_planner.const import DEFAULT_MAX_SOC
-from custom_components.electricity_planner.defaults import calculate_soc_price_multiplier
-
 
 # NOTE: EmergencyChargingStrategy was removed - emergency logic is now handled
 # by the PriceThresholdGuard in StrategyManager.evaluate(). The tests below
@@ -100,7 +103,7 @@ def test_dynamic_price_handles_none_prices_gracefully():
         "price_analysis": {
             "current_price": 0.10,
             "highest_price": None,  # Can be None during refresh
-            "lowest_price": None,   # Can be None during refresh
+            "lowest_price": None,  # Can be None during refresh
             "next_price": None,
             "price_threshold": 0.15,
         },
@@ -192,7 +195,9 @@ def test_dynamic_price_with_excellent_solar_is_selective():
             "significant_solar_surplus": True,
         },
     }
-    should_charge_excellent, reason_excellent = strategy.should_charge(excellent_context)
+    should_charge_excellent, reason_excellent = strategy.should_charge(
+        excellent_context
+    )
 
     # Poor solar - should be less picky
     poor_context = {
@@ -206,8 +211,14 @@ def test_dynamic_price_with_excellent_solar_is_selective():
 
     # With significant solar, it should be harder to charge (more selective)
     # Updated to match new user-friendly messages
-    assert "waiting for solar" in reason_excellent.lower() or "surplus:" in reason_excellent.lower()
-    assert "accepting okay prices" in reason_poor.lower() or "price conditions not optimal" in reason_poor.lower()
+    assert (
+        "waiting for solar" in reason_excellent.lower()
+        or "surplus:" in reason_excellent.lower()
+    )
+    assert (
+        "accepting okay prices" in reason_poor.lower()
+        or "price conditions not optimal" in reason_poor.lower()
+    )
     assert should_charge_poor in (True, False)  # Sanity check returned bool
 
 
@@ -238,7 +249,9 @@ def test_strategy_manager_sorts_by_priority():
     assert priorities == sorted(priorities), f"Strategies not sorted: {priorities}"
 
     # Verify no duplicate priorities
-    assert len(priorities) == len(set(priorities)), f"Duplicate priorities found: {priorities}"
+    assert len(priorities) == len(
+        set(priorities)
+    ), f"Duplicate priorities found: {priorities}"
 
 
 def test_strategy_manager_emergency_overrides_high_price():
@@ -344,13 +357,16 @@ def test_strategy_manager_hard_blocks_grid_when_battery_solar_is_allocated():
 # --- SOC Price Multiplier Tests ---
 
 
-@pytest.mark.parametrize("soc,expected_multiplier", [
-    (15.0, 1.3),   # At emergency threshold → max multiplier
-    (10.0, 1.3),   # Below emergency → max multiplier (capped)
-    (50.0, 1.0),   # At buffer target → no relaxation
-    (70.0, 1.0),   # Above buffer target → no relaxation
-    (32.5, 1.15),  # Midpoint → 50% of extra multiplier
-])
+@pytest.mark.parametrize(
+    "soc,expected_multiplier",
+    [
+        (15.0, 1.3),  # At emergency threshold → max multiplier
+        (10.0, 1.3),  # Below emergency → max multiplier (capped)
+        (50.0, 1.0),  # At buffer target → no relaxation
+        (70.0, 1.0),  # Above buffer target → no relaxation
+        (32.5, 1.15),  # Midpoint → 50% of extra multiplier
+    ],
+)
 def test_soc_price_multiplier_calculation(soc, expected_multiplier):
     """Test SOC price multiplier calculation with various SOC levels."""
     multiplier = calculate_soc_price_multiplier(
@@ -359,9 +375,9 @@ def test_soc_price_multiplier_calculation(soc, expected_multiplier):
         buffer_target_soc=50.0,
         max_multiplier=1.3,
     )
-    assert abs(multiplier - expected_multiplier) < 0.01, (
-        f"At SOC {soc}%, expected multiplier {expected_multiplier}, got {multiplier}"
-    )
+    assert (
+        abs(multiplier - expected_multiplier) < 0.01
+    ), f"At SOC {soc}%, expected multiplier {expected_multiplier}, got {multiplier}"
 
 
 def test_soc_price_multiplier_invalid_max():
@@ -516,7 +532,9 @@ def test_strategy_manager_applies_soc_price_multiplier():
 
     should_charge, reason = manager.evaluate(context)
     # Should charge because 0.18 < 0.195 (effective threshold with multiplier)
-    assert should_charge is True, f"Expected charging due to SOC relaxation, got: {reason}"
+    assert (
+        should_charge is True
+    ), f"Expected charging due to SOC relaxation, got: {reason}"
     assert "Buffer charging" in reason or "multiplier" in reason.lower()
 
 
@@ -616,7 +634,9 @@ def test_solar_priority_downgrade_at_emergency_soc_allows_safety_net_to_charge()
     assert "SOCBasedChargingStrategy" in strategies_seen  # safety net continued
     # SolarPriority entry was False (downgraded), final safety-net entry was True
     solar_entry = next(e for e in trace if e["strategy"] == "SolarPriorityStrategy")
-    socbased_entry = next(e for e in trace if e["strategy"] == "SOCBasedChargingStrategy")
+    socbased_entry = next(
+        e for e in trace if e["strategy"] == "SOCBasedChargingStrategy"
+    )
     assert solar_entry["should_charge"] is False
     assert socbased_entry["should_charge"] is True
 
@@ -684,17 +704,19 @@ def test_evaluate_default_decision_when_no_strategy_votes():
 def test_get_last_trace_returns_a_copy_not_internal_list():
     """Callers must not be able to mutate internal trace via get_last_trace()."""
     manager = StrategyManager(use_dynamic_threshold=False)
-    manager.evaluate({
-        "battery_analysis": {"average_soc": 55, "max_soc_threshold": 90},
-        "price_analysis": {
-            "current_price": 0.10,
-            "price_threshold": 0.15,
-            "is_low_price": False,
-        },
-        "power_allocation": {},
-        "power_analysis": {},
-        "config": {"emergency_soc_threshold": 15},
-    })
+    manager.evaluate(
+        {
+            "battery_analysis": {"average_soc": 55, "max_soc_threshold": 90},
+            "price_analysis": {
+                "current_price": 0.10,
+                "price_threshold": 0.15,
+                "is_low_price": False,
+            },
+            "power_allocation": {},
+            "power_analysis": {},
+            "config": {"emergency_soc_threshold": 15},
+        }
+    )
 
     trace = manager.get_last_trace()
     original_len = len(trace)
@@ -711,7 +733,10 @@ def test_get_dynamic_threshold_returns_none_when_dynamic_pricing_disabled():
     """use_dynamic_threshold=False → dynamic_price_strategy is None → returns None."""
     manager = StrategyManager(use_dynamic_threshold=False)
     assert manager.dynamic_price_strategy is None
-    assert manager.get_dynamic_threshold({"price_analysis": {"current_price": 0.1}}) is None
+    assert (
+        manager.get_dynamic_threshold({"price_analysis": {"current_price": 0.1}})
+        is None
+    )
 
 
 def test_get_dynamic_threshold_returns_none_when_analyzer_not_initialized():
@@ -733,28 +758,43 @@ def test_get_dynamic_threshold_returns_none_when_prices_missing():
     """After analyzer is initialized, missing current/highest/lowest → None."""
     manager = StrategyManager(use_dynamic_threshold=True)
     # First run evaluate() to initialize the analyzer.
-    manager.evaluate({
-        "battery_analysis": {"average_soc": 50, "max_soc_threshold": 90},
-        "price_analysis": {
-            "current_price": 0.10,
-            "price_threshold": 0.15,
-            "highest_price": 0.3,
-            "lowest_price": 0.05,
-        },
-        "power_allocation": {},
-        "power_analysis": {},
-        "config": {"emergency_soc_threshold": 15},
-    })
+    manager.evaluate(
+        {
+            "battery_analysis": {"average_soc": 50, "max_soc_threshold": 90},
+            "price_analysis": {
+                "current_price": 0.10,
+                "price_threshold": 0.15,
+                "highest_price": 0.3,
+                "lowest_price": 0.05,
+            },
+            "power_allocation": {},
+            "power_analysis": {},
+            "config": {"emergency_soc_threshold": 15},
+        }
+    )
     assert manager.dynamic_price_strategy.dynamic_analyzer is not None
 
     # Missing current_price
-    assert manager.get_dynamic_threshold({"price_analysis": {"highest_price": 0.3, "lowest_price": 0.05}}) is None
+    assert (
+        manager.get_dynamic_threshold(
+            {"price_analysis": {"highest_price": 0.3, "lowest_price": 0.05}}
+        )
+        is None
+    )
     # Missing highest_price
-    assert manager.get_dynamic_threshold({"price_analysis": {"current_price": 0.1, "lowest_price": 0.05}}) is None
+    assert (
+        manager.get_dynamic_threshold(
+            {"price_analysis": {"current_price": 0.1, "lowest_price": 0.05}}
+        )
+        is None
+    )
     # Missing lowest_price
-    assert manager.get_dynamic_threshold({"price_analysis": {"current_price": 0.1, "highest_price": 0.3}}) is None
-
-
+    assert (
+        manager.get_dynamic_threshold(
+            {"price_analysis": {"current_price": 0.1, "highest_price": 0.3}}
+        )
+        is None
+    )
 
 
 if __name__ == "__main__":

@@ -1,18 +1,19 @@
 """Charging strategies for decision making."""
+
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from typing import Any
-import logging
 
 from .const import (
-    DEFAULT_MAX_SOC,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
     DEFAULT_EMERGENCY_SOC,
+    DEFAULT_MAX_SOC,
     DEFAULT_PREDICTIVE_CHARGING_MIN_SOC,
-    DEFAULT_VERY_LOW_PRICE_THRESHOLD,
-    DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
     DEFAULT_SOC_BUFFER_TARGET,
+    DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
+    DEFAULT_VERY_LOW_PRICE_THRESHOLD,
 )
 from .defaults import DEFAULT_ALGORITHM_THRESHOLDS, calculate_soc_price_multiplier
 from .dynamic_threshold import DynamicThresholdAnalyzer
@@ -41,7 +42,7 @@ class ChargingStrategy(ABC):
 
 class SolarPriorityStrategy(ChargingStrategy):
     """Prefer solar charging over grid."""
-    
+
     def should_charge(self, context: dict[str, Any]) -> tuple[bool, str]:
         """Check if solar should be used instead of grid."""
         allocation = context.get("power_allocation", {})
@@ -55,15 +56,23 @@ class SolarPriorityStrategy(ChargingStrategy):
         # If battery data unavailable, cannot determine solar priority
         if average_soc is None:
             return False, ""
-        
+
         if allocated_solar > 0:
-            return False, f"Using allocated solar power ({allocated_solar}W) for batteries instead of grid"
-        
+            return (
+                False,
+                f"Using allocated solar power ({allocated_solar}W) for batteries instead of grid",
+            )
+
         # Prevent solar waste when batteries nearly full
-        if remaining_solar > 0 and average_soc >= max_soc - DEFAULT_ALGORITHM_THRESHOLDS.soc_buffer:
-            return False, (f"Battery {average_soc:.0f}% nearly full with {remaining_solar}W "
-                          f"solar surplus - preventing solar waste")
-        
+        if (
+            remaining_solar > 0
+            and average_soc >= max_soc - DEFAULT_ALGORITHM_THRESHOLDS.soc_buffer
+        ):
+            return False, (
+                f"Battery {average_soc:.0f}% nearly full with {remaining_solar}W "
+                f"solar surplus - preventing solar waste"
+            )
+
         return False, ""
 
     def get_priority(self) -> int:
@@ -113,7 +122,9 @@ class PredictiveChargingStrategy(ChargingStrategy):
             else None
         )
         if predictive_min is None:
-            predictive_min = config.get("predictive_charging_min_soc", DEFAULT_PREDICTIVE_CHARGING_MIN_SOC)
+            predictive_min = config.get(
+                "predictive_charging_min_soc", DEFAULT_PREDICTIVE_CHARGING_MIN_SOC
+            )
 
         # If battery data unavailable, cannot predict - let other strategies decide
         if average_soc is None:
@@ -125,8 +136,10 @@ class PredictiveChargingStrategy(ChargingStrategy):
 
         # Wait for the price drop (advisory - continues evaluation)
         next_price = price.get("next_price", 0)
-        return False, (f"SOC {average_soc:.0f}% sufficient - waiting for significant price drop "
-                      f"next hour ({next_price:.3f}€/kWh)")
+        return False, (
+            f"SOC {average_soc:.0f}% sufficient - waiting for significant price drop "
+            f"next hour ({next_price:.3f}€/kWh)"
+        )
 
     def get_priority(self) -> int:
         return 2  # Early - can delay charging for better prices
@@ -156,17 +169,25 @@ class VeryLowPriceStrategy(ChargingStrategy):
             else None
         )
         if very_low_threshold is None:
-            very_low_threshold = config.get("very_low_price_threshold", DEFAULT_VERY_LOW_PRICE_THRESHOLD)
+            very_low_threshold = config.get(
+                "very_low_price_threshold", DEFAULT_VERY_LOW_PRICE_THRESHOLD
+            )
 
         if average_soc is None:
             current_price = price.get("current_price", 0)
-            return True, f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_threshold}% (battery data unavailable, charging anyway)"
+            return (
+                True,
+                f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_threshold}% (battery data unavailable, charging anyway)",
+            )
 
         if average_soc >= max_soc:
             return False, ""  # Let other strategies handle full battery
 
         current_price = price.get("current_price", 0)
-        return True, f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_threshold}% of daily range"
+        return (
+            True,
+            f"Very low price ({current_price:.3f}€/kWh) - bottom {very_low_threshold}% of daily range",
+        )
 
     def get_priority(self) -> int:
         return 3
@@ -251,21 +272,32 @@ class SOCBasedChargingStrategy(ChargingStrategy):
             return False, ""
 
         # Low SOC + no solar → charge
-        if average_soc < DEFAULT_ALGORITHM_THRESHOLDS.low_soc_threshold and not has_significant_solar:
-            return True, (f"Low SOC {average_soc:.0f}% + no significant solar "
-                         f"(surplus: {solar_surplus}W) - charge while price low")
+        if (
+            average_soc < DEFAULT_ALGORITHM_THRESHOLDS.low_soc_threshold
+            and not has_significant_solar
+        ):
+            return True, (
+                f"Low SOC {average_soc:.0f}% + no significant solar "
+                f"(surplus: {solar_surplus}W) - charge while price low"
+            )
 
         # Medium SOC + significant solar → skip and wait for solar
-        if (average_soc >= DEFAULT_ALGORITHM_THRESHOLDS.low_soc_threshold and
-            average_soc <= DEFAULT_ALGORITHM_THRESHOLDS.high_soc_threshold and
-            has_significant_solar):
-            return False, (f"SOC {average_soc:.0f}% sufficient + significant solar "
-                          f"(surplus: {solar_surplus}W) - waiting for solar instead of grid")
+        if (
+            average_soc >= DEFAULT_ALGORITHM_THRESHOLDS.low_soc_threshold
+            and average_soc <= DEFAULT_ALGORITHM_THRESHOLDS.high_soc_threshold
+            and has_significant_solar
+        ):
+            return False, (
+                f"SOC {average_soc:.0f}% sufficient + significant solar "
+                f"(surplus: {solar_surplus}W) - waiting for solar instead of grid"
+            )
 
         # Medium SOC → charge at low price
         if average_soc < DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold:
-            return True, (f"Medium SOC {average_soc:.0f}% < {DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold}% - "
-                         f"charge at low price")
+            return True, (
+                f"Medium SOC {average_soc:.0f}% < {DEFAULT_ALGORITHM_THRESHOLDS.medium_soc_threshold}% - "
+                f"charge at low price"
+            )
 
         return False, ""
 
@@ -275,11 +307,11 @@ class SOCBasedChargingStrategy(ChargingStrategy):
 
 class DynamicPriceStrategy(ChargingStrategy):
     """Dynamic price-based charging with intelligent threshold logic."""
-    
+
     def __init__(self):
         """Initialize dynamic price strategy."""
         self.dynamic_analyzer = None
-    
+
     def should_charge(self, context: dict[str, Any]) -> tuple[bool, str]:
         """Check if charging should occur based on dynamic price analysis."""
         price = context.get("price_analysis", {})
@@ -295,7 +327,10 @@ class DynamicPriceStrategy(ChargingStrategy):
         average_soc = battery.get("average_soc")
         max_soc = battery.get("max_soc_threshold", DEFAULT_MAX_SOC)
         if average_soc is not None and average_soc >= max_soc:
-            return False, f"Battery full ({average_soc:.0f}% ≥ {max_soc}%) - no grid charging needed"
+            return (
+                False,
+                f"Battery full ({average_soc:.0f}% ≥ {max_soc}%) - no grid charging needed",
+            )
 
         # Use stable threshold snapshot for current 15-min interval if available
         # This prevents threshold fluctuations from causing on/off cycles within same price period
@@ -320,7 +355,9 @@ class DynamicPriceStrategy(ChargingStrategy):
             else None
         )
         if config_confidence is None:
-            config_confidence = config.get("dynamic_threshold_confidence", DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE)
+            config_confidence = config.get(
+                "dynamic_threshold_confidence", DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE
+            )
         try:
             config_confidence = float(config_confidence) / 100.0
         except (TypeError, ValueError):
@@ -353,7 +390,9 @@ class DynamicPriceStrategy(ChargingStrategy):
 
         # Initialize analyzer if needed, or update threshold if config changed
         if self.dynamic_analyzer is None:
-            self.dynamic_analyzer = DynamicThresholdAnalyzer(threshold, confidence_threshold)
+            self.dynamic_analyzer = DynamicThresholdAnalyzer(
+                threshold, confidence_threshold
+            )
         else:
             # Update threshold and confidence in case user changed config at runtime
             self.dynamic_analyzer.max_threshold = threshold
@@ -376,7 +415,7 @@ class DynamicPriceStrategy(ChargingStrategy):
             current_price=current_price,
             highest_today=highest_price,
             lowest_today=lowest_price,
-            next_price=next_price
+            next_price=next_price,
         )
 
         # Simple decision: does price analysis meet confidence requirement?
@@ -396,19 +435,25 @@ class DynamicPriceStrategy(ChargingStrategy):
 
         # Not charging: provide clear reason without confusing confidence percentages
         if has_significant_solar and (not soc_available or average_soc >= 40):
-            return False, f"{analysis['reason']} - waiting for solar (surplus: {solar_surplus}W)"
+            return (
+                False,
+                f"{analysis['reason']} - waiting for solar (surplus: {solar_surplus}W)",
+            )
         elif soc_available and average_soc >= 70:
-            return False, f"{analysis['reason']} - battery already at {average_soc:.0f}%"
+            return (
+                False,
+                f"{analysis['reason']} - battery already at {average_soc:.0f}%",
+            )
         else:
             return False, f"{analysis['reason']} - price conditions not optimal yet"
-    
+
     def get_priority(self) -> int:
         return 5  # After solar, predictive, very low price, and SOC buffer
 
 
 class StrategyManager:
     """Manage and execute charging strategies."""
-    
+
     def __init__(self, use_dynamic_threshold: bool = True):
         """Initialize strategy manager."""
         self._last_trace: list[dict[str, Any]] = []
@@ -417,10 +462,10 @@ class StrategyManager:
         # by the PriceThresholdGuard in evaluate() which overrides price threshold
         # when SOC is critically low.
         self.strategies = [
-            SolarPriorityStrategy(),         # Priority 1: Prefer solar
-            PredictiveChargingStrategy(),    # Priority 2: Delay for better prices
-            VeryLowPriceStrategy(),          # Priority 3: Charge at excellent prices
-            SOCBufferChargingStrategy(),     # Priority 4: Buffer charging at acceptable prices
+            SolarPriorityStrategy(),  # Priority 1: Prefer solar
+            PredictiveChargingStrategy(),  # Priority 2: Delay for better prices
+            VeryLowPriceStrategy(),  # Priority 3: Charge at excellent prices
+            SOCBufferChargingStrategy(),  # Priority 4: Buffer charging at acceptable prices
         ]
 
         # Conditionally add dynamic or traditional strategies
@@ -435,7 +480,7 @@ class StrategyManager:
 
         # Sort by priority
         self.strategies.sort(key=lambda s: s.get_priority())
-    
+
     def evaluate(self, context: dict[str, Any]) -> tuple[bool, str]:
         """Evaluate all strategies and return decision.
 
@@ -464,7 +509,10 @@ class StrategyManager:
         if stable_threshold is not None:
             base_threshold = stable_threshold
             calc_threshold = price.get("price_threshold")
-            if calc_threshold is not None and abs(calc_threshold - stable_threshold) > 0.001:
+            if (
+                calc_threshold is not None
+                and abs(calc_threshold - stable_threshold) > 0.001
+            ):
                 _LOGGER.debug(
                     "PriceThresholdGuard using stable snapshot %.4f€/kWh (current calculated: %.4f€/kWh)",
                     stable_threshold,
@@ -486,7 +534,9 @@ class StrategyManager:
             else None
         )
         if emergency_threshold is None:
-            emergency_threshold = config.get("emergency_soc_threshold", DEFAULT_EMERGENCY_SOC)
+            emergency_threshold = config.get(
+                "emergency_soc_threshold", DEFAULT_EMERGENCY_SOC
+            )
 
         soc_multiplier_max = (
             getattr(settings, "soc_price_multiplier_max", None)
@@ -494,7 +544,9 @@ class StrategyManager:
             else None
         )
         if soc_multiplier_max is None:
-            soc_multiplier_max = config.get("soc_price_multiplier_max", DEFAULT_SOC_PRICE_MULTIPLIER_MAX)
+            soc_multiplier_max = config.get(
+                "soc_price_multiplier_max", DEFAULT_SOC_PRICE_MULTIPLIER_MAX
+            )
 
         soc_buffer_target = (
             getattr(settings, "soc_buffer_target", None)
@@ -502,7 +554,9 @@ class StrategyManager:
             else None
         )
         if soc_buffer_target is None:
-            soc_buffer_target = config.get("soc_buffer_target", DEFAULT_SOC_BUFFER_TARGET)
+            soc_buffer_target = config.get(
+                "soc_buffer_target", DEFAULT_SOC_BUFFER_TARGET
+            )
 
         # Calculate effective threshold with SOC-based relaxation
         if average_soc is not None:
@@ -527,9 +581,13 @@ class StrategyManager:
                 _LOGGER.debug(
                     "Price threshold guard: cannot evaluate emergency override without battery SOC, "
                     "blocking charge at high price %.3f€/kWh > %.3f€/kWh",
-                    current_price, effective_threshold
+                    current_price,
+                    effective_threshold,
                 )
-                return False, f"Price {current_price:.3f}€/kWh exceeds threshold {effective_threshold:.3f}€/kWh (battery SOC unavailable)"
+                return (
+                    False,
+                    f"Price {current_price:.3f}€/kWh exceeds threshold {effective_threshold:.3f}€/kWh (battery SOC unavailable)",
+                )
 
             guard_entry = {
                 "strategy": "PriceThresholdGuard",
@@ -580,8 +638,11 @@ class StrategyManager:
             trace.append(entry)
 
             if should_charge:
-                _LOGGER.debug("Strategy %s decided to charge: %s",
-                            strategy.__class__.__name__, reason)
+                _LOGGER.debug(
+                    "Strategy %s decided to charge: %s",
+                    strategy.__class__.__name__,
+                    reason,
+                )
                 self._last_trace = trace
                 return True, reason
             elif isinstance(strategy, SolarPriorityStrategy) and reason:
@@ -602,13 +663,19 @@ class StrategyManager:
                 else:
                     _LOGGER.debug(
                         "Strategy %s blocked grid charging: %s",
-                        strategy.__class__.__name__, reason,
+                        strategy.__class__.__name__,
+                        reason,
                     )
                     self._last_trace = trace
                     return False, reason
-            elif reason:  # Strategy made a decision not to charge, but continue checking
-                _LOGGER.debug("Strategy %s suggests not charging: %s (continuing evaluation)",
-                            strategy.__class__.__name__, reason)
+            elif (
+                reason
+            ):  # Strategy made a decision not to charge, but continue checking
+                _LOGGER.debug(
+                    "Strategy %s suggests not charging: %s (continuing evaluation)",
+                    strategy.__class__.__name__,
+                    reason,
+                )
                 last_reason = reason
 
         # If we got here, no strategy said to charge
@@ -635,15 +702,17 @@ class StrategyManager:
             average_soc = 0
 
         price_fragment = (
-            f"{current_price:.3f}€/kWh" if current_price is not None else "unknown price"
+            f"{current_price:.3f}€/kWh"
+            if current_price is not None
+            else "unknown price"
         )
         position_fragment = (
-            f"{position:.0%} of daily range" if position is not None else "unknown price position"
+            f"{position:.0%} of daily range"
+            if position is not None
+            else "unknown price position"
         )
 
-        default_reason = (
-            f"Price not favorable ({price_fragment}, {position_fragment}) for SOC {average_soc:.0f}%"
-        )
+        default_reason = f"Price not favorable ({price_fragment}, {position_fragment}) for SOC {average_soc:.0f}%"
         trace.append(
             {
                 "strategy": "DefaultDecision",
@@ -682,7 +751,7 @@ class StrategyManager:
             current_price=current_price,
             highest_today=highest_price,
             lowest_today=lowest_price,
-            next_price=next_price
+            next_price=next_price,
         )
 
         return analysis.get("dynamic_threshold")

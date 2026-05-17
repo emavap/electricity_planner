@@ -55,15 +55,19 @@ def check_ha_environment():
 
     try:
         from homeassistant.core import HomeAssistant
+
         print("✅ Home Assistant imports working")
 
         from homeassistant.components.lovelace import const as ll_const
         from homeassistant.components.lovelace import dashboard as ll_dashboard
+
         print("✅ Lovelace imports working")
 
         # Check for constants
         print(f"   - DOMAIN: {ll_const.DOMAIN}")
-        print(f"   - Has CONF_ALLOW_SINGLE_WORD: {hasattr(ll_const, 'CONF_ALLOW_SINGLE_WORD')}")
+        print(
+            f"   - Has CONF_ALLOW_SINGLE_WORD: {hasattr(ll_const, 'CONF_ALLOW_SINGLE_WORD')}"
+        )
 
     except ImportError as e:
         print(f"❌ Import error: {e}")

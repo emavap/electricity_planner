@@ -4,6 +4,7 @@ Extracted from ``decision_engine.py``. Advises the EV charger power cap
 each cycle based on available solar, arbitrage discharge, grid
 allowance, and peak-import protection.
 """
+
 from __future__ import annotations
 
 import logging
@@ -68,9 +69,7 @@ class ChargerLimitCalculator:
             return result
 
         existing_reason = result.get("charger_limit_reason", "")
-        peak_reason = (
-            f"Peak import exceeded - reduced to {reduced_limit}W for 15min"
-        )
+        peak_reason = f"Peak import exceeded - reduced to {reduced_limit}W for 15min"
 
         result["charger_limit"] = reduced_limit
         result["charger_limit_reason"] = (
@@ -79,7 +78,9 @@ class ChargerLimitCalculator:
 
         _LOGGER.info(
             "Peak import protection: reducing charger limit from %dW to %dW (preserved non-grid %dW)",
-            limit, reduced_limit, preserved
+            limit,
+            reduced_limit,
+            preserved,
         )
         return result
 
@@ -115,10 +116,14 @@ class ChargerLimitCalculator:
         if car_solar_only:
             if allocated_solar > 0:
                 limit = min(allocated_solar, car_limit_cap)
-                return self.apply_peak_import_limit({
-                    "charger_limit": int(limit),
-                    "charger_limit_reason": f"Solar-only car charging - limited to allocated solar power ({int(limit)}W), no grid usage",
-                }, ctx, non_grid_floor=allocated_solar)
+                return self.apply_peak_import_limit(
+                    {
+                        "charger_limit": int(limit),
+                        "charger_limit_reason": f"Solar-only car charging - limited to allocated solar power ({int(limit)}W), no grid usage",
+                    },
+                    ctx,
+                    non_grid_floor=allocated_solar,
+                )
             return {
                 "charger_limit": 0,
                 "charger_limit_reason": "Solar-only mode but no solar available",
@@ -154,17 +159,23 @@ class ChargerLimitCalculator:
                 else 0
             )
             limit = min(solar_headroom + grid_allowance, car_limit_cap)
-            sources = self.format_power_sources([
-                (solar_headroom, "allocated solar"),
-                (grid_allowance, "grid"),
-            ])
-            return self.apply_peak_import_limit({
-                "charger_limit": int(limit),
-                "charger_limit_reason": (
-                    "Battery data unavailable - conservative limit using "
-                    f"{sources} ({int(limit)}W total)"
-                ),
-            }, ctx, non_grid_floor=solar_headroom)
+            sources = self.format_power_sources(
+                [
+                    (solar_headroom, "allocated solar"),
+                    (grid_allowance, "grid"),
+                ]
+            )
+            return self.apply_peak_import_limit(
+                {
+                    "charger_limit": int(limit),
+                    "charger_limit_reason": (
+                        "Battery data unavailable - conservative limit using "
+                        f"{sources} ({int(limit)}W total)"
+                    ),
+                },
+                ctx,
+                non_grid_floor=solar_headroom,
+            )
 
         monthly_peak = ctx.monthly_grid_peak
         max_setpoint = self._grid_setpoint.get_safe_setpoint(monthly_peak)
@@ -182,43 +193,59 @@ class ChargerLimitCalculator:
             limit = min(solar_headroom + shared_grid_allowance, car_limit_cap)
             _LOGGER.info(
                 "Low SOC power sharing: battery %.0f%% < %.0f%%, limiting car to 50%% of grid (%dW)",
-                average_soc, predictive_min_soc, int(limit)
+                average_soc,
+                predictive_min_soc,
+                int(limit),
             )
-            sources = self.format_power_sources([
-                (solar_headroom, "allocated solar"),
-                (shared_grid_allowance, "shared grid"),
-            ])
-            return self.apply_peak_import_limit({
-                "charger_limit": int(limit),
-                "charger_limit_reason": (
-                    f"Low battery SOC ({average_soc:.0f}% < {predictive_min_soc}%) - "
-                    f"sharing grid power with batteries using {sources} "
-                    f"({int(limit)}W total)"
-                ),
-            }, ctx, non_grid_floor=solar_headroom)
+            sources = self.format_power_sources(
+                [
+                    (solar_headroom, "allocated solar"),
+                    (shared_grid_allowance, "shared grid"),
+                ]
+            )
+            return self.apply_peak_import_limit(
+                {
+                    "charger_limit": int(limit),
+                    "charger_limit_reason": (
+                        f"Low battery SOC ({average_soc:.0f}% < {predictive_min_soc}%) - "
+                        f"sharing grid power with batteries using {sources} "
+                        f"({int(limit)}W total)"
+                    ),
+                },
+                ctx,
+                non_grid_floor=solar_headroom,
+            )
 
         if average_soc < max_soc_threshold and car_arbitrage_power <= 0:
             limit = min(solar_headroom + grid_allowance, car_limit_cap)
-            sources = self.format_power_sources([
-                (solar_headroom, "allocated solar"),
-                (grid_allowance, "grid"),
-            ])
-            return self.apply_peak_import_limit({
-                "charger_limit": int(limit),
-                "charger_limit_reason": (
-                    f"Battery {average_soc:.0f}% < {max_soc_threshold}% - "
-                    f"car can use {sources} ({int(limit)}W total), "
-                    "surplus for batteries"
-                ),
-            }, ctx, non_grid_floor=solar_headroom)
+            sources = self.format_power_sources(
+                [
+                    (solar_headroom, "allocated solar"),
+                    (grid_allowance, "grid"),
+                ]
+            )
+            return self.apply_peak_import_limit(
+                {
+                    "charger_limit": int(limit),
+                    "charger_limit_reason": (
+                        f"Battery {average_soc:.0f}% < {max_soc_threshold}% - "
+                        f"car can use {sources} ({int(limit)}W total), "
+                        "surplus for batteries"
+                    ),
+                },
+                ctx,
+                non_grid_floor=solar_headroom,
+            )
 
         available_power = solar_headroom + car_arbitrage_power + grid_allowance
         limit = min(available_power, car_limit_cap)
-        sources = self.format_power_sources([
-            (solar_headroom, "allocated solar"),
-            (car_arbitrage_power, "battery arbitrage"),
-            (grid_allowance, "grid"),
-        ])
+        sources = self.format_power_sources(
+            [
+                (solar_headroom, "allocated solar"),
+                (car_arbitrage_power, "battery arbitrage"),
+                (grid_allowance, "grid"),
+            ]
+        )
 
         threshold_context = (
             f"Battery {average_soc:.0f}% ≥ arbitrage reserve {arbitrage_reserve_soc:.0f}%"
@@ -226,10 +253,14 @@ class ChargerLimitCalculator:
             else f"Battery {average_soc:.0f}% ≥ {max_soc_threshold}%"
         )
 
-        return self.apply_peak_import_limit({
-            "charger_limit": int(limit),
-            "charger_limit_reason": (
-                f"{threshold_context} - "
-                f"car can use {sources} ({int(limit)}W total)"
-            ),
-        }, ctx, non_grid_floor=solar_headroom + car_arbitrage_power)
+        return self.apply_peak_import_limit(
+            {
+                "charger_limit": int(limit),
+                "charger_limit_reason": (
+                    f"{threshold_context} - "
+                    f"car can use {sources} ({int(limit)}W total)"
+                ),
+            },
+            ctx,
+            non_grid_floor=solar_headroom + car_arbitrage_power,
+        )

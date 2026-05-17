@@ -4,6 +4,7 @@ Extracted from ``decision_engine.py``. Computes the grid import/export
 setpoint each cycle, honouring the monthly-peak cap, transition window,
 and safety nets that prevent authorised-only imports/exports.
 """
+
 from __future__ import annotations
 
 import logging
@@ -252,7 +253,9 @@ class GridSetpointCalculator:
 
         battery_grid_need = 0
         if arbitrage_mode_export_active and arbitrage_mode_export_power > 0:
-            remaining_export_power = max(0, arbitrage_mode_export_power - int(car_battery_need))
+            remaining_export_power = max(
+                0, arbitrage_mode_export_power - int(car_battery_need)
+            )
             if remaining_export_power > 0:
                 battery_grid_need = -min(
                     remaining_export_power,
@@ -300,8 +303,11 @@ class GridSetpointCalculator:
                 "(car_grid_need=%d, battery_grid_need=%d, "
                 "significant_car_charging=%s, car_grid_import_allowed=%s, "
                 "battery_grid_charging=%s)",
-                int(grid_setpoint), int(car_grid_need), int(battery_grid_need),
-                significant_car_charging, car_grid_import_allowed,
+                int(grid_setpoint),
+                int(car_grid_need),
+                int(battery_grid_need),
+                significant_car_charging,
+                car_grid_import_allowed,
                 battery_grid_charging,
             )
             grid_setpoint = 0
@@ -314,8 +320,10 @@ class GridSetpointCalculator:
                 "Grid setpoint safety net clamped %dW export to 0 "
                 "(battery_grid_need=%d, arbitrage_mode_active=%s, "
                 "arbitrage_mode_export_power=%d)",
-                int(grid_setpoint), int(battery_grid_need),
-                ctx.arbitrage_mode_active, arbitrage_mode_export_power,
+                int(grid_setpoint),
+                int(battery_grid_need),
+                ctx.arbitrage_mode_active,
+                arbitrage_mode_export_power,
             )
             grid_setpoint = 0
             car_grid_need = 0

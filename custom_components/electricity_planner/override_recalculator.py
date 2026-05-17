@@ -4,6 +4,7 @@ Extracted from ``decision_engine.py``. After manual overrides adjust
 charging flags, charger limit, or grid setpoint, this collaborator refreshes
 the dependent values so that the decision remains internally consistent.
 """
+
 from __future__ import annotations
 
 import logging
@@ -79,7 +80,9 @@ class OverrideRecalculator:
                 power_allocation,
             )
 
-        total_grid_setpoint = int(_safe_optional_float(decision.get("grid_setpoint")) or 0)
+        total_grid_setpoint = int(
+            _safe_optional_float(decision.get("grid_setpoint")) or 0
+        )
         if total_grid_setpoint == 0:
             return {"battery": 0, "car": 0}
 
@@ -196,7 +199,9 @@ class OverrideRecalculator:
         # window must not dominate.  Clear the arbitrage flags so that
         # _calculate_grid_setpoint follows the charging path instead of the
         # export path.
-        if "battery_grid_charging" in override_targets and decision.get("battery_grid_charging"):
+        if "battery_grid_charging" in override_targets and decision.get(
+            "battery_grid_charging"
+        ):
             combined_data["arbitrage_mode_active"] = False
             combined_data["arbitrage_mode_export_power"] = 0
 
@@ -209,9 +214,8 @@ class OverrideRecalculator:
             power_allocation,
         )
 
-        if (
-            "charger_limit" not in override_targets
-            and override_targets.intersection({"battery_grid_charging", "car_grid_charging"})
+        if "charger_limit" not in override_targets and override_targets.intersection(
+            {"battery_grid_charging", "car_grid_charging"}
         ):
             charger_limit_decision = self._engine._calculate_charger_limit(
                 price_analysis,
@@ -248,9 +252,8 @@ class OverrideRecalculator:
             )
             combined_data["grid_setpoint_reason"] = decision["grid_setpoint_reason"]
 
-        if (
-            "grid_setpoint" not in override_targets
-            and override_targets.intersection({"battery_grid_charging", "car_grid_charging", "charger_limit"})
+        if "grid_setpoint" not in override_targets and override_targets.intersection(
+            {"battery_grid_charging", "car_grid_charging", "charger_limit"}
         ):
             charger_limit = decision.get("charger_limit", 0)
             grid_setpoint_decision = self._engine._calculate_grid_setpoint(
@@ -268,10 +271,17 @@ class OverrideRecalculator:
             combined_data.get("phase_mode") == PHASE_MODE_THREE
             and combined_data.get("phase_details")
             and override_targets.intersection(
-                {"battery_grid_charging", "car_grid_charging", "charger_limit", "grid_setpoint"}
+                {
+                    "battery_grid_charging",
+                    "car_grid_charging",
+                    "charger_limit",
+                    "grid_setpoint",
+                }
             )
         ):
-            phase_results = self._engine._distribute_phase_decisions(decision, combined_data)
+            phase_results = self._engine._distribute_phase_decisions(
+                decision, combined_data
+            )
             decision["phase_results"] = phase_results
 
         return decision

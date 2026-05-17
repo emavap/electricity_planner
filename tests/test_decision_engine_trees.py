@@ -1,4 +1,5 @@
 """Decision-tree coverage tests for the core planner branches."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -37,7 +38,9 @@ def _engine(config: dict[str, Any] | None = None) -> ChargingDecisionEngine:
     return ChargingDecisionEngine(hass=None, config=base_config)
 
 
-def _arbitrage_battery_analysis(average_soc: float = 95, max_soc_threshold: float = 90) -> dict[str, Any]:
+def _arbitrage_battery_analysis(
+    average_soc: float = 95, max_soc_threshold: float = 90
+) -> dict[str, Any]:
     return {
         "average_soc": average_soc,
         "max_soc_threshold": max_soc_threshold,
@@ -61,7 +64,14 @@ def _arbitrage_mode_data(**overrides: Any) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(
-    ("price_analysis", "battery_analysis", "power_analysis", "data", "expected_enabled", "reason_fragment"),
+    (
+        "price_analysis",
+        "battery_analysis",
+        "power_analysis",
+        "data",
+        "expected_enabled",
+        "reason_fragment",
+    ),
     [
         (
             {"data_available": True},
@@ -176,7 +186,11 @@ def test_battery_decision_tree_strategy_branch_passes_through_result() -> None:
     engine.strategy_manager.get_last_trace = lambda: [{"strategy": "Stub"}]
 
     result = engine._decide_battery_grid_charging(
-        price_analysis={"data_available": True, "current_price": 0.02, "price_threshold": 0.10},
+        price_analysis={
+            "data_available": True,
+            "current_price": 0.02,
+            "price_threshold": 0.10,
+        },
         battery_analysis={
             "batteries_count": 1,
             "batteries_available": True,
@@ -372,27 +386,65 @@ def test_battery_decision_falls_back_to_live_threshold_without_lock() -> None:
     ("price_analysis", "data", "expected_branch"),
     [
         (
-            {"data_available": True, "current_price": 0.06, "price_threshold": 0.15, "very_low_price": True, "is_low_price": True},
+            {
+                "data_available": True,
+                "current_price": 0.06,
+                "price_threshold": 0.15,
+                "very_low_price": True,
+                "is_low_price": True,
+            },
             {"previous_car_charging": False, "has_min_charging_window": True},
             "very_low",
         ),
         (
-            {"data_available": True, "current_price": 0.10, "price_threshold": 0.15, "very_low_price": False, "is_low_price": True},
+            {
+                "data_available": True,
+                "current_price": 0.10,
+                "price_threshold": 0.15,
+                "very_low_price": False,
+                "is_low_price": True,
+            },
             {"previous_car_charging": False, "has_min_charging_window": True},
             "low",
         ),
         (
-            {"data_available": True, "current_price": 0.18, "price_threshold": 0.15, "very_low_price": False, "is_low_price": False},
-            {"previous_car_charging": True, "has_min_charging_window": True, "car_charging_locked_threshold": 0.20},
+            {
+                "data_available": True,
+                "current_price": 0.18,
+                "price_threshold": 0.15,
+                "very_low_price": False,
+                "is_low_price": False,
+            },
+            {
+                "previous_car_charging": True,
+                "has_min_charging_window": True,
+                "car_charging_locked_threshold": 0.20,
+            },
             "low",
         ),
         (
-            {"data_available": True, "current_price": 0.14, "price_threshold": 0.12, "very_low_price": False, "is_low_price": False},
-            {"previous_car_charging": False, "has_min_charging_window": True, "car_permissive_mode_active": True},
+            {
+                "data_available": True,
+                "current_price": 0.14,
+                "price_threshold": 0.12,
+                "very_low_price": False,
+                "is_low_price": False,
+            },
+            {
+                "previous_car_charging": False,
+                "has_min_charging_window": True,
+                "car_permissive_mode_active": True,
+            },
             "low",
         ),
         (
-            {"data_available": True, "current_price": 0.30, "price_threshold": 0.15, "very_low_price": False, "is_low_price": False},
+            {
+                "data_available": True,
+                "current_price": 0.30,
+                "price_threshold": 0.15,
+                "very_low_price": False,
+                "is_low_price": False,
+            },
             {"previous_car_charging": False, "has_min_charging_window": False},
             "high",
         ),
@@ -414,6 +466,7 @@ def test_car_decision_tree_selects_expected_top_level_branch(
                 "car_grid_charging_reason": name,
                 "car_solar_only": False,
             }
+
         return _inner
 
     engine._car_decision_for_very_low_price = _stub("very_low")
@@ -450,16 +503,30 @@ def test_car_decision_tree_blocks_immediately_when_price_data_is_missing() -> No
     ("price_analysis", "expected_import_allowed"),
     [
         (
-            {"data_available": True, "current_price": 0.30, "price_threshold": 0.10, "is_low_price": False, "very_low_price": False},
+            {
+                "data_available": True,
+                "current_price": 0.30,
+                "price_threshold": 0.10,
+                "is_low_price": False,
+                "very_low_price": False,
+            },
             False,
         ),
         (
-            {"data_available": True, "current_price": 0.05, "price_threshold": 0.10, "is_low_price": True, "very_low_price": True},
+            {
+                "data_available": True,
+                "current_price": 0.05,
+                "price_threshold": 0.10,
+                "is_low_price": True,
+                "very_low_price": True,
+            },
             True,
         ),
     ],
 )
-def test_car_decision_tree_arbitrage_overlay(price_analysis: dict[str, Any], expected_import_allowed: bool) -> None:
+def test_car_decision_tree_arbitrage_overlay(
+    price_analysis: dict[str, Any], expected_import_allowed: bool
+) -> None:
     engine = _engine({CONF_MAX_CAR_POWER: 11000})
 
     result = engine._decide_car_grid_charging(
@@ -480,7 +547,13 @@ def test_car_decision_tree_arbitrage_overlay(price_analysis: dict[str, Any], exp
 
 
 @pytest.mark.parametrize(
-    ("price_analysis", "power_allocation", "expected_enabled", "reason_fragment", "expected_effective_price"),
+    (
+        "price_analysis",
+        "power_allocation",
+        "expected_enabled",
+        "reason_fragment",
+        "expected_effective_price",
+    ),
     [
         (
             {"data_available": False},
@@ -533,7 +606,9 @@ def test_feedin_decision_tree_gateways(
     if expected_effective_price is None:
         assert result["feedin_effective_price"] is None
     else:
-        assert result["feedin_effective_price"] == pytest.approx(expected_effective_price)
+        assert result["feedin_effective_price"] == pytest.approx(
+            expected_effective_price
+        )
 
 
 def test_feedin_decision_tree_uses_feed_specific_adjustments() -> None:
@@ -556,13 +631,24 @@ def test_feedin_decision_tree_uses_feed_specific_adjustments() -> None:
 
 
 @pytest.mark.parametrize(
-    ("config", "battery_analysis", "power_allocation", "data", "expected_limit", "reason_fragment"),
+    (
+        "config",
+        "battery_analysis",
+        "power_allocation",
+        "data",
+        "expected_limit",
+        "reason_fragment",
+    ),
     [
         (
             {},
             {"average_soc": 60, "max_soc_threshold": 90},
             {"solar_for_car": 2000},
-            {"car_charging_power": 3500, "car_grid_charging": False, "car_solar_only": False},
+            {
+                "car_charging_power": 3500,
+                "car_grid_charging": False,
+                "car_solar_only": False,
+            },
             0,
             "Car grid charging not allowed",
         ),
@@ -570,7 +656,11 @@ def test_feedin_decision_tree_uses_feed_specific_adjustments() -> None:
             {},
             {"average_soc": 85, "max_soc_threshold": 90},
             {"solar_for_car": 2500},
-            {"car_charging_power": 3000, "car_grid_charging": True, "car_solar_only": True},
+            {
+                "car_charging_power": 3000,
+                "car_grid_charging": True,
+                "car_solar_only": True,
+            },
             2500,
             "Solar-only car charging",
         ),
@@ -578,7 +668,13 @@ def test_feedin_decision_tree_uses_feed_specific_adjustments() -> None:
             {},
             {"average_soc": None},
             {"solar_for_car": 0, "car_current_solar_usage": 0},
-            {"car_charging_power": 500, "car_grid_charging": True, "car_grid_import_allowed": True, "battery_grid_charging": False, "monthly_grid_peak": 4000},
+            {
+                "car_charging_power": 500,
+                "car_grid_charging": True,
+                "car_grid_import_allowed": True,
+                "battery_grid_charging": False,
+                "monthly_grid_peak": 4000,
+            },
             3600,
             "Battery data unavailable - conservative limit",
         ),
@@ -586,7 +682,12 @@ def test_feedin_decision_tree_uses_feed_specific_adjustments() -> None:
             {},
             {"average_soc": 20, "max_soc_threshold": 90},
             {"solar_for_car": 0, "car_current_solar_usage": 0},
-            {"car_charging_power": 3200, "car_grid_charging": True, "car_grid_import_allowed": True, "battery_grid_charging": True},
+            {
+                "car_charging_power": 3200,
+                "car_grid_charging": True,
+                "car_grid_import_allowed": True,
+                "battery_grid_charging": True,
+            },
             1350,
             "sharing grid power with batteries",
         ),
@@ -594,7 +695,12 @@ def test_feedin_decision_tree_uses_feed_specific_adjustments() -> None:
             {},
             {"average_soc": 60, "max_soc_threshold": 90},
             {"solar_for_car": 0, "car_current_solar_usage": 0},
-            {"car_charging_power": 3200, "car_grid_charging": True, "car_grid_import_allowed": True, "battery_grid_charging": False},
+            {
+                "car_charging_power": 3200,
+                "car_grid_charging": True,
+                "car_grid_import_allowed": True,
+                "battery_grid_charging": False,
+            },
             2700,
             "surplus for batteries",
         ),
@@ -630,7 +736,15 @@ def test_charger_limit_decision_tree_branches(
 
 
 @pytest.mark.parametrize(
-    ("battery_analysis", "power_allocation", "data", "charger_limit", "expected_setpoint", "expected_components", "reason_fragment"),
+    (
+        "battery_analysis",
+        "power_allocation",
+        "data",
+        "charger_limit",
+        "expected_setpoint",
+        "expected_components",
+        "reason_fragment",
+    ),
     [
         (
             {"average_soc": None},
@@ -739,7 +853,14 @@ def test_grid_setpoint_decision_tree_branches(
 
 
 @pytest.mark.parametrize(
-    ("battery_grid_charging", "car_grid_charging", "car_grid_import_allowed", "arbitrage_mode_active", "expected_limit", "expected_setpoint"),
+    (
+        "battery_grid_charging",
+        "car_grid_charging",
+        "car_grid_import_allowed",
+        "arbitrage_mode_active",
+        "expected_limit",
+        "expected_setpoint",
+    ),
     [
         (True, True, True, False, 2700, 2700),
         (False, True, False, True, 3000, -1000),
@@ -755,8 +876,14 @@ def test_decision_tree_combinations_keep_charger_limit_and_grid_setpoint_coheren
     expected_setpoint: int,
 ) -> None:
     engine = _engine({CONF_MAX_CAR_POWER: 11000, CONF_ARBITRAGE_MODE_RESERVE_SOC: 40})
-    battery_analysis = _arbitrage_battery_analysis(average_soc=95 if arbitrage_mode_active else 60)
-    power_allocation = {"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0}
+    battery_analysis = _arbitrage_battery_analysis(
+        average_soc=95 if arbitrage_mode_active else 60
+    )
+    power_allocation = {
+        "remaining_solar": 0,
+        "solar_for_car": 0,
+        "car_current_solar_usage": 0,
+    }
     data = {
         "car_charging_power": 2000,
         "car_grid_charging": car_grid_charging,
@@ -769,9 +896,17 @@ def test_decision_tree_combinations_keep_charger_limit_and_grid_setpoint_coheren
         "previous_car_charging": True,
     }
 
-    charger_limit = engine._calculate_charger_limit({}, battery_analysis, power_allocation, data)["charger_limit"]
-    grid_setpoint = engine._calculate_grid_setpoint({}, battery_analysis, power_allocation, data, charger_limit)
+    charger_limit = engine._calculate_charger_limit(
+        {}, battery_analysis, power_allocation, data
+    )["charger_limit"]
+    grid_setpoint = engine._calculate_grid_setpoint(
+        {}, battery_analysis, power_allocation, data, charger_limit
+    )
 
     assert charger_limit == expected_limit
     assert grid_setpoint["grid_setpoint"] == expected_setpoint
-    assert grid_setpoint["grid_components"]["battery"] + grid_setpoint["grid_components"]["car"] == expected_setpoint
+    assert (
+        grid_setpoint["grid_components"]["battery"]
+        + grid_setpoint["grid_components"]["car"]
+        == expected_setpoint
+    )

@@ -1,11 +1,11 @@
 """Tests for Nord Pool Prices Sensor."""
+
 from __future__ import annotations
 
 import pytest
 import pytz
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-
 from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.electricity_planner.const import DOMAIN
 from custom_components.electricity_planner.helpers import (
@@ -35,7 +35,9 @@ class FakeCoordinator:
         """Check if built-in transport cost components are configured."""
         return self.config.get("transport_cost_day") is not None
 
-    def _resolve_transport_cost(self, transport_lookup, start_time_utc, reference_now=None):
+    def _resolve_transport_cost(
+        self, transport_lookup, start_time_utc, reference_now=None
+    ):
         """Resolve transport cost using built-in or legacy test behavior."""
         if self._has_builtin_transport_cost():
             return self.builtin_transport_cost
@@ -53,11 +55,7 @@ def fake_coordinator():
 @pytest.fixture
 def fake_entry():
     """Provide a fake config entry."""
-    return MockConfigEntry(
-        domain=DOMAIN,
-        data={},
-        entry_id="test_entry_id"
-    )
+    return MockConfigEntry(domain=DOMAIN, data={}, entry_id="test_entry_id")
 
 
 def test_extract_price_value_handles_price_key():
@@ -103,7 +101,7 @@ def test_normalize_price_interval_adds_price_key(fake_coordinator, fake_entry):
     interval = {
         "start": "2025-10-14T00:00:00+00:00",
         "end": "2025-10-14T00:15:00+00:00",
-        "value": 104.85  # In €/MWh
+        "value": 104.85,  # In €/MWh
     }
 
     # No transport cost lookup provided
@@ -120,7 +118,9 @@ def test_normalize_price_interval_adds_price_key(fake_coordinator, fake_entry):
     assert "value" in result  # Original key preserved
 
 
-def test_normalize_price_interval_returns_none_for_invalid(fake_coordinator, fake_entry):
+def test_normalize_price_interval_returns_none_for_invalid(
+    fake_coordinator, fake_entry
+):
     """Test that _normalize_price_interval returns None for invalid data."""
     sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
 
@@ -130,7 +130,9 @@ def test_normalize_price_interval_returns_none_for_invalid(fake_coordinator, fak
     assert sensor._normalize_price_interval([]) is None
 
     # Missing price data
-    assert sensor._normalize_price_interval({"start": "2025-10-14T00:00:00+00:00"}) is None
+    assert (
+        sensor._normalize_price_interval({"start": "2025-10-14T00:00:00+00:00"}) is None
+    )
 
 
 def test_normalize_price_interval_applies_adjustments(fake_coordinator, fake_entry):
@@ -138,14 +140,14 @@ def test_normalize_price_interval_applies_adjustments(fake_coordinator, fake_ent
     # Configure adjustment: price × 1.21 + 0.05 (e.g., VAT + surcharge)
     fake_coordinator.config = {
         "price_adjustment_multiplier": 1.21,
-        "price_adjustment_offset": 0.05
+        "price_adjustment_offset": 0.05,
     }
     sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
 
     interval = {
         "start": "2025-10-14T00:00:00+00:00",
         "end": "2025-10-14T00:15:00+00:00",
-        "value": 100.0  # 100 €/MWh = 0.1 €/kWh
+        "value": 100.0,  # 100 €/MWh = 0.1 €/kWh
     }
 
     result = sensor._normalize_price_interval(interval, transport_cost_lookup=None)
@@ -159,7 +161,9 @@ def test_normalize_price_interval_applies_adjustments(fake_coordinator, fake_ent
     assert result["contract_adjustment"] == pytest.approx(0.071, rel=1e-6)
 
 
-def test_normalize_price_interval_applies_transport_cost(fake_coordinator, fake_entry, monkeypatch):
+def test_normalize_price_interval_applies_transport_cost(
+    fake_coordinator, fake_entry, monkeypatch
+):
     """Test that _normalize_price_interval applies week-old transport costs for future times."""
     from datetime import datetime, timezone
 
@@ -169,7 +173,7 @@ def test_normalize_price_interval_applies_transport_cost(fake_coordinator, fake_
 
     fake_coordinator.config = {
         "price_adjustment_multiplier": 1.0,
-        "price_adjustment_offset": 0.0
+        "price_adjustment_offset": 0.0,
     }
     fake_coordinator.data = {}  # Empty data to avoid interference
     sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
@@ -185,7 +189,7 @@ def test_normalize_price_interval_applies_transport_cost(fake_coordinator, fake_
     night_interval = {
         "start": "2025-10-14T00:00:00+00:00",
         "end": "2025-10-14T00:15:00+00:00",
-        "value": 100.0  # 100 €/MWh = 0.1 €/kWh
+        "value": 100.0,  # 100 €/MWh = 0.1 €/kWh
     }
 
     result_night = sensor._normalize_price_interval(night_interval, transport_lookup)
@@ -197,7 +201,7 @@ def test_normalize_price_interval_applies_transport_cost(fake_coordinator, fake_
     day_interval = {
         "start": "2025-10-14T14:00:00+00:00",
         "end": "2025-10-14T14:15:00+00:00",
-        "value": 100.0  # 100 €/MWh = 0.1 €/kWh
+        "value": 100.0,  # 100 €/MWh = 0.1 €/kWh
     }
 
     result_day = sensor._normalize_price_interval(day_interval, transport_lookup)
@@ -206,7 +210,9 @@ def test_normalize_price_interval_applies_transport_cost(fake_coordinator, fake_
     assert result_day["transport_cost"] == 0.05
 
 
-def test_normalize_price_interval_uses_local_time_zone(fake_coordinator, fake_entry, monkeypatch):
+def test_normalize_price_interval_uses_local_time_zone(
+    fake_coordinator, fake_entry, monkeypatch
+):
     """Transport cost lookup should work correctly regardless of timezone."""
     from datetime import datetime, timezone
 
@@ -249,7 +255,9 @@ def test_normalize_price_interval_uses_local_time_zone(fake_coordinator, fake_en
         dt_util.set_default_time_zone(original_tz)
 
 
-def test_normalize_price_interval_matches_future_transport_by_local_week(fake_coordinator, fake_entry, monkeypatch):
+def test_normalize_price_interval_matches_future_transport_by_local_week(
+    fake_coordinator, fake_entry, monkeypatch
+):
     """DST transitions should reuse the same local tariff slot, not the same UTC instant."""
     from datetime import datetime, timezone
 
@@ -297,11 +305,19 @@ def test_native_value_shows_today_only(fake_coordinator, fake_entry):
     fake_coordinator.data = {
         "nordpool_prices_today": {
             "BE": [
-                {"start": "2025-10-14T00:00:00+00:00", "end": "2025-10-14T00:15:00+00:00", "price": 104.85},
-                {"start": "2025-10-14T00:15:00+00:00", "end": "2025-10-14T00:30:00+00:00", "price": 97.53},
+                {
+                    "start": "2025-10-14T00:00:00+00:00",
+                    "end": "2025-10-14T00:15:00+00:00",
+                    "price": 104.85,
+                },
+                {
+                    "start": "2025-10-14T00:15:00+00:00",
+                    "end": "2025-10-14T00:30:00+00:00",
+                    "price": 97.53,
+                },
             ]
         },
-        "nordpool_prices_tomorrow": None
+        "nordpool_prices_tomorrow": None,
     }
 
     sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
@@ -314,14 +330,22 @@ def test_native_value_shows_today_and_tomorrow(fake_coordinator, fake_entry):
     fake_coordinator.data = {
         "nordpool_prices_today": {
             "BE": [
-                {"start": "2025-10-14T00:00:00+00:00", "end": "2025-10-14T00:15:00+00:00", "price": 104.85},
+                {
+                    "start": "2025-10-14T00:00:00+00:00",
+                    "end": "2025-10-14T00:15:00+00:00",
+                    "price": 104.85,
+                },
             ]
         },
         "nordpool_prices_tomorrow": {
             "BE": [
-                {"start": "2025-10-15T00:00:00+00:00", "end": "2025-10-15T00:15:00+00:00", "price": 110.0},
+                {
+                    "start": "2025-10-15T00:00:00+00:00",
+                    "end": "2025-10-15T00:15:00+00:00",
+                    "price": 110.0,
+                },
             ]
-        }
+        },
     }
 
     sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
@@ -334,12 +358,20 @@ def test_extra_state_attributes_combines_prices(fake_coordinator, fake_entry):
     fake_coordinator.data = {
         "nordpool_prices_today": {
             "BE": [
-                {"start": "2025-10-14T10:00:00+00:00", "end": "2025-10-14T10:15:00+00:00", "price": 100.0},  # In €/MWh
+                {
+                    "start": "2025-10-14T10:00:00+00:00",
+                    "end": "2025-10-14T10:15:00+00:00",
+                    "price": 100.0,
+                },  # In €/MWh
             ]
         },
         "nordpool_prices_tomorrow": {
             "BE": [
-                {"start": "2025-10-15T10:00:00+00:00", "end": "2025-10-15T10:15:00+00:00", "price": 110.0},  # In €/MWh
+                {
+                    "start": "2025-10-15T10:00:00+00:00",
+                    "end": "2025-10-15T10:15:00+00:00",
+                    "price": 110.0,
+                },  # In €/MWh
             ]
         },
         "transport_cost_lookup": [],
@@ -448,13 +480,23 @@ def test_extra_state_attributes_invalidates_when_data_dict_replaced(
     assert second_attrs["last_update"] != first_attrs["last_update"]
 
 
-def test_extra_state_attributes_handles_different_price_keys(fake_coordinator, fake_entry):
+def test_extra_state_attributes_handles_different_price_keys(
+    fake_coordinator, fake_entry
+):
     """Test that attributes work with different price key formats."""
     fake_coordinator.data = {
         "nordpool_prices_today": {
             "BE": [
-                {"start": "2025-10-14T10:00:00+00:00", "end": "2025-10-14T10:15:00+00:00", "value": 100.0},  # In €/MWh
-                {"start": "2025-10-14T10:15:00+00:00", "end": "2025-10-14T10:30:00+00:00", "value_exc_vat": 90.0},  # In €/MWh
+                {
+                    "start": "2025-10-14T10:00:00+00:00",
+                    "end": "2025-10-14T10:15:00+00:00",
+                    "value": 100.0,
+                },  # In €/MWh
+                {
+                    "start": "2025-10-14T10:15:00+00:00",
+                    "end": "2025-10-14T10:30:00+00:00",
+                    "value_exc_vat": 90.0,
+                },  # In €/MWh
             ]
         },
         "nordpool_prices_tomorrow": None,
@@ -475,7 +517,9 @@ def test_extra_state_attributes_handles_different_price_keys(fake_coordinator, f
     assert attrs["transport_cost_status"] == "pending_history"
 
 
-def test_extra_state_attributes_marks_builtin_transport_cost_as_applied(fake_coordinator, fake_entry):
+def test_extra_state_attributes_marks_builtin_transport_cost_as_applied(
+    fake_coordinator, fake_entry
+):
     """Built-in transport cost mode should be reported as applied."""
     fake_coordinator.config.update(
         {
@@ -541,7 +585,9 @@ def test_extra_state_attributes_compacts_interval_payload(fake_coordinator, fake
     ]
 
 
-def test_extra_state_attributes_stays_under_recorder_limit(fake_coordinator, fake_entry):
+def test_extra_state_attributes_stays_under_recorder_limit(
+    fake_coordinator, fake_entry
+):
     """Full 48h of 15-minute Nord Pool intervals must fit under HA's 16 KB
     recorder attribute limit. Regression guard for the ``State attributes
     ... exceed maximum size of 16384 bytes`` Recorder warning observed on
@@ -602,9 +648,20 @@ def test_extra_state_attributes_skips_invalid_intervals(fake_coordinator, fake_e
     fake_coordinator.data = {
         "nordpool_prices_today": {
             "BE": [
-                {"start": "2025-10-14T10:00:00+00:00", "end": "2025-10-14T10:15:00+00:00", "price": 100.0},  # In €/MWh
-                {"start": "2025-10-14T10:15:00+00:00", "end": "2025-10-14T10:30:00+00:00"},  # Missing price
-                {"start": "2025-10-14T10:30:00+00:00", "end": "2025-10-14T10:45:00+00:00", "price": 110.0},  # In €/MWh
+                {
+                    "start": "2025-10-14T10:00:00+00:00",
+                    "end": "2025-10-14T10:15:00+00:00",
+                    "price": 100.0,
+                },  # In €/MWh
+                {
+                    "start": "2025-10-14T10:15:00+00:00",
+                    "end": "2025-10-14T10:30:00+00:00",
+                },  # Missing price
+                {
+                    "start": "2025-10-14T10:30:00+00:00",
+                    "end": "2025-10-14T10:45:00+00:00",
+                    "price": 110.0,
+                },  # In €/MWh
             ]
         },
         "nordpool_prices_tomorrow": None,
@@ -621,7 +678,6 @@ def test_extra_state_attributes_skips_invalid_intervals(fake_coordinator, fake_e
     assert attrs["data"][1]["price"] == 0.11  # Converted to €/kWh
     assert attrs["total_intervals"] == 2
     assert attrs["transport_cost_applied"] is None
-
 
 
 def test_resolve_transport_cost_uses_pre_parsed_local_when_present(monkeypatch):
@@ -671,7 +727,9 @@ def test_resolve_transport_cost_uses_pre_parsed_local_when_present(monkeypatch):
         {
             "start": "2099-06-01T13:00:00+00:00",
             "cost": 0.05,
-            "_local": dt_util.as_local(datetime(2099, 6, 1, 13, 0, tzinfo=timezone.utc)),
+            "_local": dt_util.as_local(
+                datetime(2099, 6, 1, 13, 0, tzinfo=timezone.utc)
+            ),
         },
     ]
     parse_calls["count"] = 0

@@ -1,9 +1,10 @@
 """Tests for grid setpoint, charger limits, feed-in, and phase handling."""
+
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
-import pytz
 import pytest
+import pytz
 from homeassistant.util import dt as dt_util
 
 from custom_components.electricity_planner.const import (
@@ -11,6 +12,9 @@ from custom_components.electricity_planner.const import (
     CONF_BASE_GRID_SETPOINT,
     CONF_BATTERY_CAPACITIES,
     CONF_CAR_USE_BATTERY_ARBITRAGE,
+    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
+    CONF_FEEDIN_ADJUSTMENT_OFFSET,
+    CONF_FEEDIN_PRICE_THRESHOLD,
     CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
     CONF_INVERTER_EXPORT_DEADBAND,
@@ -21,20 +25,17 @@ from custom_components.electricity_planner.const import (
     CONF_MAX_INVERTER_POWER,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
-    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     CONF_MIN_CAR_CHARGING_THRESHOLD,
-    CONF_FEEDIN_PRICE_THRESHOLD,
-    CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
-    CONF_FEEDIN_ADJUSTMENT_OFFSET,
+    CONF_PHASE_MODE,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_PRICE_THRESHOLD,
+    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     CONF_VERY_LOW_PRICE_THRESHOLD,
-    CONF_PHASE_MODE,
+    DEFAULT_MAX_SOC,
+    PHASE_IDS,
     PHASE_MODE_SINGLE,
     PHASE_MODE_THREE,
-    PHASE_IDS,
-    DEFAULT_MAX_SOC,
 )
 from custom_components.electricity_planner.decision_engine import ChargingDecisionEngine
 from custom_components.electricity_planner.defaults import DEFAULT_POWER_ESTIMATES
@@ -97,7 +98,9 @@ def test_grid_setpoint_without_battery_data():
     )
 
     assert result["grid_setpoint"] == 3600
-    assert "grid import reserved for car pulling 3600W" in result["grid_setpoint_reason"]
+    assert (
+        "grid import reserved for car pulling 3600W" in result["grid_setpoint_reason"]
+    )
     assert "Peak this month is 4000W" in result["grid_setpoint_reason"]
     assert "using 3600W" in result["grid_setpoint_reason"]
     assert "(90% of 4000W)" in result["grid_setpoint_reason"]
@@ -448,7 +451,9 @@ def test_grid_setpoint_upstream_ignores_dump_power_when_arbitrage_inactive(caplo
         "monthly_grid_peak": 4000,
     }
 
-    with caplog.at_level("INFO", logger="custom_components.electricity_planner.grid_setpoint"):
+    with caplog.at_level(
+        "INFO", logger="custom_components.electricity_planner.grid_setpoint"
+    ):
         result = engine._calculate_grid_setpoint(
             {},
             battery_analysis,
@@ -504,7 +509,9 @@ def test_car_decision_prioritizes_car_above_arbitrage_reserve_even_below_max_soc
             "is_low_price": False,
             "very_low_price": False,
         },
-        battery_analysis=_arbitrage_battery_analysis(average_soc=60, max_soc_threshold=90),
+        battery_analysis=_arbitrage_battery_analysis(
+            average_soc=60, max_soc_threshold=90
+        ),
         power_allocation={},
         data={
             "previous_car_charging": False,
@@ -623,11 +630,21 @@ async def test_single_phase_passes_current_battery_decision_to_car_logic(monkeyp
             "batteries_full": False,
         },
     )
-    monkeypatch.setattr(engine, "_analyze_power_flow", lambda data: {"solar_surplus": 0})
+    monkeypatch.setattr(
+        engine, "_analyze_power_flow", lambda data: {"solar_surplus": 0}
+    )
     monkeypatch.setattr(engine, "_analyze_solar_production", lambda data: {})
-    monkeypatch.setattr(engine, "_allocate_solar_power", lambda power_analysis, battery_analysis: {})
-    monkeypatch.setattr(engine.power_validator, "validate_allocation", lambda *args: (True, None))
-    monkeypatch.setattr(engine, "_apply_sunny_day_grid_limit", lambda battery_analysis, data: battery_analysis)
+    monkeypatch.setattr(
+        engine, "_allocate_solar_power", lambda power_analysis, battery_analysis: {}
+    )
+    monkeypatch.setattr(
+        engine.power_validator, "validate_allocation", lambda *args: (True, None)
+    )
+    monkeypatch.setattr(
+        engine,
+        "_apply_sunny_day_grid_limit",
+        lambda battery_analysis, data: battery_analysis,
+    )
     monkeypatch.setattr(
         engine,
         "_decide_battery_grid_charging",
@@ -637,9 +654,13 @@ async def test_single_phase_passes_current_battery_decision_to_car_logic(monkeyp
             "strategy_trace": [],
         },
     )
-    monkeypatch.setattr(engine.strategy_manager, "get_dynamic_threshold", lambda context: None)
+    monkeypatch.setattr(
+        engine.strategy_manager, "get_dynamic_threshold", lambda context: None
+    )
 
-    def capture_car_decision(price_analysis, battery_analysis, power_allocation, data, **kwargs):
+    def capture_car_decision(
+        price_analysis, battery_analysis, power_allocation, data, **kwargs
+    ):
         seen["battery_grid_charging"] = data.get("battery_grid_charging")
         return {
             "car_grid_charging": False,
@@ -651,7 +672,10 @@ async def test_single_phase_passes_current_battery_decision_to_car_logic(monkeyp
     monkeypatch.setattr(
         engine,
         "_calculate_charger_limit",
-        lambda *args, **kwargs: {"charger_limit": 0, "charger_limit_reason": "No charging"},
+        lambda *args, **kwargs: {
+            "charger_limit": 0,
+            "charger_limit_reason": "No charging",
+        },
     )
     monkeypatch.setattr(
         engine,
@@ -701,7 +725,11 @@ def test_charger_limit_adds_arbitrage_power_to_allowed_grid():
     result = engine._calculate_charger_limit(
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(),
-        power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 0,
+        },
         data=_arbitrage_mode_data(
             car_charging_power=5000,
             car_grid_import_allowed=True,
@@ -719,7 +747,11 @@ def test_charger_limit_uses_arbitrage_power_without_grid_import():
     result = engine._calculate_charger_limit(
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(),
-        power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 0,
+        },
         data=_arbitrage_mode_data(),
     )
 
@@ -734,7 +766,11 @@ def test_charger_limit_uses_arbitrage_power_above_reserve_even_below_max_soc():
     result = engine._calculate_charger_limit(
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(average_soc=60),
-        power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 0,
+        },
         data=_arbitrage_mode_data(),
     )
 
@@ -749,7 +785,11 @@ def test_charger_limit_keeps_arbitrage_energy_below_reserve_floor():
     result = engine._calculate_charger_limit(
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(average_soc=35),
-        power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 0,
+        },
         data=_arbitrage_mode_data(),
     )
 
@@ -769,7 +809,11 @@ def test_charger_limit_falls_back_to_configured_reserve_when_live_target_missing
     result = engine._calculate_charger_limit(
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(average_soc=50),
-        power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 0,
+        },
         data=_arbitrage_mode_data(arbitrage_mode_reserve_soc=None),
     )
 
@@ -789,7 +833,11 @@ def test_charger_limit_blocks_when_configured_reserve_fallback_is_not_met():
     result = engine._calculate_charger_limit(
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(average_soc=40),
-        power_allocation={"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
+        power_allocation={
+            "remaining_solar": 0,
+            "solar_for_car": 0,
+            "car_current_solar_usage": 0,
+        },
         data=_arbitrage_mode_data(arbitrage_mode_reserve_soc=None),
     )
 
@@ -1041,9 +1089,7 @@ def test_grid_setpoint_nets_remaining_export_after_supplying_ev_from_battery():
         price_analysis={},
         battery_analysis=_arbitrage_battery_analysis(),
         power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
-        data=_arbitrage_mode_data(
-            arbitrage_mode_reason="Arbitrage mode active"
-        ),
+        data=_arbitrage_mode_data(arbitrage_mode_reason="Arbitrage mode active"),
         charger_limit=3000,
     )
 
@@ -1059,7 +1105,9 @@ def test_grid_setpoint_nets_ev_load_before_export_above_reserve_even_below_max_s
 
     result = engine._calculate_grid_setpoint(
         price_analysis={},
-        battery_analysis=_arbitrage_battery_analysis(average_soc=60, max_soc_threshold=90),
+        battery_analysis=_arbitrage_battery_analysis(
+            average_soc=60, max_soc_threshold=90
+        ),
         power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
         data=_arbitrage_mode_data(
             arbitrage_mode_reason="Arbitrage mode active",
@@ -1148,7 +1196,9 @@ def test_recalculate_after_charger_limit_override_updates_grid_setpoint_and_phas
             },
             "phase_capacity_map": {"phase_1": 10.0},
             "phase_batteries": {
-                "phase_1": [{"entity_id": "sensor.battery_a", "soc": 80, "capacity": 10.0}],
+                "phase_1": [
+                    {"entity_id": "sensor.battery_a", "soc": 80, "capacity": 10.0}
+                ],
             },
             "car_grid_import_allowed": True,
             "car_solar_only": False,
@@ -1200,7 +1250,9 @@ def test_recalculate_after_grid_setpoint_override_normalizes_phase_results():
             },
             "phase_capacity_map": {"phase_1": 10.0},
             "phase_batteries": {
-                "phase_1": [{"entity_id": "sensor.battery_a", "soc": 80, "capacity": 10.0}],
+                "phase_1": [
+                    {"entity_id": "sensor.battery_a", "soc": 80, "capacity": 10.0}
+                ],
             },
             "car_grid_import_allowed": True,
             "car_solar_only": False,
@@ -1254,9 +1306,7 @@ def test_recalculate_after_negative_grid_setpoint_override_suppresses_battery_ch
             "car_grid_charging": False,
             "grid_setpoint": -3000,
             "grid_components": {"battery": 3000, "car": 0},
-            "manual_overrides": {
-                "grid_setpoint": {"reason": "Manual export test"}
-            },
+            "manual_overrides": {"grid_setpoint": {"reason": "Manual export test"}},
         },
         override_targets={"grid_setpoint"},
     )
@@ -1290,9 +1340,7 @@ def test_recalculate_after_small_negative_grid_setpoint_still_suppresses_battery
             "car_grid_charging": False,
             "grid_setpoint": -0.5,
             "grid_components": {"battery": 1, "car": 0},
-            "manual_overrides": {
-                "grid_setpoint": {"reason": "Manual export test"}
-            },
+            "manual_overrides": {"grid_setpoint": {"reason": "Manual export test"}},
         },
         override_targets={"grid_setpoint"},
     )
@@ -1398,11 +1446,11 @@ def test_recalculate_after_battery_override_while_arbitrage_active_yields_positi
             "car_grid_charging": False,
             "car_grid_import_allowed": False,
             "car_solar_only": False,
-            "battery_grid_charging": True,   # forced on by override
-            "arbitrage_mode_active": True,   # stale from automatic decision
+            "battery_grid_charging": True,  # forced on by override
+            "arbitrage_mode_active": True,  # stale from automatic decision
             "arbitrage_mode_export_power": 3000,
             "charger_limit": 0,
-            "grid_setpoint": -3000,          # old automatic setpoint
+            "grid_setpoint": -3000,  # old automatic setpoint
             "grid_components": {"battery": -3000, "car": 0},
         },
         override_targets={"battery_grid_charging"},
@@ -1445,7 +1493,7 @@ def test_recalculate_after_battery_override_while_arbitrage_active_car_still_use
             "car_grid_charging": True,
             "car_grid_import_allowed": False,
             "car_solar_only": False,
-            "battery_grid_charging": True,   # forced on
+            "battery_grid_charging": True,  # forced on
             "arbitrage_mode_active": True,
             "arbitrage_mode_export_power": 3000,
             "charger_limit": 3000,
@@ -1477,7 +1525,7 @@ def test_charger_limit_uses_arbitrage_not_solar_limit_when_car_solar_only_was_st
         "car_charging_power": 2000,
         "car_grid_charging": True,
         "car_grid_import_allowed": False,
-        "car_solar_only": False,           # correctly reset by init (was stale True)
+        "car_solar_only": False,  # correctly reset by init (was stale True)
         "battery_grid_charging": False,
         "arbitrage_mode_active": True,
         "arbitrage_mode_reserve_soc": 40,
@@ -1515,7 +1563,7 @@ def test_charger_limit_stale_solar_only_flag_causes_wrong_limit():
         "car_charging_power": 2000,
         "car_grid_charging": True,
         "car_grid_import_allowed": False,
-        "car_solar_only": True,            # STALE - bug scenario
+        "car_solar_only": True,  # STALE - bug scenario
         "battery_grid_charging": False,
         "arbitrage_mode_active": True,
         "arbitrage_mode_reserve_soc": 40,
@@ -1549,7 +1597,7 @@ def test_grid_setpoint_uses_arbitrage_not_solar_only_when_car_solar_only_is_fals
             "car_charging_power": 2000,
             "car_grid_charging": True,
             "car_grid_import_allowed": False,
-            "car_solar_only": False,          # correctly reset
+            "car_solar_only": False,  # correctly reset
             "battery_grid_charging": False,
             "arbitrage_mode_active": True,
             "arbitrage_mode_export_power": 3000,
@@ -1580,7 +1628,7 @@ def test_grid_setpoint_stale_solar_only_bypasses_arbitrage_car_power():
             "car_charging_power": 2000,
             "car_grid_charging": True,
             "car_grid_import_allowed": False,
-            "car_solar_only": True,           # STALE - bug scenario
+            "car_solar_only": True,  # STALE - bug scenario
             "battery_grid_charging": False,
             "arbitrage_mode_active": True,
             "arbitrage_mode_export_power": 3000,
@@ -1604,7 +1652,10 @@ def test_arbitrage_mode_does_not_block_battery_grid_charging():
     """
     engine = _engine()
     # Stub the strategy to approve charging (e.g. price is below threshold)
-    engine.strategy_manager.evaluate = lambda context: (True, "low price - charge approved")
+    engine.strategy_manager.evaluate = lambda context: (
+        True,
+        "low price - charge approved",
+    )
     engine.strategy_manager.get_last_trace = lambda: [{"strategy": "Stub"}]
 
     result = engine._decide_battery_grid_charging(
@@ -1810,8 +1861,17 @@ def test_battery_decision_context_uses_sanitized_settings():
     engine.strategy_manager.get_last_trace = lambda: []
 
     result = engine._decide_battery_grid_charging(
-        price_analysis={"data_available": True, "current_price": 0.2, "price_threshold": 0.15},
-        battery_analysis={"batteries_count": 1, "batteries_available": True, "batteries_full": False, "average_soc": 20},
+        price_analysis={
+            "data_available": True,
+            "current_price": 0.2,
+            "price_threshold": 0.15,
+        },
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+            "average_soc": 20,
+        },
         power_allocation={},
         power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
         time_context={},
@@ -1831,9 +1891,13 @@ def test_safe_grid_setpoint_uses_current_month_peak_when_already_above_configure
     assert engine._get_safe_grid_setpoint(5100) == 4590
 
 
-def test_safe_grid_setpoint_switches_to_next_month_baseline_before_month_end(monkeypatch):
+def test_safe_grid_setpoint_switches_to_next_month_baseline_before_month_end(
+    monkeypatch,
+):
     engine = _engine({CONF_BASE_GRID_SETPOINT: 5000})
-    base_time = datetime(2025, 10, 31, 22, 35, tzinfo=timezone.utc)  # 23:35 local Brussels
+    base_time = datetime(
+        2025, 10, 31, 22, 35, tzinfo=timezone.utc
+    )  # 23:35 local Brussels
     original_tz = dt_util.DEFAULT_TIME_ZONE
     dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
 
@@ -1852,7 +1916,9 @@ def test_safe_grid_setpoint_stays_on_new_month_baseline_after_midnight_until_sen
     monkeypatch,
 ):
     engine = _engine({CONF_BASE_GRID_SETPOINT: 5000})
-    base_time = datetime(2025, 10, 31, 23, 10, tzinfo=timezone.utc)  # 00:10 local Brussels
+    base_time = datetime(
+        2025, 10, 31, 23, 10, tzinfo=timezone.utc
+    )  # 00:10 local Brussels
     original_tz = dt_util.DEFAULT_TIME_ZONE
     dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
 
@@ -1876,7 +1942,11 @@ def test_safe_grid_setpoint_stays_on_new_month_baseline_after_midnight_until_sen
 )
 def test_feed_in_decision(current_price, threshold, expected):
     engine = _engine({CONF_VERY_LOW_PRICE_THRESHOLD: 25})
-    price_analysis = {"current_price": current_price, "data_available": True, "raw_current_price": current_price}
+    price_analysis = {
+        "current_price": current_price,
+        "data_available": True,
+        "raw_current_price": current_price,
+    }
     power_allocation = {"remaining_solar": 1800}
     engine.config[CONF_FEEDIN_PRICE_THRESHOLD] = threshold
 
@@ -1892,11 +1962,13 @@ def test_feed_in_decision(current_price, threshold, expected):
 
 
 def test_feed_in_uses_adjustment_positive():
-    engine = _engine({
-        CONF_FEEDIN_ADJUSTMENT_MULTIPLIER: 0.7,
-        CONF_FEEDIN_ADJUSTMENT_OFFSET: -0.01,
-        CONF_FEEDIN_PRICE_THRESHOLD: 0.0,
-    })
+    engine = _engine(
+        {
+            CONF_FEEDIN_ADJUSTMENT_MULTIPLIER: 0.7,
+            CONF_FEEDIN_ADJUSTMENT_OFFSET: -0.01,
+            CONF_FEEDIN_PRICE_THRESHOLD: 0.0,
+        }
+    )
     price_analysis = {
         "data_available": True,
         "current_price": 0.09,
@@ -1911,11 +1983,13 @@ def test_feed_in_uses_adjustment_positive():
 
 
 def test_feed_in_uses_adjustment_negative():
-    engine = _engine({
-        CONF_FEEDIN_ADJUSTMENT_MULTIPLIER: 0.7,
-        CONF_FEEDIN_ADJUSTMENT_OFFSET: -0.01,
-        CONF_FEEDIN_PRICE_THRESHOLD: 0.0,
-    })
+    engine = _engine(
+        {
+            CONF_FEEDIN_ADJUSTMENT_MULTIPLIER: 0.7,
+            CONF_FEEDIN_ADJUSTMENT_OFFSET: -0.01,
+            CONF_FEEDIN_PRICE_THRESHOLD: 0.0,
+        }
+    )
     price_analysis = {
         "data_available": True,
         "current_price": 0.01,
@@ -1941,11 +2015,13 @@ def test_feed_in_no_price_disables():
 
 
 def test_feed_in_adjustment_respects_threshold():
-    engine = _engine({
-        CONF_FEEDIN_ADJUSTMENT_MULTIPLIER: 0.7,
-        CONF_FEEDIN_ADJUSTMENT_OFFSET: -0.01,
-        CONF_FEEDIN_PRICE_THRESHOLD: 0.02,
-    })
+    engine = _engine(
+        {
+            CONF_FEEDIN_ADJUSTMENT_MULTIPLIER: 0.7,
+            CONF_FEEDIN_ADJUSTMENT_OFFSET: -0.01,
+            CONF_FEEDIN_PRICE_THRESHOLD: 0.02,
+        }
+    )
     price_analysis = {
         "data_available": True,
         "current_price": 0.05,
@@ -1960,13 +2036,15 @@ def test_feed_in_adjustment_respects_threshold():
 
 
 def test_feed_in_reason_uses_effective_feed_price_with_default_contract_values():
-    engine = _engine({
-        CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.04,
-        CONF_PRICE_ADJUSTMENT_OFFSET: 0.005,
-        CONF_FEEDIN_ADJUSTMENT_MULTIPLIER: 1.0,
-        CONF_FEEDIN_ADJUSTMENT_OFFSET: -0.0098,
-        CONF_FEEDIN_PRICE_THRESHOLD: 0.01,
-    })
+    engine = _engine(
+        {
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.04,
+            CONF_PRICE_ADJUSTMENT_OFFSET: 0.005,
+            CONF_FEEDIN_ADJUSTMENT_MULTIPLIER: 1.0,
+            CONF_FEEDIN_ADJUSTMENT_OFFSET: -0.0098,
+            CONF_FEEDIN_PRICE_THRESHOLD: 0.01,
+        }
+    )
     price_analysis = {
         "data_available": True,
         "current_price": 0.0568,
@@ -2027,7 +2105,10 @@ def test_inverter_derating_holds_previous_target_inside_deadband():
     )
 
     assert result["inverter_derating_target"] == 1800
-    assert "averaged export 80W is within the 40-120W band" in result["inverter_derating_reason"]
+    assert (
+        "averaged export 80W is within the 40-120W band"
+        in result["inverter_derating_reason"]
+    )
     assert result["inverter_derating_alarm"] is False
 
 
@@ -2079,7 +2160,9 @@ def test_inverter_derating_relaxes_upward_one_step_when_export_stays_low():
     )
 
     assert result["inverter_derating_target"] == 1900
-    assert "averaged export stayed low at 20W < 40W" in result["inverter_derating_reason"]
+    assert (
+        "averaged export stayed low at 20W < 40W" in result["inverter_derating_reason"]
+    )
     assert result["inverter_derating_alarm"] is False
     assert result["inverter_derating_unreached_since"] == now
 
@@ -2105,7 +2188,10 @@ def test_inverter_derating_recalculates_immediately_when_house_load_exceeds_pv()
     )
 
     assert result["inverter_derating_target"] == 2380
-    assert "house consumption 2300W already exceeds current solar 1500W" in result["inverter_derating_reason"]
+    assert (
+        "house consumption 2300W already exceeds current solar 1500W"
+        in result["inverter_derating_reason"]
+    )
     assert "export target 80W" in result["inverter_derating_reason"]
     assert result["inverter_derating_alarm"] is False
     assert result["inverter_derating_unreached_since"] is None
@@ -2132,7 +2218,10 @@ def test_inverter_derating_recalculates_immediately_when_site_is_importing():
 
     assert result["inverter_derating_target"] == 3840
     assert "already importing 3049W" in result["inverter_derating_reason"]
-    assert "current solar + grid import + export target (3840W)" in result["inverter_derating_reason"]
+    assert (
+        "current solar + grid import + export target (3840W)"
+        in result["inverter_derating_reason"]
+    )
     assert result["inverter_derating_alarm"] is False
     assert result["inverter_derating_unreached_since"] is None
 
@@ -2188,7 +2277,10 @@ def test_inverter_derating_relaxation_timer_survives_band_fluctuation():
     )
 
     assert result["inverter_derating_target"] == 1900
-    assert "stayed at or below the 40-120W control band for 5 minutes" in result["inverter_derating_reason"]
+    assert (
+        "stayed at or below the 40-120W control band for 5 minutes"
+        in result["inverter_derating_reason"]
+    )
     assert result["inverter_derating_alarm"] is False
     assert result["inverter_derating_unreached_since"] == now
 
@@ -2218,7 +2310,10 @@ def test_inverter_derating_averages_export_to_avoid_spike_resets():
 
     assert result["inverter_derating_target"] == 1440
     assert "export is 140W > 120W" in result["inverter_derating_reason"]
-    assert "reduce from current solar 1500W toward 80W export" in result["inverter_derating_reason"]
+    assert (
+        "reduce from current solar 1500W toward 80W export"
+        in result["inverter_derating_reason"]
+    )
     assert result["inverter_derating_alarm"] is False
     assert result["inverter_derating_unreached_since"] is None
 
@@ -2342,13 +2437,13 @@ def test_inverter_derating_fallback_keeps_stable_house_cap_when_solar_already_be
     assert result["inverter_derating_alarm"] is False
 
 
-
-
 def test_price_analysis_unavailable_when_adjustment_missing_data():
-    engine = _engine({
-        CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.12,
-        CONF_PRICE_ADJUSTMENT_OFFSET: 0.008,
-    })
+    engine = _engine(
+        {
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.12,
+            CONF_PRICE_ADJUSTMENT_OFFSET: 0.008,
+        }
+    )
     analysis = engine._analyze_comprehensive_pricing(
         {
             "current_price": None,
@@ -2362,10 +2457,12 @@ def test_price_analysis_unavailable_when_adjustment_missing_data():
 
 
 def test_transport_cost_added_to_pricing():
-    engine = _engine({
-        CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.0,
-        CONF_PRICE_ADJUSTMENT_OFFSET: 0.0,
-    })
+    engine = _engine(
+        {
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.0,
+            CONF_PRICE_ADJUSTMENT_OFFSET: 0.0,
+        }
+    )
     analysis = engine._analyze_comprehensive_pricing(
         {
             "current_price": 0.10,
@@ -2382,10 +2479,12 @@ def test_transport_cost_added_to_pricing():
 
 def test_price_analysis_uses_interval_aware_overrides_when_available():
     """Timestamp-aware summary overrides should bypass flat transport reuse."""
-    engine = _engine({
-        CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.0,
-        CONF_PRICE_ADJUSTMENT_OFFSET: 0.0,
-    })
+    engine = _engine(
+        {
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.0,
+            CONF_PRICE_ADJUSTMENT_OFFSET: 0.0,
+        }
+    )
     analysis = engine._analyze_comprehensive_pricing(
         {
             "current_price": 0.10,
@@ -2535,10 +2634,12 @@ def test_car_high_price_uses_live_solar_fallback():
 
 def test_price_adjustment_failure_disables_charging():
     """If price adjustments are configured but fail, charging must be disabled for safety."""
-    engine = _engine({
-        CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.12,
-        CONF_PRICE_ADJUSTMENT_OFFSET: 0.008,
-    })
+    engine = _engine(
+        {
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.12,
+            CONF_PRICE_ADJUSTMENT_OFFSET: 0.008,
+        }
+    )
 
     # Simulate adjustment failure by passing invalid data that will cause apply_price_adjustment to return None
     # In practice this would be a bug in apply_price_adjustment, but we test the safety behavior
@@ -2558,10 +2659,12 @@ def test_price_adjustment_failure_disables_charging():
 
 def test_price_adjustment_fallback_only_when_no_adjustment():
     """Without configured adjustments, fallback to raw prices is safe."""
-    engine = _engine({
-        CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.0,  # Default = no adjustment
-        CONF_PRICE_ADJUSTMENT_OFFSET: 0.0,      # Default = no adjustment
-    })
+    engine = _engine(
+        {
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.0,  # Default = no adjustment
+            CONF_PRICE_ADJUSTMENT_OFFSET: 0.0,  # Default = no adjustment
+        }
+    )
 
     data = {
         "current_price": 0.08,
@@ -2624,7 +2727,9 @@ async def test_three_phase_preserves_single_phase_logic(monkeypatch):
     three_phase_payload.update(
         {
             CONF_PHASE_MODE: PHASE_MODE_THREE,
-            "phase_capacity_map": {phase: (10.0 if phase == "phase_1" else 0.0) for phase in PHASE_IDS},
+            "phase_capacity_map": {
+                phase: (10.0 if phase == "phase_1" else 0.0) for phase in PHASE_IDS
+            },
             "phase_batteries": {
                 "phase_1": [
                     {
@@ -2659,7 +2764,10 @@ async def test_three_phase_preserves_single_phase_logic(monkeypatch):
         assert three_phase_result[key] == value
 
     assert three_phase_result["phase_mode"] == PHASE_MODE_THREE
-    assert three_phase_result["phase_results"]["phase_1"]["grid_setpoint"] == single_phase_result["grid_setpoint"]
+    assert (
+        three_phase_result["phase_results"]["phase_1"]["grid_setpoint"]
+        == single_phase_result["grid_setpoint"]
+    )
     assert set(three_phase_result["phase_results"].keys()) == {"phase_1"}
 
 
@@ -2783,7 +2891,10 @@ def test_distribute_phase_decisions_applies_capacity_weights():
     phase_capacity_map = {"phase_1": 5.0, "phase_2": 11.0, "phase_3": 0.0}
     phase_batteries = {
         "phase_1": [{"entity_id": "sensor.battery_a"}],
-        "phase_2": [{"entity_id": "sensor.battery_a"}, {"entity_id": "sensor.battery_b"}],
+        "phase_2": [
+            {"entity_id": "sensor.battery_a"},
+            {"entity_id": "sensor.battery_b"},
+        ],
         "phase_3": [],
     }
 
@@ -2812,8 +2923,14 @@ def test_distribute_phase_decisions_applies_capacity_weights():
     assert result["phase_2"]["charger_limit"] == 4500
     assert result["phase_3"]["charger_limit"] == 0
 
-    assert result["phase_3"]["battery_grid_charging_reason"] == "No batteries assigned to this phase"
-    assert result["phase_3"]["car_grid_charging_reason"] == "No EV feed configured for this phase"
+    assert (
+        result["phase_3"]["battery_grid_charging_reason"]
+        == "No batteries assigned to this phase"
+    )
+    assert (
+        result["phase_3"]["car_grid_charging_reason"]
+        == "No EV feed configured for this phase"
+    )
     assert result["phase_1"]["capacity_share"] == pytest.approx(5.0 / 16.0)
     assert result["phase_1"]["capacity_share_kwh"] == pytest.approx(5.0)
 
@@ -2842,7 +2959,10 @@ async def test_evaluate_three_phase_wraps_single_phase(monkeypatch):
     phase_capacity_map = {"phase_1": 5.0, "phase_2": 11.0, "phase_3": 0.0}
     phase_batteries = {
         "phase_1": [{"entity_id": "sensor.battery_a"}],
-        "phase_2": [{"entity_id": "sensor.battery_a"}, {"entity_id": "sensor.battery_b"}],
+        "phase_2": [
+            {"entity_id": "sensor.battery_a"},
+            {"entity_id": "sensor.battery_b"},
+        ],
         "phase_3": [],
     }
 
@@ -2913,7 +3033,6 @@ def test_car_distribution_ignores_current_draw():
     assert result["phase_3"]["grid_setpoint"] == 0
 
 
-
 # ---------------------------------------------------------------------------
 # Sunny Day Grid Limit (_apply_sunny_day_grid_limit) Tests
 # ---------------------------------------------------------------------------
@@ -2933,11 +3052,13 @@ def _battery_analysis(average_soc=50.0, max_soc=90.0):
 
 def test_sunny_day_no_forecast_returns_unchanged():
     """No solar forecast in data → battery_analysis returned unchanged."""
-    engine = _engine({
-        CONF_MAX_SOC_THRESHOLD: 90,
-        CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
-        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
-    })
+    engine = _engine(
+        {
+            CONF_MAX_SOC_THRESHOLD: 90,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
+        }
+    )
     ba = _battery_analysis()
     result = engine._apply_sunny_day_grid_limit(ba, {})
     assert result is ba  # exact same object
@@ -2945,11 +3066,13 @@ def test_sunny_day_no_forecast_returns_unchanged():
 
 def test_sunny_day_feature_disabled_when_thresholds_equal():
     """Sunny threshold >= normal threshold → feature disabled."""
-    engine = _engine({
-        CONF_MAX_SOC_THRESHOLD: 90,
-        CONF_MAX_SOC_THRESHOLD_SUNNY: 90,
-        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
-    })
+    engine = _engine(
+        {
+            CONF_MAX_SOC_THRESHOLD: 90,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 90,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
+        }
+    )
     ba = _battery_analysis()
     result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 20.0})
     assert result is ba
@@ -2957,11 +3080,13 @@ def test_sunny_day_feature_disabled_when_thresholds_equal():
 
 def test_sunny_day_no_battery_capacity_still_uses_kwh_threshold():
     """Sunny mode now depends on configured forecast kWh threshold, not capacities."""
-    engine = _engine({
-        CONF_MAX_SOC_THRESHOLD: 90,
-        CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
-        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 8.0,
-    })
+    engine = _engine(
+        {
+            CONF_MAX_SOC_THRESHOLD: 90,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 8.0,
+        }
+    )
     ba = _battery_analysis()
     result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 9.0})
     assert result is not ba
@@ -2970,11 +3095,13 @@ def test_sunny_day_no_battery_capacity_still_uses_kwh_threshold():
 
 def test_sunny_day_forecast_below_threshold_not_sunny():
     """Forecast below configured threshold → not a sunny day."""
-    engine = _engine({
-        CONF_MAX_SOC_THRESHOLD: 90,
-        CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
-        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
-    })
+    engine = _engine(
+        {
+            CONF_MAX_SOC_THRESHOLD: 90,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
+        }
+    )
     ba = _battery_analysis()
     result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 9.0})
     assert result is not ba
@@ -2984,11 +3111,13 @@ def test_sunny_day_forecast_below_threshold_not_sunny():
 
 def test_sunny_day_forecast_above_threshold_applies_limit():
     """Forecast >= configured threshold → sunny day, max SOC reduced."""
-    engine = _engine({
-        CONF_MAX_SOC_THRESHOLD: 90,
-        CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
-        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
-    })
+    engine = _engine(
+        {
+            CONF_MAX_SOC_THRESHOLD: 90,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
+        }
+    )
     ba = _battery_analysis(average_soc=40.0, max_soc=90.0)
     result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 12.0})
 
@@ -3004,11 +3133,13 @@ def test_sunny_day_forecast_above_threshold_applies_limit():
 
 def test_sunny_day_batteries_full_in_sunny_mode():
     """SOC >= sunny threshold → batteries_full should be True."""
-    engine = _engine({
-        CONF_MAX_SOC_THRESHOLD: 90,
-        CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
-        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
-    })
+    engine = _engine(
+        {
+            CONF_MAX_SOC_THRESHOLD: 90,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
+        }
+    )
     ba = _battery_analysis(average_soc=55.0, max_soc=90.0)
     result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 15.0})
 
@@ -3019,11 +3150,13 @@ def test_sunny_day_batteries_full_in_sunny_mode():
 
 def test_sunny_day_hysteresis_keeps_active_grid_charge_inside_two_percent_band():
     """Existing grid charging should not flap at the sunny-day SOC boundary."""
-    engine = _engine({
-        CONF_MAX_SOC_THRESHOLD: 90,
-        CONF_MAX_SOC_THRESHOLD_SUNNY: 35,
-        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
-    })
+    engine = _engine(
+        {
+            CONF_MAX_SOC_THRESHOLD: 90,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 35,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
+        }
+    )
     ba = _battery_analysis(average_soc=36.4, max_soc=90.0)
     result = engine._apply_sunny_day_grid_limit(
         ba,
@@ -3041,11 +3174,13 @@ def test_sunny_day_hysteresis_keeps_active_grid_charge_inside_two_percent_band()
 
 def test_sunny_day_hysteresis_stops_active_grid_charge_above_band():
     """Active grid charging should still stop once SOC clears the hysteresis band."""
-    engine = _engine({
-        CONF_MAX_SOC_THRESHOLD: 90,
-        CONF_MAX_SOC_THRESHOLD_SUNNY: 35,
-        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
-    })
+    engine = _engine(
+        {
+            CONF_MAX_SOC_THRESHOLD: 90,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 35,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
+        }
+    )
     ba = _battery_analysis(average_soc=37.1, max_soc=90.0)
     result = engine._apply_sunny_day_grid_limit(
         ba,
@@ -3062,11 +3197,13 @@ def test_sunny_day_hysteresis_stops_active_grid_charge_above_band():
 
 def test_sunny_day_hysteresis_does_not_start_grid_charge_at_boundary():
     """When charging is already off, the configured sunny threshold remains the ON gate."""
-    engine = _engine({
-        CONF_MAX_SOC_THRESHOLD: 90,
-        CONF_MAX_SOC_THRESHOLD_SUNNY: 35,
-        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
-    })
+    engine = _engine(
+        {
+            CONF_MAX_SOC_THRESHOLD: 90,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 35,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
+        }
+    )
     ba = _battery_analysis(average_soc=35.4, max_soc=90.0)
     result = engine._apply_sunny_day_grid_limit(
         ba,
@@ -3083,11 +3220,13 @@ def test_sunny_day_hysteresis_does_not_start_grid_charge_at_boundary():
 
 def test_sunny_day_exactly_at_threshold():
     """Forecast exactly at configured threshold → should trigger sunny mode."""
-    engine = _engine({
-        CONF_MAX_SOC_THRESHOLD: 90,
-        CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
-        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
-    })
+    engine = _engine(
+        {
+            CONF_MAX_SOC_THRESHOLD: 90,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
+        }
+    )
     ba = _battery_analysis(average_soc=30.0, max_soc=90.0)
     result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 10.0})
 
@@ -3097,11 +3236,13 @@ def test_sunny_day_exactly_at_threshold():
 
 def test_sunny_day_no_average_soc():
     """If average_soc is None, batteries_full and remaining_capacity should not be set."""
-    engine = _engine({
-        CONF_MAX_SOC_THRESHOLD: 90,
-        CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
-        CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
-    })
+    engine = _engine(
+        {
+            CONF_MAX_SOC_THRESHOLD: 90,
+            CONF_MAX_SOC_THRESHOLD_SUNNY: 50,
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: 10.0,
+        }
+    )
     ba = {"max_soc_threshold": 90.0, "batteries_available": True}
     result = engine._apply_sunny_day_grid_limit(ba, {"solar_forecast_production": 15.0})
 
@@ -3178,9 +3319,7 @@ def test_weighted_average_soc_all_zero_capacities_falls_back_to_simple_mean():
     # so configuring {zero, zero} leaves battery_capacities empty and we end up in
     # the "no capacities" branch. Configure a single battery whose entity is not
     # in battery_capacities AND override default to 0 via direct settings patch.
-    engine = _engine(
-        {CONF_BATTERY_CAPACITIES: {"sensor.excluded": 5.0}}
-    )
+    engine = _engine({CONF_BATTERY_CAPACITIES: {"sensor.excluded": 5.0}})
 
     # Pass only batteries whose entity_id isn't in capacities, but force
     # DEFAULT capacity path via a monkey-style replacement.
@@ -3364,7 +3503,6 @@ def test_inverter_derating_fallback_generic_when_solar_above_safe_output():
     assert result["inverter_derating_target"] == 580
     assert "incomplete telemetry" in result["inverter_derating_reason"]
     assert result["inverter_derating_alarm"] is False
-
 
 
 def test_negative_buy_forces_battery_grid_charging_when_active():
@@ -3570,7 +3708,9 @@ def test_inverter_derating_does_not_curtail_solar_when_negative_buy_active():
 
     # Feed-in path wins: inverter stays unrestricted regardless of negative-buy flag.
     assert result["inverter_derating_target"] == 4400
-    assert "Negative Arbitrage Buy curtailment" not in result["inverter_derating_reason"]
+    assert (
+        "Negative Arbitrage Buy curtailment" not in result["inverter_derating_reason"]
+    )
     assert result["inverter_derating_alarm"] is False
 
 
@@ -3611,7 +3751,9 @@ def test_inverter_derating_skips_curtailment_when_flag_absent():
     )
 
     assert result["inverter_derating_target"] == 4400
-    assert "Negative Arbitrage Buy curtailment" not in result["inverter_derating_reason"]
+    assert (
+        "Negative Arbitrage Buy curtailment" not in result["inverter_derating_reason"]
+    )
 
 
 def test_negative_buy_does_not_bypass_peak_import_protection():

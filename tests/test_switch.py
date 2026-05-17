@@ -1,4 +1,5 @@
 """Tests for switch platform entities."""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,10 +8,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-
 from homeassistant.const import STATE_ON
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.electricity_planner import coordinator as coordinator_module
 from custom_components.electricity_planner.const import (
@@ -22,7 +22,9 @@ from custom_components.electricity_planner.const import (
     CONF_NEXT_PRICE_ENTITY,
     DOMAIN,
 )
-from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
+from custom_components.electricity_planner.coordinator import (
+    ElectricityPlannerCoordinator,
+)
 from custom_components.electricity_planner.switch import (
     ArbitrageModeSwitch,
     BatteryChargingDisableSwitch,
@@ -94,7 +96,9 @@ def _base_config() -> dict[str, object]:
     }
 
 
-def _create_coordinator(fake_hass: FakeHass, config: dict[str, object], monkeypatch: pytest.MonkeyPatch) -> ElectricityPlannerCoordinator:
+def _create_coordinator(
+    fake_hass: FakeHass, config: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> ElectricityPlannerCoordinator:
     """Create a coordinator instance without setting up listeners."""
     entry = MockConfigEntry(domain=DOMAIN, data=config, options={})
     monkeypatch.setattr(
@@ -109,7 +113,9 @@ def _create_coordinator(fake_hass: FakeHass, config: dict[str, object], monkeypa
 async def test_car_permissive_switch_restores_last_on_state(fake_hass, monkeypatch):
     """Permissive switch should restore ON state after restart."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
-    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Planner", data=_base_config(), options={}
+    )
     entity = CarPermissiveModeSwitch(coordinator, entry)
     entity.hass = fake_hass
 
@@ -128,10 +134,14 @@ async def test_car_permissive_switch_restores_last_on_state(fake_hass, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_car_permissive_switch_skips_restore_when_no_last_state(fake_hass, monkeypatch):
+async def test_car_permissive_switch_skips_restore_when_no_last_state(
+    fake_hass, monkeypatch
+):
     """Permissive switch should keep default state when nothing was restored."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
-    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Planner", data=_base_config(), options={}
+    )
     entity = CarPermissiveModeSwitch(coordinator, entry)
     entity.hass = fake_hass
 
@@ -146,12 +156,16 @@ async def test_car_permissive_switch_skips_restore_when_no_last_state(fake_hass,
 
 
 @pytest.mark.asyncio
-async def test_car_permissive_switch_prefers_coordinator_persisted_state(fake_hass, monkeypatch):
+async def test_car_permissive_switch_prefers_coordinator_persisted_state(
+    fake_hass, monkeypatch
+):
     """Entity restore should not overwrite the coordinator's persisted setting."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     coordinator._car_permissive_mode_active = False
     coordinator._car_permissive_mode_has_persisted_state = True
-    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Planner", data=_base_config(), options={}
+    )
     entity = CarPermissiveModeSwitch(coordinator, entry)
     entity.hass = fake_hass
 
@@ -171,11 +185,15 @@ async def test_car_permissive_switch_prefers_coordinator_persisted_state(fake_ha
 
 
 @pytest.mark.asyncio
-async def test_car_permissive_switch_persists_state_before_refresh(fake_hass, monkeypatch):
+async def test_car_permissive_switch_persists_state_before_refresh(
+    fake_hass, monkeypatch
+):
     """Toggling permissive mode should persist via the coordinator store immediately."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     coordinator._car_permissive_mode_store = _MemoryStore()
-    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Planner", data=_base_config(), options={}
+    )
     entity = CarPermissiveModeSwitch(coordinator, entry)
     coordinator.async_request_refresh = AsyncMock()
 
@@ -198,7 +216,9 @@ async def test_car_permissive_switch_persists_state_before_refresh(fake_hass, mo
 async def test_arbitrage_mode_switch_uses_runtime_mode_manager(fake_hass, monkeypatch):
     """Arbitrage switch should delegate persistence to the runtime mode manager."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
-    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Planner", data=_base_config(), options={}
+    )
     entity = ArbitrageModeSwitch(coordinator, entry)
 
     coordinator.async_set_arbitrage_mode = AsyncMock()
@@ -220,7 +240,8 @@ async def test_arbitrage_mode_switch_uses_runtime_mode_manager(fake_hass, monkey
 
 @pytest.mark.asyncio
 async def test_arbitrage_mode_switch_reflects_persisted_override_after_restart(
-    fake_hass, monkeypatch,
+    fake_hass,
+    monkeypatch,
 ):
     """Arbitrage switch should prefer the live plan reason after restart refresh."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
@@ -242,17 +263,23 @@ async def test_arbitrage_mode_switch_reflects_persisted_override_after_restart(
         }
     }
 
-    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Planner", data=_base_config(), options={}
+    )
     entity = ArbitrageModeSwitch(restored, entry)
 
     assert entity.is_on is True
     assert entity.extra_state_attributes["mode_enabled"] is True
-    assert entity.extra_state_attributes["reason"] == "Arbitrage mode enabled but no battery data is available"
+    assert (
+        entity.extra_state_attributes["reason"]
+        == "Arbitrage mode enabled but no battery data is available"
+    )
 
 
 @pytest.mark.asyncio
 async def test_arbitrage_mode_switch_uses_override_reason_before_first_refresh(
-    fake_hass, monkeypatch,
+    fake_hass,
+    monkeypatch,
 ):
     """Arbitrage switch should fall back to the persisted runtime-mode reason before plan data exists."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
@@ -264,14 +291,18 @@ async def test_arbitrage_mode_switch_uses_override_reason_before_first_refresh(
     restored._runtime_mode_store = _MemoryStore(coordinator._runtime_mode_store.data)
     await restored._async_load_runtime_modes()
 
-    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Planner", data=_base_config(), options={}
+    )
     entity = ArbitrageModeSwitch(restored, entry)
 
     assert entity.is_on is True
     assert entity.extra_state_attributes["reason"] == "persisted dump"
 
 
-def test_arbitrage_mode_switch_ignores_stale_plan_when_override_is_cleared(fake_hass, monkeypatch):
+def test_arbitrage_mode_switch_ignores_stale_plan_when_override_is_cleared(
+    fake_hass, monkeypatch
+):
     """Stale arbitrage-plan data must not leak through after arbitrage mode is turned off."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     coordinator.data = {
@@ -291,7 +322,9 @@ def test_arbitrage_mode_switch_ignores_stale_plan_when_override_is_cleared(fake_
     }
     coordinator._arbitrage_mode_state = None
 
-    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Planner", data=_base_config(), options={}
+    )
     entity = ArbitrageModeSwitch(coordinator, entry)
     attrs = entity.extra_state_attributes
 
@@ -323,19 +356,22 @@ def test_battery_disable_switch_ignores_expired_override(fake_hass, monkeypatch)
         "set_at": base_time - timedelta(minutes=5),
     }
 
-    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Planner", data=_base_config(), options={}
+    )
     entity = BatteryChargingDisableSwitch(coordinator, entry)
 
     assert entity.is_on is False
     assert coordinator._manual_overrides["battery_grid_charging"] is None
 
 
-
 @pytest.mark.asyncio
 async def test_negative_buy_switch_uses_runtime_mode_manager(fake_hass, monkeypatch):
     """Negative-buy switch should delegate persistence to the runtime mode manager."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
-    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Planner", data=_base_config(), options={}
+    )
     entity = NegativeArbitrageBuyModeSwitch(coordinator, entry)
 
     coordinator.async_set_negative_buy_mode = AsyncMock()
@@ -355,7 +391,9 @@ async def test_negative_buy_switch_uses_runtime_mode_manager(fake_hass, monkeypa
     coordinator.async_request_refresh.assert_awaited_once()
 
 
-def test_negative_buy_switch_reports_attributes_from_active_plan(fake_hass, monkeypatch):
+def test_negative_buy_switch_reports_attributes_from_active_plan(
+    fake_hass, monkeypatch
+):
     """When armed, the switch should expose plan threshold, slots, and active flags."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     base_time = coordinator_module.dt_util.utcnow()
@@ -385,7 +423,9 @@ def test_negative_buy_switch_reports_attributes_from_active_plan(fake_hass, monk
         }
     }
 
-    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Planner", data=_base_config(), options={}
+    )
     entity = NegativeArbitrageBuyModeSwitch(coordinator, entry)
     attrs = entity.extra_state_attributes
 
@@ -400,7 +440,9 @@ def test_negative_buy_switch_reports_attributes_from_active_plan(fake_hass, monk
     assert "Negative Arbitrage Buy active" in attrs["reason"]
 
 
-def test_negative_buy_switch_ignores_stale_plan_when_override_is_cleared(fake_hass, monkeypatch):
+def test_negative_buy_switch_ignores_stale_plan_when_override_is_cleared(
+    fake_hass, monkeypatch
+):
     """Stale negative-buy plan data must not leak through after the mode is turned off."""
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     coordinator.data = {
@@ -417,7 +459,9 @@ def test_negative_buy_switch_ignores_stale_plan_when_override_is_cleared(fake_ha
     }
     coordinator._negative_buy_mode_state = None
 
-    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data=_base_config(), options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Planner", data=_base_config(), options={}
+    )
     entity = NegativeArbitrageBuyModeSwitch(coordinator, entry)
     attrs = entity.extra_state_attributes
 

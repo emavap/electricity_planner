@@ -1,28 +1,31 @@
 """Tests for peak threshold calculation in coordinator."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-import pytz
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+import pytz
 from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.electricity_planner import coordinator as coordinator_module
-from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
 from custom_components.electricity_planner.const import (
-    CONF_BATTERY_SOC_ENTITIES,
     CONF_BASE_GRID_SETPOINT,
+    CONF_BATTERY_SOC_ENTITIES,
+    CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_GRID_POWER_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
     CONF_LOWEST_PRICE_ENTITY,
+    CONF_MIN_CAR_CHARGING_THRESHOLD,
     CONF_MONTHLY_GRID_PEAK_ENTITY,
     CONF_NEXT_PRICE_ENTITY,
-    CONF_CAR_CHARGING_POWER_ENTITY,
-    CONF_MIN_CAR_CHARGING_THRESHOLD,
     DOMAIN,
+)
+from custom_components.electricity_planner.coordinator import (
+    ElectricityPlannerCoordinator,
 )
 
 
@@ -79,8 +82,12 @@ def fake_hass():
 
 
 def _freeze_time(monkeypatch, base_time):
-    monkeypatch.setattr(coordinator_module.dt_util, "now", lambda: base_time, raising=False)
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "now", lambda: base_time, raising=False
+    )
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False
+    )
 
 
 @pytest.mark.parametrize(
@@ -88,19 +95,14 @@ def _freeze_time(monkeypatch, base_time):
     [
         # Case 1: Normal - monthly peak exceeds base
         (6000, 5000, 6300),  # 6000 * 1.05 = 6300W
-
         # Case 2: Low usage month - monthly peak below base
         (4000, 5000, 5250),  # max(4000, 5000) * 1.05 = 5250W
-
         # Case 3: No monthly peak sensor (None)
         (None, 5000, 5250),  # max(0, 5000) * 1.05 = 5250W
-
         # Case 4: High usage month
         (7000, 5000, 7350),  # 7000 * 1.05 = 7350W
-
         # Case 5: Monthly peak equals base
         (5000, 5000, 5250),  # 5000 * 1.05 = 5250W
-
         # Case 6: Monthly peak zero
         (0, 5000, 5250),  # max(0, 5000) * 1.05 = 5250W
     ],
@@ -131,7 +133,9 @@ def test_peak_threshold_calculation(
     coordinator._update_peak_limit_state(data)
 
     # Verify the threshold
-    assert data["car_peak_limit_threshold"] == pytest.approx(expected_threshold, rel=1e-6)
+    assert data["car_peak_limit_threshold"] == pytest.approx(
+        expected_threshold, rel=1e-6
+    )
 
 
 def test_peak_threshold_uses_max_of_monthly_and_base(fake_hass, monkeypatch):
@@ -174,7 +178,9 @@ def test_peak_threshold_switches_to_next_month_baseline_30_minutes_before_month_
     fake_hass, monkeypatch
 ):
     """The last 30 minutes of the month should stop following the old peak."""
-    base_time = datetime(2025, 10, 31, 22, 35, tzinfo=timezone.utc)  # 23:35 local Brussels
+    base_time = datetime(
+        2025, 10, 31, 22, 35, tzinfo=timezone.utc
+    )  # 23:35 local Brussels
     _freeze_time(monkeypatch, base_time)
 
     config = _base_config()
@@ -206,7 +212,9 @@ def test_peak_threshold_stays_on_new_month_baseline_after_midnight_until_sensor_
     fake_hass, monkeypatch
 ):
     """A stale previous-month peak must not reopen the old cap right after midnight."""
-    base_time = datetime(2025, 10, 31, 23, 10, tzinfo=timezone.utc)  # 00:10 local Brussels
+    base_time = datetime(
+        2025, 10, 31, 23, 10, tzinfo=timezone.utc
+    )  # 00:10 local Brussels
     _freeze_time(monkeypatch, base_time)
 
     config = _base_config()
@@ -268,7 +276,9 @@ def test_peak_limit_triggers_after_5_minutes(fake_hass, monkeypatch):
     def mock_utcnow():
         return clock["now"]
 
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", mock_utcnow, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", mock_utcnow, raising=False
+    )
 
     config = _base_config()
     config[CONF_BASE_GRID_SETPOINT] = 5000
@@ -310,7 +320,9 @@ def test_peak_monitoring_resets_when_below_threshold(fake_hass, monkeypatch):
     def mock_utcnow():
         return clock["now"]
 
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", mock_utcnow, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", mock_utcnow, raising=False
+    )
 
     config = _base_config()
     config[CONF_BASE_GRID_SETPOINT] = 5000
@@ -346,7 +358,9 @@ def test_peak_limit_expires_after_15_minutes(fake_hass, monkeypatch):
     def mock_utcnow():
         return clock["now"]
 
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", mock_utcnow, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", mock_utcnow, raising=False
+    )
 
     config = _base_config()
     config[CONF_BASE_GRID_SETPOINT] = 5000

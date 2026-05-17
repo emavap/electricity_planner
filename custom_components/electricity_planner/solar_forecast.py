@@ -6,6 +6,7 @@ cache state (``_cached_solar_forecast`` / ``_solar_forecast_cache_date``
 the coordinator so existing tests and sensors that read those attributes
 keep working.
 """
+
 from __future__ import annotations
 
 import logging
@@ -51,9 +52,13 @@ class SolarForecastService:
         today = now_local.date()
         current_hour = now_local.hour
         start_hour = int(
-            coordinator.config.get(CONF_SOLAR_FORECAST_START_HOUR, DEFAULT_SOLAR_FORECAST_START_HOUR)
+            coordinator.config.get(
+                CONF_SOLAR_FORECAST_START_HOUR, DEFAULT_SOLAR_FORECAST_START_HOUR
+            )
         )
-        tomorrow_entity = entity_id or coordinator.config.get(CONF_SOLAR_FORECAST_ENTITY_TOMORROW)
+        tomorrow_entity = entity_id or coordinator.config.get(
+            CONF_SOLAR_FORECAST_ENTITY_TOMORROW
+        )
         today_entity = coordinator.config.get(CONF_SOLAR_FORECAST_TODAY_ENTITY)
 
         if current_hour >= start_hour:
@@ -125,10 +130,15 @@ class SolarForecastService:
         # (it flipped at midnight), so using it would give incorrect
         # sunny-day decisions.  Return None to disable the feature
         # until the start hour when the cache can be populated.
-        live_value = await coordinator._get_state_value(tomorrow_entity) if tomorrow_entity else None
+        live_value = (
+            await coordinator._get_state_value(tomorrow_entity)
+            if tomorrow_entity
+            else None
+        )
         if live_value is not None:
             reason = (
-                "'today' entity unavailable" if today_entity
+                "'today' entity unavailable"
+                if today_entity
                 else "no 'today' entity configured"
             )
             _LOGGER.warning(

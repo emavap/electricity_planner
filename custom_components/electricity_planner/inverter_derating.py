@@ -6,6 +6,7 @@ decision engine. The calculator is a pure function of its inputs: given
 a snapshot of the current decision cycle it returns the recommended
 inverter output cap in Watts plus supporting diagnostic fields.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -98,13 +99,16 @@ class InverterDeratingCalculator:
             data.get("previous_inverter_derating_target")
         )
         if previous_target_w is not None:
-            previous_target_w = max(0.0, min(float(max_inverter_power), previous_target_w))
+            previous_target_w = max(
+                0.0, min(float(max_inverter_power), previous_target_w)
+            )
         previous_unreached_since = _safe_optional_datetime(
             data.get("previous_inverter_derating_unreached_since")
         )
-        evaluated_at = _safe_optional_datetime(
-            data.get("inverter_derating_evaluated_at")
-        ) or dt_util.utcnow()
+        evaluated_at = (
+            _safe_optional_datetime(data.get("inverter_derating_evaluated_at"))
+            or dt_util.utcnow()
+        )
 
         grid_power_raw = data.get("grid_power")
         grid_power_w = _safe_optional_float(grid_power_raw)
@@ -119,15 +123,11 @@ class InverterDeratingCalculator:
                 if previous_grid_power_w is not None
                 else export_power_w
             )
-            smoothed_export_power_w = (
-                export_power_w + previous_export_power_w
-            ) / 2.0
+            smoothed_export_power_w = (export_power_w + previous_export_power_w) / 2.0
             release_step_w = 100.0
             lower_export_w = max(0.0, export_limit_w - export_deadband_w)
             upper_export_w = export_limit_w + export_deadband_w
-            relax_cap_after = timedelta(
-                minutes=unused_release_minutes
-            )
+            relax_cap_after = timedelta(minutes=unused_release_minutes)
             previous_derating_active = (
                 previous_target_w is not None
                 and previous_target_w < float(max_inverter_power)
@@ -135,18 +135,27 @@ class InverterDeratingCalculator:
             export_below_band = smoothed_export_power_w < lower_export_w
             current_export_above_band = export_power_w > upper_export_w
             export_above_band = (
-                current_export_above_band
-                or smoothed_export_power_w > upper_export_w
+                current_export_above_band or smoothed_export_power_w > upper_export_w
             )
             # Relaxation is allowed when export is at or below the upper band
             # (not just below the lower band).  This lets the relaxation timer
             # survive brief fluctuations into the deadband instead of resetting.
-            allow_relaxation_progress = previous_derating_active and not export_above_band
-            if previous_derating_active and previous_unreached_since is not None and not export_above_band:
+            allow_relaxation_progress = (
+                previous_derating_active and not export_above_band
+            )
+            if (
+                previous_derating_active
+                and previous_unreached_since is not None
+                and not export_above_band
+            ):
                 unreached_since = previous_unreached_since
             else:
                 unreached_since = None
-            if previous_derating_active and export_below_band and unreached_since is None:
+            if (
+                previous_derating_active
+                and export_below_band
+                and unreached_since is None
+            ):
                 unreached_since = evaluated_at
 
             def should_relax_cap_upward() -> bool:

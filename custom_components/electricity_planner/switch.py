@@ -1,4 +1,5 @@
 """Switch platform for Electricity Planner."""
+
 from __future__ import annotations
 
 import logging
@@ -8,8 +9,8 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_ON
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -216,7 +217,9 @@ class BatteryChargingDisableSwitch(CoordinatorEntity, SwitchEntity):
         Args:
             **kwargs: Additional keyword arguments (unused)
         """
-        _LOGGER.info("Clearing manual battery charging disable - resuming automatic mode")
+        _LOGGER.info(
+            "Clearing manual battery charging disable - resuming automatic mode"
+        )
         await self.coordinator.async_clear_manual_override(target="battery")
         await self.coordinator.async_request_refresh()
 
@@ -249,11 +252,17 @@ class ArbitrageModeSwitch(CoordinatorEntity, SwitchEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
-        arbitrage_plan = self.coordinator.data.get("arbitrage_mode_plan", {}) if self.coordinator.data else {}
+        arbitrage_plan = (
+            self.coordinator.data.get("arbitrage_mode_plan", {})
+            if self.coordinator.data
+            else {}
+        )
         runtime_state = self.coordinator.get_arbitrage_mode_state()
         mode_enabled = runtime_state is not None
         set_at = runtime_state.get("set_at") if runtime_state else None
-        effective_plan = arbitrage_plan if mode_enabled and arbitrage_plan.get("enabled") else {}
+        effective_plan = (
+            arbitrage_plan if mode_enabled and arbitrage_plan.get("enabled") else {}
+        )
         reason = (
             effective_plan.get("reason")
             or (runtime_state.get("reason") if runtime_state else None)
@@ -265,9 +274,13 @@ class ArbitrageModeSwitch(CoordinatorEntity, SwitchEntity):
             "reason": reason,
             "reserve_soc": effective_plan.get("reserve_soc"),
             "currently_exporting": effective_plan.get("active", False),
-            "arbitrage_price_threshold": effective_plan.get("arbitrage_price_threshold"),
+            "arbitrage_price_threshold": effective_plan.get(
+                "arbitrage_price_threshold"
+            ),
             "current_slot_price": effective_plan.get("current_slot_price"),
-            "slots_cover_full_arbitrage": effective_plan.get("slots_cover_full_arbitrage"),
+            "slots_cover_full_arbitrage": effective_plan.get(
+                "slots_cover_full_arbitrage"
+            ),
             "selected_slots_count": effective_plan.get("selected_slots_count", 0),
             "selected_slots": effective_plan.get("selected_slots", []),
             "deadline": effective_plan.get("deadline"),

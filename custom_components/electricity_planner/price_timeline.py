@@ -5,6 +5,7 @@ for turning raw Nord Pool interval dicts into chronologically-ordered
 ``PriceInterval`` lists, applying the purchase or feed-in price adjustments,
 and selecting the highest-value export slots for battery-dump planning.
 """
+
 from __future__ import annotations
 
 import logging
@@ -92,17 +93,25 @@ class PriceTimelineBuilder:
                         if end_time <= now:
                             continue
                     else:
-                        if start_time_utc < now - timedelta(hours=PRICE_INTERVAL_LOOKBACK_HOURS):
+                        if start_time_utc < now - timedelta(
+                            hours=PRICE_INTERVAL_LOOKBACK_HOURS
+                        ):
                             continue
 
                     price_value = extract_price_from_interval(interval)
                     if price_value is None:
                         continue
 
-                    if not PRICE_VALUE_MIN_EUR_MWH <= price_value <= PRICE_VALUE_MAX_EUR_MWH:
+                    if (
+                        not PRICE_VALUE_MIN_EUR_MWH
+                        <= price_value
+                        <= PRICE_VALUE_MAX_EUR_MWH
+                    ):
                         _LOGGER.warning(
                             "Suspicious price value %.2f €/MWh outside expected range [%d, %d], skipping interval",
-                            price_value, PRICE_VALUE_MIN_EUR_MWH, PRICE_VALUE_MAX_EUR_MWH
+                            price_value,
+                            PRICE_VALUE_MIN_EUR_MWH,
+                            PRICE_VALUE_MAX_EUR_MWH,
                         )
                         continue
 
@@ -123,7 +132,8 @@ class PriceTimelineBuilder:
                         raise
                     _LOGGER.warning(
                         "Unexpected error processing interval for price timeline: %s",
-                        err, exc_info=True
+                        err,
+                        exc_info=True,
                     )
                     continue
 
@@ -193,7 +203,9 @@ class PriceTimelineBuilder:
         )
 
         def _purchase_price(
-            interval: dict[str, Any], raw_price_kwh: float, start_utc: datetime,
+            interval: dict[str, Any],
+            raw_price_kwh: float,
+            start_utc: datetime,
         ) -> float | None:
             adjusted_price = (raw_price_kwh * multiplier) + offset
             transport_cost = coordinator._resolve_transport_cost(
@@ -208,7 +220,10 @@ class PriceTimelineBuilder:
             return adjusted_price + transport_cost
 
         return self.parse_intervals(
-            prices_today, prices_tomorrow, now, _purchase_price,
+            prices_today,
+            prices_tomorrow,
+            now,
+            _purchase_price,
         )
 
     def build_feedin(
@@ -229,13 +244,18 @@ class PriceTimelineBuilder:
         )
 
         def _feedin_price(
-            interval: dict[str, Any], raw_price_kwh: float, start_utc: datetime,
+            interval: dict[str, Any],
+            raw_price_kwh: float,
+            start_utc: datetime,
         ) -> float | None:
             final_price = apply_price_adjustment(raw_price_kwh, multiplier, offset)
             return final_price if final_price is not None else raw_price_kwh
 
         return self.parse_intervals(
-            prices_today, prices_tomorrow, now, _feedin_price,
+            prices_today,
+            prices_tomorrow,
+            now,
+            _feedin_price,
         )
 
     def select_export_slots(

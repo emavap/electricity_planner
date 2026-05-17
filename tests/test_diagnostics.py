@@ -1,4 +1,5 @@
 """Diagnostics tests for Electricity Planner."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace

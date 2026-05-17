@@ -1,9 +1,11 @@
 """Helper functions and utilities for Electricity Planner."""
+
 from __future__ import annotations
 
 import logging
 import re
-from datetime import date, datetime, timedelta, timezone as dt_timezone
+from datetime import date, datetime, timedelta
+from datetime import timezone as dt_timezone
 from functools import lru_cache
 from typing import Any, NamedTuple
 
@@ -17,11 +19,11 @@ except ImportError:  # pragma: no cover - Home Assistant test env provides pytz
 
 from .const import (
     MONTH_PEAK_TRANSITION_LEAD_MINUTES,
-    POWER_ALLOCATION_TOLERANCE,
     POWER_ALLOCATION_PRECISION,
+    POWER_ALLOCATION_TOLERANCE,
     PRICE_POSITION_CACHE_SIZE,
-    TARIFF_DAY_START_HOUR,
     TARIFF_DAY_END_HOUR,
+    TARIFF_DAY_START_HOUR,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -161,12 +163,16 @@ def _coerce_local_wall_clock(
             candidates.append(candidate)
 
     if candidates:
-        return min(
-            candidates,
-            key=lambda candidate: candidate.astimezone(dt_timezone.utc),
-        ) if prefer_earliest_ambiguous else max(
-            candidates,
-            key=lambda candidate: candidate.astimezone(dt_timezone.utc),
+        return (
+            min(
+                candidates,
+                key=lambda candidate: candidate.astimezone(dt_timezone.utc),
+            )
+            if prefer_earliest_ambiguous
+            else max(
+                candidates,
+                key=lambda candidate: candidate.astimezone(dt_timezone.utc),
+            )
         )
 
     for minutes in range(1, 181):
@@ -380,13 +386,13 @@ def calculate_transport_cost_from_components(
 
 class DataValidator:
     """Validate and sanitize data."""
-    
+
     @staticmethod
     def validate_power_value(
         power: float,
         min_value: float = 0,
         max_value: float | None = None,
-        name: str = "power"
+        name: str = "power",
     ) -> float:
         """Validate and clamp power values to safe ranges.
 
@@ -400,39 +406,40 @@ class DataValidator:
             Clamped power value within [min_value, max_value]
         """
         if power < min_value:
-            _LOGGER.warning("%s value %sW below minimum, clamping to %sW", 
-                          name, power, min_value)
+            _LOGGER.warning(
+                "%s value %sW below minimum, clamping to %sW", name, power, min_value
+            )
             return min_value
         if max_value is not None and power > max_value:
-            _LOGGER.warning("%s value %sW above maximum, clamping to %sW", 
-                          name, power, max_value)
+            _LOGGER.warning(
+                "%s value %sW above maximum, clamping to %sW", name, power, max_value
+            )
             return max_value
         return power
-    
+
     @staticmethod
     def validate_battery_data(battery_soc_data: list[dict]) -> tuple[bool, str]:
         """Validate battery data integrity."""
         if not battery_soc_data:
             return False, "No battery entities configured"
-        
-        valid_count = sum(1 for b in battery_soc_data 
-                         if b.get("soc") is not None and 0 <= b["soc"] <= 100)
-        
+
+        valid_count = sum(
+            1
+            for b in battery_soc_data
+            if b.get("soc") is not None and 0 <= b["soc"] <= 100
+        )
+
         if valid_count == 0:
             return False, "All battery sensors returning invalid data"
-        
+
         if valid_count < len(battery_soc_data) / 2:
             _LOGGER.warning("More than 50% of battery sensors unavailable")
-        
+
         return True, f"{valid_count}/{len(battery_soc_data)} sensors valid"
-    
+
     @staticmethod
     def sanitize_config_value(
-        value: Any,
-        min_val: float,
-        max_val: float,
-        default: float,
-        name: str = "config"
+        value: Any, min_val: float, max_val: float, default: float, name: str = "config"
     ) -> float:
         """Sanitize configuration values to prevent issues."""
         try:
@@ -440,15 +447,18 @@ class DataValidator:
             if not min_val <= val <= max_val:
                 _LOGGER.warning(
                     "%s value %s out of range [%s, %s], using default %s",
-                    name, val, min_val, max_val, default
+                    name,
+                    val,
+                    min_val,
+                    max_val,
+                    default,
                 )
                 return default
             return val
         except (TypeError, ValueError):
-            _LOGGER.error("%s value %s invalid, using default %s", 
-                         name, value, default)
+            _LOGGER.error("%s value %s invalid, using default %s", name, value, default)
             return default
-    
+
     @staticmethod
     def is_valid_state(state: Any) -> bool:
         """Check if a state value is valid."""
@@ -456,9 +466,7 @@ class DataValidator:
 
 
 def apply_price_adjustment(
-    price: float | None,
-    multiplier: float = 1.0,
-    offset: float = 0.0
+    price: float | None, multiplier: float = 1.0, offset: float = 0.0
 ) -> float | None:
     """Apply a simple affine transformation to a price value.
 
@@ -475,7 +483,12 @@ def apply_price_adjustment(
     try:
         return (float(price) * float(multiplier)) + float(offset)
     except (TypeError, ValueError):
-        _LOGGER.error("Invalid price adjustment: price=%s, multiplier=%s, offset=%s", price, multiplier, offset)
+        _LOGGER.error(
+            "Invalid price adjustment: price=%s, multiplier=%s, offset=%s",
+            price,
+            multiplier,
+            offset,
+        )
         return None
 
 
@@ -485,9 +498,7 @@ class PriceCalculator:
     @staticmethod
     @lru_cache(maxsize=PRICE_POSITION_CACHE_SIZE)
     def calculate_price_position(
-        current: float,
-        highest: float,
-        lowest: float
+        current: float, highest: float, lowest: float
     ) -> float:
         """Calculate price position relative to daily range (cached).
 
@@ -509,15 +520,14 @@ class PriceCalculator:
         # Inverted range (shouldn't happen, but handle gracefully)
         _LOGGER.warning(
             "Invalid price range: highest=%.4f < lowest=%.4f, returning neutral position",
-            highest, lowest
+            highest,
+            lowest,
         )
         return 0.5
-    
+
     @staticmethod
     def is_significant_price_drop(
-        current_price: float,
-        next_price: float | None,
-        threshold: float = 0.15
+        current_price: float, next_price: float | None, threshold: float = 0.15
     ) -> bool:
         """Check if there's a significant price drop coming."""
         if next_price is None or current_price <= 0:
@@ -540,47 +550,57 @@ class TimeContext:
 
 class PowerAllocationValidator:
     """Validate power allocation logic."""
-    
+
     @staticmethod
     def validate_allocation(
         allocation: dict[str, Any],
         available_solar: float,
         max_battery_power: float,
-        max_car_power: float
+        max_car_power: float,
     ) -> tuple[bool, str | None]:
         """Validate power allocation doesn't exceed limits."""
         solar_for_batteries = allocation.get("solar_for_batteries", 0)
         solar_for_car = allocation.get("solar_for_car", 0)
         car_current_usage = allocation.get("car_current_solar_usage", 0)
         total_allocated = allocation.get("total_allocated", 0)
-        
+
         # Check individual limits
         if solar_for_batteries > max_battery_power:
-            return False, f"Battery allocation {solar_for_batteries}W exceeds limit {max_battery_power}W"
-        
+            return (
+                False,
+                f"Battery allocation {solar_for_batteries}W exceeds limit {max_battery_power}W",
+            )
+
         if solar_for_car > max_car_power:
-            return False, f"Car allocation {solar_for_car}W exceeds limit {max_car_power}W"
-        
+            return (
+                False,
+                f"Car allocation {solar_for_car}W exceeds limit {max_car_power}W",
+            )
+
         # Check total doesn't exceed available (with configurable tolerance)
         calculated_total = solar_for_batteries + solar_for_car + car_current_usage
         if calculated_total > available_solar * POWER_ALLOCATION_TOLERANCE:
-            return False, f"Total allocation {calculated_total}W exceeds available {available_solar}W"
+            return (
+                False,
+                f"Total allocation {calculated_total}W exceeds available {available_solar}W",
+            )
 
         # Check internal consistency (with configurable precision)
         if abs(calculated_total - total_allocated) > POWER_ALLOCATION_PRECISION:
-            return False, f"Allocation mismatch: sum={calculated_total}W, total={total_allocated}W"
-        
+            return (
+                False,
+                f"Allocation mismatch: sum={calculated_total}W, total={total_allocated}W",
+            )
+
         return True, None
 
 
 def format_reason(
-    action: str,
-    primary_reason: str,
-    details: dict[str, Any] | None = None
+    action: str, primary_reason: str, details: dict[str, Any] | None = None
 ) -> str:
     """Format a decision reason with optional details."""
     reason = f"{action}: {primary_reason}"
-    
+
     if details:
         detail_parts = []
         for key, value in details.items():
@@ -593,8 +613,8 @@ def format_reason(
                     detail_parts.append(f"{key}={value:.0f}W")
             else:
                 detail_parts.append(f"{key}={value}")
-        
+
         if detail_parts:
             reason += f" ({', '.join(detail_parts)})"
-    
+
     return reason

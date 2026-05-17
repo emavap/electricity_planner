@@ -1,4 +1,5 @@
 """Tests for integration setup/reload helpers in __init__.py."""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,20 +10,20 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 import voluptuous as vol
 import yaml
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.exceptions import HomeAssistantError
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.electricity_planner import (
+    MANUAL_OVERRIDE_SERVICE_SCHEMA,
     _async_migrate_number_entity_ids,
     _async_migrate_switch_entity_ids,
-    MANUAL_OVERRIDE_SERVICE_SCHEMA,
-    async_reload_entry,
     _register_services_once,
+    async_reload_entry,
 )
-from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
 from custom_components.electricity_planner.const import (
     ATTR_ACTION,
     ATTR_DURATION,
+    ATTR_GRID_SETPOINT_OVERRIDE,
     ATTR_TARGET,
     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
     CONF_BATTERY_CAPACITIES,
@@ -37,31 +38,33 @@ from custom_components.electricity_planner.const import (
     CONF_INVERTER_EXPORT_LIMIT,
     CONF_MAX_INVERTER_POWER,
     CONF_MAX_SOC_THRESHOLD,
-    CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_MAX_SOC_THRESHOLD_SOLAR,
+    CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_NEGATIVE_BUY_THRESHOLD,
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     CONF_TRANSPORT_COST_DAY,
     CONF_TRANSPORT_COST_ENTITY,
     CONF_TRANSPORT_COST_NIGHT,
-    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
-    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
-    DEFAULT_INVERTER_EXPORT_DEADBAND,
-    DEFAULT_INVERTER_EXPORT_LIMIT,
     DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
-    DEFAULT_MAX_INVERTER_POWER,
     DEFAULT_ENERGY_COST_GSC,
     DEFAULT_ENERGY_COST_WKK,
     DEFAULT_ENERGY_TAX_ACCIJNS,
     DEFAULT_ENERGY_TAX_BIJDRAGE,
+    DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
+    DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
+    DEFAULT_INVERTER_EXPORT_DEADBAND,
+    DEFAULT_INVERTER_EXPORT_LIMIT,
+    DEFAULT_MAX_INVERTER_POWER,
     DEFAULT_TRANSPORT_COST_DAY,
     DEFAULT_TRANSPORT_COST_NIGHT,
-    ATTR_GRID_SETPOINT_OVERRIDE,
+    DOMAIN,
     MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT,
     MANUAL_OVERRIDE_TARGET_GRID_SETPOINT,
     SERVICE_SET_MANUAL_OVERRIDE,
-    DOMAIN,
+)
+from custom_components.electricity_planner.coordinator import (
+    ElectricityPlannerCoordinator,
 )
 from custom_components.electricity_planner.migrations import async_migrate_entry
 
@@ -255,10 +258,14 @@ def test_manual_override_service_schema_rejects_runtime_mode_targets():
 
 
 @pytest.mark.asyncio
-async def test_manual_override_service_requires_numeric_payload_for_numeric_target(monkeypatch):
+async def test_manual_override_service_requires_numeric_payload_for_numeric_target(
+    monkeypatch,
+):
     """Numeric-only override calls should fail fast when the payload is missing."""
     hass = FakeHass()
-    entry = MockConfigEntry(domain=DOMAIN, data={CONF_CURRENT_PRICE_ENTITY: "sensor.price"}, options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={CONF_CURRENT_PRICE_ENTITY: "sensor.price"}, options={}
+    )
     monkeypatch.setattr(
         ElectricityPlannerCoordinator,
         "_setup_entity_listeners",
@@ -273,7 +280,9 @@ async def test_manual_override_service_requires_numeric_payload_for_numeric_targ
     handler = hass.services.registered[(DOMAIN, SERVICE_SET_MANUAL_OVERRIDE)]["handler"]
 
     with pytest.raises(HomeAssistantError, match="charger_limit is required"):
-        await handler(SimpleNamespace(data={ATTR_TARGET: MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT}))
+        await handler(
+            SimpleNamespace(data={ATTR_TARGET: MANUAL_OVERRIDE_TARGET_CHARGER_LIMIT})
+        )
 
     coordinator.async_set_manual_override.assert_not_awaited()
     coordinator.async_request_refresh.assert_not_awaited()
@@ -283,7 +292,9 @@ async def test_manual_override_service_requires_numeric_payload_for_numeric_targ
 async def test_manual_override_service_applies_negative_grid_setpoint(monkeypatch):
     """Negative grid setpoints should be passed through for export control."""
     hass = FakeHass()
-    entry = MockConfigEntry(domain=DOMAIN, data={CONF_CURRENT_PRICE_ENTITY: "sensor.price"}, options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={CONF_CURRENT_PRICE_ENTITY: "sensor.price"}, options={}
+    )
 
     monkeypatch.setattr(
         ElectricityPlannerCoordinator,
@@ -328,7 +339,9 @@ def test_services_yaml_allows_negative_grid_setpoint_selector():
     )
 
     services_data = yaml.safe_load(services_path.read_text())
-    grid_selector = services_data["set_manual_override"]["fields"]["grid_setpoint"]["selector"]["number"]
+    grid_selector = services_data["set_manual_override"]["fields"]["grid_setpoint"][
+        "selector"
+    ]["number"]
 
     assert grid_selector["min"] == -50000
 
@@ -343,8 +356,12 @@ def test_services_yaml_excludes_runtime_mode_targets():
     )
 
     services_data = yaml.safe_load(services_path.read_text())
-    set_options = services_data["set_manual_override"]["fields"]["target"]["selector"]["select"]["options"]
-    clear_options = services_data["clear_manual_override"]["fields"]["target"]["selector"]["select"]["options"]
+    set_options = services_data["set_manual_override"]["fields"]["target"]["selector"][
+        "select"
+    ]["options"]
+    clear_options = services_data["clear_manual_override"]["fields"]["target"][
+        "selector"
+    ]["select"]["options"]
 
     assert "arbitrage_mode" not in set_options
     assert "negative_buy" not in set_options
@@ -355,7 +372,9 @@ def test_services_yaml_excludes_runtime_mode_targets():
 @pytest.mark.asyncio
 async def test_async_migrate_number_entity_ids_renames_legacy_number_ids(monkeypatch):
     """Legacy sunny number IDs should be migrated to stable dashboard-friendly IDs."""
-    entry = MockConfigEntry(domain=DOMAIN, title="Electricity Planner", data={}, options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Electricity Planner", data={}, options={}
+    )
     unique_id_to_entity_id = {
         f"{entry.entry_id}_max_soc_threshold": "number.electricity_planner_battery_max_soc_threshold",
         f"{entry.entry_id}_max_soc_threshold_sunny": (
@@ -407,9 +426,13 @@ async def test_async_migrate_number_entity_ids_renames_legacy_number_ids(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_async_migrate_switch_entity_ids_renames_legacy_arbitrage_switch(monkeypatch):
+async def test_async_migrate_switch_entity_ids_renames_legacy_arbitrage_switch(
+    monkeypatch,
+):
     """Legacy arbitrage switch ID should be migrated to the new dashboard-friendly ID."""
-    entry = MockConfigEntry(domain=DOMAIN, title="Electricity Planner", data={}, options={})
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Electricity Planner", data={}, options={}
+    )
     unique_id_to_entity_id = {
         f"{entry.entry_id}_battery_dump_to_grid": "switch.electricity_planner_battery_dump_to_grid",
     }
@@ -463,11 +486,11 @@ async def test_async_migrate_entry_derives_sunny_threshold_from_option_capacitie
 
     def _update_entry(config_entry, *, data=None, version=None, options=None):
         if data is not None:
-            object.__setattr__(entry, 'data', data)
+            object.__setattr__(entry, "data", data)
         if options is not None:
-            object.__setattr__(entry, 'options', options)
+            object.__setattr__(entry, "options", options)
         if version is not None:
-            object.__setattr__(entry, 'version', version)
+            object.__setattr__(entry, "version", version)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry),
@@ -493,11 +516,11 @@ async def test_async_migrate_entry_preserves_legacy_soc_defaults_for_sparse_v14_
 
     def _update_entry(config_entry, *, data=None, version=None, options=None):
         if data is not None:
-            object.__setattr__(entry, 'data', data)
+            object.__setattr__(entry, "data", data)
         if options is not None:
-            object.__setattr__(entry, 'options', options)
+            object.__setattr__(entry, "options", options)
         if version is not None:
-            object.__setattr__(entry, 'version', version)
+            object.__setattr__(entry, "version", version)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry),
@@ -522,11 +545,11 @@ async def test_async_migrate_entry_uses_legacy_sunny_default_for_pre_v12_entries
 
     def _update_entry(config_entry, *, data=None, version=None, options=None):
         if data is not None:
-            object.__setattr__(entry, 'data', data)
+            object.__setattr__(entry, "data", data)
         if options is not None:
-            object.__setattr__(entry, 'options', options)
+            object.__setattr__(entry, "options", options)
         if version is not None:
-            object.__setattr__(entry, 'version', version)
+            object.__setattr__(entry, "version", version)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry),
@@ -553,11 +576,11 @@ async def test_async_migrate_entry_replaces_legacy_transport_cost_sensor():
 
     def _update_entry(config_entry, *, data=None, version=None, options=None):
         if data is not None:
-            object.__setattr__(entry, 'data', data)
+            object.__setattr__(entry, "data", data)
         if options is not None:
-            object.__setattr__(entry, 'options', options)
+            object.__setattr__(entry, "options", options)
         if version is not None:
-            object.__setattr__(entry, 'version', version)
+            object.__setattr__(entry, "version", version)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry),
@@ -567,10 +590,18 @@ async def test_async_migrate_entry_replaces_legacy_transport_cost_sensor():
 
     assert entry.version == 23
     assert CONF_TRANSPORT_COST_ENTITY not in entry.data
-    assert entry.data[CONF_TRANSPORT_COST_DAY] == pytest.approx(DEFAULT_TRANSPORT_COST_DAY)
-    assert entry.data[CONF_TRANSPORT_COST_NIGHT] == pytest.approx(DEFAULT_TRANSPORT_COST_NIGHT)
-    assert entry.data[CONF_ENERGY_TAX_ACCIJNS] == pytest.approx(DEFAULT_ENERGY_TAX_ACCIJNS)
-    assert entry.data[CONF_ENERGY_TAX_BIJDRAGE] == pytest.approx(DEFAULT_ENERGY_TAX_BIJDRAGE)
+    assert entry.data[CONF_TRANSPORT_COST_DAY] == pytest.approx(
+        DEFAULT_TRANSPORT_COST_DAY
+    )
+    assert entry.data[CONF_TRANSPORT_COST_NIGHT] == pytest.approx(
+        DEFAULT_TRANSPORT_COST_NIGHT
+    )
+    assert entry.data[CONF_ENERGY_TAX_ACCIJNS] == pytest.approx(
+        DEFAULT_ENERGY_TAX_ACCIJNS
+    )
+    assert entry.data[CONF_ENERGY_TAX_BIJDRAGE] == pytest.approx(
+        DEFAULT_ENERGY_TAX_BIJDRAGE
+    )
     assert entry.data[CONF_ENERGY_COST_GSC] == pytest.approx(DEFAULT_ENERGY_COST_GSC)
     assert entry.data[CONF_ENERGY_COST_WKK] == pytest.approx(DEFAULT_ENERGY_COST_WKK)
 
@@ -589,11 +620,11 @@ async def test_async_migrate_entry_adds_inverter_derating_defaults_for_v16():
 
     def _update_entry(config_entry, *, data=None, version=None, options=None):
         if data is not None:
-            object.__setattr__(entry, 'data', data)
+            object.__setattr__(entry, "data", data)
         if options is not None:
-            object.__setattr__(entry, 'options', options)
+            object.__setattr__(entry, "options", options)
         if version is not None:
-            object.__setattr__(entry, 'version', version)
+            object.__setattr__(entry, "version", version)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry),
@@ -629,11 +660,11 @@ async def test_async_migrate_entry_adds_arbitrage_mode_deadline_hour_for_v19():
 
     def _update_entry(config_entry, *, data=None, version=None, options=None):
         if data is not None:
-            object.__setattr__(entry, 'data', data)
+            object.__setattr__(entry, "data", data)
         if options is not None:
-            object.__setattr__(entry, 'options', options)
+            object.__setattr__(entry, "options", options)
         if version is not None:
-            object.__setattr__(entry, 'version', version)
+            object.__setattr__(entry, "version", version)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry),
@@ -642,7 +673,10 @@ async def test_async_migrate_entry_adds_arbitrage_mode_deadline_hour_for_v19():
     await async_migrate_entry(hass, entry)
 
     assert entry.version == 23
-    assert entry.data[CONF_ARBITRAGE_MODE_DEADLINE_HOUR] == DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR
+    assert (
+        entry.data[CONF_ARBITRAGE_MODE_DEADLINE_HOUR]
+        == DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR
+    )
 
 
 @pytest.mark.parametrize(
@@ -673,11 +707,11 @@ async def test_async_migrate_entry_normalizes_arbitrage_mode_deadline_hour_for_v
 
     def _update_entry(config_entry, *, data=None, version=None, options=None):
         if data is not None:
-            object.__setattr__(entry, 'data', data)
+            object.__setattr__(entry, "data", data)
         if options is not None:
-            object.__setattr__(entry, 'options', options)
+            object.__setattr__(entry, "options", options)
         if version is not None:
-            object.__setattr__(entry, 'version', version)
+            object.__setattr__(entry, "version", version)
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=_update_entry),

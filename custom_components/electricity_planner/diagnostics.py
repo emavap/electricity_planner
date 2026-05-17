@@ -1,4 +1,5 @@
 """Diagnostics helpers for Electricity Planner."""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -37,7 +38,9 @@ async def async_get_config_entry_diagnostics(
         return {"error": "coordinator_unavailable"}
 
     data = coordinator.data or {}
-    diagnostics = {_key: deepcopy(data.get(_key)) for _key in _EXPORT_KEYS if _key in data}
+    diagnostics = {
+        _key: deepcopy(data.get(_key)) for _key in _EXPORT_KEYS if _key in data
+    }
 
     return {
         "config_entry": {
@@ -46,8 +49,12 @@ async def async_get_config_entry_diagnostics(
             "options": dict(entry.options),
         },
         "coordinator_meta": {
-            "last_successful_update": getattr(coordinator, "last_successful_update", None),
-            "data_unavailable_since": getattr(coordinator, "data_unavailable_since", None),
+            "last_successful_update": getattr(
+                coordinator, "last_successful_update", None
+            ),
+            "data_unavailable_since": getattr(
+                coordinator, "data_unavailable_since", None
+            ),
             "notification_sent": getattr(coordinator, "notification_sent", False),
         },
         "diagnostics": diagnostics,

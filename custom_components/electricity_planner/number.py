@@ -1,4 +1,5 @@
 """Number platform for Electricity Planner."""
+
 from __future__ import annotations
 
 import logging
@@ -18,8 +19,8 @@ from .const import (
     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_MAX_SOC_THRESHOLD,
-    CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_MAX_SOC_THRESHOLD_SOLAR,
+    CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_NEGATIVE_BUY_THRESHOLD,
     CONF_SOLAR_FORECAST_ENTITY_TOMORROW,
     CONF_SOLAR_FORECAST_START_HOUR,
@@ -28,8 +29,8 @@ from .const import (
     DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
     DEFAULT_MAX_SOC,
-    DEFAULT_MAX_SOC_SUNNY,
     DEFAULT_MAX_SOC_SOLAR,
+    DEFAULT_MAX_SOC_SUNNY,
     DEFAULT_NEGATIVE_BUY_THRESHOLD,
     DEFAULT_SOLAR_FORECAST_START_HOUR,
     DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
@@ -68,7 +69,9 @@ def _parse_state_as_float(state_value: Any) -> float | None:
         return None
 
 
-def _resolve_display_solar_forecast(coordinator: ElectricityPlannerCoordinator) -> float | None:
+def _resolve_display_solar_forecast(
+    coordinator: ElectricityPlannerCoordinator,
+) -> float | None:
     """Best-effort forecast value for UI display when coordinator data is not populated yet."""
     if coordinator.data:
         from_data = coordinator.data.get("solar_forecast_production")
@@ -179,7 +182,9 @@ class MaxSocThresholdNumber(CoordinatorEntity, NumberEntity):
         self._entry = entry
         self._attr_name = f"{entry.title} Battery Max SOC Threshold"
         self._attr_unique_id = f"{entry.entry_id}_max_soc_threshold"
-        self.entity_id = f"number.{slugify(entry.title or 'electricity_planner')}_max_soc_threshold"
+        self.entity_id = (
+            f"number.{slugify(entry.title or 'electricity_planner')}_max_soc_threshold"
+        )
         self._attr_icon = "mdi:battery-charging-high"
         self._attr_native_unit_of_measurement = "%"
         self._attr_mode = NumberMode.SLIDER
@@ -202,7 +207,11 @@ class MaxSocThresholdNumber(CoordinatorEntity, NumberEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
         current_value = self.native_value
-        battery_analysis = self.coordinator.data.get("battery_analysis", {}) if self.coordinator.data else {}
+        battery_analysis = (
+            self.coordinator.data.get("battery_analysis", {})
+            if self.coordinator.data
+            else {}
+        )
         average_soc = battery_analysis.get("average_soc")
 
         attrs = {
@@ -214,7 +223,9 @@ class MaxSocThresholdNumber(CoordinatorEntity, NumberEntity):
 
         if average_soc is not None:
             attrs["current_battery_soc"] = f"{average_soc:.1f}%"
-            attrs["remaining_to_threshold"] = f"{max(0, current_value - average_soc):.1f}%"
+            attrs["remaining_to_threshold"] = (
+                f"{max(0, current_value - average_soc):.1f}%"
+            )
 
         return attrs
 
@@ -279,9 +290,7 @@ class ArbitrageModeReserveSocNumber(CoordinatorEntity, NumberEntity):
         # v22→v23 rename; the entity_id slug is updated in lockstep with
         # _async_migrate_entity_ids().
         self._attr_unique_id = f"{entry.entry_id}_battery_dump_target_soc"
-        self.entity_id = (
-            f"number.{slugify(entry.title or 'electricity_planner')}_arbitrage_mode_reserve_soc"
-        )
+        self.entity_id = f"number.{slugify(entry.title or 'electricity_planner')}_arbitrage_mode_reserve_soc"
         self._attr_icon = "mdi:battery-arrow-down-outline"
         self._attr_native_unit_of_measurement = "%"
         self._attr_mode = NumberMode.SLIDER
@@ -314,19 +323,35 @@ class ArbitrageModeReserveSocNumber(CoordinatorEntity, NumberEntity):
             ),
         }
 
-        arbitrage_plan = self.coordinator.data.get("arbitrage_mode_plan", {}) if self.coordinator.data else {}
-        average_soc = self.coordinator.data.get("battery_analysis", {}).get("average_soc") if self.coordinator.data else None
+        arbitrage_plan = (
+            self.coordinator.data.get("arbitrage_mode_plan", {})
+            if self.coordinator.data
+            else {}
+        )
+        average_soc = (
+            self.coordinator.data.get("battery_analysis", {}).get("average_soc")
+            if self.coordinator.data
+            else None
+        )
 
         if average_soc is not None:
             attrs["current_battery_soc"] = f"{average_soc:.1f}%"
-            attrs["available_to_export_percent"] = f"{max(0, average_soc - self.native_value):.1f}%"
+            attrs["available_to_export_percent"] = (
+                f"{max(0, average_soc - self.native_value):.1f}%"
+            )
 
         if arbitrage_plan:
             attrs["arbitrage_mode_enabled"] = arbitrage_plan.get("enabled", False)
-            attrs["arbitrage_price_threshold"] = arbitrage_plan.get("arbitrage_price_threshold")
+            attrs["arbitrage_price_threshold"] = arbitrage_plan.get(
+                "arbitrage_price_threshold"
+            )
             attrs["current_slot_price"] = arbitrage_plan.get("current_slot_price")
-            attrs["selected_slots_count"] = arbitrage_plan.get("selected_slots_count", 0)
-            attrs["slots_cover_full_arbitrage"] = arbitrage_plan.get("slots_cover_full_arbitrage", False)
+            attrs["selected_slots_count"] = arbitrage_plan.get(
+                "selected_slots_count", 0
+            )
+            attrs["slots_cover_full_arbitrage"] = arbitrage_plan.get(
+                "slots_cover_full_arbitrage", False
+            )
 
         return attrs
 
@@ -366,9 +391,7 @@ class ArbitrageModeDeadlineHourNumber(CoordinatorEntity, NumberEntity):
         self._entry = entry
         self._attr_name = f"{entry.title} Arbitrage Deadline Hour"
         self._attr_unique_id = f"{entry.entry_id}_arbitrage_mode_deadline_hour"
-        self.entity_id = (
-            f"number.{slugify(entry.title or 'electricity_planner')}_arbitrage_mode_deadline_hour"
-        )
+        self.entity_id = f"number.{slugify(entry.title or 'electricity_planner')}_arbitrage_mode_deadline_hour"
         self._attr_icon = "mdi:clock-end"
         self._attr_native_unit_of_measurement = "h"
         self._attr_mode = NumberMode.SLIDER
@@ -446,9 +469,7 @@ class MaxSocThresholdSunnyNumber(CoordinatorEntity, NumberEntity):
         self._entry = entry
         self._attr_name = f"{entry.title} Battery Max SOC Threshold (High Solar)"
         self._attr_unique_id = f"{entry.entry_id}_max_soc_threshold_sunny"
-        self.entity_id = (
-            f"number.{slugify(entry.title or 'electricity_planner')}_max_soc_threshold_sunny"
-        )
+        self.entity_id = f"number.{slugify(entry.title or 'electricity_planner')}_max_soc_threshold_sunny"
         self._attr_icon = "mdi:weather-sunny"
         self._attr_native_unit_of_measurement = "%"
         self._attr_mode = NumberMode.SLIDER
@@ -465,14 +486,22 @@ class MaxSocThresholdSunnyNumber(CoordinatorEntity, NumberEntity):
     @property
     def native_value(self) -> float:
         """Return the current sunny max SOC threshold value."""
-        return self.coordinator.config.get(CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY)
+        return self.coordinator.config.get(
+            CONF_MAX_SOC_THRESHOLD_SUNNY, DEFAULT_MAX_SOC_SUNNY
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
         current_value = self.native_value
-        normal_threshold = self.coordinator.config.get(CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC)
-        sunny_active = self.coordinator.data.get("sunny_day_active", False) if self.coordinator.data else False
+        normal_threshold = self.coordinator.config.get(
+            CONF_MAX_SOC_THRESHOLD, DEFAULT_MAX_SOC
+        )
+        sunny_active = (
+            self.coordinator.data.get("sunny_day_active", False)
+            if self.coordinator.data
+            else False
+        )
 
         attrs = {
             "description": (
@@ -552,9 +581,7 @@ class MaxSocThresholdSolarNumber(CoordinatorEntity, NumberEntity):
         self._entry = entry
         self._attr_name = f"{entry.title} Battery Max SOC Threshold (Solar)"
         self._attr_unique_id = f"{entry.entry_id}_max_soc_threshold_solar"
-        self.entity_id = (
-            f"number.{slugify(entry.title or 'electricity_planner')}_max_soc_threshold_solar"
-        )
+        self.entity_id = f"number.{slugify(entry.title or 'electricity_planner')}_max_soc_threshold_solar"
         self._attr_icon = "mdi:solar-power-variant"
         self._attr_native_unit_of_measurement = "%"
         self._attr_mode = NumberMode.SLIDER
@@ -638,9 +665,7 @@ class SunnyForecastThresholdNumber(CoordinatorEntity, NumberEntity):
         self._entry = entry
         self._attr_name = f"{entry.title} Sunny Forecast Trigger"
         self._attr_unique_id = f"{entry.entry_id}_sunny_forecast_threshold_kwh"
-        self.entity_id = (
-            f"number.{slugify(entry.title or 'electricity_planner')}_sunny_forecast_threshold_kwh"
-        )
+        self.entity_id = f"number.{slugify(entry.title or 'electricity_planner')}_sunny_forecast_threshold_kwh"
         self._attr_icon = "mdi:weather-partly-cloudy"
         self._attr_native_unit_of_measurement = "kWh"
         self._attr_mode = NumberMode.SLIDER
@@ -718,9 +743,7 @@ class NegativeBuyThresholdNumber(CoordinatorEntity, NumberEntity):
         self._entry = entry
         self._attr_name = f"{entry.title} Negative Arbitrage Buy Threshold"
         self._attr_unique_id = f"{entry.entry_id}_negative_buy_threshold"
-        self.entity_id = (
-            f"number.{slugify(entry.title or 'electricity_planner')}_negative_buy_threshold"
-        )
+        self.entity_id = f"number.{slugify(entry.title or 'electricity_planner')}_negative_buy_threshold"
         self._attr_icon = "mdi:cash-minus"
         self._attr_native_unit_of_measurement = "€/kWh"
         self._attr_mode = NumberMode.BOX

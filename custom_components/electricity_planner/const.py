@@ -73,7 +73,9 @@ CONF_BASE_GRID_SETPOINT = "base_grid_setpoint"
 CONF_MAX_INVERTER_POWER = "max_inverter_power"
 CONF_INVERTER_EXPORT_LIMIT = "inverter_export_limit"
 CONF_INVERTER_EXPORT_DEADBAND = "inverter_export_deadband"
-CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES = "inverter_derating_unused_release_minutes"
+CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES = (
+    "inverter_derating_unused_release_minutes"
+)
 CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD = "inverter_derating_soc_bypass_threshold"
 CONF_USE_DYNAMIC_THRESHOLD = "use_dynamic_threshold"
 CONF_DYNAMIC_THRESHOLD_CONFIDENCE = "dynamic_threshold_confidence"
@@ -93,17 +95,25 @@ DEFAULT_MIN_SOC = 20
 DEFAULT_MAX_SOC = 70
 DEFAULT_ARBITRAGE_MODE_RESERVE_SOC = 40
 DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR = 12
-DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER = 0  # 0 = automatic cap based on battery/grid limits
-DEFAULT_NEGATIVE_BUY_THRESHOLD = -0.05  # €/kWh - only buy when net price ≤ this (truly paid-to-consume)
+DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER = (
+    0  # 0 = automatic cap based on battery/grid limits
+)
+DEFAULT_NEGATIVE_BUY_THRESHOLD = (
+    -0.05
+)  # €/kWh - only buy when net price ≤ this (truly paid-to-consume)
 DEFAULT_PRICE_THRESHOLD = 0.15
 DEFAULT_EMERGENCY_SOC = 15
 DEFAULT_VERY_LOW_PRICE_THRESHOLD = 30  # Bottom 30% of daily range
 DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD = 1000  # 1kW
 DEFAULT_FEEDIN_PRICE_THRESHOLD = 0.05  # €0.05/kWh - export only above this price
 DEFAULT_MAX_SOC_SUNNY = 35  # Lower grid charge target when sunny day expected
-DEFAULT_MAX_SOC_SOLAR = 50  # Cap solar allocation to batteries above this SOC (diverts rest to EV/export)
+DEFAULT_MAX_SOC_SOLAR = (
+    50  # Cap solar allocation to batteries above this SOC (diverts rest to EV/export)
+)
 DEFAULT_SOLAR_FORECAST_START_HOUR = 20  # Start reading tomorrow's forecast at 8 PM
-DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH = 5.0  # kWh forecast that enables sunny-day SOC limit
+DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH = (
+    5.0  # kWh forecast that enables sunny-day SOC limit
+)
 
 # Default Safety Limits (W)
 DEFAULT_MAX_BATTERY_POWER = 3000  # 3kW typical home battery inverter limit
@@ -111,41 +121,69 @@ DEFAULT_MAX_CAR_POWER = 11000  # 11kW typical home car charger limit
 DEFAULT_MAX_GRID_POWER = 15000  # 15kW typical home grid connection limit
 DEFAULT_MIN_CAR_CHARGING_THRESHOLD = 100  # Minimum power to consider car "charging"
 DEFAULT_PREDICTIVE_CHARGING_MIN_SOC = 30  # Minimum SOC for predictive charging logic
-DEFAULT_USE_DYNAMIC_THRESHOLD = False  # Use intelligent dynamic threshold logic (opt-in)
-DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE = 75  # Default confidence threshold (75% - more aggressive)
-DEFAULT_USE_AVERAGE_THRESHOLD = False  # Use average of future prices as threshold (opt-in)
-DEFAULT_MIN_CAR_CHARGING_DURATION = 2  # Minimum hours of low prices to start car charging
-DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER = 1.2  # 20% higher threshold when permissive mode active
-DEFAULT_CAR_USE_BATTERY_ARBITRAGE = True  # Let EV consume scheduled arbitrage export locally
-DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER = 1.04  # Energie.be dynamic buy formula coefficient (Apr 2026)
+DEFAULT_USE_DYNAMIC_THRESHOLD = (
+    False  # Use intelligent dynamic threshold logic (opt-in)
+)
+DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE = (
+    75  # Default confidence threshold (75% - more aggressive)
+)
+DEFAULT_USE_AVERAGE_THRESHOLD = (
+    False  # Use average of future prices as threshold (opt-in)
+)
+DEFAULT_MIN_CAR_CHARGING_DURATION = (
+    2  # Minimum hours of low prices to start car charging
+)
+DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER = (
+    1.2  # 20% higher threshold when permissive mode active
+)
+DEFAULT_CAR_USE_BATTERY_ARBITRAGE = (
+    True  # Let EV consume scheduled arbitrage export locally
+)
+DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER = (
+    1.04  # Energie.be dynamic buy formula coefficient (Apr 2026)
+)
 DEFAULT_PRICE_ADJUSTMENT_OFFSET = 0.005  # €/kWh, excl. VAT market basis
-DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER = 1.0  # Energie.be dynamic feed-in formula coefficient (Apr 2026)
+DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER = (
+    1.0  # Energie.be dynamic feed-in formula coefficient (Apr 2026)
+)
 DEFAULT_FEEDIN_ADJUSTMENT_OFFSET = -0.0098  # €/kWh, excl. VAT market basis
-DEFAULT_SOC_PRICE_MULTIPLIER_MAX = 1.3  # Accept prices up to 130% of threshold when battery is critically low
-DEFAULT_SOC_BUFFER_TARGET = 50  # Target SOC % above which no price relaxation is applied
+DEFAULT_SOC_PRICE_MULTIPLIER_MAX = (
+    1.3  # Accept prices up to 130% of threshold when battery is critically low
+)
+DEFAULT_SOC_BUFFER_TARGET = (
+    50  # Target SOC % above which no price relaxation is applied
+)
 
 # Built-in transport cost defaults (€/kWh, excl. VAT — Energie.be / Fluvius Apr 2026)
-DEFAULT_TRANSPORT_COST_DAY = 0.0599    # Fluvius West "excl. nacht" digital meter
+DEFAULT_TRANSPORT_COST_DAY = 0.0599  # Fluvius West "excl. nacht" digital meter
 DEFAULT_TRANSPORT_COST_NIGHT = 0.0498  # Fluvius West night/weekend digital meter
 DEFAULT_ENERGY_TAX_ACCIJNS = 0.050329  # Bijzondere accijns op Energie
 DEFAULT_ENERGY_TAX_BIJDRAGE = 0.002042  # Bijdrage op de Energie
-DEFAULT_ENERGY_COST_GSC = 0.0117       # Groene stroom certificaten
-DEFAULT_ENERGY_COST_WKK = 0.0039       # Warmte-krachtkoppeling
+DEFAULT_ENERGY_COST_GSC = 0.0117  # Groene stroom certificaten
+DEFAULT_ENERGY_COST_WKK = 0.0039  # Warmte-krachtkoppeling
 
 # Belgian day/night tariff schedule (Fluvius standard)
-TARIFF_DAY_START_HOUR = 7    # Day tariff starts at 07:00 local
-TARIFF_DAY_END_HOUR = 22     # Day tariff ends at 22:00 local
+TARIFF_DAY_START_HOUR = 7  # Day tariff starts at 07:00 local
+TARIFF_DAY_END_HOUR = 22  # Day tariff ends at 22:00 local
 # Night tariff: Mon-Fri 22:00-07:00 + all day Saturday and Sunday
 # P1 meter tariff codes: "1" = day/peak, "2" = night/off-peak
 
 # Algorithm Constants
 DEFAULT_BASE_GRID_SETPOINT = 2500  # Conservative base grid limit (W)
 DEFAULT_MONTHLY_PEAK_SAFETY_MARGIN = 0.9  # Use 90% of monthly peak
-DEFAULT_MAX_INVERTER_POWER = 4400  # 4.4kW common residential single-phase inverter limit
+DEFAULT_MAX_INVERTER_POWER = (
+    4400  # 4.4kW common residential single-phase inverter limit
+)
 DEFAULT_INVERTER_EXPORT_LIMIT = 80  # Target about 80W export when feed-in is disabled
-DEFAULT_INVERTER_EXPORT_DEADBAND = 40  # Hold derating steady within +/-40W of export target
-DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES = 5  # Wait this many minutes before raising the cap by one step
-DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD = 95  # Below this SOC, keep PV unrestricted
+DEFAULT_INVERTER_EXPORT_DEADBAND = (
+    40  # Hold derating steady within +/-40W of export target
+)
+DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES = (
+    5  # Wait this many minutes before raising the cap by one step
+)
+DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD = (
+    95  # Below this SOC, keep PV unrestricted
+)
 
 # Cache and Performance Constants
 NORDPOOL_CACHE_MAX_SIZE = 10  # Maximum number of cached Nord Pool price entries
@@ -155,16 +193,24 @@ NORDPOOL_CACHE_TTL_MINUTES = 5  # Cache time-to-live in minutes
 PRICE_INTERVAL_LOOKBACK_HOURS = 1  # How far back to look for price intervals
 PEAK_MONITORING_DURATION_MINUTES = 5  # Duration to monitor before triggering peak limit
 PEAK_LIMIT_DURATION_MINUTES = 15  # Duration of peak limit once triggered
-MONTH_PEAK_TRANSITION_LEAD_MINUTES = 30  # Start using next month's peak baseline before month end
+MONTH_PEAK_TRANSITION_LEAD_MINUTES = (
+    30  # Start using next month's peak baseline before month end
+)
 PRICE_INTERVAL_MINUTES = 15  # Default price interval duration
-PRICE_INTERVAL_GAP_TOLERANCE_SECONDS = 30  # Tolerance for gaps between intervals (increased from 5s)
+PRICE_INTERVAL_GAP_TOLERANCE_SECONDS = (
+    30  # Tolerance for gaps between intervals (increased from 5s)
+)
 
 # Validation Constants
-PRICE_VALUE_MIN_EUR_MWH = -1000  # Minimum reasonable price in €/MWh (negative prices are valid)
+PRICE_VALUE_MIN_EUR_MWH = (
+    -1000
+)  # Minimum reasonable price in €/MWh (negative prices are valid)
 PRICE_VALUE_MAX_EUR_MWH = 10000  # Maximum reasonable price in €/MWh
 PERMISSIVE_MULTIPLIER_MIN = 1.0  # Minimum permissive mode multiplier
 PERMISSIVE_MULTIPLIER_MAX = 2.0  # Maximum permissive mode multiplier (200% of base)
-BATTERY_SOC_DECIMAL_THRESHOLD = 1.0  # If SOC <= this, assume it's decimal (0-1) not percentage
+BATTERY_SOC_DECIMAL_THRESHOLD = (
+    1.0  # If SOC <= this, assume it's decimal (0-1) not percentage
+)
 PRICE_TIMELINE_MAX_AGE_HOURS = 1  # Maximum age of cached price timeline in hours
 
 # Tolerance Constants
@@ -219,7 +265,9 @@ MANUAL_OVERRIDE_TARGET_GRID_SETPOINT = "grid_setpoint"
 MANUAL_OVERRIDE_TARGET_ALL = "all"
 
 # Power Validation Constants (Watts)
-MAX_POWER_VALIDATION_W = 50000  # Maximum reasonable power for solar/consumption/grid validation
+MAX_POWER_VALIDATION_W = (
+    50000  # Maximum reasonable power for solar/consumption/grid validation
+)
 MAX_CAR_POWER_VALIDATION_W = 22000  # Maximum reasonable car charging power
 
 INTEGRATION_VERSION = "6.6.3"

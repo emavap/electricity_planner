@@ -6,12 +6,13 @@ across the three price bands: very-low, low and high. The engine retains
 thin delegators for each method so existing tests keep calling into the
 same symbols.
 """
+
 from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
 
-from .const import PERMISSIVE_MULTIPLIER_MIN, PERMISSIVE_MULTIPLIER_MAX
+from .const import PERMISSIVE_MULTIPLIER_MAX, PERMISSIVE_MULTIPLIER_MIN
 
 if TYPE_CHECKING:
     from .decision_engine import (
@@ -81,9 +82,7 @@ class CarChargingDecisionCalculator:
                 source_parts.insert(0, f"{context.format_solar_watts()} solar")
             if grid_import_allowed:
                 source_parts.append("allowed grid import")
-            reason = (
-                f"Arbitrage mode active - charging allowed with {' + '.join(source_parts)}"
-            )
+            reason = f"Arbitrage mode active - charging allowed with {' + '.join(source_parts)}"
             return {
                 "car_grid_charging": True,
                 "car_grid_import_allowed": grid_import_allowed,
@@ -147,8 +146,10 @@ class CarChargingDecisionCalculator:
             if ctx.effective_car_permissive_multiplier != ctx.car_permissive_multiplier:
                 _LOGGER.warning(
                     "Permissive multiplier %.2f outside safe range [%.1f, %.1f], clamping to %.2f",
-                    ctx.car_permissive_multiplier, PERMISSIVE_MULTIPLIER_MIN,
-                    PERMISSIVE_MULTIPLIER_MAX, ctx.effective_car_permissive_multiplier
+                    ctx.car_permissive_multiplier,
+                    PERMISSIVE_MULTIPLIER_MIN,
+                    PERMISSIVE_MULTIPLIER_MAX,
+                    ctx.effective_car_permissive_multiplier,
                 )
 
             _LOGGER.debug(
@@ -177,9 +178,7 @@ class CarChargingDecisionCalculator:
         _LOGGER.debug("Car charging stopping: clearing locked threshold")
 
     @staticmethod
-    def append_solar_info_to_reason(
-        reason: str, context: "CarDecisionContext"
-    ) -> str:
+    def append_solar_info_to_reason(reason: str, context: "CarDecisionContext") -> str:
         if context.has_allocated_solar:
             return f"{reason}, solar available ({context.format_solar_watts()})"
         return reason
@@ -271,8 +270,12 @@ class CarChargingDecisionCalculator:
         data: dict[str, Any],
     ) -> "CarChargingDecision":
         if context.previous_charging:
-            base_reason = f"Low price ({context.format_price_comparison()}) - continuing"
-            reason = self.build_reason_with_solar(base_reason, context, include_solar_inline=True)
+            base_reason = (
+                f"Low price ({context.format_price_comparison()}) - continuing"
+            )
+            reason = self.build_reason_with_solar(
+                base_reason, context, include_solar_inline=True
+            )
             return {"car_grid_charging": True, "car_grid_charging_reason": reason}
 
         if context.has_min_window:
@@ -281,7 +284,9 @@ class CarChargingDecisionCalculator:
                 f"Low price ({context.format_price_comparison()}), "
                 f"{context.min_duration}h+ window available - starting"
             )
-            reason = self.build_reason_with_solar(base_reason, context, include_solar_inline=True)
+            reason = self.build_reason_with_solar(
+                base_reason, context, include_solar_inline=True
+            )
             return {"car_grid_charging": True, "car_grid_charging_reason": reason}
 
         if context.is_low_price_flag:
@@ -293,7 +298,9 @@ class CarChargingDecisionCalculator:
                 return {
                     "car_grid_charging": True,
                     "car_solar_only": True,
-                    "car_grid_charging_reason": self.append_permissive_mode_to_reason(base_reason, context),
+                    "car_grid_charging_reason": self.append_permissive_mode_to_reason(
+                        base_reason, context
+                    ),
                 }
             base_reason = (
                 f"Low price ({context.format_price_comparison()}) but less than {context.min_duration}h "
@@ -301,7 +308,9 @@ class CarChargingDecisionCalculator:
             )
             return {
                 "car_grid_charging": False,
-                "car_grid_charging_reason": self.append_permissive_mode_to_reason(base_reason, context),
+                "car_grid_charging_reason": self.append_permissive_mode_to_reason(
+                    base_reason, context
+                ),
             }
 
         window_requirement = (
@@ -324,11 +333,15 @@ class CarChargingDecisionCalculator:
             return {
                 "car_grid_charging": True,
                 "car_solar_only": True,
-                "car_grid_charging_reason": self.append_permissive_mode_to_reason(solar_reason, context),
+                "car_grid_charging_reason": self.append_permissive_mode_to_reason(
+                    solar_reason, context
+                ),
             }
         return {
             "car_grid_charging": False,
-            "car_grid_charging_reason": self.append_permissive_mode_to_reason(base_reason, context),
+            "car_grid_charging_reason": self.append_permissive_mode_to_reason(
+                base_reason, context
+            ),
         }
 
     def decision_for_high_price(
@@ -342,18 +355,20 @@ class CarChargingDecisionCalculator:
         if context.previous_charging:
             self.unlock_threshold(ctx, data)
             if context.has_allocated_solar:
-                base_reason = (
-                    f"{high_price_reason} - switching to solar power only ({context.format_solar_watts()})"
-                )
+                base_reason = f"{high_price_reason} - switching to solar power only ({context.format_solar_watts()})"
                 return {
                     "car_grid_charging": True,
                     "car_solar_only": True,
-                    "car_grid_charging_reason": self.append_permissive_mode_to_reason(base_reason, context),
+                    "car_grid_charging_reason": self.append_permissive_mode_to_reason(
+                        base_reason, context
+                    ),
                 }
             base_reason = f"{high_price_reason} - stopping car charging"
             return {
                 "car_grid_charging": False,
-                "car_grid_charging_reason": self.append_permissive_mode_to_reason(base_reason, context),
+                "car_grid_charging_reason": self.append_permissive_mode_to_reason(
+                    base_reason, context
+                ),
             }
 
         if context.has_allocated_solar:
@@ -364,10 +379,14 @@ class CarChargingDecisionCalculator:
             return {
                 "car_grid_charging": True,
                 "car_solar_only": True,
-                "car_grid_charging_reason": self.append_permissive_mode_to_reason(base_reason, context),
+                "car_grid_charging_reason": self.append_permissive_mode_to_reason(
+                    base_reason, context
+                ),
             }
 
         return {
             "car_grid_charging": False,
-            "car_grid_charging_reason": self.append_permissive_mode_to_reason(high_price_reason, context),
+            "car_grid_charging_reason": self.append_permissive_mode_to_reason(
+                high_price_reason, context
+            ),
         }

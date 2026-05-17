@@ -5,6 +5,7 @@ calculator consumes a list of raw battery SOC readings and returns the
 aggregated analysis dictionary consumed by the rest of the decision
 pipeline.
 """
+
 from __future__ import annotations
 
 import logging
@@ -35,8 +36,11 @@ class BatteryAnalysisCalculator:
 
         # Filter valid batteries
         valid_batteries = [
-            battery for battery in battery_soc_data
-            if "soc" in battery and battery["soc"] is not None and 0 <= battery["soc"] <= 100
+            battery
+            for battery in battery_soc_data
+            if "soc" in battery
+            and battery["soc"] is not None
+            and 0 <= battery["soc"] <= 100
         ]
 
         if not valid_batteries:
@@ -70,7 +74,9 @@ class BatteryAnalysisCalculator:
     def calculate_weighted_average_soc(self, batteries: list[dict[str, Any]]) -> float:
         """Calculate capacity-weighted average SOC."""
         if not batteries:
-            _LOGGER.warning("Empty batteries list passed to calculate_weighted_average_soc")
+            _LOGGER.warning(
+                "Empty batteries list passed to calculate_weighted_average_soc"
+            )
             return 0.0
 
         capacities = self._settings.battery_capacities
@@ -86,7 +92,9 @@ class BatteryAnalysisCalculator:
         for battery in batteries:
             entity_id = battery["entity_id"]
             soc = battery["soc"]
-            capacity = capacities.get(entity_id, DEFAULT_POWER_ESTIMATES.default_battery_capacity)
+            capacity = capacities.get(
+                entity_id, DEFAULT_POWER_ESTIMATES.default_battery_capacity
+            )
 
             energy = (soc / 100.0) * capacity
             total_energy += energy
@@ -94,7 +102,10 @@ class BatteryAnalysisCalculator:
 
             _LOGGER.debug(
                 "Battery %s: SOC=%.1f%%, Capacity=%.1fkWh, Stored=%.2fkWh",
-                entity_id, soc, capacity, energy
+                entity_id,
+                soc,
+                capacity,
+                energy,
             )
 
         if total_capacity > 0:

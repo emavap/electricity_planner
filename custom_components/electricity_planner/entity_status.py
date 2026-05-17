@@ -4,6 +4,7 @@ Extracted from ``coordinator.py``. Provides safe numeric reads of HA
 entity states and a structured status report (per entity + summary) used
 by diagnostic sensors.
 """
+
 from __future__ import annotations
 
 import logging
@@ -74,7 +75,9 @@ class EntityStatusReporter:
                     pass
 
             if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug("Could not convert state to float: %s = %s", entity_id, state.state)
+                _LOGGER.debug(
+                    "Could not convert state to float: %s = %s", entity_id, state.state
+                )
             return None
 
     def get_entity_status(
@@ -82,7 +85,11 @@ class EntityStatusReporter:
     ) -> dict[str, Any]:
         """Get detailed status for a configured entity."""
         if not entity_id:
-            return {"configured": False, "status": "not_configured", "is_required": is_required}
+            return {
+                "configured": False,
+                "status": "not_configured",
+                "is_required": is_required,
+            }
 
         state = self._coordinator.hass.states.get(entity_id)
         if not state:
@@ -147,7 +154,9 @@ class EntityStatusReporter:
 
         battery_entities: dict[str, Any] = {}
         for entity_id in config.get(CONF_BATTERY_SOC_ENTITIES, []):
-            battery_entities[entity_id] = self.get_entity_status(entity_id, is_required=False)
+            battery_entities[entity_id] = self.get_entity_status(
+                entity_id, is_required=False
+            )
 
         power_entities: dict[str, Any] = {}
         if phase_mode == PHASE_MODE_THREE:
@@ -198,17 +207,28 @@ class EntityStatusReporter:
             )
 
         all_entities: list[dict[str, Any]] = []
-        for category in [price_entities, battery_entities, power_entities, optional_entities]:
+        for category in [
+            price_entities,
+            battery_entities,
+            power_entities,
+            optional_entities,
+        ]:
             all_entities.extend(category.values())
 
         configured_entities = [e for e in all_entities if e.get("configured")]
-        available_count = sum(1 for e in configured_entities if e.get("status") == "available")
+        available_count = sum(
+            1 for e in configured_entities if e.get("status") == "available"
+        )
         unavailable_count = sum(
-            1 for e in configured_entities if e.get("status") in ("unavailable", "unknown", "missing")
+            1
+            for e in configured_entities
+            if e.get("status") in ("unavailable", "unknown", "missing")
         )
         required_unavailable = [
-            e.get("entity_id") for e in configured_entities
-            if e.get("is_required") and e.get("status") in ("unavailable", "unknown", "missing")
+            e.get("entity_id")
+            for e in configured_entities
+            if e.get("is_required")
+            and e.get("status") in ("unavailable", "unknown", "missing")
         ]
 
         return {

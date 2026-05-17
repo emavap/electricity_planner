@@ -5,6 +5,7 @@ for resolving the local deadline after which no more arbitrage export should
 occur, and for constructing the arbitrage plan dict used by sensors and the
 decision engine.
 """
+
 from __future__ import annotations
 
 import logging
@@ -146,7 +147,10 @@ class ArbitrageModePlanner:
         required_duration = timedelta(hours=required_duration_hours)
         plan["required_duration_hours"] = round(required_duration_hours, 2)
         return self._finalize_plan(
-            plan, data, required_duration, export_power_cap,
+            plan,
+            data,
+            required_duration,
+            export_power_cap,
         )
 
     def _finalize_plan(
@@ -169,11 +173,15 @@ class ArbitrageModePlanner:
             now,
         )
         if not timeline:
-            plan["reason"] = "Arbitrage mode enabled but no feed-in price timeline is available"
+            plan["reason"] = (
+                "Arbitrage mode enabled but no feed-in price timeline is available"
+            )
             return plan
 
         feedin_threshold = float(
-            coordinator.config.get(CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD)
+            coordinator.config.get(
+                CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
+            )
         )
         deadline = self.deadline(now)
         plan["deadline"] = _iso_local(deadline)
@@ -199,8 +207,12 @@ class ArbitrageModePlanner:
             }
             for slot in selected_slots
         ]
-        plan["selected_slots_count"] = int(slot_selection.get("selected_slots_count", 0))
-        plan["slots_cover_full_arbitrage"] = bool(slot_selection.get("covers_full_export", False))
+        plan["selected_slots_count"] = int(
+            slot_selection.get("selected_slots_count", 0)
+        )
+        plan["slots_cover_full_arbitrage"] = bool(
+            slot_selection.get("covers_full_export", False)
+        )
         arbitrage_price_threshold = slot_selection.get("export_price_threshold")
         current_slot_price = slot_selection.get("current_slot_price")
         plan["arbitrage_price_threshold"] = (

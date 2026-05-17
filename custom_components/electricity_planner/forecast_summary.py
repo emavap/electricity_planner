@@ -4,6 +4,7 @@ Extracted from ``coordinator.py`` as a standalone collaborator. Operates on
 the coordinator's cached price timeline state, invalidating it when the
 underlying price-data hash changes or when the cache exceeds its max age.
 """
+
 from __future__ import annotations
 
 import logging
@@ -44,16 +45,24 @@ class ForecastSummaryCalculator:
         stale = False
 
         # Check if cached timeline is too old
-        if (coordinator._last_price_timeline_generated_at is not None and
-            now - coordinator._last_price_timeline_generated_at > coordinator._price_timeline_max_age):
-            _LOGGER.debug("Price timeline cache expired (age: %.1f hours), clearing",
-                        (now - coordinator._last_price_timeline_generated_at).total_seconds() / 3600)
+        if (
+            coordinator._last_price_timeline_generated_at is not None
+            and now - coordinator._last_price_timeline_generated_at
+            > coordinator._price_timeline_max_age
+        ):
+            _LOGGER.debug(
+                "Price timeline cache expired (age: %.1f hours), clearing",
+                (now - coordinator._last_price_timeline_generated_at).total_seconds()
+                / 3600,
+            )
             coordinator._last_price_timeline = None
             coordinator._last_price_timeline_generated_at = None
             coordinator._last_price_timeline_data_hash = None
 
         # Compute hash of current price data to detect changes
-        current_price_hash = coordinator._compute_price_data_hash(prices_today, prices_tomorrow)
+        current_price_hash = coordinator._compute_price_data_hash(
+            prices_today, prices_tomorrow
+        )
 
         # Invalidate cache if price data has changed — but only when we
         # actually *have* new price data.  When both are None the caller has
@@ -63,7 +72,9 @@ class ForecastSummaryCalculator:
             coordinator._last_price_timeline is not None
             and coordinator._last_price_timeline_data_hash != current_price_hash
         ):
-            _LOGGER.debug("Price data changed (hash mismatch), invalidating timeline cache")
+            _LOGGER.debug(
+                "Price data changed (hash mismatch), invalidating timeline cache"
+            )
             coordinator._last_price_timeline = None
             coordinator._last_price_timeline_generated_at = None
             coordinator._last_price_timeline_data_hash = None
@@ -78,12 +89,15 @@ class ForecastSummaryCalculator:
                 coordinator._last_price_timeline_data_hash = None
                 return {"available": False}
         else:
-            timeline = coordinator._last_price_timeline or coordinator._build_price_timeline(
-                prices_today,
-                prices_tomorrow,
-                transport_lookup,
-                current_transport_cost,
-                now,
+            timeline = (
+                coordinator._last_price_timeline
+                or coordinator._build_price_timeline(
+                    prices_today,
+                    prices_tomorrow,
+                    transport_lookup,
+                    current_transport_cost,
+                    now,
+                )
             )
             if timeline and coordinator._last_price_timeline is None:
                 coordinator._last_price_timeline = timeline
@@ -97,7 +111,9 @@ class ForecastSummaryCalculator:
             return {"available": False}
 
         # Consider only intervals that are in the future
-        future_segments = [(start, end, price) for start, end, price in timeline if end > now]
+        future_segments = [
+            (start, end, price) for start, end, price in timeline if end > now
+        ]
         if not future_segments:
             coordinator._last_price_timeline = None
             coordinator._last_price_timeline_generated_at = None
@@ -130,7 +146,9 @@ class ForecastSummaryCalculator:
         if stale:
             summary["stale"] = True
         if coordinator._last_price_timeline_generated_at:
-            summary["timeline_generated_at"] = _iso_local(coordinator._last_price_timeline_generated_at)
+            summary["timeline_generated_at"] = _iso_local(
+                coordinator._last_price_timeline_generated_at
+            )
 
         if best_window:
             summary.update(
@@ -184,10 +202,7 @@ class ForecastSummaryCalculator:
                 if hours_total <= 0:
                     continue
                 average_price = price_sum / hours_total
-                if (
-                    best_window is None
-                    or average_price < best_window["average_price"]
-                ):
+                if best_window is None or average_price < best_window["average_price"]:
                     best_window = {
                         "start": window_start,
                         "end": current_time,

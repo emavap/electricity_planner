@@ -10,6 +10,7 @@ Owns the persistent toggles that are not per-decision overrides:
 Underlying state attributes remain on the coordinator for test and
 sensor compatibility.
 """
+
 from __future__ import annotations
 
 import logging
@@ -52,7 +53,9 @@ class RuntimeModeManager:
         return dt_util.as_utc(parsed)
 
     @staticmethod
-    def _coerce_runtime_state(payload: Any, default_reason: str) -> dict[str, Any] | None:
+    def _coerce_runtime_state(
+        payload: Any, default_reason: str
+    ) -> dict[str, Any] | None:
         if not isinstance(payload, dict) or payload.get("value") is not True:
             return None
         return {
@@ -90,7 +93,9 @@ class RuntimeModeManager:
         if coordinator._arbitrage_mode_state:
             _LOGGER.info("Arbitrage mode cleared")
         coordinator._arbitrage_mode_state = None
-        self.update_runtime_arbitrage_state(enabled=False, reason="Arbitrage mode disabled")
+        self.update_runtime_arbitrage_state(
+            enabled=False, reason="Arbitrage mode disabled"
+        )
         await self.persist_runtime_modes()
 
     def update_runtime_arbitrage_state(self, enabled: bool, reason: str) -> None:
@@ -229,7 +234,10 @@ class RuntimeModeManager:
                     err,
                 )
 
-        if not isinstance(stored, dict) and coordinator._manual_override_store is not None:
+        if (
+            not isinstance(stored, dict)
+            and coordinator._manual_override_store is not None
+        ):
             try:
                 legacy = await coordinator._manual_override_store.async_load()
             except Exception as err:
@@ -241,7 +249,9 @@ class RuntimeModeManager:
                     err,
                 )
                 legacy = None
-            legacy_overrides = legacy.get("overrides", legacy) if isinstance(legacy, dict) else None
+            legacy_overrides = (
+                legacy.get("overrides", legacy) if isinstance(legacy, dict) else None
+            )
             if isinstance(legacy_overrides, dict):
                 stored = {
                     "arbitrage_mode": legacy_overrides.get("arbitrage_mode")
@@ -281,7 +291,9 @@ class RuntimeModeManager:
             modes_to_save["arbitrage_mode"] = {
                 "value": True,
                 "reason": coordinator._arbitrage_mode_state.get("reason"),
-                "set_at": self._serialize_datetime(coordinator._arbitrage_mode_state.get("set_at")),
+                "set_at": self._serialize_datetime(
+                    coordinator._arbitrage_mode_state.get("set_at")
+                ),
             }
         if coordinator._negative_buy_mode_state:
             modes_to_save["negative_buy_mode"] = {

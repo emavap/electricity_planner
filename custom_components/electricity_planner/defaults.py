@@ -1,12 +1,15 @@
 """Default configuration values and data classes for Electricity Planner."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 
 # Power/Energy estimation constants
 @dataclass
 class PowerEstimates:
     """Power and energy estimation configuration."""
+
     per_soc_percent: float = 100.0  # W per 1% SOC
     kwh_per_soc_percent: float = 0.1  # kWh per 1% SOC
     max_solar_production: float = 5000.0  # W - Assumed max for efficiency calc
@@ -15,10 +18,12 @@ class PowerEstimates:
     house_consumption_factor: float = 0.5  # 50% - Estimated surplus factor
     default_battery_capacity: float = 10.0  # kWh - Default if not configured
 
+
 # Algorithm thresholds
 @dataclass
 class AlgorithmThresholds:
     """Algorithm decision thresholds."""
+
     soc_safety_margin: int = 5  # % - Safety margin to prevent waste
     soc_buffer: int = 10  # % - Buffer for various SOC checks
     low_soc_threshold: int = 40  # % - Low SOC for decision logic
@@ -29,15 +34,18 @@ class AlgorithmThresholds:
     significant_price_drop: float = 0.15  # 15% - Price drop considered significant
     neutral_price_position: float = 0.5  # 50% - Neutral position in daily range
 
+
 # System limits
 @dataclass
 class SystemLimits:
     """System power limits."""
+
     max_car_charger_power: int = 11000  # W - Maximum car charger power
     min_update_interval: int = 10  # seconds - Minimum between entity updates
     max_update_interval: int = 30  # seconds - Maximum update interval
     evaluation_interval: int = 5  # minutes - Decision re-evaluation interval
     data_unavailable_notification_delay: int = 60  # seconds - Delay before notification
+
 
 # Create default instances
 DEFAULT_POWER_ESTIMATES = PowerEstimates()

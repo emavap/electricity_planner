@@ -1,13 +1,14 @@
 """Tests for manual override handling in the coordinator."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.electricity_planner import coordinator as coordinator_module
-from custom_components.electricity_planner.coordinator import ElectricityPlannerCoordinator
 from custom_components.electricity_planner.const import (
     CONF_BATTERY_SOC_ENTITIES,
     CONF_CURRENT_PRICE_ENTITY,
@@ -17,7 +18,9 @@ from custom_components.electricity_planner.const import (
     CONF_NEXT_PRICE_ENTITY,
     DOMAIN,
 )
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from custom_components.electricity_planner.coordinator import (
+    ElectricityPlannerCoordinator,
+)
 
 
 class FakeState:
@@ -60,7 +63,9 @@ def _base_config() -> dict[str, object]:
     }
 
 
-def _create_coordinator(fake_hass: FakeHass, config: dict[str, object], monkeypatch: pytest.MonkeyPatch) -> ElectricityPlannerCoordinator:
+def _create_coordinator(
+    fake_hass: FakeHass, config: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> ElectricityPlannerCoordinator:
     """Create a coordinator instance without setting up listeners."""
     entry = MockConfigEntry(domain=DOMAIN, data=config, options={})
     monkeypatch.setattr(
@@ -74,7 +79,9 @@ def _create_coordinator(fake_hass: FakeHass, config: dict[str, object], monkeypa
 def test_apply_manual_override_updates_decision(fake_hass, monkeypatch):
     """Ensure active overrides update decisions and trace data."""
     base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False
+    )
 
     config = _base_config()
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
@@ -96,7 +103,10 @@ def test_apply_manual_override_updates_decision(fake_hass, monkeypatch):
     updated_decision, changed_targets = coordinator._apply_manual_overrides(decision)
 
     assert updated_decision["car_grid_charging"] is True
-    assert updated_decision["car_grid_charging_reason"] == "Manual override: Manual override to charge"
+    assert (
+        updated_decision["car_grid_charging_reason"]
+        == "Manual override: Manual override to charge"
+    )
     assert changed_targets == {"car_grid_charging"}
 
     overrides = updated_decision.get("manual_overrides", {})
@@ -113,7 +123,9 @@ def test_apply_manual_override_updates_decision(fake_hass, monkeypatch):
 def test_expired_manual_override_is_cleared(fake_hass, monkeypatch):
     """Expired overrides should be removed and not affect decisions."""
     base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False
+    )
 
     config = _base_config()
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
@@ -147,7 +159,9 @@ def test_expired_manual_override_is_cleared(fake_hass, monkeypatch):
 def test_get_manual_override_clears_expired_override(fake_hass, monkeypatch):
     """Reading an expired override should treat it as inactive immediately."""
     base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False
+    )
 
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
     coordinator._manual_overrides["battery_grid_charging"] = {
@@ -166,7 +180,9 @@ def test_get_manual_override_clears_expired_override(fake_hass, monkeypatch):
 def test_apply_numeric_override_charger_limit(fake_hass, monkeypatch):
     """Ensure charger_limit numeric override updates decisions."""
     base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False
+    )
 
     config = _base_config()
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
@@ -199,7 +215,9 @@ def test_apply_numeric_override_charger_limit(fake_hass, monkeypatch):
 def test_apply_numeric_override_grid_setpoint(fake_hass, monkeypatch):
     """Ensure grid_setpoint numeric override updates decisions."""
     base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False
+    )
 
     config = _base_config()
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
@@ -232,7 +250,9 @@ def test_apply_numeric_override_grid_setpoint(fake_hass, monkeypatch):
 def test_numeric_override_expires_correctly(fake_hass, monkeypatch):
     """Ensure expired numeric overrides are cleared."""
     base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False
+    )
 
     config = _base_config()
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
@@ -263,7 +283,9 @@ def test_numeric_override_expires_correctly(fake_hass, monkeypatch):
 def test_mixed_boolean_and_numeric_overrides(fake_hass, monkeypatch):
     """Ensure boolean and numeric overrides work together."""
     base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False
+    )
 
     config = _base_config()
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
@@ -317,21 +339,26 @@ def test_mixed_boolean_and_numeric_overrides(fake_hass, monkeypatch):
 def test_numeric_only_override_does_not_set_boolean(fake_hass, monkeypatch):
     """Ensure numeric-only overrides don't affect boolean charging decisions."""
     base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False
+    )
 
     config = _base_config()
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
     # Set charger_limit override with value=None (numeric-only)
     import asyncio
-    asyncio.run(coordinator.async_set_manual_override(
-        target="charger_limit",
-        value=None,
-        duration=timedelta(minutes=60),
-        reason="Test limit",
-        charger_limit=5000,
-        grid_setpoint=None,
-    ))
+
+    asyncio.run(
+        coordinator.async_set_manual_override(
+            target="charger_limit",
+            value=None,
+            duration=timedelta(minutes=60),
+            reason="Test limit",
+            charger_limit=5000,
+            grid_setpoint=None,
+        )
+    )
 
     # Verify that charger_limit is set
     assert "charger_limit" in coordinator._manual_overrides
@@ -371,19 +398,24 @@ def test_mixed_boolean_target_applies_numeric_override_fields(fake_hass, monkeyp
     grid import while force-charging the car), not be silently dropped.
     """
     base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False
+    )
 
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
 
     import asyncio
-    asyncio.run(coordinator.async_set_manual_override(
-        target="car",
-        value=True,
-        duration=timedelta(minutes=60),
-        reason="Force car charging",
-        charger_limit=5000,
-        grid_setpoint=0,
-    ))
+
+    asyncio.run(
+        coordinator.async_set_manual_override(
+            target="car",
+            value=True,
+            duration=timedelta(minutes=60),
+            reason="Force car charging",
+            charger_limit=5000,
+            grid_setpoint=0,
+        )
+    )
 
     assert coordinator._manual_overrides["car_grid_charging"]["value"] is True
     assert coordinator._manual_overrides["charger_limit"]["value"] == 5000
@@ -397,21 +429,28 @@ def test_mixed_boolean_target_applies_numeric_override_fields(fake_hass, monkeyp
     assert coordinator._manual_overrides["grid_setpoint"]["value"] == 0
 
 
-def test_force_car_with_zero_grid_setpoint_propagates_to_decision(fake_hass, monkeypatch):
+def test_force_car_with_zero_grid_setpoint_propagates_to_decision(
+    fake_hass, monkeypatch
+):
     """Force-charge car with ``grid_setpoint=0`` must clamp the decision to 0W."""
     base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False
+    )
 
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
 
     import asyncio
-    asyncio.run(coordinator.async_set_manual_override(
-        target="car",
-        value=True,
-        duration=timedelta(minutes=60),
-        reason="Solar-only car charging",
-        grid_setpoint=0,
-    ))
+
+    asyncio.run(
+        coordinator.async_set_manual_override(
+            target="car",
+            value=True,
+            duration=timedelta(minutes=60),
+            reason="Solar-only car charging",
+            grid_setpoint=0,
+        )
+    )
 
     decision = {
         "car_grid_charging": False,
@@ -438,7 +477,9 @@ def test_clear_all_preserves_arbitrage_and_negative_buy_modes(fake_hass, monkeyp
     cancel per-decision overrides only (battery/car/charger_limit/grid_setpoint).
     """
     base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False
+    )
 
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
 
@@ -468,6 +509,7 @@ def test_clear_all_preserves_arbitrage_and_negative_buy_modes(fake_hass, monkeyp
     }
 
     import asyncio
+
     asyncio.run(coordinator.async_clear_manual_override("all"))
 
     # Per-decision overrides cleared.
@@ -495,10 +537,14 @@ def test_manual_override_target_mapping_excludes_runtime_modes(fake_hass, monkey
     }
 
 
-def test_runtime_modes_are_not_exposed_as_manual_override_status(fake_hass, monkeypatch):
+def test_runtime_modes_are_not_exposed_as_manual_override_status(
+    fake_hass, monkeypatch
+):
     """Runtime mode toggles should not appear in the decision manual override payload."""
     base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False)
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: base_time, raising=False
+    )
 
     coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
 

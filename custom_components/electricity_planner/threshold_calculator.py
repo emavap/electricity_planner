@@ -8,6 +8,7 @@ The calculator still depends on the coordinator for runtime access to
 config values and the transport-cost resolver (which reads coordinator
 state). That dependency is passed in as a reference.
 """
+
 from __future__ import annotations
 
 import logging
@@ -109,7 +110,8 @@ class ThresholdCalculator:
 
                 except (ValueError, TypeError, KeyError) as err:
                     _LOGGER.debug(
-                        "Expected error processing interval for average threshold: %s", err
+                        "Expected error processing interval for average threshold: %s",
+                        err,
                     )
                     continue
                 except Exception as err:
@@ -117,7 +119,8 @@ class ThresholdCalculator:
                         raise
                     _LOGGER.warning(
                         "Unexpected error processing interval for average threshold: %s",
-                        err, exc_info=True
+                        err,
+                        exc_info=True,
                     )
                     continue
 
@@ -211,12 +214,16 @@ class ThresholdCalculator:
         if prices_today:
             area_code = next(iter(prices_today.keys()), None)
             if area_code and isinstance(prices_today[area_code], list):
-                process_intervals(prices_today[area_code], include_past=False, include_future=True)
+                process_intervals(
+                    prices_today[area_code], include_past=False, include_future=True
+                )
 
         if prices_tomorrow:
             area_code = next(iter(prices_tomorrow.keys()), None)
             if area_code and isinstance(prices_tomorrow[area_code], list):
-                process_intervals(prices_tomorrow[area_code], include_past=False, include_future=True)
+                process_intervals(
+                    prices_tomorrow[area_code], include_past=False, include_future=True
+                )
 
         all_intervals.sort(key=lambda x: x[0])
 
@@ -233,7 +240,9 @@ class ThresholdCalculator:
 
         interval_seconds = interval_duration.total_seconds()
         if interval_seconds <= 0:
-            _LOGGER.warning("Invalid interval duration detected, using 15-minute default")
+            _LOGGER.warning(
+                "Invalid interval duration detected, using 15-minute default"
+            )
             interval_seconds = AVERAGE_THRESHOLD_DEFAULT_INTERVAL_SECONDS
         intervals_needed = max(1, int(_MIN_HOURS * 3600 / interval_seconds))
 
@@ -249,9 +258,12 @@ class ThresholdCalculator:
 
                 _LOGGER.debug(
                     "Average threshold: using %d past + %d future intervals (%.1fh total) to meet %dh minimum",
-                    past_count, future_count,
-                    (past_count + future_count) * interval_duration.total_seconds() / 3600,
-                    _MIN_HOURS
+                    past_count,
+                    future_count,
+                    (past_count + future_count)
+                    * interval_duration.total_seconds()
+                    / 3600,
+                    _MIN_HOURS,
                 )
             else:
                 combined_intervals = future_intervals
@@ -270,7 +282,8 @@ class ThresholdCalculator:
 
             _LOGGER.debug(
                 "Average threshold: using %d future intervals (%.1fh total)",
-                future_count, future_count * interval_duration.total_seconds() / 3600
+                future_count,
+                future_count * interval_duration.total_seconds() / 3600,
             )
 
         if combined_intervals:
@@ -287,20 +300,25 @@ class ThresholdCalculator:
                         self.enabled = True
                         _LOGGER.info(
                             "Average threshold enabled after %d consecutive valid calculations: %.4f €/kWh",
-                            self.valid_count, average
+                            self.valid_count,
+                            average,
                         )
                     else:
                         _LOGGER.debug(
                             "Average threshold calculated (%.4f €/kWh) but not yet enabled "
                             "(%d/%d consecutive valid calculations)",
-                            average, self.valid_count, AVERAGE_THRESHOLD_HYSTERESIS_COUNT
+                            average,
+                            self.valid_count,
+                            AVERAGE_THRESHOLD_HYSTERESIS_COUNT,
                         )
                 # else: already enabled, keep using
 
                 _LOGGER.debug(
                     "Calculated average threshold: %.4f €/kWh from %d intervals (enabled: %s, count: %d)",
-                    average, len(combined_intervals), self.enabled,
-                    self.valid_count
+                    average,
+                    len(combined_intervals),
+                    self.enabled,
+                    self.valid_count,
                 )
                 return round(average, 4)
 
@@ -309,21 +327,27 @@ class ThresholdCalculator:
                 _LOGGER.warning(
                     "Average threshold: insufficient data for %dh minimum "
                     "(have %d intervals, need %d) - continuing with available data",
-                    _MIN_HOURS, len(combined_intervals), intervals_needed
+                    _MIN_HOURS,
+                    len(combined_intervals),
+                    intervals_needed,
                 )
                 return round(average, 4)
 
             _LOGGER.debug(
                 "Average threshold: insufficient data for %dh minimum "
                 "(have %d intervals, need %d) - returning value without enabling",
-                _MIN_HOURS, len(combined_intervals), intervals_needed
+                _MIN_HOURS,
+                len(combined_intervals),
+                intervals_needed,
             )
             self.valid_count = 0
             return round(average, 4)
 
         # No intervals available - reset
         if self.valid_count > 0 or self.enabled:
-            _LOGGER.debug("Average threshold data unavailable - resetting hysteresis state")
+            _LOGGER.debug(
+                "Average threshold data unavailable - resetting hysteresis state"
+            )
         self.valid_count = 0
         self.enabled = False
         return None

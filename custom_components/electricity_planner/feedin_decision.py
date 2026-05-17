@@ -5,6 +5,7 @@ calculator receives a fully-materialized :class:`CycleContext` and the
 current :class:`EngineSettings`, returning the three feed-in decision
 fields used by downstream sensors.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -48,7 +49,9 @@ class FeedInDecisionCalculator:
         feedin_threshold = self._settings.feedin_threshold
         remaining_solar = int(ctx.remaining_solar)
 
-        adjusted_feed_price = apply_price_adjustment(raw_price, feed_multiplier, feed_offset)
+        adjusted_feed_price = apply_price_adjustment(
+            raw_price, feed_multiplier, feed_offset
+        )
         if adjusted_feed_price is None:
             adjusted_feed_price = raw_price
 

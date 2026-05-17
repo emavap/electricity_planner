@@ -1,4 +1,5 @@
 """Config flow tests for Electricity Planner."""
+
 from __future__ import annotations
 
 import pytest
@@ -13,10 +14,10 @@ from custom_components.electricity_planner.const import (
     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
     CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
+    CONF_BASE_GRID_SETPOINT,
     CONF_BATTERY_CAPACITIES,
     CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_BATTERY_SOC_ENTITIES,
-    CONF_BASE_GRID_SETPOINT,
     CONF_CAR_USE_BATTERY_ARBITRAGE,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
@@ -40,15 +41,15 @@ from custom_components.electricity_planner.const import (
     CONF_PHASE_GRID_POWER_ENTITY,
     CONF_PHASE_MODE,
     CONF_PHASE_NAME,
-    CONF_PHASES,
     CONF_PHASE_SOLAR_ENTITY,
+    CONF_PHASES,
     CONF_PREDICTIVE_CHARGING_MIN_SOC,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_PRICE_THRESHOLD,
     CONF_SIGNIFICANT_SOLAR_THRESHOLD,
-    CONF_SOLAR_PRODUCTION_ENTITY,
     CONF_SOLAR_FORECAST_START_HOUR,
+    CONF_SOLAR_PRODUCTION_ENTITY,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     CONF_USE_AVERAGE_THRESHOLD,
     CONF_USE_DYNAMIC_THRESHOLD,
@@ -88,12 +89,16 @@ def _make_handler(entry: MockConfigEntry) -> OptionsFlowHandler:
 
 
 def _default_for(schema, field_name: str):
-    key = next(key for key in schema.schema if getattr(key, "schema", None) == field_name)
+    key = next(
+        key for key in schema.schema if getattr(key, "schema", None) == field_name
+    )
     default = getattr(key, "default", None)
     return default() if callable(default) else default
 
 
-async def _go_to_entities(handler: OptionsFlowHandler, phase_mode: str = PHASE_MODE_SINGLE):
+async def _go_to_entities(
+    handler: OptionsFlowHandler, phase_mode: str = PHASE_MODE_SINGLE
+):
     result = await handler.async_step_init()
     assert result["type"] == FlowResultType.FORM
     result = await handler.async_step_init({CONF_PHASE_MODE: phase_mode})
@@ -110,13 +115,21 @@ async def _go_to_settings(
 ):
     await _go_to_entities(handler, phase_mode=phase_mode)
     result = await handler.async_step_entities(entities_input)
-    if result["type"] == FlowResultType.FORM and result["step_id"] == "battery_capacities":
+    if (
+        result["type"] == FlowResultType.FORM
+        and result["step_id"] == "battery_capacities"
+    ):
         capacities_input = {
-            getattr(key, "schema", ""): _default_for(result["data_schema"], getattr(key, "schema", ""))
+            getattr(key, "schema", ""): _default_for(
+                result["data_schema"], getattr(key, "schema", "")
+            )
             for key in result["data_schema"].schema
         }
         result = await handler.async_step_battery_capacities(capacities_input)
-    if result["type"] == FlowResultType.FORM and result["step_id"] == "battery_phase_assignment":
+    if (
+        result["type"] == FlowResultType.FORM
+        and result["step_id"] == "battery_phase_assignment"
+    ):
         phase_input = {}
         for entity_id in entities_input.get(CONF_BATTERY_SOC_ENTITIES, []):
             phase_input[f"phase_assignment_{entity_id.replace('.', '_')}"] = ["phase_1"]
@@ -237,9 +250,18 @@ async def test_options_flow_defaults_reflect_existing_options():
     assert _default_for(schema, CONF_PRICE_THRESHOLD) == pytest.approx(0.321)
     assert _default_for(schema, CONF_ARBITRAGE_MODE_RESERVE_SOC) == pytest.approx(27)
     assert _default_for(schema, CONF_SUNNY_FORECAST_THRESHOLD_KWH) == pytest.approx(5.8)
-    assert _default_for(schema, CONF_INVERTER_EXPORT_LIMIT) == DEFAULT_INVERTER_EXPORT_LIMIT
-    assert _default_for(schema, CONF_INVERTER_EXPORT_DEADBAND) == DEFAULT_INVERTER_EXPORT_DEADBAND
-    assert _default_for(schema, CONF_CAR_USE_BATTERY_ARBITRAGE) == DEFAULT_CAR_USE_BATTERY_ARBITRAGE
+    assert (
+        _default_for(schema, CONF_INVERTER_EXPORT_LIMIT)
+        == DEFAULT_INVERTER_EXPORT_LIMIT
+    )
+    assert (
+        _default_for(schema, CONF_INVERTER_EXPORT_DEADBAND)
+        == DEFAULT_INVERTER_EXPORT_DEADBAND
+    )
+    assert (
+        _default_for(schema, CONF_CAR_USE_BATTERY_ARBITRAGE)
+        == DEFAULT_CAR_USE_BATTERY_ARBITRAGE
+    )
     assert (
         _default_for(schema, CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES)
         == DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES
@@ -249,30 +271,68 @@ async def test_options_flow_defaults_reflect_existing_options():
         {
             CONF_MIN_SOC_THRESHOLD: _default_for(schema, CONF_MIN_SOC_THRESHOLD),
             CONF_MAX_SOC_THRESHOLD: _default_for(schema, CONF_MAX_SOC_THRESHOLD),
-            CONF_ARBITRAGE_MODE_RESERVE_SOC: _default_for(schema, CONF_ARBITRAGE_MODE_RESERVE_SOC),
-            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: _default_for(schema, CONF_ARBITRAGE_MODE_DEADLINE_HOUR),
-            CONF_SOLAR_FORECAST_START_HOUR: _default_for(schema, CONF_SOLAR_FORECAST_START_HOUR),
-            CONF_MAX_SOC_THRESHOLD_SUNNY: _default_for(schema, CONF_MAX_SOC_THRESHOLD_SUNNY),
-            CONF_SUNNY_FORECAST_THRESHOLD_KWH: _default_for(schema, CONF_SUNNY_FORECAST_THRESHOLD_KWH),
+            CONF_ARBITRAGE_MODE_RESERVE_SOC: _default_for(
+                schema, CONF_ARBITRAGE_MODE_RESERVE_SOC
+            ),
+            CONF_ARBITRAGE_MODE_DEADLINE_HOUR: _default_for(
+                schema, CONF_ARBITRAGE_MODE_DEADLINE_HOUR
+            ),
+            CONF_SOLAR_FORECAST_START_HOUR: _default_for(
+                schema, CONF_SOLAR_FORECAST_START_HOUR
+            ),
+            CONF_MAX_SOC_THRESHOLD_SUNNY: _default_for(
+                schema, CONF_MAX_SOC_THRESHOLD_SUNNY
+            ),
+            CONF_SUNNY_FORECAST_THRESHOLD_KWH: _default_for(
+                schema, CONF_SUNNY_FORECAST_THRESHOLD_KWH
+            ),
             CONF_PRICE_THRESHOLD: _default_for(schema, CONF_PRICE_THRESHOLD),
-            CONF_PRICE_ADJUSTMENT_MULTIPLIER: _default_for(schema, CONF_PRICE_ADJUSTMENT_MULTIPLIER),
-            CONF_PRICE_ADJUSTMENT_OFFSET: _default_for(schema, CONF_PRICE_ADJUSTMENT_OFFSET),
-            CONF_EMERGENCY_SOC_THRESHOLD: _default_for(schema, CONF_EMERGENCY_SOC_THRESHOLD),
-            CONF_VERY_LOW_PRICE_THRESHOLD: _default_for(schema, CONF_VERY_LOW_PRICE_THRESHOLD),
-            CONF_SIGNIFICANT_SOLAR_THRESHOLD: _default_for(schema, CONF_SIGNIFICANT_SOLAR_THRESHOLD),
-            CONF_USE_DYNAMIC_THRESHOLD: _default_for(schema, CONF_USE_DYNAMIC_THRESHOLD),
-            CONF_DYNAMIC_THRESHOLD_CONFIDENCE: _default_for(schema, CONF_DYNAMIC_THRESHOLD_CONFIDENCE),
-            CONF_USE_AVERAGE_THRESHOLD: _default_for(schema, CONF_USE_AVERAGE_THRESHOLD),
-            CONF_MIN_CAR_CHARGING_DURATION: _default_for(schema, CONF_MIN_CAR_CHARGING_DURATION),
-            CONF_CAR_USE_BATTERY_ARBITRAGE: _default_for(schema, CONF_CAR_USE_BATTERY_ARBITRAGE),
-            CONF_INVERTER_EXPORT_LIMIT: _default_for(schema, CONF_INVERTER_EXPORT_LIMIT),
-            CONF_INVERTER_EXPORT_DEADBAND: _default_for(schema, CONF_INVERTER_EXPORT_DEADBAND),
-            CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES: _default_for(schema, CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES),
+            CONF_PRICE_ADJUSTMENT_MULTIPLIER: _default_for(
+                schema, CONF_PRICE_ADJUSTMENT_MULTIPLIER
+            ),
+            CONF_PRICE_ADJUSTMENT_OFFSET: _default_for(
+                schema, CONF_PRICE_ADJUSTMENT_OFFSET
+            ),
+            CONF_EMERGENCY_SOC_THRESHOLD: _default_for(
+                schema, CONF_EMERGENCY_SOC_THRESHOLD
+            ),
+            CONF_VERY_LOW_PRICE_THRESHOLD: _default_for(
+                schema, CONF_VERY_LOW_PRICE_THRESHOLD
+            ),
+            CONF_SIGNIFICANT_SOLAR_THRESHOLD: _default_for(
+                schema, CONF_SIGNIFICANT_SOLAR_THRESHOLD
+            ),
+            CONF_USE_DYNAMIC_THRESHOLD: _default_for(
+                schema, CONF_USE_DYNAMIC_THRESHOLD
+            ),
+            CONF_DYNAMIC_THRESHOLD_CONFIDENCE: _default_for(
+                schema, CONF_DYNAMIC_THRESHOLD_CONFIDENCE
+            ),
+            CONF_USE_AVERAGE_THRESHOLD: _default_for(
+                schema, CONF_USE_AVERAGE_THRESHOLD
+            ),
+            CONF_MIN_CAR_CHARGING_DURATION: _default_for(
+                schema, CONF_MIN_CAR_CHARGING_DURATION
+            ),
+            CONF_CAR_USE_BATTERY_ARBITRAGE: _default_for(
+                schema, CONF_CAR_USE_BATTERY_ARBITRAGE
+            ),
+            CONF_INVERTER_EXPORT_LIMIT: _default_for(
+                schema, CONF_INVERTER_EXPORT_LIMIT
+            ),
+            CONF_INVERTER_EXPORT_DEADBAND: _default_for(
+                schema, CONF_INVERTER_EXPORT_DEADBAND
+            ),
+            CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES: _default_for(
+                schema, CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES
+            ),
         }
     )
     assert safety_result["step_id"] == "safety_limits"
     safety_schema = safety_result["data_schema"]
-    assert _default_for(safety_schema, CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER) == pytest.approx(4200)
+    assert _default_for(
+        safety_schema, CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER
+    ) == pytest.approx(4200)
 
 
 @pytest.mark.asyncio
@@ -291,9 +351,14 @@ async def test_options_flow_settings_defaults_arbitrage_mode_reserve_soc():
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "settings"
-    assert _default_for(result["data_schema"], CONF_ARBITRAGE_MODE_RESERVE_SOC) == pytest.approx(33)
+    assert _default_for(
+        result["data_schema"], CONF_ARBITRAGE_MODE_RESERVE_SOC
+    ) == pytest.approx(33)
     assert _default_for(result["data_schema"], CONF_ARBITRAGE_MODE_DEADLINE_HOUR) == 7
-    assert _default_for(result["data_schema"], CONF_CAR_USE_BATTERY_ARBITRAGE) == DEFAULT_CAR_USE_BATTERY_ARBITRAGE
+    assert (
+        _default_for(result["data_schema"], CONF_CAR_USE_BATTERY_ARBITRAGE)
+        == DEFAULT_CAR_USE_BATTERY_ARBITRAGE
+    )
 
 
 @pytest.mark.asyncio
@@ -305,10 +370,13 @@ async def test_options_flow_settings_uses_default_arbitrage_mode_settings_when_u
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "settings"
-    assert _default_for(result["data_schema"], CONF_ARBITRAGE_MODE_RESERVE_SOC) == pytest.approx(
-        DEFAULT_ARBITRAGE_MODE_RESERVE_SOC
+    assert _default_for(
+        result["data_schema"], CONF_ARBITRAGE_MODE_RESERVE_SOC
+    ) == pytest.approx(DEFAULT_ARBITRAGE_MODE_RESERVE_SOC)
+    assert (
+        _default_for(result["data_schema"], CONF_CAR_USE_BATTERY_ARBITRAGE)
+        == DEFAULT_CAR_USE_BATTERY_ARBITRAGE
     )
-    assert _default_for(result["data_schema"], CONF_CAR_USE_BATTERY_ARBITRAGE) == DEFAULT_CAR_USE_BATTERY_ARBITRAGE
     assert _default_for(result["data_schema"], CONF_ARBITRAGE_MODE_DEADLINE_HOUR) == (
         DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR
     )
@@ -363,7 +431,10 @@ async def test_options_flow_safety_limits_defaults_arbitrage_mode_export_cap():
 
     assert result["step_id"] == "safety_limits"
     safety_schema = result["data_schema"]
-    assert _default_for(safety_schema, CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER) == DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER
+    assert (
+        _default_for(safety_schema, CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER)
+        == DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER
+    )
 
 
 @pytest.mark.asyncio
@@ -395,7 +466,9 @@ async def test_options_flow_derives_sunny_forecast_threshold_from_capacity():
             CONF_BATTERY_SOC_ENTITIES: [battery_entity],
         },
     )
-    assert _default_for(result["data_schema"], CONF_SUNNY_FORECAST_THRESHOLD_KWH) == pytest.approx(7.0)
+    assert _default_for(
+        result["data_schema"], CONF_SUNNY_FORECAST_THRESHOLD_KWH
+    ) == pytest.approx(7.0)
 
 
 @pytest.mark.asyncio
@@ -498,7 +571,10 @@ async def test_options_flow_rejects_sunny_soc_above_normal_max_soc():
 
     assert result["type"] == FlowResultType.FORM
     assert result["errors"]["base"] == "invalid_config"
-    assert "max_soc_threshold_sunny" in result["description_placeholders"]["validation_errors"]
+    assert (
+        "max_soc_threshold_sunny"
+        in result["description_placeholders"]["validation_errors"]
+    )
 
 
 def test_validate_config_allows_car_power_above_grid_power():
@@ -541,7 +617,10 @@ async def test_options_flow_three_phase_preserves_phase_grid_power_sensor():
     )
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["data"][CONF_PHASES]["phase_1"][CONF_PHASE_GRID_POWER_ENTITY] == "sensor.grid_l1"
+    assert (
+        result["data"][CONF_PHASES]["phase_1"][CONF_PHASE_GRID_POWER_ENTITY]
+        == "sensor.grid_l1"
+    )
 
 
 @pytest.mark.asyncio
@@ -713,7 +792,9 @@ async def test_options_flow_round_trip_preserves_all_existing_values():
     # Submit settings step with defaults (empty dict uses schema defaults)
     settings_schema = settings_result["data_schema"]
     settings_defaults = {
-        getattr(key, "schema", ""): _default_for(settings_schema, getattr(key, "schema", ""))
+        getattr(key, "schema", ""): _default_for(
+            settings_schema, getattr(key, "schema", "")
+        )
         for key in settings_schema.schema
         if _default_for(settings_schema, getattr(key, "schema", "")) is not None
     }
@@ -723,7 +804,9 @@ async def test_options_flow_round_trip_preserves_all_existing_values():
     # Submit safety_limits step with defaults
     safety_schema = result["data_schema"]
     safety_defaults = {
-        getattr(key, "schema", ""): _default_for(safety_schema, getattr(key, "schema", ""))
+        getattr(key, "schema", ""): _default_for(
+            safety_schema, getattr(key, "schema", "")
+        )
         for key in safety_schema.schema
         if _default_for(safety_schema, getattr(key, "schema", "")) is not None
     }

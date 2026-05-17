@@ -9,6 +9,7 @@ The plan is consumed by the decision engine, which forces battery grid
 charging while ``active`` is True and curtails solar production during
 paid-to-consume slots.
 """
+
 from __future__ import annotations
 
 import logging
@@ -115,7 +116,9 @@ class NegativeBuyPlanner:
         import_power_cap = max_grid_power
         plan["configured_import_cap_w"] = import_power_cap
         if import_power_cap <= 0:
-            plan["reason"] = "Negative Arbitrage Buy mode enabled but no import power is available"
+            plan["reason"] = (
+                "Negative Arbitrage Buy mode enabled but no import power is available"
+            )
             return plan
 
         if battery_headroom_kwh > 0:
@@ -208,10 +211,7 @@ class NegativeBuyPlanner:
             else None
         )
 
-        if (
-            current_slot_price is not None
-            and float(current_slot_price) <= threshold
-        ):
+        if current_slot_price is not None and float(current_slot_price) <= threshold:
             plan["active"] = True
             plan["solar_curtail_active"] = True
             plan["import_power"] = import_power_cap

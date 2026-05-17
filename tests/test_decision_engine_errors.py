@@ -1,4 +1,5 @@
 """Tests for error handling in the decision engine."""
+
 import pytest
 
 from custom_components.electricity_planner.decision_engine import (

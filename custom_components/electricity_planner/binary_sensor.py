@@ -1,4 +1,5 @@
 """Binary sensor platform for Electricity Planner."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -14,9 +15,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    DOMAIN,
     CONF_FEEDIN_PRICE_THRESHOLD,
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
+    DOMAIN,
     INTEGRATION_VERSION,
 )
 from .coordinator import ElectricityPlannerCoordinator
@@ -53,7 +54,12 @@ async def async_setup_entry(
 class ElectricityPlannerBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
     """Base class for Electricity Planner binary sensors."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the binary sensor."""
         super().__init__(coordinator)
         self.entry = entry
@@ -80,7 +86,12 @@ class ElectricityPlannerBinarySensorBase(CoordinatorEntity, BinarySensorEntity):
 class BatteryGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
     """AUTOMATION SENSOR (1/5): Battery grid charging decision."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the battery grid charging binary sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Battery: Charge from Grid"
@@ -117,7 +128,12 @@ class BatteryGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
 class CarGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
     """AUTOMATION SENSOR (2/5): Car grid charging decision."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the car grid charging binary sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Car: Charge from Grid"
@@ -154,7 +170,12 @@ class CarGridChargingBinarySensor(ElectricityPlannerBinarySensorBase):
 class LowPriceBinarySensor(ElectricityPlannerBinarySensorBase):
     """DIAGNOSTIC SENSOR: Low electricity price indicator."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the low price binary sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Price: Below Threshold"
@@ -186,7 +207,12 @@ class LowPriceBinarySensor(ElectricityPlannerBinarySensorBase):
 class SolarProductionBinarySensor(ElectricityPlannerBinarySensorBase):
     """DIAGNOSTIC SENSOR: Solar production status indicator."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the solar production binary sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Solar: Producing Power"
@@ -219,7 +245,12 @@ class SolarProductionBinarySensor(ElectricityPlannerBinarySensorBase):
 class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
     """DIAGNOSTIC SENSOR: Nord Pool data availability status."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the data availability binary sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Data: Nord Pool Available"
@@ -249,23 +280,35 @@ class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
 
         # Add availability timestamps from coordinator
         if self.coordinator.last_successful_update:
-            attributes["last_successful_update"] = self.coordinator.last_successful_update.isoformat()
+            attributes["last_successful_update"] = (
+                self.coordinator.last_successful_update.isoformat()
+            )
 
         if self.coordinator.data_unavailable_since:
-            attributes["data_unavailable_since"] = self.coordinator.data_unavailable_since.isoformat()
-            unavailable_duration = (dt_util.utcnow() - self.coordinator.data_unavailable_since).total_seconds()
+            attributes["data_unavailable_since"] = (
+                self.coordinator.data_unavailable_since.isoformat()
+            )
+            unavailable_duration = (
+                dt_util.utcnow() - self.coordinator.data_unavailable_since
+            ).total_seconds()
             attributes["unavailable_duration_seconds"] = int(unavailable_duration)
 
         # Add data source status
         price_analysis = self.coordinator.data.get("price_analysis", {})
-        attributes.update({
-            "current_price_available": self.coordinator.data.get("current_price") is not None,
-            "highest_price_available": self.coordinator.data.get("highest_price") is not None,
-            "lowest_price_available": self.coordinator.data.get("lowest_price") is not None,
-            "next_price_available": self.coordinator.data.get("next_price") is not None,
-            "price_analysis_available": price_analysis.get("data_available", False),
-            "notification_sent": self.coordinator.notification_sent,
-        })
+        attributes.update(
+            {
+                "current_price_available": self.coordinator.data.get("current_price")
+                is not None,
+                "highest_price_available": self.coordinator.data.get("highest_price")
+                is not None,
+                "lowest_price_available": self.coordinator.data.get("lowest_price")
+                is not None,
+                "next_price_available": self.coordinator.data.get("next_price")
+                is not None,
+                "price_analysis_available": price_analysis.get("data_available", False),
+                "notification_sent": self.coordinator.notification_sent,
+            }
+        )
 
         return attributes
 
@@ -273,7 +316,12 @@ class DataAvailabilityBinarySensor(ElectricityPlannerBinarySensorBase):
 class FeedinSolarBinarySensor(ElectricityPlannerBinarySensorBase):
     """AUTOMATION SENSOR (3/5): Solar feed-in decision."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the feed-in solar binary sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Solar: Feed-in Grid"
@@ -300,7 +348,9 @@ class FeedinSolarBinarySensor(ElectricityPlannerBinarySensorBase):
             CONF_FEEDIN_PRICE_THRESHOLD, DEFAULT_FEEDIN_PRICE_THRESHOLD
         )
         return {
-            "reason": self.coordinator.data.get("feedin_solar_reason", "No reason available"),
+            "reason": self.coordinator.data.get(
+                "feedin_solar_reason", "No reason available"
+            ),
             "current_price": self.coordinator.data.get("feedin_effective_price"),
             "feedin_threshold": feedin_threshold,
             "remaining_solar": power_allocation.get("remaining_solar", 0),
@@ -311,7 +361,12 @@ class FeedinSolarBinarySensor(ElectricityPlannerBinarySensorBase):
 class InverterDeratingAlarmBinarySensor(ElectricityPlannerBinarySensorBase):
     """AUTOMATION SENSOR: Alarm when low-SOC bypass still needs derating."""
 
-    def __init__(self, coordinator: ElectricityPlannerCoordinator, entry: ConfigEntry, device_suffix: str = "") -> None:
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
         """Initialize the inverter derating alarm binary sensor."""
         super().__init__(coordinator, entry, device_suffix)
         self._attr_name = "Solar: Derating Alarm"
@@ -333,8 +388,14 @@ class InverterDeratingAlarmBinarySensor(ElectricityPlannerBinarySensorBase):
             return {}
 
         return {
-            "reason": self.coordinator.data.get("inverter_derating_alarm_reason", "No alarm"),
-            "inverter_derating_target": self.coordinator.data.get("inverter_derating_target"),
+            "reason": self.coordinator.data.get(
+                "inverter_derating_alarm_reason", "No alarm"
+            ),
+            "inverter_derating_target": self.coordinator.data.get(
+                "inverter_derating_target"
+            ),
             "grid_power": self.coordinator.data.get("grid_power"),
-            "battery_soc_average": self.coordinator.data.get("battery_analysis", {}).get("average_soc"),
+            "battery_soc_average": self.coordinator.data.get(
+                "battery_analysis", {}
+            ).get("average_soc"),
         }
