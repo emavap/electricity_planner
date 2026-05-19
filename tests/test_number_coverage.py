@@ -26,6 +26,7 @@ from custom_components.electricity_planner.number import (
     SunnyForecastThresholdNumber,
     _parse_state_as_float,
 )
+from custom_components.electricity_planner import number as number_module
 
 
 class _ConfigEntries:
@@ -163,6 +164,12 @@ async def test_sunny_and_solar_numbers_cover_forecast_and_validation_paths():
 async def test_sunny_forecast_threshold_uses_entity_fallback_and_clamps_negative_values(
     monkeypatch,
 ):
+    monkeypatch.setattr(
+        number_module.dt_util,
+        "now",
+        lambda: number_module.dt_util.utcnow().replace(hour=12),
+        raising=False,
+    )
     entry = _entry()
     coordinator = _Coordinator(
         config={

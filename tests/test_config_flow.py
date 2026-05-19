@@ -85,6 +85,20 @@ from custom_components.electricity_planner.const import (
 def _make_handler(entry: MockConfigEntry) -> OptionsFlowHandler:
     handler = OptionsFlowHandler()
     object.__setattr__(handler, "_config_entry", entry)
+    handler.handler = entry.entry_id
+    handler.hass = type(
+        "MockHass",
+        (),
+        {
+            "config_entries": type(
+                "MockConfigEntries",
+                (),
+                {
+                    "async_get_known_entry": lambda self, entry_id: entry,
+                },
+            )()
+        },
+    )()
     return handler
 
 

@@ -80,13 +80,12 @@ class FakeServices:
 
 class FakeHass:
     def __init__(self):
-        self.loop = asyncio.get_event_loop()
         self.data: dict = {}
         self.services = FakeServices()
         self.config_entries = SimpleNamespace(_entries={})
 
     def async_create_task(self, coro):
-        return self.loop.create_task(coro)
+        return asyncio.get_running_loop().create_task(coro)
 
     async def async_add_executor_job(self, func, *args, **kwargs):
         return func(*args, **kwargs)

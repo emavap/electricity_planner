@@ -77,7 +77,6 @@ class FakeHass:
     """Minimal Home Assistant test double."""
 
     def __init__(self):
-        self.loop = asyncio.get_event_loop()
         self.states = FakeStates()
         self.services = FakeServices()
         self.data: dict = {}
@@ -88,7 +87,7 @@ class FakeHass:
         )
 
     def async_create_task(self, coro):
-        return self.loop.create_task(coro)
+        return asyncio.get_running_loop().create_task(coro)
 
     async def async_add_executor_job(self, func, *args, **kwargs):
         return func(*args, **kwargs)
