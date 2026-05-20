@@ -6,6 +6,7 @@ import pytest
 from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.electricity_planner import number as number_module
 from custom_components.electricity_planner.const import (
     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
@@ -26,7 +27,6 @@ from custom_components.electricity_planner.number import (
     SunnyForecastThresholdNumber,
     _parse_state_as_float,
 )
-from custom_components.electricity_planner import number as number_module
 
 
 class _ConfigEntries:
