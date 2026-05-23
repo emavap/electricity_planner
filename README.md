@@ -463,6 +463,8 @@ data:
 | `number.electricity_planner_max_soc_threshold_solar` | Battery SOC ceiling for solar absorption | % |
 | `number.electricity_planner_sunny_forecast_threshold_kwh` | Solar forecast trigger for sunny mode | kWh |
 | `number.electricity_planner_arbitrage_mode_reserve_soc` | Minimum reserve SOC used by arbitrage mode | % |
+| `number.electricity_planner_arbitrage_mode_reserve_soc_sunny` | Reserve SOC override on sunny-day forecast | % |
+| `number.electricity_planner_arbitrage_mode_reserve_soc_solar` | Reserve SOC override during solar absorption | % |
 | `number.electricity_planner_arbitrage_mode_deadline_hour` | Local cutoff hour shared by arbitrage sell and negative buy planning | h |
 | `number.electricity_planner_negative_buy_threshold` | Net buy price at or below which Negative Arbitrage Buy mode activates | €/kWh |
 
@@ -543,7 +545,10 @@ phase_results:
 | `min_soc_threshold` | 20% | 5–50% | Minimum battery SOC |
 | `max_soc_threshold` | 70% | 50–100% | Maximum battery SOC |
 | `max_soc_threshold_sunny` | 35% | 0–100% | Grid-charging max SOC on high-solar days |
+| `max_soc_threshold_solar` | 50% | 0–100% | Battery SOC ceiling for solar absorption |
 | `arbitrage_mode_reserve_soc` | 40% | 0–100% | Reserve floor for arbitrage mode |
+| `arbitrage_mode_reserve_soc_sunny` | 30% | 0–100% | Reserve SOC on sunny-day forecast |
+| `arbitrage_mode_reserve_soc_solar` | 60% | 0–100% | Reserve SOC during solar absorption |
 | `arbitrage_mode_deadline_hour` | 12 | 0–23 | Local cutoff hour shared by arbitrage sell and Negative Arbitrage Buy planning; before it the planner targets today, after it the planner targets tomorrow |
 | `emergency_soc_threshold` | 15% | 5–30% | Force charging below this |
 | `predictive_charging_soc` | 30% | 10–50% | SOC for predictive logic |

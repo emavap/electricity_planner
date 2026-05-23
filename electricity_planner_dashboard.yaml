@@ -243,6 +243,12 @@ views:
               - entity: number.electricity_planner_arbitrage_mode_reserve_soc
                 name: "Arbitrage Reserve SOC"
                 icon: mdi:battery-arrow-down-outline
+              - entity: number.electricity_planner_arbitrage_mode_reserve_soc_sunny
+                name: "Arbitrage Reserve SOC (sunny)"
+                icon: mdi:weather-sunny
+              - entity: number.electricity_planner_arbitrage_mode_reserve_soc_solar
+                name: "Arbitrage Reserve SOC (solar)"
+                icon: mdi:solar-power-variant
               - entity: number.electricity_planner_arbitrage_mode_deadline_hour
                 name: "Arbitrage Deadline Hour"
                 icon: mdi:clock-end
