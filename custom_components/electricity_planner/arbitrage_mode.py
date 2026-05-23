@@ -140,17 +140,10 @@ class ArbitrageModePlanner:
         except (TypeError, ValueError):
             solar_forecast_val = None
 
-        if (
-            avg_soc is not None
-            and avg_soc < max_soc_solar
-            and solar_surplus > 0
-        ):
+        if avg_soc is not None and avg_soc < max_soc_solar and solar_surplus > 0:
             return min(100.0, max(0.0, solar)), "solar_absorption"
 
-        if (
-            solar_forecast_val is not None
-            and solar_forecast_val >= sunny_threshold_kwh
-        ):
+        if solar_forecast_val is not None and solar_forecast_val >= sunny_threshold_kwh:
             return min(100.0, max(0.0, sunny)), "sunny_day"
 
         return min(100.0, max(0.0, base)), "normal"

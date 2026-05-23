@@ -52,6 +52,15 @@ home-assistant_v2.db
 known_devices.yaml
 secrets.yaml
 
+# Docs build artifacts
+site/
+htmlcov/
+
+# OpenClaw workspace files
+.openclaw/
+AGENTS.md
+TOOLS.md
+
 # Temporary files
 *.tmp
 *.temp

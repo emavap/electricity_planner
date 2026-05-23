@@ -1425,9 +1425,7 @@ class ChargingDecisionEngine:
                         100.0,
                     )
                 grid_analysis["grid_charge_stop_soc_threshold"] = stop_threshold
-                grid_analysis["batteries_full"] = (
-                    average_soc >= (stop_threshold - 1e-9)
-                )
+                grid_analysis["batteries_full"] = average_soc >= (stop_threshold - 1e-9)
                 grid_analysis["remaining_capacity_percent"] = (
                     stop_threshold - average_soc
                 )
@@ -1451,9 +1449,7 @@ class ChargingDecisionEngine:
                     100.0,
                 )
             grid_analysis["grid_charge_stop_soc_threshold"] = stop_threshold
-            grid_analysis["batteries_full"] = (
-                average_soc >= (stop_threshold - 1e-9)
-            )
+            grid_analysis["batteries_full"] = average_soc >= (stop_threshold - 1e-9)
             grid_analysis["remaining_capacity_percent"] = stop_threshold - average_soc
         return grid_analysis
 
