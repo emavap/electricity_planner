@@ -18,7 +18,6 @@ from homeassistant.util import slugify
 from .const import (
     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
-    CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
     CONF_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SOLAR,
@@ -30,7 +29,6 @@ from .const import (
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
-    DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
     DEFAULT_MAX_SOC,
     DEFAULT_MAX_SOC_SOLAR,
@@ -48,7 +46,6 @@ _LIVE_NUMBER_OPTION_KEYS = (
     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
-    CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
     CONF_MAX_SOC_THRESHOLD_SOLAR,
@@ -164,7 +161,6 @@ async def async_setup_entry(
         SunnyForecastThresholdNumber(coordinator, entry),
         ArbitrageModeReserveSocNumber(coordinator, entry),
         ArbitrageModeReserveSocSunnyNumber(coordinator, entry),
-        ArbitrageModeReserveSocSolarNumber(coordinator, entry),
         ArbitrageModeDeadlineHourNumber(coordinator, entry),
         NegativeBuyThresholdNumber(coordinator, entry),
     ]
@@ -458,83 +454,6 @@ class ArbitrageModeReserveSocSunnyNumber(CoordinatorEntity, NumberEntity):
             options=new_options,
         )
         self.coordinator.config[CONF_ARBITRAGE_MODE_RESERVE_SOC_SUNNY] = new_value
-        self.coordinator.decision_engine.refresh_settings(self.coordinator.config)
-        await self.coordinator.async_request_refresh()
-
-
-class ArbitrageModeReserveSocSolarNumber(CoordinatorEntity, NumberEntity):
-    """Arbitrage reserve SOC used while solar absorption is active.
-
-    Applied when SOC is below the solar absorption ceiling with usable solar
-    surplus, raising the reserve so arbitrage export doesn't compete with
-    free solar charging.
-    """
-
-    def __init__(
-        self,
-        coordinator: ElectricityPlannerCoordinator,
-        entry: ConfigEntry,
-    ) -> None:
-        super().__init__(coordinator)
-        self._entry = entry
-        self._attr_name = f"{entry.title} Arbitrage Reserve SOC (Solar)"
-        self._attr_unique_id = f"{entry.entry_id}_arbitrage_mode_reserve_soc_solar"
-        self.entity_id = f"number.{slugify(entry.title or 'electricity_planner')}_arbitrage_mode_reserve_soc_solar"
-        self._attr_icon = "mdi:solar-power-variant"
-        self._attr_native_unit_of_measurement = "%"
-        self._attr_mode = NumberMode.SLIDER
-        self._attr_native_min_value = 0
-        self._attr_native_max_value = 100
-        self._attr_native_step = 5
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": entry.title,
-            "manufacturer": "Electricity Planner",
-            "model": "Smart Charging Controller",
-        }
-
-    @property
-    def native_value(self) -> float:
-        return self.coordinator.config.get(
-            CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
-            DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
-        )
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        base = self.coordinator.config.get(
-            CONF_ARBITRAGE_MODE_RESERVE_SOC, DEFAULT_ARBITRAGE_MODE_RESERVE_SOC
-        )
-        plan = (
-            self.coordinator.data.get("arbitrage_mode_plan", {})
-            if self.coordinator.data
-            else {}
-        )
-        return {
-            "description": (
-                f"While solar absorption is active, the arbitrage reserve is "
-                f"set to {self.native_value:.0f}% (vs base {base:.0f}%) so "
-                "incoming solar fills the battery before arbitrage exports it."
-            ),
-            "base_reserve_soc": f"{base:.0f}%",
-            "active_source": plan.get("reserve_soc_source"),
-        }
-
-    async def async_set_native_value(self, value: float) -> None:
-        new_value = int(value)
-        _LOGGER.info("Updating solar arbitrage reserve SOC to %d%%", new_value)
-        self._entry, new_options = _build_updated_number_options(
-            self.hass,
-            self._entry,
-            self.coordinator,
-            CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
-            new_value,
-        )
-        self.hass.config_entries.async_update_entry(
-            self._entry,
-            options=new_options,
-        )
-        self.coordinator.config[CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR] = new_value
         self.coordinator.decision_engine.refresh_settings(self.coordinator.config)
         await self.coordinator.async_request_refresh()
 

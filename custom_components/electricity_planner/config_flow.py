@@ -15,7 +15,6 @@ from .const import (
     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
     CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
-    CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
     CONF_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
     CONF_BASE_GRID_SETPOINT,
     CONF_BATTERY_CAPACITIES,
@@ -86,7 +85,6 @@ from .const import (
     DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
     DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER,
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
-    DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
@@ -769,17 +767,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=self.data.get(
                         CONF_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
                         DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
-                    ),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0, max=100, unit_of_measurement="%"
-                    )
-                ),
-                vol.Optional(
-                    CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
-                    default=self.data.get(
-                        CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
-                        DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
                     ),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
@@ -1778,17 +1765,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     default=self.data.get(
                         CONF_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
                         DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
-                    ),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0, max=100, unit_of_measurement="%"
-                    )
-                ),
-                vol.Optional(
-                    CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
-                    default=self.data.get(
-                        CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
-                        DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
                     ),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(

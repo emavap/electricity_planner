@@ -16,7 +16,6 @@ from .car_charging import CarChargingDecisionCalculator
 from .charger_limit import ChargerLimitCalculator
 from .const import (
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
-    CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
     CONF_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
     CONF_BASE_GRID_SETPOINT,
     CONF_BATTERY_CAPACITIES,
@@ -54,7 +53,6 @@ from .const import (
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
-    DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
@@ -267,7 +265,6 @@ class EngineSettings:
     max_soc_threshold: float
     arbitrage_mode_reserve_soc: float
     arbitrage_mode_reserve_soc_sunny: float
-    arbitrage_mode_reserve_soc_solar: float
     max_soc_threshold_sunny: float
     max_soc_threshold_solar: float
     sunny_forecast_threshold_kwh: float
@@ -445,14 +442,6 @@ class EngineSettings:
         arbitrage_mode_reserve_soc_sunny = max(
             0.0, min(100.0, arbitrage_mode_reserve_soc_sunny)
         )
-        arbitrage_mode_reserve_soc_solar = extractor.get_float(
-            CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
-            DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
-            "arbitrage_mode_reserve_soc_solar",
-        )
-        arbitrage_mode_reserve_soc_solar = max(
-            0.0, min(100.0, arbitrage_mode_reserve_soc_solar)
-        )
         max_soc_threshold_sunny = extractor.get_float(
             CONF_MAX_SOC_THRESHOLD_SUNNY,
             DEFAULT_MAX_SOC_SUNNY,
@@ -538,7 +527,6 @@ class EngineSettings:
             max_soc_threshold=max_soc_threshold,
             arbitrage_mode_reserve_soc=arbitrage_mode_reserve_soc,
             arbitrage_mode_reserve_soc_sunny=arbitrage_mode_reserve_soc_sunny,
-            arbitrage_mode_reserve_soc_solar=arbitrage_mode_reserve_soc_solar,
             max_soc_threshold_sunny=max_soc_threshold_sunny,
             max_soc_threshold_solar=max_soc_threshold_solar,
             sunny_forecast_threshold_kwh=sunny_forecast_threshold_kwh,
