@@ -281,7 +281,9 @@ views:
 
               *Arbitrage*
 
-              - **Arbitrage Reserve SOC** (default 40%): Minimum battery SOC kept in reserve while *Arbitrage Mode* is active — exports stop once the average SOC reaches this floor.
+              - **Arbitrage Reserve SOC** (default 50%): Base reserve SOC used during arbitrage mode on an average day. Exports stop at this floor.
+              - **Arbitrage Reserve SOC (Sunny)** (default 30%): Lower reserve that replaces the base when tomorrow's solar forecast is high. Sells more battery capacity the day before to make room for incoming solar and avoid inverter derating.
+              - **Arbitrage Reserve SOC (Solar)** (default 60%): Higher reserve used while solar absorption is active (battery below Solar Max SOC with surplus). Keeps more in the battery to let solar fill it.
               - **Arbitrage Deadline Hour** (default 12): Local hour by which both arbitrage *sell* and *Negative Arbitrage Buy* slot windows must finish. Protects the morning solar harvest.
               - **Negative Arbitrage Buy Threshold** (default −0.05 €/kWh): Net buy price at or below which the planner requests peak-limited grid import (truly paid-to-consume). More-negative values mean stricter activation.
 
