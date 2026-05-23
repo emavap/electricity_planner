@@ -70,6 +70,14 @@ class ArbitrageModePlanner:
             )
         return dt_util.as_utc(deadline_local)
 
+    @staticmethod
+    def _reserve_soc_description(reserve_soc: float, reserve_soc_source: str) -> str:
+        """Return a human-readable reserve SOC description suffix."""
+        source_label = (
+            "base" if reserve_soc_source == "normal" else "sunny — high forecast"
+        )
+        return f" — Arbitrage reserve: {reserve_soc:.0f}% ({source_label})"
+
     def _effective_reserve_soc(self, data: dict[str, Any]) -> tuple[float, str]:
         """Return the effective arbitrage reserve SOC and the reason.
 
@@ -138,7 +146,10 @@ class ArbitrageModePlanner:
 
         battery_details = data.get("battery_details") or []
         if not battery_details:
-            plan["reason"] = "Arbitrage mode enabled but no battery data is available"
+            plan["reason"] = (
+                "Arbitrage mode enabled but no battery data is available"
+                + self._reserve_soc_description(reserve_soc, reserve_soc_source)
+            )
             return plan
 
         available_energy_kwh = 0.0
@@ -156,6 +167,7 @@ class ArbitrageModePlanner:
         if available_energy_kwh <= 0:
             plan["reason"] = (
                 f"Arbitrage reserve target already reached (net energy above {reserve_soc:.0f}% is unavailable)"
+                + self._reserve_soc_description(reserve_soc, reserve_soc_source)
             )
             return plan
 
@@ -179,7 +191,10 @@ class ArbitrageModePlanner:
         )
         plan["configured_export_cap_w"] = export_power_cap
         if export_power_cap <= 0:
-            plan["reason"] = "Arbitrage mode enabled but no export power is available"
+            plan["reason"] = (
+                "Arbitrage mode enabled but no export power is available"
+                + self._reserve_soc_description(reserve_soc, reserve_soc_source)
+            )
             return plan
 
         required_duration_hours = available_energy_kwh / (export_power_cap / 1000)
@@ -211,9 +226,12 @@ class ArbitrageModePlanner:
             data.get("nordpool_prices_tomorrow"),
             now,
         )
+        reserve_soc = plan["reserve_soc"]
+        reserve_soc_source = plan["reserve_soc_source"]
         if not timeline:
             plan["reason"] = (
                 "Arbitrage mode enabled but no feed-in price timeline is available"
+                + self._reserve_soc_description(reserve_soc, reserve_soc_source)
             )
             return plan
 
@@ -234,6 +252,7 @@ class ArbitrageModePlanner:
         if slot_selection is None:
             plan["reason"] = (
                 f"No eligible feed-in slots are currently available above {feedin_threshold:.3f}€/kWh before {plan['deadline']}"
+                + self._reserve_soc_description(reserve_soc, reserve_soc_source)
             )
             return plan
 
@@ -276,22 +295,26 @@ class ArbitrageModePlanner:
                 plan["reason"] = (
                     f"Arbitrage export active at {float(current_slot_price):.3f}€/kWh "
                     f"(arbitrage threshold {float(arbitrage_price_threshold):.3f}€/kWh)"
+                    + self._reserve_soc_description(reserve_soc, reserve_soc_source)
                 )
             else:
                 plan["reason"] = (
                     f"Arbitrage export active at {float(current_slot_price):.3f}€/kWh using the best available slots "
                     f"(arbitrage threshold {float(arbitrage_price_threshold):.3f}€/kWh)"
+                    + self._reserve_soc_description(reserve_soc, reserve_soc_source)
                 )
         else:
             if plan["slots_cover_full_arbitrage"]:
                 plan["reason"] = (
                     f"Arbitrage mode armed for the top {plan['selected_slots_count']} eligible slots "
                     f"with arbitrage threshold {float(arbitrage_price_threshold):.3f}€/kWh"
+                    + self._reserve_soc_description(reserve_soc, reserve_soc_source)
                 )
             else:
                 plan["reason"] = (
                     f"Arbitrage mode armed for the best available {plan['selected_slots_count']} eligible slots "
                     f"with arbitrage threshold {float(arbitrage_price_threshold):.3f}€/kWh"
+                    + self._reserve_soc_description(reserve_soc, reserve_soc_source)
                 )
 
         return plan

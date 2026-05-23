@@ -1,6 +1,6 @@
 # Electricity Planner
 
-**Version 6.6.4** | **Config Schema Version 23** | **Home Assistant 2024.4+**
+**Version 6.6.5** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
