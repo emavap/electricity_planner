@@ -18,15 +18,23 @@ from .const import (
     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
     CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
+    CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
+    CONF_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
     CONF_FEEDIN_PRICE_THRESHOLD,
     CONF_MAX_BATTERY_POWER,
     CONF_MAX_GRID_POWER,
+    CONF_MAX_SOC_THRESHOLD_SOLAR,
+    CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
     DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER,
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
+    DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
+    DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
     DEFAULT_MAX_BATTERY_POWER,
     DEFAULT_MAX_GRID_POWER,
+    DEFAULT_MAX_SOC_SOLAR,
+    DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
 )
 from .helpers import coerce_integral_range, resolve_local_deadline
 
@@ -66,23 +74,99 @@ class ArbitrageModePlanner:
             )
         return dt_util.as_utc(deadline_local)
 
+    def _effective_reserve_soc(self, data: dict[str, Any]) -> tuple[float, str]:
+        """Return the effective arbitrage reserve SOC and the reason.
+
+        Follows the same pattern as ``_apply_sunny_day_grid_limit`` in
+        ``decision_engine.py``: when solar absorption is active (battery SOC
+        below the solar absorption ceiling with usable solar surplus), use the
+        solar-mode override; otherwise when tomorrow's forecast exceeds the
+        sunny trigger, use the sunny-day override; else use the base value.
+        """
+        config = self._coordinator.config
+
+        base = float(
+            config.get(
+                CONF_ARBITRAGE_MODE_RESERVE_SOC, DEFAULT_ARBITRAGE_MODE_RESERVE_SOC
+            )
+        )
+        sunny = float(
+            config.get(
+                CONF_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
+                DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
+            )
+        )
+        solar = float(
+            config.get(
+                CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
+                DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SOLAR,
+            )
+        )
+        sunny_threshold_kwh = float(
+            config.get(
+                CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+                DEFAULT_SUNNY_FORECAST_THRESHOLD_KWH,
+            )
+        )
+        max_soc_solar = float(
+            config.get(CONF_MAX_SOC_THRESHOLD_SOLAR, DEFAULT_MAX_SOC_SOLAR)
+        )
+
+        battery_details = data.get("battery_details") or []
+        total_cap = 0.0
+        weighted_soc = 0.0
+        for battery in battery_details:
+            try:
+                capacity = float(battery.get("capacity") or 0.0)
+                soc = float(battery.get("soc") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if capacity <= 0:
+                continue
+            total_cap += capacity
+            weighted_soc += capacity * soc
+        avg_soc = (weighted_soc / total_cap) if total_cap > 0 else None
+
+        try:
+            solar_surplus = float(data.get("solar_surplus") or 0.0)
+        except (TypeError, ValueError):
+            solar_surplus = 0.0
+
+        solar_forecast = data.get("solar_forecast_production")
+        try:
+            solar_forecast_val = (
+                float(solar_forecast) if solar_forecast is not None else None
+            )
+        except (TypeError, ValueError):
+            solar_forecast_val = None
+
+        if (
+            avg_soc is not None
+            and avg_soc < max_soc_solar
+            and solar_surplus > 0
+        ):
+            return min(100.0, max(0.0, solar)), "solar_absorption"
+
+        if (
+            solar_forecast_val is not None
+            and solar_forecast_val >= sunny_threshold_kwh
+        ):
+            return min(100.0, max(0.0, sunny)), "sunny_day"
+
+        return min(100.0, max(0.0, base)), "normal"
+
     def build_plan(self, data: dict[str, Any]) -> dict[str, Any]:
         """Build the current arbitrage plan and status."""
         coordinator = self._coordinator
         enabled = coordinator.is_arbitrage_mode_enabled()
-        reserve_soc = float(
-            coordinator.config.get(
-                CONF_ARBITRAGE_MODE_RESERVE_SOC,
-                DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
-            )
-        )
-        reserve_soc = min(100.0, max(0.0, reserve_soc))
+        reserve_soc, reserve_soc_source = self._effective_reserve_soc(data)
 
         plan: dict[str, Any] = {
             "enabled": enabled,
             "active": False,
             "reason": "Arbitrage mode disabled",
             "reserve_soc": round(reserve_soc, 1),
+            "reserve_soc_source": reserve_soc_source,
             "configured_export_cap_w": 0,
             "deadline": None,
             "available_energy_kwh": 0.0,

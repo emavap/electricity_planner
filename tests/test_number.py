@@ -37,6 +37,8 @@ from custom_components.electricity_planner.coordinator import (
 from custom_components.electricity_planner.number import (
     ArbitrageModeDeadlineHourNumber,
     ArbitrageModeReserveSocNumber,
+    ArbitrageModeReserveSocSolarNumber,
+    ArbitrageModeReserveSocSunnyNumber,
     MaxSocThresholdNumber,
     MaxSocThresholdSolarNumber,
     MaxSocThresholdSunnyNumber,
@@ -140,14 +142,16 @@ async def test_number_setup_always_adds_standard_and_sunny_entities(
     entities = []
     await async_setup_entry(fake_hass, entry, entities.extend)
 
-    assert len(entities) == 7
+    assert len(entities) == 9
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
     assert isinstance(entities[2], MaxSocThresholdSolarNumber)
     assert isinstance(entities[3], SunnyForecastThresholdNumber)
     assert isinstance(entities[4], ArbitrageModeReserveSocNumber)
-    assert isinstance(entities[5], ArbitrageModeDeadlineHourNumber)
-    assert isinstance(entities[6], NegativeBuyThresholdNumber)
+    assert isinstance(entities[5], ArbitrageModeReserveSocSunnyNumber)
+    assert isinstance(entities[6], ArbitrageModeReserveSocSolarNumber)
+    assert isinstance(entities[7], ArbitrageModeDeadlineHourNumber)
+    assert isinstance(entities[8], NegativeBuyThresholdNumber)
 
 
 @pytest.mark.asyncio
@@ -171,14 +175,16 @@ async def test_number_setup_with_forecast_entity_keeps_same_three_entities(
     entities = []
     await async_setup_entry(fake_hass, entry, entities.extend)
 
-    assert len(entities) == 7
+    assert len(entities) == 9
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
     assert isinstance(entities[2], MaxSocThresholdSolarNumber)
     assert isinstance(entities[3], SunnyForecastThresholdNumber)
     assert isinstance(entities[4], ArbitrageModeReserveSocNumber)
-    assert isinstance(entities[5], ArbitrageModeDeadlineHourNumber)
-    assert isinstance(entities[6], NegativeBuyThresholdNumber)
+    assert isinstance(entities[5], ArbitrageModeReserveSocSunnyNumber)
+    assert isinstance(entities[6], ArbitrageModeReserveSocSolarNumber)
+    assert isinstance(entities[7], ArbitrageModeDeadlineHourNumber)
+    assert isinstance(entities[8], NegativeBuyThresholdNumber)
 
 
 @pytest.mark.asyncio

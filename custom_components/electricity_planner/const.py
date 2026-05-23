@@ -46,6 +46,8 @@ CONF_ENERGY_COST_WKK = "energy_cost_wkk"
 CONF_MIN_SOC_THRESHOLD = "min_soc_threshold"
 CONF_MAX_SOC_THRESHOLD = "max_soc_threshold"
 CONF_ARBITRAGE_MODE_RESERVE_SOC = "arbitrage_mode_reserve_soc"
+CONF_ARBITRAGE_MODE_RESERVE_SOC_SUNNY = "arbitrage_mode_reserve_soc_sunny"
+CONF_ARBITRAGE_MODE_RESERVE_SOC_SOLAR = "arbitrage_mode_reserve_soc_solar"
 CONF_ARBITRAGE_MODE_DEADLINE_HOUR = "arbitrage_mode_deadline_hour"
 CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER = "arbitrage_mode_max_export_power"
 CONF_NEGATIVE_BUY_THRESHOLD = "negative_buy_threshold"
@@ -94,6 +96,8 @@ CONF_SOC_BUFFER_TARGET = "soc_buffer_target"
 DEFAULT_MIN_SOC = 20
 DEFAULT_MAX_SOC = 70
 DEFAULT_ARBITRAGE_MODE_RESERVE_SOC = 40
+DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SUNNY = 30
+DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SOLAR = 60
 DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR = 12
 DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER = (
     0  # 0 = automatic cap based on battery/grid limits
@@ -270,4 +274,4 @@ MAX_POWER_VALIDATION_W = (
 )
 MAX_CAR_POWER_VALIDATION_W = 22000  # Maximum reasonable car charging power
 
-INTEGRATION_VERSION = "6.6.3"
+INTEGRATION_VERSION = "6.6.4"
