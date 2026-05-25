@@ -590,6 +590,32 @@ def test_solar_bootstrap_skipped_when_one_battery_lagging():
     assert allocation["remaining_solar"] == 5000
 
 
+def test_idle_car_solar_falls_back_to_batteries_above_solar_threshold():
+    """Idle EV reservation must not curtail solar while batteries have room."""
+    engine = _create_engine(
+        {
+            "max_soc_threshold": 70,
+            "max_soc_threshold_solar": 50,
+            "max_battery_power": 3000,
+        }
+    )
+
+    allocation = engine._allocate_solar_power(
+        power_analysis={"solar_surplus": 2500, "car_charging_power": 0},
+        battery_analysis={
+            "average_soc": 46,  # Above 50 - 5, so the solar EV reserve path stops.
+            "min_soc": 35,  # Below 50 - 10, so idle-car bootstrap is not available.
+            "max_soc_threshold": 70,
+            "batteries_full": False,
+        },
+    )
+
+    assert allocation["solar_for_batteries"] == 2400
+    assert allocation["solar_for_car"] == 0
+    assert allocation["car_current_solar_usage"] == 0
+    assert allocation["remaining_solar"] == 100
+
+
 def test_solar_allocation_below_threshold_reserves_all_surplus_for_battery():
     engine = _create_engine(
         {"significant_solar_threshold": 1500, "max_soc_threshold_solar": 90}

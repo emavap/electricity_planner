@@ -73,6 +73,20 @@ class SolarAllocationCalculator:
             solar_for_car = self.bootstrap_car_allocation(
                 available_for_car, battery_analysis
             )
+            if solar_for_car == 0 and available_for_car > 0:
+                fallback_headroom = max(
+                    0,
+                    self._settings.max_battery_power - solar_for_batteries,
+                )
+                fallback_for_batteries = self.battery_allocation(
+                    min(available_for_car, fallback_headroom),
+                    battery_analysis,
+                    soc_cap=battery_analysis.get(
+                        "max_soc_threshold", self._settings.max_soc_threshold
+                    ),
+                    safety_margin=0,
+                )
+                solar_for_batteries += fallback_for_batteries
 
         total_allocated = solar_for_batteries + solar_for_car + car_current_solar_usage
         if total_allocated > solar_surplus:
@@ -125,10 +139,17 @@ class SolarAllocationCalculator:
         return 0
 
     def battery_allocation(
-        self, available_solar: float, battery_analysis: dict[str, Any]
+        self,
+        available_solar: float,
+        battery_analysis: dict[str, Any],
+        *,
+        soc_cap: float | None = None,
+        safety_margin: float = DEFAULT_ALGORITHM_THRESHOLDS.soc_safety_margin,
     ) -> int:
         average_soc = battery_analysis.get("average_soc")
-        solar_max = self._settings.max_soc_threshold_solar
+        solar_max = (
+            self._settings.max_soc_threshold_solar if soc_cap is None else soc_cap
+        )
 
         if average_soc is None or solar_max is None:
             return 0
@@ -137,7 +158,7 @@ class SolarAllocationCalculator:
 
         if (
             not solar_full
-            and average_soc < solar_max - DEFAULT_ALGORITHM_THRESHOLDS.soc_safety_margin
+            and average_soc < solar_max - safety_margin
             and available_solar > 0
         ):
             soc_deficit = max(0, solar_max - average_soc)

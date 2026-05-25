@@ -1,10 +1,10 @@
 # Electricity Planner – Project Summary
 
-**Version 6.6.5** | **Config Schema Version 23** | **Home Assistant 2024.4+**
+**Version 6.6.6** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
-> Release note for v6.6.2: adds a 2% sunny-day battery SOC hysteresis band while grid charging is already active, preventing charge-from-grid flapping around the reduced sunny-day SOC ceiling. No config migration required. 519/519 Docker tests passing.
+> Release note for v6.6.6: fixes idle-EV solar curtailment. When the car is not charging and the EV bootstrap gate cannot accept solar, the allocator now falls back to allocating leftover solar to batteries up to the normal `max_soc_threshold` (bounded by `max_battery_power`), instead of leaving it as `remaining_solar` and risking inverter derating. `max_soc_threshold_solar` once again behaves as an EV reservation threshold rather than an unconditional battery cap. 562/562 tests passing.
 
 ## Key Features
 
