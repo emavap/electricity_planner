@@ -602,6 +602,7 @@ class CycleContext:
     arbitrage_mode_export_power: int
     arbitrage_mode_reserve_soc: float
     arbitrage_mode_export_active: bool
+    arbitrage_pending_power: int
     negative_buy_mode_enabled: bool
     negative_buy_mode_active: bool
     negative_buy_curtail_solar: bool
@@ -719,16 +720,32 @@ class CycleContext:
             _safe_optional_float(power_allocation.get("car_current_solar_usage")) or 0.0
         )
 
+        arbitrage_plan = data.get("arbitrage_mode_plan") or {}
+        arbitrage_pending_power = 0
+        if arbitrage_mode_active and arbitrage_mode_export_power > 0:
+            arbitrage_pending_power = arbitrage_mode_export_power
+        elif (
+            not arbitrage_mode_active
+            and int(arbitrage_plan.get("selected_slots_count") or 0) > 0
+            and float(arbitrage_plan.get("available_energy_kwh") or 0.0) > 0.0
+        ):
+            arbitrage_pending_power = max(
+                0,
+                int(
+                    _safe_optional_float(arbitrage_plan.get("configured_export_cap_w"))
+                    or 0
+                ),
+            )
+
         car_arbitrage_power = 0
         if (
             settings.car_use_battery_arbitrage
-            and arbitrage_mode_active
-            and arbitrage_mode_export_power > 0
+            and arbitrage_pending_power > 0
             and not battery_grid_charging
             and battery_average_soc is not None
             and battery_average_soc >= arbitrage_mode_reserve_soc
         ):
-            car_arbitrage_power = arbitrage_mode_export_power
+            car_arbitrage_power = arbitrage_pending_power
 
         return cls(
             current_price=_safe_optional_float(price_analysis.get("current_price")),
@@ -820,6 +837,7 @@ class CycleContext:
             arbitrage_mode_export_power=arbitrage_mode_export_power,
             arbitrage_mode_reserve_soc=arbitrage_mode_reserve_soc,
             arbitrage_mode_export_active=arbitrage_mode_export_active,
+            arbitrage_pending_power=arbitrage_pending_power,
             negative_buy_mode_enabled=bool(data.get("negative_buy_mode_enabled")),
             negative_buy_mode_active=bool(data.get("negative_buy_mode_active")),
             negative_buy_curtail_solar=bool(data.get("negative_buy_curtail_solar")),

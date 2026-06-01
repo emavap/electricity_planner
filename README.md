@@ -1,10 +1,10 @@
 # Electricity Planner
 
-**Version 6.6.6** | **Config Schema Version 23** | **Home Assistant 2024.4+**
+**Version 6.7.0** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
-> Release note for v6.6.2: adds a 2% sunny-day battery SOC hysteresis band while grid charging is already active, preventing charge-from-grid flapping around the reduced sunny-day SOC ceiling. No config migration required. 519/519 Docker tests passing.
+> Release note for v6.7.0: lets the EV consume scheduled battery-arbitrage discharge during *pending* arbitrage slots, not only during active export. When slots are planned but not yet active, the EV can already draw from battery headroom reserved for the upcoming export window. Gated on `car_use_battery_arbitrage` (default on). No config migration required.
 
 ---
 

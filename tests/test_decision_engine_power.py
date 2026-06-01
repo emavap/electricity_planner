@@ -3786,3 +3786,145 @@ def test_negative_buy_does_not_bypass_peak_import_protection():
     # Solar (3800W) preserved + grid (4773W) halved (2386W) = 6186W; identical to baseline.
     assert result["charger_limit"] == 6186
     assert "Peak import exceeded - reduced to 6186W" in result["charger_limit_reason"]
+
+
+# ---------------------------------------------------------------------------
+# Pending-arbitrage car charging (slots selected but not yet active)
+# ---------------------------------------------------------------------------
+
+
+def _ctx_from(engine, data, battery_analysis=None):
+    from custom_components.electricity_planner.decision_engine import CycleContext
+
+    return CycleContext.from_data(
+        data,
+        engine._settings,
+        battery_analysis or {"average_soc": 80, "max_soc_threshold": 90},
+        {},
+        {},
+        {},
+    )
+
+
+def test_car_arbitrage_power_set_when_arbitrage_pending_slots_selected():
+    engine = _engine({CONF_CAR_USE_BATTERY_ARBITRAGE: True})
+    ctx = _ctx_from(
+        engine,
+        data={
+            "arbitrage_mode_active": False,
+            "arbitrage_mode_export_power": 0,
+            "arbitrage_mode_reserve_soc": 40,
+            "battery_grid_charging": False,
+            "arbitrage_mode_plan": {
+                "selected_slots_count": 2,
+                "available_energy_kwh": 6.5,
+                "configured_export_cap_w": 3200,
+            },
+        },
+        battery_analysis={"average_soc": 80, "max_soc_threshold": 90},
+    )
+    assert ctx.arbitrage_pending_power == 3200
+    assert ctx.car_arbitrage_power == 3200
+
+
+def test_car_arbitrage_power_zero_when_arbitrage_pending_but_soc_below_reserve():
+    engine = _engine({CONF_CAR_USE_BATTERY_ARBITRAGE: True})
+    ctx = _ctx_from(
+        engine,
+        data={
+            "arbitrage_mode_active": False,
+            "arbitrage_mode_export_power": 0,
+            "arbitrage_mode_reserve_soc": 50,
+            "battery_grid_charging": False,
+            "arbitrage_mode_plan": {
+                "selected_slots_count": 2,
+                "available_energy_kwh": 6.5,
+                "configured_export_cap_w": 3200,
+            },
+        },
+        battery_analysis={"average_soc": 30, "max_soc_threshold": 90},
+    )
+    assert ctx.arbitrage_pending_power == 3200
+    assert ctx.car_arbitrage_power == 0
+
+
+def test_car_arbitrage_power_zero_when_no_slots_selected():
+    engine = _engine({CONF_CAR_USE_BATTERY_ARBITRAGE: True})
+    ctx = _ctx_from(
+        engine,
+        data={
+            "arbitrage_mode_active": False,
+            "arbitrage_mode_export_power": 0,
+            "arbitrage_mode_reserve_soc": 40,
+            "battery_grid_charging": False,
+            "arbitrage_mode_plan": {
+                "selected_slots_count": 0,
+                "available_energy_kwh": 0.0,
+                "configured_export_cap_w": 3200,
+            },
+        },
+    )
+    assert ctx.arbitrage_pending_power == 0
+    assert ctx.car_arbitrage_power == 0
+
+
+def test_car_arbitrage_power_zero_when_pending_but_battery_grid_charging():
+    engine = _engine({CONF_CAR_USE_BATTERY_ARBITRAGE: True})
+    ctx = _ctx_from(
+        engine,
+        data={
+            "arbitrage_mode_active": False,
+            "arbitrage_mode_export_power": 0,
+            "arbitrage_mode_reserve_soc": 40,
+            "battery_grid_charging": True,
+            "arbitrage_mode_plan": {
+                "selected_slots_count": 2,
+                "available_energy_kwh": 6.5,
+                "configured_export_cap_w": 3200,
+            },
+        },
+    )
+    # Pending power still computed, but car_arbitrage_power gated by battery_grid_charging.
+    assert ctx.arbitrage_pending_power == 3200
+    assert ctx.car_arbitrage_power == 0
+
+
+def test_car_arbitrage_power_active_preferred_over_pending():
+    """When arbitrage is actively exporting, use the live export power."""
+    engine = _engine({CONF_CAR_USE_BATTERY_ARBITRAGE: True})
+    ctx = _ctx_from(
+        engine,
+        data={
+            "arbitrage_mode_active": True,
+            "arbitrage_mode_export_power": 2800,
+            "arbitrage_mode_reserve_soc": 40,
+            "battery_grid_charging": False,
+            "arbitrage_mode_plan": {
+                "selected_slots_count": 2,
+                "available_energy_kwh": 6.5,
+                "configured_export_cap_w": 3200,
+            },
+        },
+    )
+    assert ctx.arbitrage_pending_power == 2800
+    assert ctx.car_arbitrage_power == 2800
+
+
+def test_car_arbitrage_pending_respects_car_use_battery_arbitrage_setting():
+    engine = _engine({CONF_CAR_USE_BATTERY_ARBITRAGE: False})
+    ctx = _ctx_from(
+        engine,
+        data={
+            "arbitrage_mode_active": False,
+            "arbitrage_mode_export_power": 0,
+            "arbitrage_mode_reserve_soc": 40,
+            "battery_grid_charging": False,
+            "arbitrage_mode_plan": {
+                "selected_slots_count": 2,
+                "available_energy_kwh": 6.5,
+                "configured_export_cap_w": 3200,
+            },
+        },
+    )
+    assert ctx.arbitrage_pending_power == 3200
+    assert ctx.car_arbitrage_power == 0
