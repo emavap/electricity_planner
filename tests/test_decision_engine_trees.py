@@ -311,12 +311,15 @@ def test_battery_decision_does_not_hold_solar_priority_stop() -> None:
     assert "allocated solar power" in result["battery_grid_charging_reason"]
 
 
-def test_battery_decision_uses_locked_threshold_during_hold() -> None:
-    """Hold compares price against the locked threshold, not the live one.
+def test_battery_decision_hold_releases_when_price_exceeds_effective_threshold() -> (
+    None
+):
+    """Hold releases when current price exceeds the effective threshold.
 
-    A SOC bump that drops the SOC-relaxed effective threshold below the
-    current price must not break a hold that was entered at a higher
-    threshold.
+    Even when a stale locked threshold exists (e.g. from a previously active
+    ``battery_stable_threshold`` that has since deactivated), the hold must
+    not keep charging ON if the current price exceeds the *current* effective
+    battery price threshold (base × SOC multiplier).
     """
     engine = _engine()
     engine.strategy_manager.evaluate = lambda context: (False, "price too high")
@@ -325,7 +328,6 @@ def test_battery_decision_uses_locked_threshold_during_hold() -> None:
     result = engine._decide_battery_grid_charging(
         price_analysis={
             "data_available": True,
-            # Live (post-SOC-drift) threshold would reject this price...
             "current_price": 0.16,
             "price_threshold": 0.15,
         },
@@ -341,18 +343,19 @@ def test_battery_decision_uses_locked_threshold_during_hold() -> None:
         data={
             "previous_battery_grid_charging": True,
             "battery_grid_charging_state_age_seconds": 60,
-            # ...but the threshold locked at hold entry tolerates it.
+            # Stale locked threshold from a previously relaxed floor —
+            # must NOT keep the hold alive.
             "battery_grid_charging_locked_threshold": 0.20,
         },
     )
 
-    assert result["battery_grid_charging"] is True
-    assert "0.200€/kWh" in result["battery_grid_charging_reason"]
-    assert result["strategy_trace"][-1]["strategy"] == "BatteryOnHold"
+    # 0.16 €/kWh > 0.15 €/kWh (effective = 0.15 × 1.0 multiplier at 60 % SOC)
+    assert result["battery_grid_charging"] is False
+    assert result["battery_grid_charging_reason"] == "price too high"
 
 
 def test_battery_decision_falls_back_to_live_threshold_without_lock() -> None:
-    """First cycle after a restart has no lock; live threshold is used."""
+    """Hold uses the current effective threshold when no lock is recorded."""
     engine = _engine()
     engine.strategy_manager.evaluate = lambda context: (False, "")
     engine.strategy_manager.get_last_trace = lambda: []
@@ -380,6 +383,51 @@ def test_battery_decision_falls_back_to_live_threshold_without_lock() -> None:
 
     assert result["battery_grid_charging"] is True
     assert result["strategy_trace"][-1]["strategy"] == "BatteryOnHold"
+
+
+def test_battery_hold_releases_when_floor_drops_during_hold() -> None:
+    """Regression: hold must release when stable-threshold deactivates mid-hold.
+
+    Scenario: battery_stable_threshold was active at OFF→ON, inflating the
+    effective threshold to ~0.25 €/kWh.  The stable threshold then
+    deactivates, bringing the effective threshold down to 0.164 €/kWh
+    (base 0.158 × SOC multiplier 1.04).  The current price is 0.248 €/kWh.
+
+    The hold must NOT keep charging ON — 0.248 € is 10 cents above the real
+    ceiling of 0.164 €.
+    """
+    engine = _engine()
+    engine.strategy_manager.evaluate = lambda context: (False, "price too high")
+    engine.strategy_manager.get_last_trace = lambda: []
+
+    result = engine._decide_battery_grid_charging(
+        price_analysis={
+            "data_available": True,
+            "current_price": 0.248,
+            "price_threshold": 0.158,
+        },
+        battery_analysis={
+            "batteries_count": 1,
+            "batteries_available": True,
+            "batteries_full": False,
+            # SOC just below buffer → multiplier ~1.04
+            "average_soc": 48,
+        },
+        power_allocation={},
+        power_analysis={"significant_solar_surplus": False, "solar_surplus": 0},
+        time_context={},
+        data={
+            "previous_battery_grid_charging": True,
+            "battery_grid_charging_state_age_seconds": 60,
+            # Stale lock from when stable threshold was active (0.240 floor)
+            # 0.240 × 1.04 ≈ 0.250
+            "battery_grid_charging_locked_threshold": 0.250,
+            # No stable threshold active now — floor is back to base
+        },
+    )
+
+    # Price 0.248 > effective threshold 0.164 → hold must release
+    assert result["battery_grid_charging"] is False
 
 
 @pytest.mark.parametrize(

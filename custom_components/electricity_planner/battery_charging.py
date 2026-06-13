@@ -175,12 +175,17 @@ class BatteryChargingDecisionCalculator:
     ) -> dict[str, Any]:
         """Avoid rapid ON->OFF cycling while the price remains acceptable.
 
-        Mirrors the car-charging "locked threshold" pattern: when an ON state
-        was entered at price threshold T, hold ON for up to
-        ``_MIN_BATTERY_ON_HOLD_SECONDS`` while ``current_price <= T``. The
-        threshold is captured at OFF->ON transition and reused throughout the
-        hold so SOC drift (which would otherwise shrink the SOC multiplier and
-        the effective threshold) cannot prematurely terminate the hold.
+        When an ON state was entered at a given price threshold, hold ON for
+        up to ``_MIN_BATTERY_ON_HOLD_SECONDS`` while ``current_price`` stays
+        at or below the **current** effective battery price threshold
+        (base × SOC multiplier).
+
+        The effective threshold is re-evaluated every cycle rather than frozen
+        at hold-entry.  This prevents the hold from keeping charging ON when
+        the underlying floor has changed (e.g. a ``battery_stable_threshold``
+        relaxation deactivates mid-hold).  SOC drift during a 5-minute hold is
+        negligible in practice, so the former locked-threshold guard against it
+        is removed in favour of correctness under changing floors.
         """
         if decision.get("battery_grid_charging"):
             return decision
@@ -203,15 +208,12 @@ class BatteryChargingDecisionCalculator:
         if current_price is None:
             return decision
 
-        # Prefer the threshold locked at hold-entry; fall back to the live
-        # effective threshold when no lock is recorded (e.g. first cycle
-        # after a restart, before the coordinator captured the lock).
-        hold_threshold = ctx.battery_grid_charging_locked_threshold
-        if hold_threshold is None:
-            if ctx.battery_stable_threshold is not None:
-                hold_threshold = ctx.battery_stable_threshold
-            else:
-                hold_threshold = ctx.effective_battery_price_threshold
+        # Use the current effective threshold (base × SOC multiplier,
+        # including any active battery_stable_threshold) as the ceiling.
+        # The locked threshold captured at OFF→ON is stale when the floor
+        # changes (e.g. stable-threshold relaxation deactivates), and SOC
+        # drift during a 5-minute hold is too small to matter.
+        hold_threshold = ctx.effective_battery_price_threshold
 
         if current_price > hold_threshold:
             return decision
@@ -224,7 +226,7 @@ class BatteryChargingDecisionCalculator:
         held["battery_grid_charging"] = True
         held["battery_grid_charging_reason"] = (
             "Continuing battery grid charging briefly to avoid rapid cycling "
-            f"({remaining_seconds}s hold remaining, locked threshold "
+            f"({remaining_seconds}s hold remaining, effective threshold "
             f"{hold_threshold:.3f}€/kWh); next automatic result: {reason}"
         )
         trace.append(
