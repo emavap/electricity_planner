@@ -232,7 +232,7 @@ The integration is designed for dynamic electricity markets:
 
 ### Current Version
 
-- **Integration Version**: 6.6.0
+- **Integration Version**: 6.7.1
 - **Config Schema Version**: 23
 - **Migration Path**: Automatic v1→v23 migration
 
@@ -246,6 +246,19 @@ The integration is designed for dynamic electricity markets:
 6. **Arbitrage Mode**: Reserve SOC, deadline hour (shared by sell + negative-buy planning), max export power
 
 ### Recent Changes
+
+**v6.7.1** (Arbitrage-EV grid-import safety fix — behaviour change)
+
+- **Changed** (`car_charging.py`): When the EV is charging via scheduled battery arbitrage discharge (`car_arbitrage_power > 0`), grid import is now always blocked (`car_grid_import_allowed = False`) instead of being conditionally allowed when the price was low. This prevents the combined battery-discharge + grid-draw from potentially tripping the breaker. The car's charging power is sourced exclusively from battery arbitrage and solar during these windows.
+- **Tests**: Updated `test_car_decision_arbitrage_blocks_grid_import_regardless_of_price` (was `test_car_decision_arbitrage_allows_grid_import_on_low_price_without_window`), `test_grid_setpoint_arbitrage_blocks_grid_import_for_car` (was `test_grid_setpoint_combines_arbitrage_battery_with_allowed_grid_import`), and related tree/parametrize assertions to match the new blocking behaviour.
+- **Compatibility**: No config-schema change (still v23), no migration required, no entity-ID renames, no public-API changes. Installations that relied on the EV pulling grid power during arbitrage windows will now see the car's `grid_import_allowed` flag stay `False` and the grid setpoint stay at zero for the car component — this is the safe behaviour for residential breaker sizing.
+
+**v6.7.0** (Pending-arbitrage EV charging — behaviour change)
+
+- **Added** (`arbitrage_mode.py`, `car_charging.py`, `grid_setpoint.py`): The EV can now consume scheduled battery-arbitrage discharge during *pending* arbitrage slots, not only during active export. When slots are planned but not yet active, the EV can already draw from battery headroom reserved for the upcoming export window. Gated on `car_use_battery_arbitrage` (default on).
+- **Changed** (`grid_setpoint.py`): Grid setpoint now nets the EV's arbitrage-sourced load before calculating the battery export share, so the car is prioritised over export when both draw from the same discharge budget.
+- **Tests**: New coverage for pending-slot EV charging, grid-setpoint netting with concurrent EV load, and the `car_use_battery_arbitrage` gate.
+- **Compatibility**: No config-schema change (still v23), no migration required. Drop-in replacement for v6.6.6.
 
 **v6.6.0** (Battery binary-sensor consistency + anti-flap hold + battery-threshold decoupling — behaviour change with persisted state)
 

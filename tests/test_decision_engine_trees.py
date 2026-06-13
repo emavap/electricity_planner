@@ -520,7 +520,7 @@ def test_car_decision_tree_blocks_immediately_when_price_data_is_missing() -> No
                 "is_low_price": True,
                 "very_low_price": True,
             },
-            True,
+            False,
         ),
     ],
 )
@@ -708,8 +708,10 @@ def test_feedin_decision_tree_uses_feed_specific_adjustments() -> None:
             {CONF_MAX_CAR_POWER: 11000},
             _arbitrage_battery_analysis(),
             {"remaining_solar": 0, "solar_for_car": 0, "car_current_solar_usage": 0},
-            _arbitrage_mode_data(car_charging_power=5000, car_grid_import_allowed=True),
-            5700,
+            _arbitrage_mode_data(
+                car_charging_power=5000, car_grid_import_allowed=False
+            ),
+            3000,
             "3000W battery arbitrage",
         ),
     ],

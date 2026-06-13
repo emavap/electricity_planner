@@ -577,9 +577,10 @@ def test_car_decision_skips_arbitrage_when_no_export_power_is_scheduled():
     assert result["car_grid_import_allowed"] is False
 
 
-def test_car_decision_arbitrage_allows_grid_import_on_low_price_without_window():
-    """When arbitrage is already charging the car and the price is low, grid
-    import should be allowed even without a minimum charging window."""
+def test_car_decision_arbitrage_blocks_grid_import_regardless_of_price():
+    """When arbitrage is charging the car, grid import is always blocked
+    even when the price is low, to prevent breaker trip from combined
+    battery-arbitrage + grid draw."""
     engine = _engine()
 
     result = engine._decide_car_grid_charging(
@@ -601,8 +602,8 @@ def test_car_decision_arbitrage_allows_grid_import_on_low_price_without_window()
     )
 
     assert result["car_grid_charging"] is True
-    assert result["car_grid_import_allowed"] is True
-    assert "allowed grid import" in result["car_grid_charging_reason"]
+    assert result["car_grid_import_allowed"] is False
+    assert "grid blocked" in result["car_grid_charging_reason"]
 
 
 @pytest.mark.asyncio
@@ -1122,7 +1123,9 @@ def test_grid_setpoint_nets_ev_load_before_export_above_reserve_even_below_max_s
     assert "battery exporting 1000W" in result["grid_setpoint_reason"]
 
 
-def test_grid_setpoint_combines_arbitrage_battery_with_allowed_grid_import():
+def test_grid_setpoint_arbitrage_blocks_grid_import_for_car():
+    """When car_arbitrage_power > 0 and the car is charging, the grid is not
+    pulled for the car — arbitrage battery + solar cover the car's needs."""
     engine = _engine({CONF_MAX_CAR_POWER: 11000})
 
     result = engine._calculate_grid_setpoint(
@@ -1131,17 +1134,17 @@ def test_grid_setpoint_combines_arbitrage_battery_with_allowed_grid_import():
         power_allocation={"solar_for_car": 0, "car_current_solar_usage": 0},
         data=_arbitrage_mode_data(
             car_charging_power=5000,
-            car_grid_import_allowed=True,
+            car_grid_import_allowed=False,
             arbitrage_mode_reason="Arbitrage mode active",
         ),
-        charger_limit=5700,
+        charger_limit=3000,
     )
 
-    assert result["grid_setpoint"] == 2000
+    assert result["grid_setpoint"] == 0
     assert result["grid_components"]["battery"] == 0
-    assert result["grid_components"]["car"] == 2000
+    assert result["grid_components"]["car"] == 0
     assert "battery supplying car 3000W" in result["grid_setpoint_reason"]
-    assert "car pulling 2000W" in result["grid_setpoint_reason"]
+    assert "car pulling" not in result["grid_setpoint_reason"]
 
 
 def test_grid_setpoint_does_not_export_without_scheduled_arbitrage_power():

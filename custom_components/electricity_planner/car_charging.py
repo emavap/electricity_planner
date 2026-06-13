@@ -72,17 +72,11 @@ class CarChargingDecisionCalculator:
 
         arbitrage_power = ctx.car_arbitrage_power
         if arbitrage_power > 0:
-            grid_import_allowed = bool(
-                grid_import_allowed
-                or price_analysis.get("is_low_price")
-                or context.very_low_price
-            )
+            grid_import_allowed = False
             source_parts = [f"up to {arbitrage_power}W battery arbitrage"]
             if context.has_allocated_solar:
                 source_parts.insert(0, f"{context.format_solar_watts()} solar")
-            if grid_import_allowed:
-                source_parts.append("allowed grid import")
-            reason = f"Arbitrage mode active - charging allowed with {' + '.join(source_parts)}"
+            reason = f"Arbitrage mode active - charging allowed with {' + '.join(source_parts)} (grid blocked to prevent breaker trip)"
             return {
                 "car_grid_charging": True,
                 "car_grid_import_allowed": grid_import_allowed,

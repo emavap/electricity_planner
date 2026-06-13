@@ -1,9 +1,11 @@
 # Electricity Planner – Project Summary
 
-**Version 6.7.0** | **Config Schema Version 23** | **Home Assistant 2024.4+**
+**Version 6.7.1** | **Config Schema Version 23** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
+> Release note for v6.7.1: blocks grid import during battery-arbitrage EV charging, preventing combined battery-discharge + grid draw from tripping the breaker. When the EV is charging via scheduled arbitrage discharge, the grid is no longer pulled for the car — battery and solar cover the car's needs. This is a safety fix with no config migration required.
+>
 > Release note for v6.7.0: extends EV battery-arbitrage charging to *pending* arbitrage slots, not just active export. When arbitrage slots have been scheduled but the active slot hasn't started yet, the planner now lets the EV draw from scheduled battery discharge headroom instead of waiting for the slot to flip live. This smooths EV charging during the run-up to a planned export window and improves utilization of battery capacity already earmarked for arbitrage. Gated on `car_use_battery_arbitrage` (default on).
 
 ## Key Features
