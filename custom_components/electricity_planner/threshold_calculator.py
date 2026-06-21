@@ -20,8 +20,10 @@ from homeassistant.util import dt as dt_util
 from .const import (
     AVERAGE_THRESHOLD_DEFAULT_INTERVAL_SECONDS,
     AVERAGE_THRESHOLD_HYSTERESIS_COUNT,
+    CONF_BUY_VAT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
+    DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
 )
@@ -68,6 +70,9 @@ class ThresholdCalculator:
         offset = config.get(
             CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
         )
+        buy_vat_multiplier = config.get(
+            CONF_BUY_VAT_MULTIPLIER, DEFAULT_BUY_VAT_MULTIPLIER
+        )
 
         def process_intervals(
             intervals: list[dict[str, Any]],
@@ -105,7 +110,7 @@ class ThresholdCalculator:
                     if transport_cost is None:
                         transport_cost = 0.0
 
-                    final_price = adjusted_price + transport_cost
+                    final_price = (adjusted_price + transport_cost) * buy_vat_multiplier
                     all_intervals.append((start_time_utc, final_price))
 
                 except (ValueError, TypeError, KeyError) as err:
@@ -197,7 +202,7 @@ class ThresholdCalculator:
                     )
                     if transport_cost is None:
                         transport_cost = 0.0
-                    final_price = adjusted_price + transport_cost
+                    final_price = (adjusted_price + transport_cost) * buy_vat_multiplier
 
                     past_intervals.append((start_time_utc, final_price))
                 except Exception as exc:

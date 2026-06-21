@@ -32,6 +32,7 @@ from .const import (
     CONF_ENERGY_TAX_BIJDRAGE,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
+    CONF_BUY_VAT_MULTIPLIER,
     CONF_FEEDIN_PRICE_THRESHOLD,
     CONF_GRID_POWER_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
@@ -97,6 +98,7 @@ from .const import (
     DEFAULT_ENERGY_TAX_BIJDRAGE,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
+    DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
     DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
@@ -943,6 +945,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
                     )
                 ),
+                vol.Optional(
+                    CONF_BUY_VAT_MULTIPLIER,
+                    default=self.data.get(
+                        CONF_BUY_VAT_MULTIPLIER, DEFAULT_BUY_VAT_MULTIPLIER
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1.0, max=2.0, step=0.01)
+                ),
+
                 vol.Optional(
                     CONF_USE_DYNAMIC_THRESHOLD,
                     default=self.data.get(
@@ -1940,6 +1951,15 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         min=-0.5, max=0.5, step=0.001, unit_of_measurement="€/kWh"
                     )
                 ),
+                vol.Optional(
+                    CONF_BUY_VAT_MULTIPLIER,
+                    default=self.data.get(
+                        CONF_BUY_VAT_MULTIPLIER, DEFAULT_BUY_VAT_MULTIPLIER
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1.0, max=2.0, step=0.01)
+                ),
+
                 vol.Optional(
                     CONF_USE_DYNAMIC_THRESHOLD,
                     default=self.data.get(

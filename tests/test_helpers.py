@@ -232,6 +232,24 @@ def test_documented_versions_match_integration_version():
         )
 
 
+def test_buy_vat_multiplier_default_matches_expectation():
+    """DEFAULT_BUY_VAT_MULTIPLIER should be 1.06 (6% Belgian VAT)."""
+    from custom_components.electricity_planner.const import (
+        DEFAULT_BUY_VAT_MULTIPLIER,
+    )
+
+    assert DEFAULT_BUY_VAT_MULTIPLIER == 1.06
+
+
+def test_buy_vat_multiplier_const_defined():
+    """CONF_BUY_VAT_MULTIPLIER should be defined in const.py."""
+    from custom_components.electricity_planner.const import (
+        CONF_BUY_VAT_MULTIPLIER,
+    )
+
+    assert CONF_BUY_VAT_MULTIPLIER == "buy_vat_multiplier"
+
+
 def test_info_release_notes_link_matches_existing_file():
     """Published info doc should link to the GitHub releases page."""
     repo_root = Path(__file__).parent.parent

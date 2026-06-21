@@ -817,6 +817,8 @@ views:
 
                   **Consumption offset:** {{ state_attr('sensor.electricity_planner_current_electricity_price', 'price_adjustment_offset') | float(0) | round(4) }} €/kWh
 
+                  **Buy VAT multiplier:** {{ states('sensor.electricity_planner_diagnostics_monitoring_buy_vat_multiplier') | float(0) | round(2) }}
+
                   **Feed-in multiplier:** {{ state_attr('sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price', 'feedin_multiplier') | float(0) | round(4) }}
 
                   **Feed-in offset:** {{ state_attr('sensor.electricity_planner_diagnostics_monitoring_current_feed_in_price', 'feedin_offset') | float(0) | round(4) }} €/kWh

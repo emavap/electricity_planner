@@ -50,6 +50,7 @@ from .const import (
     CONF_PHASE_NAME,
     CONF_PHASE_SOLAR_ENTITY,
     CONF_PHASES,
+    CONF_BUY_VAT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_PRICE_THRESHOLD,
@@ -63,6 +64,7 @@ from .const import (
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
     DEFAULT_MIN_SOC,
     DEFAULT_PHASE_NAMES,
+    DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_PRICE_THRESHOLD,
@@ -532,6 +534,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         offset = self.config.get(
             CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
         )
+        buy_vat_multiplier = self.config.get(
+            CONF_BUY_VAT_MULTIPLIER, DEFAULT_BUY_VAT_MULTIPLIER
+        )
 
         intervals: list[dict[str, Any]] = []
 
@@ -568,6 +573,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                         if current_transport_cost is not None
                         else 0.0
                     )
+                # Apply VAT to the buy price (not feed-in)
+                final_buy_price = (adjusted_energy_price + transport_cost) * buy_vat_multiplier
 
                 end_utc: datetime | None = None
                 end_raw = interval.get("end")
@@ -585,7 +592,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                         "end": end_utc,
                         "raw_price": raw_price,
                         "transport_cost": transport_cost,
-                        "final_price": adjusted_energy_price + transport_cost,
+                        "final_price": final_buy_price,
                     }
                 )
 
@@ -824,12 +831,16 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         if cache_key is not None and cache_key in self._purchase_timeline_cache:
             return self._purchase_timeline_cache[cache_key]
 
+        buy_vat_multiplier = self.config.get(
+            CONF_BUY_VAT_MULTIPLIER, DEFAULT_BUY_VAT_MULTIPLIER
+        )
         timeline = self._price_timeline_builder.build_purchase(
             prices_today,
             prices_tomorrow,
             transport_lookup,
             current_transport_cost,
             now,
+            buy_vat_multiplier=buy_vat_multiplier,
         )
         if cache_key is not None:
             self._purchase_timeline_cache[cache_key] = timeline
@@ -882,6 +893,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             now.replace(microsecond=0).isoformat(),
             self.config.get(CONF_PRICE_ADJUSTMENT_MULTIPLIER),
             self.config.get(CONF_PRICE_ADJUSTMENT_OFFSET),
+            self.config.get(CONF_BUY_VAT_MULTIPLIER,
+                          DEFAULT_BUY_VAT_MULTIPLIER),
         )
 
     def _feedin_timeline_cache_key(

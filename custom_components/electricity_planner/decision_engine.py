@@ -25,6 +25,7 @@ from .const import (
     CONF_EMERGENCY_SOC_THRESHOLD,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
+    CONF_BUY_VAT_MULTIPLIER,
     CONF_FEEDIN_PRICE_THRESHOLD,
     CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
@@ -61,6 +62,7 @@ from .const import (
     DEFAULT_EMERGENCY_SOC,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
+    DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
     DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
@@ -256,6 +258,7 @@ class EngineSettings:
     price_adjustment_offset: float
     feedin_adjustment_multiplier: float
     feedin_adjustment_offset: float
+    buy_vat_multiplier: float
     price_threshold: float
     very_low_price_threshold_ratio: float
     very_low_price_threshold_pct: float
@@ -405,6 +408,11 @@ class EngineSettings:
             DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
             "feedin_adjustment_offset",
         )
+        buy_vat_multiplier = extractor.get_float(
+            CONF_BUY_VAT_MULTIPLIER,
+            DEFAULT_BUY_VAT_MULTIPLIER,
+            "buy_vat_multiplier",
+        )
 
         # Extract price thresholds
         price_threshold = extractor.get_float(
@@ -518,6 +526,7 @@ class EngineSettings:
             price_adjustment_offset=price_offset,
             feedin_adjustment_multiplier=feed_multiplier,
             feedin_adjustment_offset=feed_offset,
+            buy_vat_multiplier=buy_vat_multiplier,
             price_threshold=price_threshold,
             very_low_price_threshold_ratio=very_low_threshold_ratio,
             very_low_price_threshold_pct=very_low_threshold_pct,

@@ -16,10 +16,12 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_BUY_VAT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
+    DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
@@ -192,6 +194,7 @@ class PriceTimelineBuilder:
         transport_lookup: list[dict[str, Any]] | None,
         current_transport_cost: float | None,
         now: datetime,
+        buy_vat_multiplier: float | None = None,
     ) -> list[PriceInterval]:
         """Build a chronological price timeline with fully resolved intervals."""
         coordinator = self._coordinator
@@ -201,6 +204,10 @@ class PriceTimelineBuilder:
         offset = coordinator.config.get(
             CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
         )
+        if buy_vat_multiplier is None:
+            buy_vat_multiplier = coordinator.config.get(
+                CONF_BUY_VAT_MULTIPLIER, DEFAULT_BUY_VAT_MULTIPLIER
+            )
 
         def _purchase_price(
             interval: dict[str, Any],
@@ -217,7 +224,7 @@ class PriceTimelineBuilder:
                     if current_transport_cost is not None
                     else 0.0
                 )
-            return adjusted_price + transport_cost
+            return (adjusted_price + transport_cost) * buy_vat_multiplier
 
         return self.parse_intervals(
             prices_today,

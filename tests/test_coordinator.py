@@ -1018,7 +1018,7 @@ def _freeze_time(monkeypatch, base_time):
                 {"start": "2025-10-07T08:00:00+00:00", "cost": 0.02},
                 {"start": "2025-10-07T09:00:00+00:00", "cost": 0.03},
             ],
-            0.135,
+            0.1431,  # (0.12+0.15)/2 * 1.06 VAT
         ),
         (
             1.1,
@@ -1028,7 +1028,7 @@ def _freeze_time(monkeypatch, base_time):
                 {"start": "2025-10-07T08:00:00+00:00", "cost": 0.02},
                 {"start": "2025-10-07T09:00:00+00:00", "cost": 0.03},
             ],
-            0.196,
+            0.2078,  # ((0.16+0.02)+(0.182+0.03))/2 * 1.06 VAT = 0.20776
         ),
     ],
 )
@@ -1085,8 +1085,8 @@ def test_calculate_average_threshold_skips_past(fake_hass, monkeypatch):
     }
 
     result = coordinator._calculate_average_threshold(prices_today, None, None)
-    # Only the future interval remains: (100/1000) = 0.1
-    assert result == pytest.approx(0.1, rel=1e-6)
+    # Only the future interval remains: (100/1000) * 1.06 VAT = 0.106
+    assert result == pytest.approx(0.106, rel=1e-6)
 
 
 def test_calculate_average_threshold_backfills_with_past(fake_hass, monkeypatch):
@@ -1109,8 +1109,8 @@ def test_calculate_average_threshold_backfills_with_past(fake_hass, monkeypatch)
     prices_today = {"BE": intervals}
 
     result = coordinator._calculate_average_threshold(prices_today, None, None)
-    # Average of 95 * 0.100 + 1 * 0.200 over 96 slots ≈ 0.10104 -> rounded to 0.101
-    assert result == pytest.approx(0.101, rel=1e-6)
+    # Average of (95*0.1+0.2)/96 * 1.06 VAT ≈ 0.1071
+    assert result == pytest.approx(0.1071, rel=1e-6)
 
 
 def test_calculate_average_threshold_insufficient_past_uses_future_only(
@@ -1135,8 +1135,8 @@ def test_calculate_average_threshold_insufficient_past_uses_future_only(
     prices_today = {"BE": intervals}
 
     result = coordinator._calculate_average_threshold(prices_today, None, None)
-    # Future-only average: (0.100 + 0.130) / 2 = 0.115 -> rounded to 0.115
-    assert result == pytest.approx(0.115, rel=1e-6)
+    # Future-only average: (0.100 + 0.130) / 2 * 1.06 VAT ≈ 0.1219
+    assert result == pytest.approx(0.1219, rel=1e-6)
 
 
 @pytest.mark.parametrize("use_average", [True, False])
@@ -2489,8 +2489,8 @@ def test_negative_buy_plan_calculates_required_energy_and_duration(
     assert plan["configured_import_cap_w"] == 6000
     assert plan["selected_slots_count"] == 8
     assert plan["slots_cover_full_charge"] is True
-    assert plan["buy_price_threshold"] == pytest.approx(-0.10, rel=1e-6)
-    assert plan["current_slot_price"] == pytest.approx(-0.10, rel=1e-6)
+    assert plan["buy_price_threshold"] == pytest.approx(-0.106, rel=1e-6)
+    assert plan["current_slot_price"] == pytest.approx(-0.106, rel=1e-6)
     assert plan["active"] is True
     assert plan["solar_curtail_active"] is True
     assert plan["import_power"] == 6000
@@ -2543,7 +2543,7 @@ def test_negative_buy_plan_buys_when_battery_above_soc_ceiling(fake_hass, monkey
     assert plan["required_energy_kwh"] == pytest.approx(0.5, rel=1e-6)
     assert plan["active"] is True
     assert plan["solar_curtail_active"] is True
-    assert plan["current_slot_price"] == pytest.approx(-0.10, rel=1e-6)
+    assert plan["current_slot_price"] == pytest.approx(-0.106, rel=1e-6)
     assert plan["import_power"] == 6000
     assert "SOC ceiling" not in plan["reason"]
 
@@ -2635,10 +2635,10 @@ def test_forecast_summary_uses_price_timeline(fake_hass, monkeypatch):
     )
 
     assert summary["available"] is True
-    assert summary["cheapest_interval_price"] == pytest.approx(0.04, rel=1e-6)
+    assert summary["cheapest_interval_price"] == pytest.approx(0.0424, rel=1e-6)
     parsed_cheapest_start = dt_util.parse_datetime(summary["cheapest_interval_start"])
     assert dt_util.as_utc(parsed_cheapest_start) == base_time + timedelta(hours=2)
-    assert summary["best_window_average_price"] == pytest.approx(0.04, rel=1e-6)
+    assert summary["best_window_average_price"] == pytest.approx(0.0424, rel=1e-6)
     parsed_best_start = dt_util.parse_datetime(summary["best_window_start"])
     assert dt_util.as_utc(parsed_best_start) == base_time + timedelta(hours=2)
 
@@ -2685,8 +2685,8 @@ def test_forecast_summary_handles_negative_prices(fake_hass, monkeypatch):
     expected_start = base_time + timedelta(minutes=60)
 
     assert summary["available"] is True
-    assert summary["cheapest_interval_price"] == pytest.approx(-0.005, rel=1e-6)
-    assert summary["best_window_average_price"] == pytest.approx(-0.005, rel=1e-6)
+    assert summary["cheapest_interval_price"] == pytest.approx(-0.0053, rel=1e-6)
+    assert summary["best_window_average_price"] == pytest.approx(-0.0053, rel=1e-6)
     assert summary["best_window_average_price"] <= 0
     parsed_best_start = dt_util.parse_datetime(summary["best_window_start"])
     assert dt_util.as_utc(parsed_best_start) == expected_start
@@ -2737,7 +2737,7 @@ def test_missing_price_data_marks_forecast_stale(fake_hass, monkeypatch):
     )
     assert summary["available"] is True
     assert summary.get("stale") is True
-    assert summary["cheapest_interval_price"] == pytest.approx(0.05, rel=1e-6)
+    assert summary["cheapest_interval_price"] == pytest.approx(0.053, rel=1e-6)
     assert "timeline_generated_at" in summary
 
 
@@ -3107,10 +3107,10 @@ def test_build_price_analysis_overrides_uses_interval_specific_transport(
     )
 
     assert overrides is not None
-    assert overrides["current_price"] == pytest.approx(0.1 + day_transport, rel=1e-6)
-    assert overrides["next_price"] == pytest.approx(0.1 + night_transport, rel=1e-6)
-    assert overrides["highest_price"] == pytest.approx(0.15 + night_transport, rel=1e-6)
-    assert overrides["lowest_price"] == pytest.approx(0.05 + day_transport, rel=1e-6)
+    assert overrides["current_price"] == pytest.approx(0.24154326, rel=1e-6)
+    assert overrides["next_price"] == pytest.approx(0.23083726, rel=1e-6)
+    assert overrides["highest_price"] == pytest.approx(0.28383726, rel=1e-6)
+    assert overrides["lowest_price"] == pytest.approx(0.18854326, rel=1e-6)
     assert overrides["transport_cost"] == pytest.approx(day_transport, rel=1e-6)
 
 
@@ -3402,3 +3402,74 @@ async def test_solar_forecast_cache_persists_through_midnight(fake_hass, monkeyp
         "sensor.energy_production_tomorrow"
     )
     assert result3 == pytest.approx(20.0)
+
+
+# ---------------------------------------------------------------------------
+# Buy VAT Multiplier Tests
+# ---------------------------------------------------------------------------
+
+
+def test_buy_vat_multiplier_multiplies_buy_price(fake_hass, monkeypatch):
+    """buy_vat_multiplier should multiply only the buy price, not raw data."""
+    base_time = datetime(2025, 10, 14, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config[CONF_BUY_VAT_MULTIPLIER] = 1.06
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Single future interval at 100 EUR/MWh → 0.1 EUR/kWh raw
+    prices_today = {
+        "BE": [
+            _make_price_interval(base_time + timedelta(minutes=15), 100.0),
+        ]
+    }
+
+    result = coordinator._calculate_average_threshold(prices_today, None, None)
+    # (0.1 + 0) * 1.06 = 0.106
+    assert result == pytest.approx(0.106, rel=1e-6)
+
+
+def test_buy_vat_multiplier_default_is_1_06(fake_hass, monkeypatch):
+    """Default buy_vat_multiplier should be 1.06."""
+    config = _base_config()
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    vat = coordinator.config.get(
+        CONF_BUY_VAT_MULTIPLIER, DEFAULT_BUY_VAT_MULTIPLIER
+    )
+    assert vat == 1.06
+
+
+def test_buy_vat_multiplier_does_not_affect_feedin(monkeypatch):
+    """Feed-in prices should NOT be multiplied by buy_vat_multiplier."""
+    # Ensure the price_timeline builder's build_feedin does NOT reference
+    # buy_vat_multiplier at all.
+    from custom_components.electricity_planner.price_timeline import (
+        PriceTimelineBuilder,
+    )
+
+    # Check the build_feedin source doesn't contain buy_vat_multiplier
+    import inspect
+    source = inspect.getsource(PriceTimelineBuilder.build_feedin)
+    assert "buy_vat" not in source.lower()
+
+
+def test_buy_vat_multiplier_custom_value(fake_hass, monkeypatch):
+    """A custom buy_vat_multiplier should be applied correctly."""
+    base_time = datetime(2025, 10, 14, 6, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config[CONF_BUY_VAT_MULTIPLIER] = 1.21  # 21% VAT
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    prices_today = {
+        "BE": [
+            _make_price_interval(base_time + timedelta(minutes=15), 200.0),
+        ]
+    }
+
+    result = coordinator._calculate_average_threshold(prices_today, None, None)
+    # (0.2 + 0) * 1.21 = 0.242
+    assert result == pytest.approx(0.242, rel=1e-6)

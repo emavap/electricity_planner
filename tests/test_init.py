@@ -25,6 +25,7 @@ from custom_components.electricity_planner.const import (
     ATTR_TARGET,
     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
     CONF_BATTERY_CAPACITIES,
+    CONF_BUY_VAT_MULTIPLIER,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_ENERGY_COST_GSC,
     CONF_ENERGY_COST_WKK,
@@ -45,6 +46,7 @@ from custom_components.electricity_planner.const import (
     CONF_TRANSPORT_COST_ENTITY,
     CONF_TRANSPORT_COST_NIGHT,
     DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
+    DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_ENERGY_COST_GSC,
     DEFAULT_ENERGY_COST_WKK,
     DEFAULT_ENERGY_TAX_ACCIJNS,
@@ -495,7 +497,7 @@ async def test_async_migrate_entry_derives_sunny_threshold_from_option_capacitie
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 23
+    assert entry.version == 24
     assert entry.data[CONF_SUNNY_FORECAST_THRESHOLD_KWH] == pytest.approx(7.0)
     assert entry.data[CONF_MAX_SOC_THRESHOLD] == 90
     assert entry.data[CONF_MAX_SOC_THRESHOLD_SUNNY] == 50
@@ -525,7 +527,7 @@ async def test_async_migrate_entry_preserves_legacy_soc_defaults_for_sparse_v14_
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 23
+    assert entry.version == 24
     assert entry.data[CONF_MAX_SOC_THRESHOLD] == 90
     assert entry.data[CONF_MAX_SOC_THRESHOLD_SUNNY] == 50
 
@@ -554,7 +556,7 @@ async def test_async_migrate_entry_uses_legacy_sunny_default_for_pre_v12_entries
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 23
+    assert entry.version == 24
     assert entry.data[CONF_MAX_SOC_THRESHOLD_SUNNY] == 50
 
 
@@ -585,7 +587,7 @@ async def test_async_migrate_entry_replaces_legacy_transport_cost_sensor():
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 23
+    assert entry.version == 24
     assert CONF_TRANSPORT_COST_ENTITY not in entry.data
     assert entry.data[CONF_TRANSPORT_COST_DAY] == pytest.approx(
         DEFAULT_TRANSPORT_COST_DAY
@@ -629,7 +631,7 @@ async def test_async_migrate_entry_adds_inverter_derating_defaults_for_v16():
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 23
+    assert entry.version == 24
     assert entry.data[CONF_MAX_INVERTER_POWER] == DEFAULT_MAX_INVERTER_POWER
     assert entry.data[CONF_INVERTER_EXPORT_LIMIT] == DEFAULT_INVERTER_EXPORT_LIMIT
     assert entry.data[CONF_INVERTER_EXPORT_DEADBAND] == DEFAULT_INVERTER_EXPORT_DEADBAND
@@ -669,7 +671,7 @@ async def test_async_migrate_entry_adds_arbitrage_mode_deadline_hour_for_v19():
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 23
+    assert entry.version == 24
     assert (
         entry.data[CONF_ARBITRAGE_MODE_DEADLINE_HOUR]
         == DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR
@@ -716,5 +718,41 @@ async def test_async_migrate_entry_normalizes_arbitrage_mode_deadline_hour_for_v
 
     await async_migrate_entry(hass, entry)
 
-    assert entry.version == 23
+    assert entry.version == 24
     assert entry.data[CONF_ARBITRAGE_MODE_DEADLINE_HOUR] == expected_value
+
+
+@pytest.mark.asyncio
+async def test_async_migrate_entry_adds_buy_vat_multiplier_v24(hass):
+    """v23 → v24 migration should add buy_vat_multiplier with default 1.06."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=23,
+        data={
+            CONF_MIN_SOC_THRESHOLD: 30,
+            CONF_MAX_SOC_THRESHOLD: 80,
+        },
+        options={CONF_MIN_SOC_THRESHOLD: 30},
+    )
+
+    updated_data = None
+    updated_options = None
+
+    def _update_entry(e, *, data, options, version):
+        nonlocal updated_data, updated_options
+        e.data = data
+        e.options = options
+        e.version = version
+        updated_data = data
+        updated_options = options
+
+    hass.config_entries.async_update_entry = _update_entry
+
+    await async_migrate_entry(hass, entry)
+
+    assert entry.version == 24
+    assert entry.data[CONF_BUY_VAT_MULTIPLIER] == DEFAULT_BUY_VAT_MULTIPLIER
+    assert entry.options[CONF_BUY_VAT_MULTIPLIER] == DEFAULT_BUY_VAT_MULTIPLIER
+    # Existing values should NOT be modified by the VAT migration
+    assert entry.data[CONF_MIN_SOC_THRESHOLD] == 30
+    assert entry.data[CONF_MAX_SOC_THRESHOLD] == 80

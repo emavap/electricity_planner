@@ -88,6 +88,7 @@ CONF_PRICE_ADJUSTMENT_MULTIPLIER = "price_adjustment_multiplier"
 CONF_PRICE_ADJUSTMENT_OFFSET = "price_adjustment_offset"
 CONF_FEEDIN_ADJUSTMENT_MULTIPLIER = "feedin_adjustment_multiplier"
 CONF_FEEDIN_ADJUSTMENT_OFFSET = "feedin_adjustment_offset"
+CONF_BUY_VAT_MULTIPLIER = "buy_vat_multiplier"
 CONF_SOC_PRICE_MULTIPLIER_MAX = "soc_price_multiplier_max"
 CONF_SOC_BUFFER_TARGET = "soc_buffer_target"
 
@@ -106,6 +107,7 @@ DEFAULT_NEGATIVE_BUY_THRESHOLD = (
 DEFAULT_PRICE_THRESHOLD = 0.15
 DEFAULT_EMERGENCY_SOC = 15
 DEFAULT_VERY_LOW_PRICE_THRESHOLD = 30  # Bottom 30% of daily range
+DEFAULT_BUY_VAT_MULTIPLIER = 1.06  # 6% Belgian VAT on electricity buy price
 DEFAULT_SIGNIFICANT_SOLAR_THRESHOLD = 1000  # 1kW
 DEFAULT_FEEDIN_PRICE_THRESHOLD = 0.05  # €0.05/kWh - export only above this price
 DEFAULT_MAX_SOC_SUNNY = 35  # Lower grid charge target when sunny day expected
@@ -272,4 +274,4 @@ MAX_POWER_VALIDATION_W = (
 )
 MAX_CAR_POWER_VALIDATION_W = 22000  # Maximum reasonable car charging power
 
-INTEGRATION_VERSION = "6.7.2"
+INTEGRATION_VERSION = "6.7.4"

@@ -28,6 +28,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_BASE_GRID_SETPOINT,
+    CONF_BUY_VAT_MULTIPLIER,
     CONF_EMERGENCY_SOC_THRESHOLD,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
@@ -45,6 +46,7 @@ from .const import (
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
     CONF_VERY_LOW_PRICE_THRESHOLD,
     DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_EMERGENCY_SOC,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
@@ -122,6 +124,7 @@ async def async_setup_entry(
         BuyPriceMarginSensor(coordinator, entry, "_diagnostic"),
         FeedinPriceMarginSensor(coordinator, entry, "_diagnostic"),
         FeedinPriceSensor(coordinator, entry, "_diagnostic"),
+        BuyVatMultiplierSensor(coordinator, entry, "_diagnostic"),
         VeryLowPriceThresholdSensor(coordinator, entry, "_diagnostic"),
         SignificantSolarThresholdSensor(coordinator, entry, "_diagnostic"),
         EmergencySOCThresholdSensor(coordinator, entry, "_diagnostic"),
@@ -1353,6 +1356,44 @@ class FeedinPriceSensor(ElectricityPlannerSensorBase):
             "feedin_enabled": self.coordinator.data.get("feedin_solar", False),
             "feedin_reason": self.coordinator.data.get("feedin_solar_reason", ""),
             "remaining_solar": power_allocation.get("remaining_solar"),
+        }
+
+
+class BuyVatMultiplierSensor(ElectricityPlannerSensorBase):
+    """Sensor exposing the configured buy-side VAT multiplier."""
+
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        device_suffix: str = "",
+    ) -> None:
+        super().__init__(coordinator, entry, device_suffix)
+        self._attr_name = "Buy VAT Multiplier"
+        self._attr_unique_id = f"{entry.entry_id}_buy_vat_multiplier"
+        self._attr_icon = "mdi:percent"
+        self._attr_native_unit_of_measurement = None
+        self._attr_device_class = None
+        self._attr_state_class = None
+        self._attr_suggested_display_precision = 2
+
+    @property
+    def native_value(self) -> float:
+        """Return the configured buy-side VAT multiplier."""
+        return self.coordinator.config.get(
+            CONF_BUY_VAT_MULTIPLIER, DEFAULT_BUY_VAT_MULTIPLIER
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return VAT-related diagnostic information."""
+        multiplier = self.native_value
+        return {
+            "description": (
+                "VAT multiplier applied to the buy/import price only "
+                "(feed-in/sell prices are not multiplied by VAT)"
+            ),
+            "vat_percentage": round((multiplier - 1.0) * 100, 1),
         }
 
 

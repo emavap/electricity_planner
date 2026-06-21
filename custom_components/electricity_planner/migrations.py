@@ -69,6 +69,7 @@ from .const import (
     CONF_ENERGY_TAX_BIJDRAGE,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
+    CONF_BUY_VAT_MULTIPLIER,
     CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
     CONF_INVERTER_EXPORT_DEADBAND,
@@ -100,6 +101,7 @@ from .const import (
     DEFAULT_ENERGY_TAX_BIJDRAGE,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
+    DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
     DEFAULT_INVERTER_EXPORT_DEADBAND,
@@ -126,7 +128,7 @@ _LEGACY_DEFAULT_MAX_SOC = 90
 _LEGACY_DEFAULT_MAX_SOC_SUNNY = 50
 
 # Current config version
-CURRENT_VERSION = 23
+CURRENT_VERSION = 24
 
 
 def _validate_numeric_config(
@@ -712,5 +714,24 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
         _LOGGER.info("Migration to version 23 complete")
+
+    if entry.version == 23:
+        # v23 → v24: add buy_vat_multiplier to options and data with default 1.06
+        new_data = {**entry.data}
+        new_options = {**entry.options}
+
+        if CONF_BUY_VAT_MULTIPLIER not in new_data:
+            new_data[CONF_BUY_VAT_MULTIPLIER] = DEFAULT_BUY_VAT_MULTIPLIER
+        if CONF_BUY_VAT_MULTIPLIER not in new_options:
+            new_options[CONF_BUY_VAT_MULTIPLIER] = DEFAULT_BUY_VAT_MULTIPLIER
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            options=new_options,
+            version=24,
+        )
+
+        _LOGGER.info("Migration to version 24 complete")
 
     return True
