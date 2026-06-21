@@ -26,6 +26,7 @@ from .const import (
     CONF_BATTERY_CAPACITIES,
     CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_BATTERY_SOC_ENTITIES,
+    CONF_BUY_VAT_MULTIPLIER,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     CONF_CURRENT_PRICE_ENTITY,
@@ -50,7 +51,6 @@ from .const import (
     CONF_PHASE_NAME,
     CONF_PHASE_SOLAR_ENTITY,
     CONF_PHASES,
-    CONF_BUY_VAT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_MULTIPLIER,
     CONF_PRICE_ADJUSTMENT_OFFSET,
     CONF_PRICE_THRESHOLD,
@@ -59,12 +59,12 @@ from .const import (
     CONF_TRANSPORT_COST_ENTITY,
     CONF_USE_AVERAGE_THRESHOLD,
     DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_MAX_SOC,
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
     DEFAULT_MIN_SOC,
     DEFAULT_PHASE_NAMES,
-    DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER,
     DEFAULT_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_PRICE_THRESHOLD,
@@ -574,7 +574,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                         else 0.0
                     )
                 # Apply VAT to the buy price (not feed-in)
-                final_buy_price = (adjusted_energy_price + transport_cost) * buy_vat_multiplier
+                final_buy_price = (
+                    adjusted_energy_price + transport_cost
+                ) * buy_vat_multiplier
 
                 end_utc: datetime | None = None
                 end_raw = interval.get("end")
@@ -893,8 +895,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             now.replace(microsecond=0).isoformat(),
             self.config.get(CONF_PRICE_ADJUSTMENT_MULTIPLIER),
             self.config.get(CONF_PRICE_ADJUSTMENT_OFFSET),
-            self.config.get(CONF_BUY_VAT_MULTIPLIER,
-                          DEFAULT_BUY_VAT_MULTIPLIER),
+            self.config.get(CONF_BUY_VAT_MULTIPLIER, DEFAULT_BUY_VAT_MULTIPLIER),
         )
 
     def _feedin_timeline_cache_key(

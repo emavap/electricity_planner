@@ -39,6 +39,7 @@ from custom_components.electricity_planner.const import (
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SOLAR,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
+    CONF_MIN_SOC_THRESHOLD,
     CONF_NEGATIVE_BUY_THRESHOLD,
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
@@ -725,6 +726,8 @@ async def test_async_migrate_entry_normalizes_arbitrage_mode_deadline_hour_for_v
 @pytest.mark.asyncio
 async def test_async_migrate_entry_adds_buy_vat_multiplier_v24(hass):
     """v23 → v24 migration should add buy_vat_multiplier with default 1.06."""
+    import builtins
+
     entry = MockConfigEntry(
         domain=DOMAIN,
         version=23,
@@ -735,18 +738,17 @@ async def test_async_migrate_entry_adds_buy_vat_multiplier_v24(hass):
         options={CONF_MIN_SOC_THRESHOLD: 30},
     )
 
-    updated_data = None
-    updated_options = None
+    def _update_entry(e, *, data=None, options=None, version=None):
+        if data is not None:
+            builtins.object.__setattr__(e, "data", data)
+        if options is not None:
+            builtins.object.__setattr__(e, "options", options)
+        if version is not None:
+            builtins.object.__setattr__(e, "version", version)
 
-    def _update_entry(e, *, data, options, version):
-        nonlocal updated_data, updated_options
-        e.data = data
-        e.options = options
-        e.version = version
-        updated_data = data
-        updated_options = options
-
-    hass.config_entries.async_update_entry = _update_entry
+    hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_update_entry=_update_entry),
+    )
 
     await async_migrate_entry(hass, entry)
 

@@ -20,6 +20,7 @@ from .const import (
     CONF_BATTERY_CAPACITIES,
     CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_BATTERY_SOC_ENTITIES,
+    CONF_BUY_VAT_MULTIPLIER,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     CONF_CAR_USE_BATTERY_ARBITRAGE,
@@ -32,7 +33,6 @@ from .const import (
     CONF_ENERGY_TAX_BIJDRAGE,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
-    CONF_BUY_VAT_MULTIPLIER,
     CONF_FEEDIN_PRICE_THRESHOLD,
     CONF_GRID_POWER_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
@@ -88,6 +88,7 @@ from .const import (
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
     DEFAULT_BASE_GRID_SETPOINT,
+    DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     DEFAULT_CAR_USE_BATTERY_ARBITRAGE,
     DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
@@ -98,7 +99,6 @@ from .const import (
     DEFAULT_ENERGY_TAX_BIJDRAGE,
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
-    DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
     DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
@@ -953,7 +953,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1.0, max=2.0, step=0.01)
                 ),
-
                 vol.Optional(
                     CONF_USE_DYNAMIC_THRESHOLD,
                     default=self.data.get(
@@ -1959,7 +1958,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1.0, max=2.0, step=0.01)
                 ),
-
                 vol.Optional(
                     CONF_USE_DYNAMIC_THRESHOLD,
                     default=self.data.get(

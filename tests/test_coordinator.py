@@ -26,6 +26,7 @@ from custom_components.electricity_planner.const import (
     CONF_BATTERY_CAPACITIES,
     CONF_BATTERY_PHASE_ASSIGNMENTS,
     CONF_BATTERY_SOC_ENTITIES,
+    CONF_BUY_VAT_MULTIPLIER,
     CONF_CAR_CHARGING_POWER_ENTITY,
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     CONF_CURRENT_PRICE_ENTITY,
@@ -55,6 +56,7 @@ from custom_components.electricity_planner.const import (
     CONF_TRANSPORT_COST_ENTITY,
     CONF_TRANSPORT_COST_NIGHT,
     CONF_USE_AVERAGE_THRESHOLD,
+    DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_ENERGY_COST_GSC,
     DEFAULT_ENERGY_COST_WKK,
     DEFAULT_ENERGY_TAX_ACCIJNS,
@@ -3098,14 +3100,6 @@ def test_build_price_analysis_overrides_uses_interval_specific_transport(
         + DEFAULT_ENERGY_COST_GSC
         + DEFAULT_ENERGY_COST_WKK
     )
-    night_transport = (
-        DEFAULT_TRANSPORT_COST_NIGHT
-        + DEFAULT_ENERGY_TAX_ACCIJNS
-        + DEFAULT_ENERGY_TAX_BIJDRAGE
-        + DEFAULT_ENERGY_COST_GSC
-        + DEFAULT_ENERGY_COST_WKK
-    )
-
     assert overrides is not None
     assert overrides["current_price"] == pytest.approx(0.24154326, rel=1e-6)
     assert overrides["next_price"] == pytest.approx(0.23083726, rel=1e-6)
@@ -3435,9 +3429,7 @@ def test_buy_vat_multiplier_default_is_1_06(fake_hass, monkeypatch):
     config = _base_config()
     coordinator = _create_coordinator(fake_hass, config, monkeypatch)
 
-    vat = coordinator.config.get(
-        CONF_BUY_VAT_MULTIPLIER, DEFAULT_BUY_VAT_MULTIPLIER
-    )
+    vat = coordinator.config.get(CONF_BUY_VAT_MULTIPLIER, DEFAULT_BUY_VAT_MULTIPLIER)
     assert vat == 1.06
 
 
@@ -3445,12 +3437,13 @@ def test_buy_vat_multiplier_does_not_affect_feedin(monkeypatch):
     """Feed-in prices should NOT be multiplied by buy_vat_multiplier."""
     # Ensure the price_timeline builder's build_feedin does NOT reference
     # buy_vat_multiplier at all.
+    # Check the build_feedin source doesn't contain buy_vat_multiplier
+    import inspect
+
     from custom_components.electricity_planner.price_timeline import (
         PriceTimelineBuilder,
     )
 
-    # Check the build_feedin source doesn't contain buy_vat_multiplier
-    import inspect
     source = inspect.getsource(PriceTimelineBuilder.build_feedin)
     assert "buy_vat" not in source.lower()
 
