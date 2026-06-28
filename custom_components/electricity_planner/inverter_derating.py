@@ -45,8 +45,10 @@ def _safe_optional_datetime(value: Any) -> datetime | None:
 class InverterDeratingCalculator:
     """Compute the recommended inverter derating target in Watts.
 
-    Uses the planner convention for grid power:
-    positive = import, negative = export.
+    The grid power sensor convention is:
+    negative = import, positive = export.
+    The calculator inverts this internally to use the planner convention
+    (positive = import, negative = export) for its logic.
     """
 
     def __init__(self, settings: "EngineSettings") -> None:
@@ -112,7 +114,13 @@ class InverterDeratingCalculator:
 
         grid_power_raw = data.get("grid_power")
         grid_power_w = _safe_optional_float(grid_power_raw)
+        # Invert sign: sensor.grid uses negative=import, positive=export.
+        # The calculator uses the opposite convention (positive=import).
+        if grid_power_w is not None:
+            grid_power_w = -grid_power_w
         previous_grid_power_w = _safe_optional_float(data.get("previous_grid_power"))
+        if previous_grid_power_w is not None:
+            previous_grid_power_w = -previous_grid_power_w
 
         # Preferred control path: use the current operating point and hold a
         # simple deadband around the configured export target.

@@ -1,6 +1,7 @@
 """Tests for grid setpoint, charger limits, feed-in, and phase handling."""
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -11,6 +12,8 @@ from custom_components.electricity_planner.const import (
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_BASE_GRID_SETPOINT,
     CONF_BATTERY_CAPACITIES,
+    CONF_BUY_VAT_MULTIPLIER,
+    CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     CONF_CAR_USE_BATTERY_ARBITRAGE,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
@@ -2076,7 +2079,7 @@ def test_inverter_derating_gradually_reopens_when_export_below_band():
         {
             "feedin_solar": False,
             "solar_production": 2500,
-            "grid_power": -20,
+            "grid_power": 20,
             "previous_inverter_derating_target": 1800,
             "battery_analysis": {"average_soc": 98},
         }
@@ -2101,7 +2104,7 @@ def test_inverter_derating_holds_previous_target_inside_deadband():
         {
             "feedin_solar": False,
             "solar_production": 2100,
-            "grid_power": -80,
+            "grid_power": 80,
             "previous_inverter_derating_target": 1800,
             "battery_analysis": {"average_soc": 98},
         }
@@ -2128,7 +2131,7 @@ def test_inverter_derating_does_not_reopen_until_pv_reaches_current_cap():
         {
             "feedin_solar": False,
             "solar_production": 1500,
-            "grid_power": -20,
+            "grid_power": 20,
             "previous_inverter_derating_target": 1800,
             "battery_analysis": {"average_soc": 98},
         }
@@ -2154,7 +2157,7 @@ def test_inverter_derating_relaxes_upward_one_step_when_export_stays_low():
         {
             "feedin_solar": False,
             "solar_production": 1500,
-            "grid_power": -20,
+            "grid_power": 20,
             "previous_inverter_derating_target": 1800,
             "previous_inverter_derating_unreached_since": now - timedelta(minutes=6),
             "inverter_derating_evaluated_at": now,
@@ -2184,7 +2187,7 @@ def test_inverter_derating_recalculates_immediately_when_house_load_exceeds_pv()
             "feedin_solar": False,
             "solar_production": 1500,
             "house_consumption": 2300,
-            "grid_power": 800,
+            "grid_power": -800,
             "previous_inverter_derating_target": 1800,
             "battery_analysis": {"average_soc": 98},
         }
@@ -2213,7 +2216,7 @@ def test_inverter_derating_recalculates_immediately_when_site_is_importing():
         {
             "feedin_solar": False,
             "solar_production": 711,
-            "grid_power": 3049,
+            "grid_power": -3049,
             "previous_inverter_derating_target": 711,
             "battery_analysis": {"average_soc": 98},
         }
@@ -2244,7 +2247,7 @@ def test_inverter_derating_respects_configured_unused_release_minutes():
         {
             "feedin_solar": False,
             "solar_production": 1500,
-            "grid_power": -20,
+            "grid_power": 20,
             "previous_inverter_derating_target": 1800,
             "previous_inverter_derating_unreached_since": now - timedelta(minutes=3),
             "inverter_derating_evaluated_at": now,
@@ -2271,7 +2274,7 @@ def test_inverter_derating_relaxation_timer_survives_band_fluctuation():
         {
             "feedin_solar": False,
             "solar_production": 1500,
-            "grid_power": -80,
+            "grid_power": 80,
             "previous_inverter_derating_target": 1800,
             "previous_inverter_derating_unreached_since": now - timedelta(minutes=20),
             "inverter_derating_evaluated_at": now,
@@ -2302,7 +2305,7 @@ def test_inverter_derating_averages_export_to_avoid_spike_resets():
         {
             "feedin_solar": False,
             "solar_production": 1500,
-            "grid_power": -140,
+            "grid_power": 140,
             "previous_grid_power": -20,
             "previous_inverter_derating_target": 1800,
             "previous_inverter_derating_unreached_since": now - timedelta(minutes=6),
@@ -2334,7 +2337,7 @@ def test_inverter_derating_reduces_when_export_above_band():
         {
             "feedin_solar": False,
             "solar_production": 2200,
-            "grid_power": -240,
+            "grid_power": 240,
             "battery_analysis": {"average_soc": 98},
         }
     )
@@ -2358,7 +2361,7 @@ def test_inverter_derating_raises_alarm_when_low_soc_still_requires_derating():
         {
             "feedin_solar": False,
             "solar_production": 2200,
-            "grid_power": -260,
+            "grid_power": 260,
             "battery_analysis": {"average_soc": 40},
         }
     )
@@ -2382,7 +2385,7 @@ def test_inverter_derating_low_soc_bypass_does_not_ignore_current_overexport():
         {
             "feedin_solar": False,
             "solar_production": 1500,
-            "grid_power": -140,
+            "grid_power": 140,
             "previous_grid_power": -20,
             "battery_analysis": {"average_soc": 40},
         }
@@ -2408,7 +2411,7 @@ def test_inverter_derating_bypasses_curtailment_for_low_soc_inside_tolerance():
         {
             "feedin_solar": False,
             "solar_production": 2200,
-            "grid_power": -100,
+            "grid_power": 100,
             "battery_analysis": {"average_soc": 40},
         }
     )
@@ -3727,8 +3730,8 @@ def test_inverter_derating_holds_during_negative_buy_when_importing():
             "feedin_solar": False,
             "solar_production": 1500,
             "house_consumption": 600,
-            "grid_power": 4000,  # importing - no export at all
-            "previous_grid_power": 4000,
+            "grid_power": -4000,  # importing - no export at all
+            "previous_grid_power": -4000,
             "battery_analysis": {"average_soc": 60},
         }
     )
@@ -3931,3 +3934,56 @@ def test_car_arbitrage_pending_respects_car_use_battery_arbitrage_setting():
     )
     assert ctx.arbitrage_pending_power == 3200
     assert ctx.car_arbitrage_power == 0
+
+
+# ---------------------------------------------------------------------------
+# Buy VAT Multiplier Tests
+# ---------------------------------------------------------------------------
+
+
+def test_engine_settings_includes_buy_vat_multiplier():
+    """EngineSettings should include buy_vat_multiplier from config."""
+    from custom_components.electricity_planner.decision_engine import EngineSettings
+    from custom_components.electricity_planner.helpers import DataValidator
+
+    config = {
+        CONF_BUY_VAT_MULTIPLIER: 1.06,
+        CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.0,
+        CONF_PRICE_ADJUSTMENT_OFFSET: 0.0,
+        CONF_FEEDIN_ADJUSTMENT_MULTIPLIER: 1.0,
+        CONF_FEEDIN_ADJUSTMENT_OFFSET: 0.0,
+        CONF_PRICE_THRESHOLD: 0.15,
+        CONF_BATTERY_CAPACITIES: {},
+        CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER: 1.0,
+        CONF_CAR_USE_BATTERY_ARBITRAGE: False,
+        CONF_BASE_GRID_SETPOINT: 0,
+        CONF_MAX_GRID_POWER: 6000,
+    }
+    validator = DataValidator()
+    settings = EngineSettings.from_config(config, validator)
+
+    assert settings.buy_vat_multiplier == 1.06
+
+
+def test_engine_settings_buy_vat_default():
+    """EngineSettings should default buy_vat_multiplier to 1.06."""
+    from custom_components.electricity_planner.decision_engine import EngineSettings
+    from custom_components.electricity_planner.helpers import DataValidator
+
+    config: dict[str, Any] = {
+        CONF_PRICE_ADJUSTMENT_MULTIPLIER: 1.0,
+        CONF_PRICE_ADJUSTMENT_OFFSET: 0.0,
+        CONF_FEEDIN_ADJUSTMENT_MULTIPLIER: 1.0,
+        CONF_FEEDIN_ADJUSTMENT_OFFSET: 0.0,
+        CONF_PRICE_THRESHOLD: 0.15,
+        CONF_BATTERY_CAPACITIES: {},
+        CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER: 1.0,
+        CONF_CAR_USE_BATTERY_ARBITRAGE: False,
+        CONF_BASE_GRID_SETPOINT: 0,
+        CONF_MAX_GRID_POWER: 6000,
+    }
+    validator = DataValidator()
+    settings = EngineSettings.from_config(config, validator)
+
+    # Should default to 1.06 even if not in config
+    assert settings.buy_vat_multiplier == 1.06
