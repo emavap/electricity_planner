@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+from collections import deque
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -104,6 +105,7 @@ _MANUAL_OVERRIDE_STORE_VERSION = 1
 _CAR_PERMISSIVE_MODE_STORE_VERSION = 1
 _RUNTIME_MODE_STORE_VERSION = 1
 _BATTERY_CHARGING_STATE_STORE_VERSION = 1
+_INVERTER_DERATING_EXPORT_AVERAGE_WINDOW = timedelta(minutes=3)
 
 
 class ElectricityPlannerCoordinator(DataUpdateCoordinator):
@@ -167,6 +169,13 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._battery_threshold_snapshot: float | None = None
         self._last_config_hash: int | None = (
             None  # Track config changes for threshold updates
+        )
+
+        # Keep a short, in-memory grid-power history for the PV derating
+        # controller.  A rolling average avoids curtailing solar because of a
+        # single P1-meter update near the export deadband.
+        self._inverter_derating_grid_power_history: deque[tuple[datetime, float]] = (
+            deque()
         )
 
         # Runtime mode and manual override tracking
@@ -1461,6 +1470,22 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         )
         data["previous_grid_power"] = self.data.get("grid_power") if self.data else None
 
+        evaluated_at = dt_util.utcnow()
+        if data["grid_power"] is not None:
+            self._inverter_derating_grid_power_history.append(
+                (evaluated_at, float(data["grid_power"]))
+            )
+        cutoff = evaluated_at - _INVERTER_DERATING_EXPORT_AVERAGE_WINDOW
+        while (
+            self._inverter_derating_grid_power_history
+            and self._inverter_derating_grid_power_history[0][0] < cutoff
+        ):
+            self._inverter_derating_grid_power_history.popleft()
+        data["inverter_derating_grid_power_history"] = [
+            {"timestamp": timestamp, "grid_power": grid_power}
+            for timestamp, grid_power in self._inverter_derating_grid_power_history
+        ]
+
         # Preserve prior inverter target so the derating controller can hold or
         # release curtailment gradually instead of jumping back to max power.
         data["previous_inverter_derating_target"] = (
@@ -1469,7 +1494,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         data["previous_inverter_derating_unreached_since"] = (
             self.data.get("inverter_derating_unreached_since") if self.data else None
         )
-        data["inverter_derating_evaluated_at"] = dt_util.utcnow()
+        data["inverter_derating_evaluated_at"] = evaluated_at
 
         # Solar forecast with daily caching for stable overnight decisions.
         # After the configured start hour: read the forecast entity (tomorrow's

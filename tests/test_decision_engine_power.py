@@ -2397,6 +2397,99 @@ def test_inverter_derating_low_soc_bypass_does_not_ignore_current_overexport():
     assert "export is still 140W" in result["inverter_derating_alarm_reason"]
 
 
+def test_inverter_derating_low_soc_bypass_uses_three_minute_export_average():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 100,
+            CONF_INVERTER_EXPORT_DEADBAND: 50,
+            CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD: 95,
+        }
+    )
+    now = datetime.now(timezone.utc)
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 3712,
+            "grid_power": 154,
+            "inverter_derating_grid_power_history": [
+                {"timestamp": now - timedelta(minutes=2), "grid_power": 10},
+                {"timestamp": now - timedelta(minutes=1), "grid_power": -6},
+                {"timestamp": now, "grid_power": 154},
+            ],
+            "battery_analysis": {"average_soc": 52.5},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 4400
+    assert result["inverter_derating_alarm"] is False
+    assert "3-minute" in result["inverter_derating_reason"]
+
+
+def test_inverter_derating_reduces_on_three_minute_export_average():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 100,
+            CONF_INVERTER_EXPORT_DEADBAND: 50,
+        }
+    )
+    now = datetime.now(timezone.utc)
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 2000,
+            "grid_power": 170,
+            "inverter_derating_grid_power_history": [
+                {"timestamp": now - timedelta(minutes=2), "grid_power": 150},
+                {"timestamp": now - timedelta(minutes=1), "grid_power": 160},
+                {"timestamp": now, "grid_power": 170},
+            ],
+            "battery_analysis": {"average_soc": 98},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 1930
+    assert "3-minute average export is 160W (current export 170W)" in result[
+        "inverter_derating_reason"
+    ]
+    assert result["inverter_derating_alarm"] is False
+
+
+def test_inverter_derating_alarm_reports_three_minute_export_average():
+    engine = _engine(
+        {
+            CONF_MAX_INVERTER_POWER: 4400,
+            CONF_INVERTER_EXPORT_LIMIT: 100,
+            CONF_INVERTER_EXPORT_DEADBAND: 50,
+            CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD: 95,
+        }
+    )
+    now = datetime.now(timezone.utc)
+
+    result = engine._calculate_inverter_derating_target(
+        {
+            "feedin_solar": False,
+            "solar_production": 2000,
+            "grid_power": 170,
+            "inverter_derating_grid_power_history": [
+                {"timestamp": now - timedelta(minutes=2), "grid_power": 150},
+                {"timestamp": now - timedelta(minutes=1), "grid_power": 160},
+                {"timestamp": now, "grid_power": 170},
+            ],
+            "battery_analysis": {"average_soc": 52},
+        }
+    )
+
+    assert result["inverter_derating_target"] == 1930
+    assert result["inverter_derating_alarm"] is True
+    assert "3-minute average export is 160W (current export 170W)" in result[
+        "inverter_derating_alarm_reason"
+    ]
+
+
 def test_inverter_derating_bypasses_curtailment_for_low_soc_inside_tolerance():
     engine = _engine(
         {

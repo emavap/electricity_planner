@@ -1,9 +1,11 @@
 # Electricity Planner – Project Summary
 
-**Version 6.7.5** | **Config Schema Version 24** | **Home Assistant 2024.4+**
+**Version 6.7.6** | **Config Schema Version 24** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
+> Release note for v6.7.6: inverter derating uses a rolling three-minute average of grid export. Brief P1-meter readings above the export deadband no longer curtail solar or raise a low-SOC derating alarm. No config migration required.
+>
 > Release note for v6.7.5: fixes the inverter derating calculator's grid power sign convention. When `sensor.grid` reported grid import (negative value), the derating calculator interpreted it as export and wrongly curtailed solar production. The fix inverts the sign at the calculator entry point. No config migration required.
 >
 > Release note for v6.7.4: fixes the battery ON-hold logic to use the current effective price threshold instead of a stale locked threshold captured at hold-entry. The hold now correctly releases when `battery_stable_threshold` deactivates mid-hold, preventing wasteful charging above the real price ceiling. No config migration required.

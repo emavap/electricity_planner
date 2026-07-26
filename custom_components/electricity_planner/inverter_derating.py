@@ -131,7 +131,30 @@ class InverterDeratingCalculator:
                 if previous_grid_power_w is not None
                 else export_power_w
             )
-            smoothed_export_power_w = (export_power_w + previous_export_power_w) / 2.0
+            # The coordinator provides all grid readings from the last three
+            # minutes.  Use their average for the band decision so a short P1
+            # meter fluctuation cannot abruptly curtail solar.  Keep the
+            # two-sample fallback for direct callers and incomplete history.
+            history_exports: list[float] = []
+            for sample in data.get("inverter_derating_grid_power_history") or []:
+                if not isinstance(sample, dict):
+                    continue
+                historical_sensor_grid_power_w = _safe_optional_float(
+                    sample.get("grid_power")
+                )
+                if historical_sensor_grid_power_w is not None:
+                    # Match the current-reading conversion above: the source
+                    # sensor is negative for import and positive for export.
+                    historical_grid_power_w = -historical_sensor_grid_power_w
+                    history_exports.append(max(0.0, -historical_grid_power_w))
+            if history_exports:
+                smoothed_export_power_w = sum(history_exports) / len(history_exports)
+                using_rolling_export_average = True
+            else:
+                smoothed_export_power_w = (
+                    export_power_w + previous_export_power_w
+                ) / 2.0
+                using_rolling_export_average = False
             release_step_w = 100.0
             lower_export_w = max(0.0, export_limit_w - export_deadband_w)
             upper_export_w = export_limit_w + export_deadband_w
@@ -143,7 +166,12 @@ class InverterDeratingCalculator:
             export_below_band = smoothed_export_power_w < lower_export_w
             current_export_above_band = export_power_w > upper_export_w
             export_above_band = (
-                current_export_above_band or smoothed_export_power_w > upper_export_w
+                (smoothed_export_power_w > upper_export_w)
+                if using_rolling_export_average
+                else (
+                    current_export_above_band
+                    or smoothed_export_power_w > upper_export_w
+                )
             )
             # Relaxation is allowed when export is at or below the upper band
             # (not just below the lower band).  This lets the relaxation timer
@@ -174,11 +202,16 @@ class InverterDeratingCalculator:
                 )
 
             if battery_below_bypass_threshold and not export_above_band:
+                export_average_label = (
+                    "3-minute average export"
+                    if using_rolling_export_average
+                    else "averaged export"
+                )
                 return {
                     "inverter_derating_target": int(max_inverter_power),
                     "inverter_derating_reason": (
                         f"Battery SOC {average_soc:.0f}% < {soc_bypass_threshold:.0f}% and "
-                        f"averaged export {smoothed_export_power_w:.0f}W is within the "
+                        f"{export_average_label} {smoothed_export_power_w:.0f}W is within the "
                         "low-SOC tolerance - "
                         "keep inverter unrestricted so solar can charge the battery"
                     ),
@@ -292,8 +325,19 @@ class InverterDeratingCalculator:
                     max(export_power_w, smoothed_export_power_w) - export_limit_w
                 )
                 target = max(0.0, min(float(max_inverter_power), target))
+                export_for_derating_w = max(
+                    export_power_w, smoothed_export_power_w
+                )
+                if using_rolling_export_average:
+                    export_description = (
+                        f"3-minute average export is "
+                        f"{smoothed_export_power_w:.0f}W (current export "
+                        f"{export_power_w:.0f}W)"
+                    )
+                else:
+                    export_description = f"export is {export_for_derating_w:.0f}W"
                 reason = (
-                    f"Feed-in blocked and export is {max(export_power_w, smoothed_export_power_w):.0f}W > "
+                    f"Feed-in blocked and {export_description} > "
                     f"{upper_export_w:.0f}W - "
                     f"reduce from current solar {solar_production_w:.0f}W toward {export_limit_w}W export"
                 )
@@ -304,10 +348,15 @@ class InverterDeratingCalculator:
                 }
                 if battery_below_bypass_threshold:
                     response["inverter_derating_alarm"] = True
+                    alarm_export_description = (
+                        f"{export_description} is still above the limit"
+                        if using_rolling_export_average
+                        else f"export is still {export_for_derating_w:.0f}W"
+                    )
                     response["inverter_derating_alarm_reason"] = (
                         f"Battery SOC {average_soc:.0f}% is below the "
-                        f"{soc_bypass_threshold:.0f}% bypass threshold, but export is still "
-                        f"{max(export_power_w, smoothed_export_power_w):.0f}W. Derating was forced to protect the "
+                        f"{soc_bypass_threshold:.0f}% bypass threshold, but {alarm_export_description}. "
+                        "Derating was forced to protect the "
                         "grid target."
                     )
                 return response
