@@ -2452,9 +2452,10 @@ def test_inverter_derating_reduces_on_three_minute_export_average():
     )
 
     assert result["inverter_derating_target"] == 1930
-    assert "3-minute average export is 160W (current export 170W)" in result[
-        "inverter_derating_reason"
-    ]
+    assert (
+        "3-minute average export is 160W (current export 170W)"
+        in result["inverter_derating_reason"]
+    )
     assert result["inverter_derating_alarm"] is False
 
 
@@ -2485,9 +2486,10 @@ def test_inverter_derating_alarm_reports_three_minute_export_average():
 
     assert result["inverter_derating_target"] == 1930
     assert result["inverter_derating_alarm"] is True
-    assert "3-minute average export is 160W (current export 170W)" in result[
-        "inverter_derating_alarm_reason"
-    ]
+    assert (
+        "3-minute average export is 160W (current export 170W)"
+        in result["inverter_derating_alarm_reason"]
+    )
 
 
 def test_inverter_derating_bypasses_curtailment_for_low_soc_inside_tolerance():

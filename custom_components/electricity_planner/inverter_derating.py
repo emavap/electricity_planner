@@ -325,9 +325,7 @@ class InverterDeratingCalculator:
                     max(export_power_w, smoothed_export_power_w) - export_limit_w
                 )
                 target = max(0.0, min(float(max_inverter_power), target))
-                export_for_derating_w = max(
-                    export_power_w, smoothed_export_power_w
-                )
+                export_for_derating_w = max(export_power_w, smoothed_export_power_w)
                 if using_rolling_export_average:
                     export_description = (
                         f"3-minute average export is "
