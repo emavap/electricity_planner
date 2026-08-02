@@ -267,6 +267,30 @@ class OverrideRecalculator:
             decision.update(grid_setpoint_decision)
             combined_data.update(grid_setpoint_decision)
 
+        # Boolean car overrides still use the calculated charger cap, so they
+        # must pass through the same opt-in live P1 feedback as automatic car
+        # charging. A numeric charger-limit override is intentionally excluded:
+        # that value is an explicit user cap and must remain authoritative.
+        if (
+            "car_grid_charging" in override_targets
+            and "charger_limit" not in override_targets
+        ):
+            feedback_ctx = CycleContext.from_data(
+                combined_data,
+                self._settings,
+                battery_analysis,
+                price_analysis,
+                power_analysis,
+                power_allocation,
+            )
+            feedback_decision = (
+                self._engine._charger_limit.apply_negative_import_feedback(
+                    decision, feedback_ctx
+                )
+            )
+            decision.update(feedback_decision)
+            combined_data.update(feedback_decision)
+
         if (
             combined_data.get("phase_mode") == PHASE_MODE_THREE
             and combined_data.get("phase_details")

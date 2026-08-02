@@ -34,6 +34,7 @@ from .const import (
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_PRICE_THRESHOLD,
+    CONF_GRID_IMPORT_NEGATIVE_FEEDBACK,
     CONF_GRID_POWER_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
     CONF_HOUSE_CONSUMPTION_ENTITY,
@@ -100,6 +101,7 @@ from .const import (
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
+    DEFAULT_GRID_IMPORT_NEGATIVE_FEEDBACK,
     DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
     DEFAULT_INVERTER_EXPORT_DEADBAND,
@@ -1003,6 +1005,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=self.data.get(
                         CONF_CAR_USE_BATTERY_ARBITRAGE,
                         DEFAULT_CAR_USE_BATTERY_ARBITRAGE,
+                    ),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_GRID_IMPORT_NEGATIVE_FEEDBACK,
+                    default=self.data.get(
+                        CONF_GRID_IMPORT_NEGATIVE_FEEDBACK,
+                        DEFAULT_GRID_IMPORT_NEGATIVE_FEEDBACK,
                     ),
                 ): selector.BooleanSelector(),
                 vol.Optional(
@@ -2008,6 +2017,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     default=self.data.get(
                         CONF_CAR_USE_BATTERY_ARBITRAGE,
                         DEFAULT_CAR_USE_BATTERY_ARBITRAGE,
+                    ),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_GRID_IMPORT_NEGATIVE_FEEDBACK,
+                    default=self.data.get(
+                        CONF_GRID_IMPORT_NEGATIVE_FEEDBACK,
+                        DEFAULT_GRID_IMPORT_NEGATIVE_FEEDBACK,
                     ),
                 ): selector.BooleanSelector(),
                 vol.Optional(

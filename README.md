@@ -1,9 +1,11 @@
 # Electricity Planner
 
-**Version 6.7.6** | **Config Schema Version 24** | **Home Assistant 2024.4+**
+**Version 6.7.7** | **Config Schema Version 24** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
+> Release note for v6.7.7: adds an opt-in live P1 feedback guard for installations whose meter reports grid import as a negative value. When the rolling three-minute import average exceeds the Planner grid target, the EV limit is reduced and then released gradually after recovery. Restored limits are never applied until a new post-restart average exists. The option is off by default; no config migration is required.
+>
 > Release note for v6.7.6: derating now uses a rolling three-minute average of grid export instead of allowing a single current P1-meter reading to override the smoothing. This prevents brief readings just above the export deadband from curtailing solar or raising a low-SOC derating alarm. No config migration required.
 >
 > Release note for v6.7.5: fixes the inverter derating calculator's grid power sign convention. The `sensor.grid` template (based on P1 meter) uses negative=import, positive=export, but the derating calculator expected the opposite. When feed-in was blocked and the site was importing from the grid, the calculator interpreted the import as export and wrongly curtailed solar production to zero. The fix inverts the grid power sign at the calculator entry point to match the actual sensor convention.
@@ -589,6 +591,7 @@ phase_results:
 | `min_car_charging_threshold` | 100 W | 50–500 | Min power to consider the EV "charging" (above EVSE standby) |
 | `min_car_charging_duration` | 2 h | 0.5–8 | Min charging window for hysteresis |
 | `car_permissive_threshold_multiplier` | 1.2 | 1.0–2.0 | Permissive mode multiplier |
+| `grid_import_negative_feedback` | false | - | For negative-is-import P1 meters, reduce the EV limit when rolling live import exceeds the planned grid target |
 
 ### Solar Parameters
 

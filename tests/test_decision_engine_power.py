@@ -18,6 +18,7 @@ from custom_components.electricity_planner.const import (
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_PRICE_THRESHOLD,
+    CONF_GRID_IMPORT_NEGATIVE_FEEDBACK,
     CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
     CONF_INVERTER_EXPORT_DEADBAND,
@@ -1420,6 +1421,83 @@ def test_recalculate_after_car_override_clears_stale_arbitrage_state():
     assert result["grid_setpoint"] == -3000
     assert result["grid_components"]["car"] == 0
     assert result["grid_components"]["battery"] == -3000
+
+
+def test_car_override_applies_negative_import_feedback_without_manual_cap():
+    """A forced car-on decision must retain the opt-in P1 import protection."""
+    engine = _engine({CONF_GRID_IMPORT_NEGATIVE_FEEDBACK: True})
+
+    result = engine.recalculate_after_override(
+        baseline_data={
+            "grid_power": -4500,
+            "grid_tracking_average_power": -4500,
+            "grid_tracking_charger_limit": None,
+            "grid_tracking_last_adjustment": None,
+            "grid_tracking_waiting_for_application": False,
+            "car_grid_import_allowed": True,
+            "car_solar_only": False,
+            "monthly_grid_peak": 0,
+        },
+        decision={
+            "price_analysis": {},
+            "battery_analysis": {"average_soc": 80, "max_soc_threshold": 90},
+            "power_analysis": {"solar_surplus": 0},
+            "power_allocation": {
+                "remaining_solar": 0,
+                "solar_for_car": 0,
+                "car_current_solar_usage": 0,
+            },
+            "car_charging_power": 4000,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "car_solar_only": False,
+            "battery_grid_charging": False,
+            "charger_limit": 0,
+            "grid_setpoint": 0,
+        },
+        override_targets={"car_grid_charging"},
+    )
+
+    # The normal forced-car cap is 3000W. The recalculated 2400W grid target
+    # leaves 1600W beyond the allowed 500W import margin.
+    assert result["charger_limit"] == 1400
+    assert result["grid_tracking_charger_limit"] == 1400
+
+
+def test_manual_charger_cap_exempts_car_override_from_negative_import_feedback():
+    """A numeric manual EV cap remains authoritative with P1 feedback enabled."""
+    engine = _engine({CONF_GRID_IMPORT_NEGATIVE_FEEDBACK: True})
+
+    result = engine.recalculate_after_override(
+        baseline_data={
+            "grid_power": -4500,
+            "grid_tracking_average_power": -4500,
+            "car_grid_import_allowed": True,
+            "car_solar_only": False,
+            "monthly_grid_peak": 0,
+        },
+        decision={
+            "price_analysis": {},
+            "battery_analysis": {"average_soc": 80, "max_soc_threshold": 90},
+            "power_analysis": {"solar_surplus": 0},
+            "power_allocation": {
+                "remaining_solar": 0,
+                "solar_for_car": 0,
+                "car_current_solar_usage": 0,
+            },
+            "car_charging_power": 4000,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "car_solar_only": False,
+            "battery_grid_charging": False,
+            "charger_limit": 2100,
+            "grid_setpoint": 0,
+        },
+        override_targets={"car_grid_charging", "charger_limit"},
+    )
+
+    assert result["charger_limit"] == 2100
+    assert "grid_tracking_charger_limit" not in result
 
 
 def test_recalculate_after_battery_override_while_arbitrage_active_yields_positive_setpoint():
@@ -3905,6 +3983,178 @@ def _ctx_from(engine, data, battery_analysis=None):
         {},
         {},
     )
+
+
+def test_negative_import_feedback_reduces_live_export_target_case():
+    """P1 import is negative, while a negative Planner target is export."""
+    engine = _engine({CONF_GRID_IMPORT_NEGATIVE_FEEDBACK: True})
+    ctx = _ctx_from(
+        engine,
+        {
+            "grid_power": -2650,
+            "grid_tracking_average_power": -2650,
+            "car_charging_power": 4200,
+            "car_grid_charging": True,
+            "grid_tracking_charger_limit": None,
+        },
+    )
+
+    reduced = engine._charger_limit.apply_negative_import_feedback(
+        {
+            "charger_limit": 4000,
+            "charger_limit_reason": "Battery arbitrage",
+            "grid_setpoint": -170,
+        },
+        ctx,
+    )
+
+    # -2650W P1 is 2650W import.  A -170W Planner target requests 170W
+    # export, so the permitted 500W margin leaves 2320W to remove.
+    assert reduced["charger_limit"] == 1680
+    assert reduced["grid_tracking_charger_limit"] == 1680
+    assert (
+        "Live P1 import average 2650W exceeds -170W Planner target by 2320W"
+        in reduced["charger_limit_reason"]
+    )
+
+    recovered_ctx = _ctx_from(
+        engine,
+        {
+            "grid_power": -170,
+            "grid_tracking_average_power": -170,
+            "car_charging_power": 1680,
+            "car_grid_charging": True,
+            "grid_tracking_charger_limit": 1680,
+        },
+    )
+    released = engine._charger_limit.apply_negative_import_feedback(
+        {
+            "charger_limit": 4000,
+            "charger_limit_reason": "Battery arbitrage",
+            "grid_setpoint": -170,
+        },
+        recovered_ctx,
+    )
+
+    assert released["charger_limit"] == 1930
+    assert released["grid_tracking_charger_limit"] == 1930
+
+
+def test_negative_import_feedback_uses_positive_planner_import_target():
+    """A positive Planner import target must not be compared to raw negative P1."""
+    engine = _engine({CONF_GRID_IMPORT_NEGATIVE_FEEDBACK: True})
+    ctx = _ctx_from(
+        engine,
+        {
+            "grid_power": -4500,
+            "grid_tracking_average_power": -4500,
+            "car_charging_power": 4000,
+            "car_grid_charging": True,
+        },
+    )
+
+    result = engine._charger_limit.apply_negative_import_feedback(
+        {"charger_limit": 4000, "grid_setpoint": 3600}, ctx
+    )
+
+    # Actual import is 4500W, 900W above the 3600W target.  Keep the allowed
+    # 500W residual import and remove only the 400W excess.
+    assert result["charger_limit"] == 3600
+    assert result["grid_tracking_charger_limit"] == 3600
+
+
+def test_negative_import_feedback_keeps_import_within_500w_margin():
+    engine = _engine({CONF_GRID_IMPORT_NEGATIVE_FEEDBACK: True})
+    ctx = _ctx_from(
+        engine,
+        {
+            "grid_power": -4100,
+            "grid_tracking_average_power": -4100,
+            "car_charging_power": 4000,
+            "car_grid_charging": True,
+        },
+    )
+
+    result = engine._charger_limit.apply_negative_import_feedback(
+        {"charger_limit": 4000, "grid_setpoint": 3600}, ctx
+    )
+
+    assert result["charger_limit"] == 4000
+    assert result["grid_tracking_charger_limit"] is None
+
+
+def test_negative_import_feedback_waits_for_actual_ev_power_before_rechecking():
+    engine = _engine({CONF_GRID_IMPORT_NEGATIVE_FEEDBACK: True})
+    waiting_ctx = _ctx_from(
+        engine,
+        {
+            "grid_tracking_average_power": -4000,
+            "car_charging_power": 3000,
+            "car_grid_charging": True,
+            "grid_tracking_charger_limit": 2000,
+            "grid_tracking_waiting_for_application": True,
+        },
+    )
+
+    waiting = engine._charger_limit.apply_negative_import_feedback(
+        {"charger_limit": 4000, "grid_setpoint": 0}, waiting_ctx
+    )
+    assert waiting["charger_limit"] == 2000
+    assert waiting["grid_tracking_waiting_for_application"] is True
+
+    applied_ctx = _ctx_from(
+        engine,
+        {
+            "grid_tracking_average_power": -4000,
+            "car_charging_power": 2200,
+            "car_grid_charging": True,
+            "grid_tracking_charger_limit": 2000,
+            "grid_tracking_waiting_for_application": True,
+        },
+    )
+    applied = engine._charger_limit.apply_negative_import_feedback(
+        {"charger_limit": 4000, "grid_setpoint": 0}, applied_ctx
+    )
+    assert applied["grid_tracking_limit_acknowledged"] is True
+    assert applied["grid_tracking_waiting_for_application"] is False
+
+
+def test_negative_import_feedback_keeps_pending_ack_during_low_ev_reading():
+    engine = _engine({CONF_GRID_IMPORT_NEGATIVE_FEEDBACK: True})
+    ctx = _ctx_from(
+        engine,
+        {
+            "grid_tracking_average_power": -4000,
+            "car_charging_power": 0,
+            "car_grid_charging": True,
+            "grid_tracking_charger_limit": 2000,
+            "grid_tracking_waiting_for_application": True,
+        },
+    )
+    result = engine._charger_limit.apply_negative_import_feedback(
+        {"charger_limit": 4000, "grid_setpoint": 0}, ctx
+    )
+    assert result["grid_tracking_charger_limit"] == 2000
+    assert result["grid_tracking_waiting_for_application"] is True
+
+
+def test_negative_import_feedback_is_off_by_default():
+    engine = _engine()
+    ctx = _ctx_from(
+        engine,
+        {
+            "grid_power": -2650,
+            "grid_tracking_average_power": -2650,
+            "car_charging_power": 4200,
+        },
+    )
+
+    result = engine._charger_limit.apply_negative_import_feedback(
+        {"charger_limit": 4000, "grid_setpoint": -170}, ctx
+    )
+
+    assert result["charger_limit"] == 4000
+    assert result["grid_tracking_charger_limit"] is None
 
 
 def test_car_arbitrage_power_set_when_arbitrage_pending_slots_selected():

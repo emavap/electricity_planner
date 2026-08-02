@@ -91,12 +91,14 @@
                         "data": {
                             "min_car_charging_duration": "Min Car Charging Duration",
                             "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier",
-                            "car_use_battery_arbitrage": "Use Arbitrage Power For EV"
+                            "car_use_battery_arbitrage": "Use Arbitrage Power For EV",
+                            "grid_import_negative_feedback": "Track Negative Grid Import With EV"
                         },
                         "data_description": {
                             "min_car_charging_duration": "Minimum consecutive hours of low prices required before starting car charging",
                             "car_permissive_threshold_multiplier": "Multiplier applied to car charging threshold when permissive mode is active (1.2 = +20% higher threshold)",
-                            "car_use_battery_arbitrage": "When arbitrage export is active, let the EV consume that power locally before the remainder is exported to grid"
+                            "car_use_battery_arbitrage": "When arbitrage export is active, let the EV consume that power locally before the remainder is exported to grid",
+                            "grid_import_negative_feedback": "For P1 meters where negative means grid import, reduce the EV limit when live import exceeds the planned grid target"
                         }
                     },
                     "inverter_strategy": {
@@ -145,6 +147,7 @@
                     "min_car_charging_duration": "Min Car Charging Duration",
                     "car_permissive_threshold_multiplier": "Car Permissive Mode Multiplier",
                     "car_use_battery_arbitrage": "Use Arbitrage Power For EV",
+                    "grid_import_negative_feedback": "Track Negative Grid Import With EV",
                     "max_inverter_power": "Max Inverter Power",
                     "inverter_export_limit": "Inverter Export Target",
                     "inverter_export_deadband": "Inverter Export Deadband",
@@ -178,6 +181,7 @@
                     "min_car_charging_duration": "Minimum consecutive hours of low prices required before starting car charging",
                     "car_permissive_threshold_multiplier": "Multiplier applied to car charging threshold when permissive mode is active (1.2 = +20% higher threshold)",
                     "car_use_battery_arbitrage": "When arbitrage export is active, let the EV consume that power locally before the remainder is exported to grid",
+                    "grid_import_negative_feedback": "For P1 meters where negative means grid import, reduce the EV limit when live import exceeds the planned grid target",
                     "max_inverter_power": "Maximum inverter output used when feed-in is allowed and as the upper cap for derating guidance (W)",
                     "inverter_export_limit": "Grid export target used while feed-in is blocked. The planner aims to keep net export around this value, for example 80W (W)",
                     "inverter_export_deadband": "Allowed deviation around the export target before the planner changes derating. With the default 40W deadband and 80W target, the planner holds steady between 40W and 120W export (W)",

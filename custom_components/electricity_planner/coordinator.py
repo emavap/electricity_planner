@@ -33,6 +33,7 @@ from .const import (
     CONF_CURRENT_PRICE_ENTITY,
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
+    CONF_GRID_IMPORT_NEGATIVE_FEEDBACK,
     CONF_GRID_POWER_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
     CONF_HOUSE_CONSUMPTION_ENTITY,
@@ -106,10 +107,36 @@ _CAR_PERMISSIVE_MODE_STORE_VERSION = 1
 _RUNTIME_MODE_STORE_VERSION = 1
 _BATTERY_CHARGING_STATE_STORE_VERSION = 1
 _INVERTER_DERATING_EXPORT_AVERAGE_WINDOW = timedelta(minutes=3)
+_GRID_TRACKING_AVERAGE_WINDOW = timedelta(minutes=3)
 
 
 class ElectricityPlannerCoordinator(DataUpdateCoordinator):
     """Coordinator for electricity planner data."""
+
+    @staticmethod
+    def _time_weighted_power_average(
+        history: deque[tuple[datetime, float]],
+        window_start: datetime,
+        window_end: datetime,
+    ) -> float | None:
+        """Average piecewise-constant meter readings over an exact time window."""
+        if window_end <= window_start or not history:
+            return None
+
+        weighted_sum = 0.0
+        covered_seconds = 0.0
+        for index, (sample_time, power) in enumerate(history):
+            segment_start = max(sample_time, window_start)
+            next_time = (
+                history[index + 1][0] if index + 1 < len(history) else window_end
+            )
+            segment_end = min(next_time, window_end)
+            duration = (segment_end - segment_start).total_seconds()
+            if duration > 0:
+                weighted_sum += power * duration
+                covered_seconds += duration
+
+        return weighted_sum / covered_seconds if covered_seconds > 0 else None
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the coordinator."""
@@ -203,6 +230,19 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Car peak limit tracking (15-minute hold after 5 minutes of sustained peak exceedance)
         self._car_peak_limited_until: datetime | None = None
         self._car_peak_limit_started_at: datetime | None = None
+        self._grid_tracking_charger_limit: int | None = None
+        self._grid_tracking_last_adjustment: datetime | None = None
+        self._grid_tracking_waiting_for_application: bool = False
+        # A cap restored from disk describes the state before the restart.  It
+        # is kept for diagnostics only and must never throttle the charger
+        # until this cycle has produced its own P1 average, because the
+        # in-memory averaging window does not survive a restart.
+        self._grid_tracking_cap_restored_unvalidated: bool = False
+        # EV grid tracking has its own window.  It must not inherit P1
+        # samples gathered while the car decision was Off, otherwise a new
+        # charging window could react to stale import data immediately.
+        self._grid_tracking_power_history: deque[tuple[datetime, float]] = deque()
+        self._grid_tracking_window_started_at: datetime | None = None
 
         # Solar forecast caching for sunny-day grid limit
         # After the configured start hour (default 20:00), we read tomorrow's
@@ -307,7 +347,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         await self._async_load_battery_charging_state()
 
     async def _async_load_battery_charging_state(self) -> None:
-        """Restore battery grid-charging anti-flap state across restarts."""
+        """Restore battery and EV-feedback anti-flap state across restarts."""
         if self._battery_charging_state_store is None:
             return
 
@@ -340,8 +380,28 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         if isinstance(locked_raw, (int, float)):
             self._battery_grid_charging_locked_threshold = float(locked_raw)
 
+        tracked_cap = stored.get("grid_tracking_charger_limit")
+        if isinstance(tracked_cap, (int, float)) and tracked_cap >= 0:
+            self._grid_tracking_charger_limit = int(tracked_cap)
+
+        tracked_adjustment_raw = stored.get("grid_tracking_last_adjustment")
+        if isinstance(tracked_adjustment_raw, str):
+            parsed = dt_util.parse_datetime(tracked_adjustment_raw)
+            if parsed is not None:
+                self._grid_tracking_last_adjustment = dt_util.as_utc(parsed)
+        # The physical-acknowledgement check compares measured EV power with
+        # the cap that this process actually commanded.  After a restart no
+        # command has been issued yet and the three-minute averaging window
+        # starts empty, so a restored cap must not be treated as pending
+        # application: doing so would hold the reduced cap through the whole
+        # blind window and then consume the first fresh average as an "ack".
+        self._grid_tracking_waiting_for_application = False
+        self._grid_tracking_cap_restored_unvalidated = (
+            self._grid_tracking_charger_limit is not None
+        )
+
     async def _async_persist_battery_charging_state(self) -> None:
-        """Persist battery grid-charging anti-flap state for restart recovery."""
+        """Persist battery and EV-feedback anti-flap state for restart recovery."""
         if self._battery_charging_state_store is None:
             return
 
@@ -356,6 +416,12 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             ),
             "battery_grid_charging_locked_threshold": (
                 self._battery_grid_charging_locked_threshold
+            ),
+            "grid_tracking_charger_limit": self._grid_tracking_charger_limit,
+            "grid_tracking_last_adjustment": (
+                self._grid_tracking_last_adjustment.isoformat()
+                if self._grid_tracking_last_adjustment is not None
+                else None
             ),
         }
 
@@ -1134,6 +1200,25 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             data["previous_battery_grid_charging"] = (
                 self._previous_battery_grid_charging
             )
+            # Hide a restart-restored cap from the decision engine until this
+            # process has measured a complete P1 window of its own.  Exposing
+            # it earlier would clamp the charger for up to three minutes on
+            # evidence that predates the restart.
+            if (
+                self._grid_tracking_cap_restored_unvalidated
+                and data.get("grid_tracking_average_power") is None
+            ):
+                data["grid_tracking_charger_limit"] = None
+                data["grid_tracking_last_adjustment"] = None
+                data["grid_tracking_waiting_for_application"] = False
+            else:
+                data["grid_tracking_charger_limit"] = self._grid_tracking_charger_limit
+                data["grid_tracking_last_adjustment"] = (
+                    self._grid_tracking_last_adjustment
+                )
+                data["grid_tracking_waiting_for_application"] = (
+                    self._grid_tracking_waiting_for_application
+                )
             if self._battery_grid_charging_changed_at is not None:
                 data["battery_grid_charging_state_age_seconds"] = (
                     dt_util.utcnow() - self._battery_grid_charging_changed_at
@@ -1187,13 +1272,68 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 charging_decision = self.decision_engine.recalculate_after_override(
                     data, charging_decision, override_targets
                 )
+                if "charger_limit" in override_targets:
+                    # A manual EV cap is authoritative.  Do not leave a
+                    # stale automatic feedback cap behind it.
+                    charging_decision["grid_tracking_charger_limit"] = None
+                    charging_decision["grid_tracking_last_adjustment"] = None
+                    charging_decision["grid_tracking_waiting_for_application"] = False
 
             data.update(charging_decision)
-
-            # Update previous car charging state
-            self._previous_car_charging = charging_decision.get(
-                "car_grid_charging", False
+            previous_grid_tracking_cap = self._grid_tracking_charger_limit
+            previous_grid_tracking_adjustment = self._grid_tracking_last_adjustment
+            previous_grid_tracking_waiting = self._grid_tracking_waiting_for_application
+            self._grid_tracking_charger_limit = charging_decision.get(
+                "grid_tracking_charger_limit"
             )
+            self._grid_tracking_last_adjustment = charging_decision.get(
+                "grid_tracking_last_adjustment"
+            )
+            self._grid_tracking_waiting_for_application = bool(
+                charging_decision.get("grid_tracking_waiting_for_application", False)
+            )
+
+            # Update feedback state only when the explicitly opt-in P1
+            # feedback feature is enabled.  The default configuration must
+            # retain the existing coordinator behaviour exactly.
+            car_grid_charging = bool(charging_decision.get("car_grid_charging", False))
+            grid_tracking_enabled = bool(
+                self.config.get(CONF_GRID_IMPORT_NEGATIVE_FEEDBACK, False)
+            )
+            if data.get("grid_tracking_average_power") is not None:
+                # A complete window measured by this process supersedes any
+                # value restored from disk.
+                self._grid_tracking_cap_restored_unvalidated = False
+            if not grid_tracking_enabled or not car_grid_charging:
+                # An explicit Off ends the feedback session immediately.
+                # The next On starts a completely fresh P1 averaging window.
+                self._grid_tracking_charger_limit = None
+                self._grid_tracking_last_adjustment = None
+                self._grid_tracking_waiting_for_application = False
+                self._grid_tracking_cap_restored_unvalidated = False
+                self._grid_tracking_power_history.clear()
+                self._grid_tracking_window_started_at = None
+            elif not self._previous_car_charging:
+                self._grid_tracking_power_history.clear()
+                tracking_started_at = dt_util.utcnow()
+                self._grid_tracking_window_started_at = tracking_started_at
+                # Use the P1 reading gathered for this same evaluation as the
+                # first sample of the new session.  Waiting for the next
+                # refresh would make a nominal three-minute window shorter
+                # whenever Home Assistant updates are delayed.
+                if data.get("grid_power") is not None:
+                    self._grid_tracking_power_history.append(
+                        (tracking_started_at, float(data["grid_power"]))
+                    )
+            elif charging_decision.get("grid_tracking_limit_acknowledged"):
+                acknowledged_at = dt_util.utcnow()
+                self._grid_tracking_power_history.clear()
+                self._grid_tracking_window_started_at = acknowledged_at
+                if data.get("grid_power") is not None:
+                    self._grid_tracking_power_history.append(
+                        (acknowledged_at, float(data["grid_power"]))
+                    )
+            self._previous_car_charging = car_grid_charging
             previous_locked_threshold = self._battery_grid_charging_locked_threshold
             previous_changed_at = self._battery_grid_charging_changed_at
             previous_state = self._previous_battery_grid_charging
@@ -1207,6 +1347,11 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 or self._battery_grid_charging_changed_at != previous_changed_at
                 or self._battery_grid_charging_locked_threshold
                 != previous_locked_threshold
+                or self._grid_tracking_charger_limit != previous_grid_tracking_cap
+                or self._grid_tracking_last_adjustment
+                != previous_grid_tracking_adjustment
+                or self._grid_tracking_waiting_for_application
+                != previous_grid_tracking_waiting
             ):
                 await self._async_persist_battery_charging_state()
 
@@ -1485,6 +1630,43 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             {"timestamp": timestamp, "grid_power": grid_power}
             for timestamp, grid_power in self._inverter_derating_grid_power_history
         ]
+        # EV feedback is deliberately independent from inverter derating.  It
+        # only collects samples while a car-charging decision remains On, and
+        # exposes no average until a complete new window has elapsed.
+        grid_tracking_enabled = bool(
+            self.config.get(CONF_GRID_IMPORT_NEGATIVE_FEEDBACK, False)
+        )
+        if (
+            grid_tracking_enabled
+            and self._grid_tracking_window_started_at is not None
+            and data["grid_power"] is not None
+        ):
+            self._grid_tracking_power_history.append(
+                (evaluated_at, float(data["grid_power"]))
+            )
+        grid_tracking_cutoff = evaluated_at - _GRID_TRACKING_AVERAGE_WINDOW
+        # Keep the final sample just before the window so its value can be
+        # weighted from the exact window boundary to the next P1 update.
+        while (
+            len(self._grid_tracking_power_history) > 1
+            and self._grid_tracking_power_history[1][0] <= grid_tracking_cutoff
+        ):
+            self._grid_tracking_power_history.popleft()
+
+        if (
+            grid_tracking_enabled
+            and self._grid_tracking_window_started_at is not None
+            and evaluated_at - self._grid_tracking_window_started_at
+            >= _GRID_TRACKING_AVERAGE_WINDOW
+            and self._grid_tracking_power_history
+        ):
+            data["grid_tracking_average_power"] = self._time_weighted_power_average(
+                self._grid_tracking_power_history,
+                max(self._grid_tracking_window_started_at, grid_tracking_cutoff),
+                evaluated_at,
+            )
+        else:
+            data["grid_tracking_average_power"] = None
 
         # Preserve prior inverter target so the derating controller can hold or
         # release curtailment gradually instead of jumping back to max power.

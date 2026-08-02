@@ -91,6 +91,7 @@ CONF_FEEDIN_ADJUSTMENT_OFFSET = "feedin_adjustment_offset"
 CONF_BUY_VAT_MULTIPLIER = "buy_vat_multiplier"
 CONF_SOC_PRICE_MULTIPLIER_MAX = "soc_price_multiplier_max"
 CONF_SOC_BUFFER_TARGET = "soc_buffer_target"
+CONF_GRID_IMPORT_NEGATIVE_FEEDBACK = "grid_import_negative_feedback"
 
 # Default Threshold Values
 DEFAULT_MIN_SOC = 20
@@ -143,6 +144,7 @@ DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER = (
 DEFAULT_CAR_USE_BATTERY_ARBITRAGE = (
     True  # Let EV consume scheduled arbitrage export locally
 )
+DEFAULT_GRID_IMPORT_NEGATIVE_FEEDBACK = False
 DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER = (
     1.04  # Energie.be dynamic buy formula coefficient (Apr 2026)
 )
@@ -274,4 +276,4 @@ MAX_POWER_VALIDATION_W = (
 )
 MAX_CAR_POWER_VALIDATION_W = 22000  # Maximum reasonable car charging power
 
-INTEGRATION_VERSION = "6.7.6"
+INTEGRATION_VERSION = "6.7.7"

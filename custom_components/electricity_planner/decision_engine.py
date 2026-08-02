@@ -27,6 +27,7 @@ from .const import (
     CONF_FEEDIN_ADJUSTMENT_MULTIPLIER,
     CONF_FEEDIN_ADJUSTMENT_OFFSET,
     CONF_FEEDIN_PRICE_THRESHOLD,
+    CONF_GRID_IMPORT_NEGATIVE_FEEDBACK,
     CONF_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     CONF_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
     CONF_INVERTER_EXPORT_DEADBAND,
@@ -64,6 +65,7 @@ from .const import (
     DEFAULT_FEEDIN_ADJUSTMENT_MULTIPLIER,
     DEFAULT_FEEDIN_ADJUSTMENT_OFFSET,
     DEFAULT_FEEDIN_PRICE_THRESHOLD,
+    DEFAULT_GRID_IMPORT_NEGATIVE_FEEDBACK,
     DEFAULT_INVERTER_DERATING_SOC_BYPASS_THRESHOLD,
     DEFAULT_INVERTER_DERATING_UNUSED_RELEASE_MINUTES,
     DEFAULT_INVERTER_EXPORT_DEADBAND,
@@ -254,6 +256,7 @@ class EngineSettings:
     min_car_charging_duration: int
     car_permissive_threshold_multiplier: float
     car_use_battery_arbitrage: bool
+    grid_import_negative_feedback: bool
     price_adjustment_multiplier: float
     price_adjustment_offset: float
     feedin_adjustment_multiplier: float
@@ -485,6 +488,10 @@ class EngineSettings:
         use_average_threshold = extractor.get_bool(
             CONF_USE_AVERAGE_THRESHOLD, DEFAULT_USE_AVERAGE_THRESHOLD
         )
+        grid_import_negative_feedback = extractor.get_bool(
+            CONF_GRID_IMPORT_NEGATIVE_FEEDBACK,
+            DEFAULT_GRID_IMPORT_NEGATIVE_FEEDBACK,
+        )
         dynamic_threshold_confidence = extractor.get_float(
             CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
             DEFAULT_DYNAMIC_THRESHOLD_CONFIDENCE,
@@ -522,6 +529,7 @@ class EngineSettings:
             min_car_charging_duration=min_car_duration,
             car_permissive_threshold_multiplier=car_permissive_multiplier,
             car_use_battery_arbitrage=car_use_battery_arbitrage,
+            grid_import_negative_feedback=grid_import_negative_feedback,
             price_adjustment_multiplier=price_multiplier,
             price_adjustment_offset=price_offset,
             feedin_adjustment_multiplier=feed_multiplier,
@@ -591,6 +599,7 @@ class CycleContext:
     solar_forecast_production: float | None
     house_consumption: float
     current_grid_power: float | None
+    grid_tracking_average_power: float | None
     previous_grid_power: float | None
     monthly_grid_peak: float | None
     car_charging_power: float
@@ -606,6 +615,9 @@ class CycleContext:
     battery_grid_charging: bool
     car_grid_charging: bool
     charger_limit: int
+    grid_tracking_charger_limit: int | None
+    grid_tracking_last_adjustment: datetime | None
+    grid_tracking_waiting_for_application: bool
     arbitrage_mode_enabled: bool
     arbitrage_mode_active: bool
     arbitrage_mode_export_power: int
@@ -812,6 +824,9 @@ class CycleContext:
                 or 0.0
             ),
             current_grid_power=_safe_optional_float(data.get("grid_power")),
+            grid_tracking_average_power=_safe_optional_float(
+                data.get("grid_tracking_average_power")
+            ),
             previous_grid_power=_safe_optional_float(data.get("previous_grid_power")),
             monthly_grid_peak=_safe_optional_float(data.get("monthly_grid_peak")),
             car_charging_power=float(
@@ -840,6 +855,21 @@ class CycleContext:
             charger_limit=max(
                 0,
                 int(_safe_optional_float(data.get("charger_limit")) or 0),
+            ),
+            grid_tracking_charger_limit=(
+                max(
+                    0,
+                    int(_safe_optional_float(data.get("grid_tracking_charger_limit"))),
+                )
+                if _safe_optional_float(data.get("grid_tracking_charger_limit"))
+                is not None
+                else None
+            ),
+            grid_tracking_last_adjustment=_safe_optional_datetime(
+                data.get("grid_tracking_last_adjustment")
+            ),
+            grid_tracking_waiting_for_application=bool(
+                data.get("grid_tracking_waiting_for_application")
             ),
             arbitrage_mode_enabled=bool(data.get("arbitrage_mode_enabled")),
             arbitrage_mode_active=arbitrage_mode_active,
@@ -1156,6 +1186,13 @@ class ChargingDecisionEngine:
             ctx=cycle_ctx,
         )
         decision_data.update(grid_setpoint_decision)
+
+        # Preserve the calculated ESS target while correcting the EV cap from
+        # the live P1 reading. This is opt-in for meters where negative means
+        # import; the common positive-import convention remains unchanged.
+        decision_data = self._charger_limit.apply_negative_import_feedback(
+            decision_data, cycle_ctx
+        )
 
         feedin_decision = self._decide_feedin_solar(
             price_analysis, power_allocation, cycle_ctx

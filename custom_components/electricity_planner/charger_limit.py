@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.util import dt as dt_util
+
 from .const import DEFAULT_MAX_SOC
 from .defaults import DEFAULT_SYSTEM_LIMITS
 
@@ -18,6 +20,11 @@ if TYPE_CHECKING:
     from .grid_setpoint import GridSetpointCalculator
 
 _LOGGER = logging.getLogger(__name__)
+
+_GRID_TRACKING_DEADBAND_W = 500
+_GRID_TRACKING_RELEASE_STEP_W = 250
+_GRID_TRACKING_SETTLE_WINDOW = 180
+_GRID_TRACKING_APPLICATION_TOLERANCE_W = 250
 
 
 class ChargerLimitCalculator:
@@ -82,6 +89,112 @@ class ChargerLimitCalculator:
             reduced_limit,
             preserved,
         )
+        return result
+
+    def apply_negative_import_feedback(
+        self, result: dict[str, Any], ctx: "CycleContext"
+    ) -> dict[str, Any]:
+        """Reduce the EV cap when a negative-is-import P1 exceeds its target."""
+        if not self._settings.grid_import_negative_feedback:
+            result["grid_tracking_charger_limit"] = None
+            result["grid_tracking_last_adjustment"] = None
+            return result
+
+        limit = int(result.get("charger_limit", 0))
+        base_limit = limit
+        target = int(result.get("grid_setpoint", 0))
+        previous_cap = ctx.grid_tracking_charger_limit
+        if not ctx.car_grid_charging or limit <= 0:
+            result["grid_tracking_charger_limit"] = None
+            result["grid_tracking_last_adjustment"] = None
+            return result
+
+        # Hold an existing correction during temporary EV power-sensor gaps.
+        if previous_cap is not None:
+            limit = min(limit, previous_cap)
+            result["charger_limit"] = limit
+        if (
+            ctx.grid_tracking_average_power is None
+            or ctx.car_charging_power <= self._settings.min_car_charging_threshold
+        ):
+            result["grid_tracking_charger_limit"] = previous_cap
+            result["grid_tracking_last_adjustment"] = ctx.grid_tracking_last_adjustment
+            result["grid_tracking_waiting_for_application"] = (
+                ctx.grid_tracking_waiting_for_application
+            )
+            return result
+
+        # Charger limits are applied asynchronously by Home Assistant.  Hold
+        # this cap until measured EV power confirms it took effect.
+        if ctx.grid_tracking_waiting_for_application and previous_cap is not None:
+            if (
+                ctx.car_charging_power
+                > previous_cap + _GRID_TRACKING_APPLICATION_TOLERANCE_W
+            ):
+                result["grid_tracking_charger_limit"] = previous_cap
+                result["grid_tracking_last_adjustment"] = (
+                    ctx.grid_tracking_last_adjustment
+                )
+                result["grid_tracking_waiting_for_application"] = True
+                return result
+            result["grid_tracking_charger_limit"] = previous_cap
+            result["grid_tracking_last_adjustment"] = ctx.grid_tracking_last_adjustment
+            result["grid_tracking_limit_acknowledged"] = True
+            result["grid_tracking_waiting_for_application"] = False
+            return result
+
+        now = dt_util.utcnow()
+        if (
+            ctx.grid_tracking_last_adjustment is not None
+            and (now - ctx.grid_tracking_last_adjustment).total_seconds()
+            < _GRID_TRACKING_SETTLE_WINDOW
+        ):
+            result["grid_tracking_charger_limit"] = previous_cap
+            result["grid_tracking_last_adjustment"] = ctx.grid_tracking_last_adjustment
+            return result
+
+        # The Planner grid setpoint uses positive import / negative export,
+        # while the configured P1 meter uses negative import / positive
+        # export. Convert the averaged P1 reading to the Planner convention
+        # before comparing it with the target.
+        average_grid_power = ctx.grid_tracking_average_power
+        excess_import = max(
+            0, int(-average_grid_power - target - _GRID_TRACKING_DEADBAND_W)
+        )
+        if excess_import:
+            # The 500W deadband is the permitted residual import, not an
+            # action cap. Remove the measured excess, then wait for the full
+            # settle window before taking another measurement.
+            tracked_cap = max(0, limit - excess_import)
+            result["charger_limit"] = tracked_cap
+            result["charger_limit_reason"] = (
+                f"{result.get('charger_limit_reason', '')} | Live P1 import "
+                f"average {int(abs(average_grid_power))}W exceeds "
+                f"{target}W Planner target by {excess_import}W; "
+                f"limiting EV to {tracked_cap}W"
+            )
+        elif previous_cap is not None:
+            # The full settle window already passed, so this is a recovered
+            # average; release only one small step.
+            tracked_cap = min(base_limit, previous_cap + _GRID_TRACKING_RELEASE_STEP_W)
+            result["charger_limit"] = tracked_cap
+            result["charger_limit_reason"] = (
+                f"{result.get('charger_limit_reason', '')} | Live grid target recovered; "
+                f"raising EV limit gradually to {tracked_cap}W"
+            )
+        else:
+            tracked_cap = limit
+
+        # Keep a just-released base cap long enough to verify that the
+        # physical charger accepted the increase; clear it after that ack.
+        result["grid_tracking_charger_limit"] = (
+            tracked_cap
+            if tracked_cap < base_limit
+            or (previous_cap is not None and tracked_cap != previous_cap)
+            else None
+        )
+        result["grid_tracking_last_adjustment"] = now
+        result["grid_tracking_waiting_for_application"] = tracked_cap != previous_cap
         return result
 
     def calculate(

@@ -6,6 +6,7 @@ import asyncio
 import sys
 from datetime import datetime, timedelta, timezone
 from types import ModuleType, SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -31,6 +32,7 @@ from custom_components.electricity_planner.const import (
     CONF_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_DYNAMIC_THRESHOLD_CONFIDENCE,
+    CONF_GRID_IMPORT_NEGATIVE_FEEDBACK,
     CONF_GRID_POWER_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
     CONF_HOUSE_CONSUMPTION_ENTITY,
@@ -502,6 +504,71 @@ async def test_async_update_data_merges_decisions(fake_hass, monkeypatch):
     coordinator._fetch_all_data.assert_awaited_once()
     coordinator.decision_engine.evaluate_charging_decision.assert_awaited_once()
     coordinator._check_data_availability.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_car_off_clears_grid_tracking_and_next_on_starts_fresh_window(
+    fake_hass, monkeypatch
+):
+    """An Off decision must make a later On independent of old P1 samples."""
+    base_time = datetime(2026, 8, 2, 19, 0, tzinfo=timezone.utc)
+    now_ref = {"value": base_time}
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: now_ref["value"], raising=False
+    )
+    config = _base_config()
+    config[CONF_GRID_IMPORT_NEGATIVE_FEEDBACK] = True
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    coordinator._fetch_all_data = AsyncMock(
+        return_value={
+            "current_price": 0.11,
+            "highest_price": 0.2,
+            "lowest_price": 0.05,
+            "grid_power": -2000,
+        }
+    )
+    coordinator._check_data_availability = AsyncMock()
+    coordinator._previous_car_charging = True
+    coordinator._grid_tracking_charger_limit = 1800
+    coordinator._grid_tracking_last_adjustment = base_time
+    coordinator._grid_tracking_window_started_at = base_time - timedelta(minutes=3)
+    coordinator._grid_tracking_power_history.append((base_time, -2500.0))
+    coordinator.decision_engine.evaluate_charging_decision = AsyncMock(
+        side_effect=[
+            {"battery_grid_charging": False, "car_grid_charging": False},
+            {"battery_grid_charging": False, "car_grid_charging": True},
+        ]
+    )
+
+    await coordinator._async_update_data()
+
+    assert coordinator._grid_tracking_charger_limit is None
+    assert coordinator._grid_tracking_last_adjustment is None
+    assert not coordinator._grid_tracking_power_history
+    assert coordinator._grid_tracking_window_started_at is None
+
+    now_ref["value"] += timedelta(seconds=1)
+    await coordinator._async_update_data()
+
+    assert coordinator._grid_tracking_window_started_at == now_ref["value"]
+    assert list(coordinator._grid_tracking_power_history) == [
+        (now_ref["value"], -2000.0)
+    ]
+
+
+def test_grid_tracking_average_is_time_weighted():
+    """Uneven P1 update timing must not bias the three-minute feedback window."""
+    start = datetime(2026, 8, 2, 19, 0, tzinfo=timezone.utc)
+    average = ElectricityPlannerCoordinator._time_weighted_power_average(
+        [
+            (start, -1000.0),
+            (start + timedelta(seconds=10), -4000.0),
+        ],
+        start,
+        start + timedelta(seconds=180),
+    )
+
+    assert average == pytest.approx((-1000 * 10 + -4000 * 170) / 180)
 
 
 @pytest.mark.asyncio
@@ -1563,6 +1630,130 @@ class _MemoryOverrideStore:
 
     async def async_save(self, data):
         self.data = data
+
+
+@pytest.mark.asyncio
+async def test_grid_tracking_cap_persists_across_restart(fake_hass, monkeypatch):
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    store = _MemoryOverrideStore()
+    coordinator._battery_charging_state_store = store
+    adjusted_at = datetime(2026, 8, 2, 19, 0, tzinfo=timezone.utc)
+    coordinator._grid_tracking_charger_limit = 1680
+    coordinator._grid_tracking_last_adjustment = adjusted_at
+
+    await coordinator._async_persist_battery_charging_state()
+
+    restored = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    restored._battery_charging_state_store = _MemoryOverrideStore(store.data)
+    await restored._async_load_battery_charging_state()
+
+    assert restored._grid_tracking_charger_limit == 1680
+    assert restored._grid_tracking_last_adjustment == adjusted_at
+    # A restored cap has not been commanded by this process, so it must not
+    # be treated as awaiting physical acknowledgement.
+    assert restored._grid_tracking_waiting_for_application is False
+    assert restored._grid_tracking_cap_restored_unvalidated is True
+
+
+@pytest.mark.asyncio
+async def test_restored_grid_tracking_cap_does_not_throttle_before_fresh_average(
+    fake_hass, monkeypatch
+):
+    """A persisted reduced cap must not clamp the charger during the blind window.
+
+    After a restart the three-minute P1 averaging window restarts empty.  The
+    cap restored from disk describes pre-restart conditions, so it must stay
+    hidden from the decision engine until this process measures its own
+    average, otherwise charging is throttled on stale evidence.
+    """
+    base_time = datetime(2026, 8, 2, 19, 0, tzinfo=timezone.utc)
+    now_ref = {"value": base_time}
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: now_ref["value"], raising=False
+    )
+    config = _base_config()
+    config[CONF_GRID_IMPORT_NEGATIVE_FEEDBACK] = True
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    # Simulate the post-restart restore path.
+    coordinator._grid_tracking_charger_limit = 1680
+    coordinator._grid_tracking_last_adjustment = base_time - timedelta(minutes=30)
+    coordinator._grid_tracking_waiting_for_application = False
+    coordinator._grid_tracking_cap_restored_unvalidated = True
+
+    seen: dict[str, Any] = {}
+
+    async def _capture(data, *args, **kwargs):
+        seen.update(data)
+        return {"battery_grid_charging": False, "car_grid_charging": True}
+
+    coordinator._fetch_all_data = AsyncMock(
+        return_value={
+            "current_price": 0.11,
+            "highest_price": 0.2,
+            "lowest_price": 0.05,
+            "grid_power": -2000,
+            # No complete window yet after the restart.
+            "grid_tracking_average_power": None,
+        }
+    )
+    coordinator._check_data_availability = AsyncMock()
+    coordinator.decision_engine.evaluate_charging_decision = AsyncMock(
+        side_effect=_capture
+    )
+
+    await coordinator._async_update_data()
+
+    # The decision engine must not see the stale cap, so charging is not
+    # limited and no bogus acknowledgement is pending.
+    assert seen["grid_tracking_charger_limit"] is None
+    assert seen["grid_tracking_last_adjustment"] is None
+    assert seen["grid_tracking_waiting_for_application"] is False
+
+
+@pytest.mark.asyncio
+async def test_restored_grid_tracking_cap_applies_once_average_available(
+    fake_hass, monkeypatch
+):
+    """Once this process has a real average, normal feedback state resumes."""
+    base_time = datetime(2026, 8, 2, 19, 0, tzinfo=timezone.utc)
+    now_ref = {"value": base_time}
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: now_ref["value"], raising=False
+    )
+    config = _base_config()
+    config[CONF_GRID_IMPORT_NEGATIVE_FEEDBACK] = True
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    coordinator._grid_tracking_charger_limit = 1680
+    coordinator._grid_tracking_last_adjustment = base_time - timedelta(minutes=30)
+    coordinator._grid_tracking_cap_restored_unvalidated = True
+    coordinator._previous_car_charging = True
+
+    seen: dict[str, Any] = {}
+
+    async def _capture(data, *args, **kwargs):
+        seen.update(data)
+        return {"battery_grid_charging": False, "car_grid_charging": True}
+
+    coordinator._fetch_all_data = AsyncMock(
+        return_value={
+            "current_price": 0.11,
+            "highest_price": 0.2,
+            "lowest_price": 0.05,
+            "grid_power": -2000,
+            "grid_tracking_average_power": -2000.0,
+        }
+    )
+    coordinator._check_data_availability = AsyncMock()
+    coordinator.decision_engine.evaluate_charging_decision = AsyncMock(
+        side_effect=_capture
+    )
+
+    await coordinator._async_update_data()
+
+    assert seen["grid_tracking_charger_limit"] == 1680
+    assert coordinator._grid_tracking_cap_restored_unvalidated is False
 
 
 @pytest.mark.asyncio
