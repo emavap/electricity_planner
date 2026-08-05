@@ -125,7 +125,7 @@ def test_peak_threshold_calculation(
     # Prepare test data
     data = {
         "monthly_grid_peak": monthly_peak,
-        "grid_power": 3000.0,  # Importing from grid (positive = import)
+        "grid_power": -3000.0,  # Importing from grid (P1 convention: negative = import)
         "car_charging_power": 2000.0,  # Car actively charging
     }
 
@@ -154,7 +154,7 @@ def test_peak_threshold_uses_max_of_monthly_and_base(fake_hass, monkeypatch):
     # Test Case A: monthly_peak > base_setpoint
     data_a = {
         "monthly_grid_peak": 6500.0,
-        "grid_power": 3000.0,  # Importing (positive = import)
+        "grid_power": -3000.0,  # Importing (P1 convention: negative = import)
         "car_charging_power": 2000.0,
     }
     coordinator._update_peak_limit_state(data_a)
@@ -165,7 +165,7 @@ def test_peak_threshold_uses_max_of_monthly_and_base(fake_hass, monkeypatch):
     # Test Case B: monthly_peak < base_setpoint
     data_b = {
         "monthly_grid_peak": 3500.0,
-        "grid_power": 3000.0,  # Importing (positive = import)
+        "grid_power": -3000.0,  # Importing (P1 convention: negative = import)
         "car_charging_power": 2000.0,
     }
     coordinator._update_peak_limit_state(data_b)
@@ -257,7 +257,7 @@ def test_peak_monitoring_starts_when_exceeding_threshold(fake_hass, monkeypatch)
     # Monthly peak = 6000W → threshold = 6300W
     data = {
         "monthly_grid_peak": 6000.0,
-        "grid_power": 6500.0,  # Importing 6500W (exceeds threshold, positive = import)
+        "grid_power": -6500.0,  # Importing 6500W (P1 convention: negative = import)
         "car_charging_power": 3000.0,  # Car actively charging
     }
 
@@ -266,6 +266,28 @@ def test_peak_monitoring_starts_when_exceeding_threshold(fake_hass, monkeypatch)
     # Monitoring should have started
     assert coordinator._car_peak_limit_started_at == base_time
     assert data["car_peak_limited"] is False  # Not limited yet (need 5 min)
+
+
+def test_peak_monitoring_ignores_export(fake_hass, monkeypatch):
+    """Solar export must not be treated as tariff-relevant grid import."""
+    base_time = datetime(2025, 10, 27, 12, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+
+    config = _base_config()
+    config[CONF_BASE_GRID_SETPOINT] = 5000
+    config[CONF_GRID_POWER_ENTITY] = "sensor.grid_power"
+    config[CONF_CAR_CHARGING_POWER_ENTITY] = "sensor.car_power"
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    coordinator._update_peak_limit_state(
+        {
+            "monthly_grid_peak": 6000.0,
+            "grid_power": 6500.0,  # P1 export, not import
+            "car_charging_power": 3000.0,
+        }
+    )
+
+    assert coordinator._car_peak_limit_started_at is None
 
 
 def test_peak_limit_triggers_after_5_minutes(fake_hass, monkeypatch):
@@ -289,7 +311,7 @@ def test_peak_limit_triggers_after_5_minutes(fake_hass, monkeypatch):
 
     data = {
         "monthly_grid_peak": 6000.0,
-        "grid_power": 6500.0,  # Exceeds 6300W threshold (positive = import)
+        "grid_power": -6500.0,  # Exceeds 6300W threshold (negative = import)
         "car_charging_power": 3000.0,
     }
 
@@ -334,7 +356,7 @@ def test_peak_monitoring_resets_when_below_threshold(fake_hass, monkeypatch):
     # Start exceeding threshold
     data = {
         "monthly_grid_peak": 6000.0,
-        "grid_power": 6500.0,  # Exceeds 6300W threshold (positive = import)
+        "grid_power": -6500.0,  # Exceeds 6300W threshold (negative = import)
         "car_charging_power": 3000.0,
     }
     coordinator._update_peak_limit_state(data)
@@ -342,7 +364,7 @@ def test_peak_monitoring_resets_when_below_threshold(fake_hass, monkeypatch):
 
     # After 2 minutes, drop below threshold
     clock["now"] = base_time + timedelta(minutes=2)
-    data["grid_power"] = 5000.0  # Below 6300W threshold (positive = import)
+    data["grid_power"] = -5000.0  # Below 6300W threshold (negative = import)
     coordinator._update_peak_limit_state(data)
 
     # Monitoring should reset
@@ -404,7 +426,7 @@ def test_no_monitoring_when_car_not_charging(fake_hass, monkeypatch):
 
     data = {
         "monthly_grid_peak": 6000.0,
-        "grid_power": 6500.0,  # Exceeds threshold (positive = import)
+        "grid_power": -6500.0,  # Exceeds threshold (negative = import)
         "car_charging_power": 50.0,  # Below min threshold (100W)
     }
 

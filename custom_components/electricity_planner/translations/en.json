@@ -288,7 +288,7 @@
                             "energy_tax_bijdrage": "Bijdrage op de Energie (\u20ac/kWh)",
                             "energy_cost_gsc": "Groene stroom certificaten (\u20ac/kWh)",
                             "energy_cost_wkk": "Warmte-krachtkoppeling (\u20ac/kWh)",
-                            "grid_power_entity": "Real-time grid power in W (positive = import, negative = export) used for peak detection and inverter derating diagnostics"
+                            "grid_power_entity": "Raw P1 grid power in W (negative = import, positive = export) used for peak detection and inverter derating diagnostics"
                         }
                     },
                     "forecast_entities": {
@@ -359,7 +359,7 @@
                     "energy_tax_bijdrage": "Bijdrage op de Energie (\u20ac/kWh)",
                     "energy_cost_gsc": "Groene stroom certificaten (\u20ac/kWh)",
                     "energy_cost_wkk": "Warmte-krachtkoppeling (\u20ac/kWh)",
-                    "grid_power_entity": "Real-time grid power in W (positive = import, negative = export) used for peak detection and inverter derating diagnostics",
+                    "grid_power_entity": "Raw P1 grid power in W (negative = import, positive = export) used for peak detection and inverter derating diagnostics",
                     "solar_forecast_entity": "Tomorrow's solar production forecast in kWh (e.g. sensor.energy_production_tomorrow). Read from the forecast start hour onwards to decide overnight grid charging",
                     "solar_forecast_today_entity": "Today's solar production forecast in kWh (e.g. sensor.energy_production_today). Used between midnight and the forecast start hour to validate the cached forecast",
                     "phase_1_solar_entity": "Phase L1 solar production sensor (leave blank if unavailable)",
@@ -574,7 +574,7 @@
                             "energy_tax_bijdrage": "Bijdrage op de Energie (\u20ac/kWh)",
                             "energy_cost_gsc": "Groene stroom certificaten (\u20ac/kWh)",
                             "energy_cost_wkk": "Warmte-krachtkoppeling (\u20ac/kWh)",
-                            "grid_power_entity": "Real-time grid power in W (positive = import, negative = export) used for peak detection and inverter derating diagnostics"
+                            "grid_power_entity": "Raw P1 grid power in W (negative = import, positive = export) used for peak detection and inverter derating diagnostics"
                         }
                     },
                     "forecast_entities": {
@@ -875,7 +875,7 @@
                     "energy_tax_bijdrage": "Bijdrage op de Energie (\u20ac/kWh)",
                     "energy_cost_gsc": "Groene stroom certificaten (\u20ac/kWh)",
                     "energy_cost_wkk": "Warmte-krachtkoppeling (\u20ac/kWh)",
-                    "grid_power_entity": "Real-time grid power in W (positive = import, negative = export) used for peak detection and inverter derating diagnostics",
+                    "grid_power_entity": "Raw P1 grid power in W (negative = import, positive = export) used for peak detection and inverter derating diagnostics",
                     "solar_forecast_entity": "Tomorrow's solar production forecast in kWh (e.g. sensor.energy_production_tomorrow). Read from the forecast start hour onwards to decide overnight grid charging",
                     "solar_forecast_today_entity": "Today's solar production forecast in kWh (e.g. sensor.energy_production_today). Used between midnight and the forecast start hour to validate the cached forecast",
                     "phase_1_solar_entity": "Phase L1 solar production sensor (leave blank if unavailable)",

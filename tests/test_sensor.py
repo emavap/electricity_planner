@@ -34,13 +34,13 @@ from custom_components.electricity_planner.sensor import (
 
 
 def test_power_analysis_sensor_reports_grid_import_export_with_correct_sign():
-    """Positive grid power should be import, negative should be export."""
+    """P1 grid power is negative for import and positive for export."""
     coordinator = SimpleNamespace(
         data={
             "power_analysis": {
                 "solar_surplus": 250,
             },
-            "grid_power": 1200,
+            "grid_power": -1200,
         },
         async_add_listener=lambda update_callback, context=None: lambda: None,
         last_update_success=True,
@@ -53,7 +53,7 @@ def test_power_analysis_sensor_reports_grid_import_export_with_correct_sign():
     assert attrs["grid_import"] == 1200
     assert attrs["grid_export"] == 0
 
-    coordinator.data["grid_power"] = -800
+    coordinator.data["grid_power"] = 800
     attrs = sensor.extra_state_attributes
 
     assert attrs["grid_import"] == 0
@@ -326,8 +326,8 @@ def test_core_analysis_sensors_report_values_and_empty_defaults():
     assert power.native_value == 1500
     attrs = power.extra_state_attributes
     assert attrs["solar_production"] == 2600
-    assert attrs["grid_import"] == 0
-    assert attrs["grid_export"] == 250
+    assert attrs["grid_import"] == 250
+    assert attrs["grid_export"] == 0
 
     coordinator.data = {}
     assert battery.native_value is None

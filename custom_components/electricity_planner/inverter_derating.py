@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.util import dt as dt_util
 
+from .grid_signs import sensor_grid_export_w, sensor_grid_to_planner_power
+
 if TYPE_CHECKING:
     from .decision_engine import EngineSettings
 
@@ -113,14 +115,15 @@ class InverterDeratingCalculator:
         )
 
         grid_power_raw = data.get("grid_power")
-        grid_power_w = _safe_optional_float(grid_power_raw)
-        # Invert sign: sensor.grid uses negative=import, positive=export.
-        # The calculator uses the opposite convention (positive=import).
-        if grid_power_w is not None:
-            grid_power_w = -grid_power_w
+        raw_grid_power_w = _safe_optional_float(grid_power_raw)
+        grid_power_w = (
+            sensor_grid_to_planner_power(raw_grid_power_w)
+            if raw_grid_power_w is not None
+            else None
+        )
         previous_grid_power_w = _safe_optional_float(data.get("previous_grid_power"))
         if previous_grid_power_w is not None:
-            previous_grid_power_w = -previous_grid_power_w
+            previous_grid_power_w = sensor_grid_to_planner_power(previous_grid_power_w)
 
         # Preferred control path: use the current operating point and hold a
         # simple deadband around the configured export target.
@@ -145,8 +148,9 @@ class InverterDeratingCalculator:
                 if historical_sensor_grid_power_w is not None:
                     # Match the current-reading conversion above: the source
                     # sensor is negative for import and positive for export.
-                    historical_grid_power_w = -historical_sensor_grid_power_w
-                    history_exports.append(max(0.0, -historical_grid_power_w))
+                    history_exports.append(
+                        sensor_grid_export_w(historical_sensor_grid_power_w)
+                    )
             if history_exports:
                 smoothed_export_power_w = sum(history_exports) / len(history_exports)
                 using_rolling_export_average = True

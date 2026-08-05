@@ -14,6 +14,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DEFAULT_MAX_SOC
 from .defaults import DEFAULT_SYSTEM_LIMITS
+from .grid_signs import sensor_grid_to_planner_power
 
 if TYPE_CHECKING:
     from .decision_engine import CycleContext, EngineSettings
@@ -153,13 +154,17 @@ class ChargerLimitCalculator:
             result["grid_tracking_last_adjustment"] = ctx.grid_tracking_last_adjustment
             return result
 
-        # The Planner grid setpoint uses positive import / negative export,
-        # while the configured P1 meter uses negative import / positive
-        # export. Convert the averaged P1 reading to the Planner convention
-        # before comparing it with the target.
+        # Convert the averaged raw P1 reading to the Planner target convention
+        # before comparing it with the target.  The sign boundary is defined
+        # once in grid_signs.py.
         average_grid_power = ctx.grid_tracking_average_power
         excess_import = max(
-            0, int(-average_grid_power - target - _GRID_TRACKING_DEADBAND_W)
+            0,
+            int(
+                sensor_grid_to_planner_power(average_grid_power)
+                - target
+                - _GRID_TRACKING_DEADBAND_W
+            ),
         )
         if excess_import:
             # The 500W deadband is the permitted residual import, not an

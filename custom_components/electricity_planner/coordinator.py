@@ -86,6 +86,7 @@ from .const import (
 from .decision_engine import ChargingDecisionEngine
 from .entity_status import EntityStatusReporter
 from .forecast_summary import ForecastSummaryCalculator
+from .grid_signs import sensor_grid_import_w
 from .helpers import (
     PriceInterval,
     extract_price_from_interval,
@@ -801,8 +802,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             and car_charging
             and not currently_limited
         ):
-            # Grid power convention: positive = import, negative = export
-            grid_import = max(0.0, float(grid_power))
+            # ``grid_power`` is the raw P1 sensor value.  Its opposite sign
+            # from Planner setpoints is centralized in grid_signs.py.
+            grid_import = sensor_grid_import_w(float(grid_power))
 
             if grid_import > peak_threshold:
                 # Start or continue monitoring

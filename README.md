@@ -1,10 +1,12 @@
 # Electricity Planner
 
-**Version 6.7.7** | **Config Schema Version 24** | **Home Assistant 2024.4+**
+**Version 6.7.8** | **Config Schema Version 24** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
 > Release note for v6.7.7: adds an opt-in live P1 feedback guard for installations whose meter reports grid import as a negative value. When the rolling three-minute import average exceeds the Planner grid target, the EV limit is reduced and then released gradually after recovery. Restored limits are never applied until a new post-restart average exists. The option is off by default; no config migration is required.
+>
+> Release note for v6.7.8: fixes P1-negative grid-sign handling in peak-import protection and diagnostics, makes the battery SOC hysteresis effective for charging strategies, and preserves the EV arbitrage breaker guard during manual force-ON overrides. No config migration is required.
 >
 > Release note for v6.7.6: derating now uses a rolling three-minute average of grid export instead of allowing a single current P1-meter reading to override the smoothing. This prevents brief readings just above the export deadband from curtailing solar or raising a low-SOC derating alarm. No config migration required.
 >

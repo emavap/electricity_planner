@@ -214,6 +214,25 @@ class OverrideRecalculator:
             power_allocation,
         )
 
+        # An EV force-ON override must not defeat the arbitrage breaker guard:
+        # battery-arbitrage power already supplies the car, so reserving extra
+        # grid power would combine battery discharge with grid draw.
+        if (
+            "car_grid_charging" in override_targets
+            and decision.get("car_grid_charging")
+            and ctx.car_arbitrage_power > 0
+        ):
+            decision["car_grid_import_allowed"] = False
+            combined_data["car_grid_import_allowed"] = False
+            ctx = CycleContext.from_data(
+                combined_data,
+                self._settings,
+                battery_analysis,
+                price_analysis,
+                power_analysis,
+                power_allocation,
+            )
+
         if "charger_limit" not in override_targets and override_targets.intersection(
             {"battery_grid_charging", "car_grid_charging"}
         ):

@@ -1063,9 +1063,9 @@ class ChargingDecisionEngine:
 
         # Resolve effective max SOC for grid charging (sunny day logic)
         grid_battery_analysis = self._apply_sunny_day_grid_limit(battery_analysis, data)
-        decision_data["sunny_day_active"] = grid_battery_analysis.get(
-            "max_soc_threshold"
-        ) != battery_analysis.get("max_soc_threshold")
+        decision_data["sunny_day_active"] = bool(
+            grid_battery_analysis.get("sunny_day_grid_limit_active", False)
+        )
 
         cycle_ctx = CycleContext.from_data(
             {**data, **decision_data},
@@ -1465,6 +1465,7 @@ class ChargingDecisionEngine:
             # Create modified copy for grid charging decisions only
             grid_analysis = dict(battery_analysis)
             grid_analysis["max_soc_threshold"] = sunny_threshold
+            grid_analysis["sunny_day_grid_limit_active"] = True
             grid_analysis["sunny_day_grid_soc_hysteresis_percent"] = (
                 _SUNNY_DAY_GRID_SOC_HYSTERESIS_PERCENT
             )
@@ -1476,6 +1477,7 @@ class ChargingDecisionEngine:
                         sunny_threshold + _SUNNY_DAY_GRID_SOC_HYSTERESIS_PERCENT,
                         100.0,
                     )
+                grid_analysis["max_soc_threshold"] = stop_threshold
                 grid_analysis["grid_charge_stop_soc_threshold"] = stop_threshold
                 grid_analysis["batteries_full"] = average_soc >= (stop_threshold - 1e-9)
                 grid_analysis["remaining_capacity_percent"] = (
@@ -1500,6 +1502,7 @@ class ChargingDecisionEngine:
                     normal_threshold + _SUNNY_DAY_GRID_SOC_HYSTERESIS_PERCENT,
                     100.0,
                 )
+            grid_analysis["max_soc_threshold"] = stop_threshold
             grid_analysis["grid_charge_stop_soc_threshold"] = stop_threshold
             grid_analysis["batteries_full"] = average_soc >= (stop_threshold - 1e-9)
             grid_analysis["remaining_capacity_percent"] = stop_threshold - average_soc

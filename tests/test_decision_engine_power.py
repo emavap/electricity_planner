@@ -1423,6 +1423,37 @@ def test_recalculate_after_car_override_clears_stale_arbitrage_state():
     assert result["grid_components"]["battery"] == -3000
 
 
+def test_recalculate_after_forced_car_override_blocks_grid_during_arbitrage():
+    """A manual EV ON override must not undo the arbitrage breaker guard."""
+    engine = _engine({CONF_MAX_CAR_POWER: 11000})
+
+    result = engine.recalculate_after_override(
+        baseline_data={
+            **_arbitrage_mode_data(),
+            "car_grid_import_allowed": False,
+        },
+        decision={
+            "price_analysis": {},
+            "battery_analysis": _arbitrage_battery_analysis(),
+            "power_allocation": {
+                "remaining_solar": 0,
+                "solar_for_car": 0,
+                "car_current_solar_usage": 0,
+            },
+            "car_charging_power": 2000,
+            "car_grid_charging": True,
+            "car_grid_import_allowed": True,
+            "car_solar_only": False,
+            "charger_limit": 5700,
+            "grid_setpoint": 2000,
+        },
+        override_targets={"car_grid_charging"},
+    )
+
+    assert result["car_grid_import_allowed"] is False
+    assert result["charger_limit"] == 3000
+
+
 def test_car_override_applies_negative_import_feedback_without_manual_cap():
     """A forced car-on decision must retain the opt-in P1 import protection."""
     engine = _engine({CONF_GRID_IMPORT_NEGATIVE_FEEDBACK: True})
@@ -3286,6 +3317,7 @@ def test_sunny_day_forecast_below_threshold_not_sunny():
     assert result is not ba
     assert result["max_soc_threshold"] == 90.0
     assert result["grid_charge_stop_soc_threshold"] == 90.0
+    assert result.get("sunny_day_grid_limit_active", False) is False
 
 
 def test_sunny_day_forecast_above_threshold_applies_limit():
@@ -3345,7 +3377,7 @@ def test_sunny_day_hysteresis_keeps_active_grid_charge_inside_two_percent_band()
         },
     )
 
-    assert result["max_soc_threshold"] == 35.0
+    assert result["max_soc_threshold"] == 37.0
     assert result["grid_charge_stop_soc_threshold"] == 37.0
     assert result["batteries_full"] is False
     assert result["remaining_capacity_percent"] == pytest.approx(0.6)
@@ -3370,6 +3402,7 @@ def test_sunny_day_hysteresis_stops_active_grid_charge_above_band():
     )
 
     assert result["grid_charge_stop_soc_threshold"] == 37.0
+    assert result["max_soc_threshold"] == 37.0
     assert result["batteries_full"] is True
     assert result["remaining_capacity_percent"] == pytest.approx(-0.1)
 

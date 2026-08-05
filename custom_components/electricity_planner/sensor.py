@@ -74,6 +74,7 @@ from .const import (
     PHASE_MODE_THREE,
 )
 from .coordinator import ElectricityPlannerCoordinator
+from .grid_signs import sensor_grid_export_w, sensor_grid_import_w
 from .helpers import (
     extract_price_from_interval,
     is_in_month_peak_transition_window,
@@ -407,10 +408,8 @@ class PowerAnalysisSensor(ElectricityPlannerSensorBase):
         grid_power = self.coordinator.data.get("grid_power")
         if grid_power is not None:
             attributes["grid_power"] = grid_power
-            attributes["grid_import"] = max(0, grid_power)  # Positive value for import
-            attributes["grid_export"] = abs(
-                min(0, grid_power)
-            )  # Positive value for export
+            attributes["grid_import"] = sensor_grid_import_w(float(grid_power))
+            attributes["grid_export"] = sensor_grid_export_w(float(grid_power))
 
         # Expose peak import limiting status
         attributes["car_peak_limited"] = bool(
