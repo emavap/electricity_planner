@@ -271,6 +271,15 @@ views:
               - entity: number.electricity_planner_arbitrage_mode_deadline_hour
                 name: "Arbitrage Deadline Hour"
                 icon: mdi:clock-end
+              - entity: number.electricity_planner_arbitrage_round_trip_efficiency
+                name: "Arbitrage Round-trip Efficiency"
+                icon: mdi:sync
+              - entity: number.electricity_planner_arbitrage_degradation_cost
+                name: "Arbitrage Degradation Cost"
+                icon: mdi:battery-heart
+              - entity: number.electricity_planner_arbitrage_minimum_profit
+                name: "Arbitrage Minimum Export Profit"
+                icon: mdi:cash-plus
               - entity: number.electricity_planner_negative_buy_threshold
                 name: "Negative Arbitrage Buy Threshold"
                 icon: mdi:cash-minus
@@ -303,6 +312,7 @@ views:
               - **Arbitrage Reserve SOC** (default 50%): Minimum battery SOC kept in reserve while *Arbitrage Mode* is active — exports stop once the average SOC reaches this floor.
               - **Arbitrage Reserve SOC (sunny)** (default 30%): Overrides the base reserve when tomorrow's solar forecast is high — lowers the floor to sell more battery capacity before a sunny day, making room for incoming solar and reducing derating.
               - **Arbitrage Deadline Hour** (default 12): Local hour by which both arbitrage *sell* and *Negative Arbitrage Buy* slot windows must finish. Protects the morning solar harvest.
+              - **Arbitrage costs**: the planner keeps a virtual ledger of where the battery's energy came from. The reserve floor is charged to the oldest energy, and export eligibility is then checked from the most recently charged energy downwards, stopping at the first lot that may not be sold. Grid-bought energy is exported only when the current feed-in price covers its recorded all-in buy price divided by the round-trip efficiency, plus degradation cost and minimum export profit; a negative buy price lowers that bar. Solar is credited only up to the solar power the planner actually allocated to the battery. Energy of unknown origin — anything present at startup, charged during a manual override, or gained across a restart — is never exported by this mode.
               - **Negative Arbitrage Buy Threshold** (default −0.05 €/kWh): Net buy price at or below which the planner requests peak-limited grid import (truly paid-to-consume). More-negative values mean stricter activation.
 
               *Mode toggles*

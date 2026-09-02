@@ -16,6 +16,7 @@ from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.electricity_planner import coordinator as coordinator_module
+from custom_components.electricity_planner import energy_ledger as energy_ledger_module
 from custom_components.electricity_planner.const import (
     ATTR_ACTION,
     ATTR_ENTRY_ID,
@@ -75,6 +76,10 @@ from custom_components.electricity_planner.const import (
 )
 from custom_components.electricity_planner.coordinator import (
     ElectricityPlannerCoordinator,
+)
+from custom_components.electricity_planner.energy_ledger import (
+    BatteryEnergyLedger,
+    EnergyOrigin,
 )
 from custom_components.electricity_planner.sensor import GridSetpointSensor
 
@@ -1076,6 +1081,45 @@ def _freeze_time(monkeypatch, base_time):
     )
 
 
+def _seed_energy_ledger(
+    coordinator, battery_details, origin=EnergyOrigin.SOLAR, buy_cost=None
+):
+    """Give the planner a trusted ledger that fully accounts for the fleet.
+
+    Arbitrage export fails closed on an unattributed ledger, so slot and price
+    tests seed one lot of a known origin covering the whole observed inventory.
+    The configured fleet is narrowed to the batteries in ``battery_details``:
+    arbitrage also fails closed when a configured battery is not reporting.
+    """
+    coordinator.config[CONF_BATTERY_SOC_ENTITIES] = [
+        battery["entity_id"] for battery in battery_details
+    ]
+    total = sum(
+        float(battery["capacity"]) * float(battery["soc"]) / 100
+        for battery in battery_details
+    )
+    ledger = BatteryEnergyLedger()
+    ledger.add(origin, total, buy_cost)
+    coordinator._energy_ledger = ledger
+    coordinator._ledger_initialized = True
+    coordinator._ledger_last_energy_kwh = total
+    coordinator._ledger_last_observed_at = coordinator_module.dt_util.utcnow()
+    coordinator._ledger_inventory = tuple(
+        sorted(
+            (battery["entity_id"], round(float(battery["capacity"]), 6))
+            for battery in battery_details
+        )
+    )
+    coordinator._ledger_status = "seeded"
+    return coordinator
+
+
+def _arbitrage_plan(coordinator, data, **seed_kwargs):
+    """Seed a trusted ledger from ``data`` and build the arbitrage plan."""
+    _seed_energy_ledger(coordinator, data.get("battery_details") or [], **seed_kwargs)
+    return coordinator._calculate_arbitrage_mode_plan(data)
+
+
 @pytest.mark.parametrize(
     "multiplier,offset,transport_lookup,expected",
     [
@@ -1906,7 +1950,8 @@ def test_arbitrage_mode_plan_prefers_highest_export_slots(fake_hass, monkeypatch
         for slot in range(8)
     ]
 
-    plan = coordinator._calculate_arbitrage_mode_plan(
+    plan = _arbitrage_plan(
+        coordinator,
         {
             "battery_details": [
                 {
@@ -1918,7 +1963,7 @@ def test_arbitrage_mode_plan_prefers_highest_export_slots(fake_hass, monkeypatch
             ],
             "nordpool_prices_today": {"BE": lower_window + higher_window},
             "nordpool_prices_tomorrow": None,
-        }
+        },
     )
 
     assert plan["enabled"] is True
@@ -1959,7 +2004,8 @@ def test_arbitrage_mode_plan_honors_configured_export_cap(fake_hass, monkeypatch
         for slot in range(16)
     ]
 
-    plan = coordinator._calculate_arbitrage_mode_plan(
+    plan = _arbitrage_plan(
+        coordinator,
         {
             "battery_details": [
                 {
@@ -1971,7 +2017,7 @@ def test_arbitrage_mode_plan_honors_configured_export_cap(fake_hass, monkeypatch
             ],
             "nordpool_prices_today": {"BE": intervals},
             "nordpool_prices_tomorrow": None,
-        }
+        },
     )
 
     assert plan["configured_export_cap_w"] == 4500
@@ -2013,7 +2059,8 @@ def test_arbitrage_mode_plan_derives_threshold_from_selected_slots(
         for slot in range(4)
     ]
 
-    plan = coordinator._calculate_arbitrage_mode_plan(
+    plan = _arbitrage_plan(
+        coordinator,
         {
             "battery_details": [
                 {
@@ -2025,7 +2072,7 @@ def test_arbitrage_mode_plan_derives_threshold_from_selected_slots(
             ],
             "nordpool_prices_today": {"BE": first_window + second_window},
             "nordpool_prices_tomorrow": None,
-        }
+        },
     )
 
     assert plan["slots_cover_full_arbitrage"] is True
@@ -2067,7 +2114,8 @@ def test_arbitrage_mode_plan_stops_when_fleet_net_energy_is_at_reserve(
         for slot in range(8)
     ]
 
-    plan = coordinator._calculate_arbitrage_mode_plan(
+    plan = _arbitrage_plan(
+        coordinator,
         {
             "battery_details": [
                 {
@@ -2085,7 +2133,7 @@ def test_arbitrage_mode_plan_stops_when_fleet_net_energy_is_at_reserve(
             ],
             "nordpool_prices_today": {"BE": slots},
             "nordpool_prices_tomorrow": None,
-        }
+        },
     )
 
     assert plan["active"] is False
@@ -2124,7 +2172,8 @@ def test_arbitrage_mode_plan_uses_net_fleet_headroom_when_some_batteries_are_bel
         for slot in range(8)
     ]
 
-    plan = coordinator._calculate_arbitrage_mode_plan(
+    plan = _arbitrage_plan(
+        coordinator,
         {
             "battery_details": [
                 {
@@ -2142,7 +2191,7 @@ def test_arbitrage_mode_plan_uses_net_fleet_headroom_when_some_batteries_are_bel
             ],
             "nordpool_prices_today": {"BE": slots},
             "nordpool_prices_tomorrow": None,
-        }
+        },
     )
 
     assert plan["active"] is True
@@ -2186,7 +2235,8 @@ def test_arbitrage_mode_plan_activates_during_current_selected_window(
         for slot in range(4)
     ]
 
-    plan = coordinator._calculate_arbitrage_mode_plan(
+    plan = _arbitrage_plan(
+        coordinator,
         {
             "battery_details": [
                 {
@@ -2198,7 +2248,7 @@ def test_arbitrage_mode_plan_activates_during_current_selected_window(
             ],
             "nordpool_prices_today": {"BE": current_window + later_window},
             "nordpool_prices_tomorrow": None,
-        }
+        },
     )
 
     assert plan["active"] is True
@@ -2249,7 +2299,8 @@ def test_arbitrage_mode_plan_falls_back_when_total_eligible_duration_is_insuffic
         for slot in range(4)
     ]
 
-    plan = coordinator._calculate_arbitrage_mode_plan(
+    plan = _arbitrage_plan(
+        coordinator,
         {
             "battery_details": [
                 {
@@ -2261,7 +2312,7 @@ def test_arbitrage_mode_plan_falls_back_when_total_eligible_duration_is_insuffic
             ],
             "nordpool_prices_today": {"BE": first_window + second_window},
             "nordpool_prices_tomorrow": None,
-        }
+        },
     )
 
     assert plan["slots_cover_full_arbitrage"] is False
@@ -2303,7 +2354,8 @@ def test_arbitrage_mode_plan_uses_whole_slots_without_partial_truncation(
         for slot in range(8)
     ]
 
-    plan = coordinator._calculate_arbitrage_mode_plan(
+    plan = _arbitrage_plan(
+        coordinator,
         {
             "battery_details": [
                 {
@@ -2315,7 +2367,7 @@ def test_arbitrage_mode_plan_uses_whole_slots_without_partial_truncation(
             ],
             "nordpool_prices_today": {"BE": slots},
             "nordpool_prices_tomorrow": None,
-        }
+        },
     )
 
     assert plan["selected_slots_count"] == 5
@@ -2360,7 +2412,8 @@ def test_arbitrage_mode_plan_targets_same_day_deadline_before_cutoff(
         for slot in range(4)
     ]
 
-    plan = coordinator._calculate_arbitrage_mode_plan(
+    plan = _arbitrage_plan(
+        coordinator,
         {
             "battery_details": [
                 {
@@ -2372,7 +2425,7 @@ def test_arbitrage_mode_plan_targets_same_day_deadline_before_cutoff(
             ],
             "nordpool_prices_today": {"BE": before_deadline},
             "nordpool_prices_tomorrow": {"BE": after_deadline},
-        }
+        },
     )
 
     assert plan["arbitrage_price_threshold"] == pytest.approx(0.09, rel=1e-6)
@@ -2419,7 +2472,8 @@ def test_arbitrage_mode_plan_rolls_to_next_day_after_cutoff(fake_hass, monkeypat
         for slot in range(4)
     ]
 
-    plan = coordinator._calculate_arbitrage_mode_plan(
+    plan = _arbitrage_plan(
+        coordinator,
         {
             "battery_details": [
                 {
@@ -2431,7 +2485,7 @@ def test_arbitrage_mode_plan_rolls_to_next_day_after_cutoff(fake_hass, monkeypat
             ],
             "nordpool_prices_today": {"BE": before_next_deadline},
             "nordpool_prices_tomorrow": {"BE": after_next_deadline},
-        }
+        },
     )
 
     parsed_deadline = dt_util.parse_datetime(plan["deadline"])
@@ -3657,3 +3711,1668 @@ def test_buy_vat_multiplier_custom_value(fake_hass, monkeypatch):
     result = coordinator._calculate_average_threshold(prices_today, None, None)
     # (0.2 + 0) * 1.21 = 0.242
     assert result == pytest.approx(0.242, rel=1e-6)
+
+
+# --- virtual battery-energy ledger ----------------------------------------
+
+
+class _MemoryLedgerStore:
+    """Store double recording immediate and coalesced delayed writes."""
+
+    def __init__(self, initial_data: dict | None = None):
+        self.data = initial_data
+        self.immediate_saves = 0
+        self.delayed_saves = 0
+        self.last_delay: float | None = None
+
+    async def async_load(self):
+        return self.data
+
+    async def async_save(self, data):
+        self.immediate_saves += 1
+        self.data = data
+
+    def async_delay_save(self, data_func, delay=0):
+        self.delayed_saves += 1
+        self.last_delay = delay
+        self.data = data_func()
+
+
+def _movable_time(monkeypatch, start):
+    """Freeze time at ``start`` and return a mutable reference to advance it."""
+    now_ref = {"value": start}
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "utcnow", lambda: now_ref["value"], raising=False
+    )
+    monkeypatch.setattr(
+        coordinator_module.dt_util, "now", lambda: now_ref["value"], raising=False
+    )
+    return now_ref
+
+
+def _fleet(*specs):
+    """Build ``battery_details`` for (entity_id, soc, capacity) triples."""
+    return [
+        {
+            "entity_id": entity_id,
+            "soc": soc,
+            "capacity": capacity,
+            "phases": ["phase_1"],
+        }
+        for entity_id, soc, capacity in specs
+    ]
+
+
+_SAME_SOC = object()
+
+
+def _full_fleet(soc_1, soc_2=_SAME_SOC, capacity=10.0):
+    """Both configured batteries, which is what a valid observation requires."""
+    return _fleet(
+        ("sensor.battery_soc_1", soc_1, capacity),
+        ("sensor.battery_soc_2", soc_1 if soc_2 is _SAME_SOC else soc_2, capacity),
+    )
+
+
+def _ledger_coordinator(fake_hass, monkeypatch, config=None):
+    coordinator = _create_coordinator(fake_hass, config or _base_config(), monkeypatch)
+    coordinator._energy_ledger_store = _MemoryLedgerStore()
+    return coordinator
+
+
+def _lot_tuples(coordinator):
+    return [
+        (lot.origin, pytest.approx(lot.energy_kwh), lot.buy_cost_eur_per_kwh)
+        for lot in coordinator.energy_ledger.lots
+    ]
+
+
+def _price_analysis(raw_price, transport_cost=0.0, **overrides):
+    """Build the engine's price analysis for a raw (pre-VAT) market price."""
+    try:
+        # Mirrors the engine: an unusable raw price leaves no current price.
+        current_price = float(raw_price) + transport_cost
+    except (TypeError, ValueError):
+        current_price = None
+    analysis = {
+        "raw_current_price": raw_price,
+        "current_price": current_price,
+        "price_adjustment_multiplier": 1.0,
+        "price_adjustment_offset": 0.0,
+        "transport_cost": transport_cost,
+        "data_available": True,
+    }
+    analysis.update(overrides)
+    return analysis
+
+
+def _all_in(raw_price, transport_cost=0.0, vat=DEFAULT_BUY_VAT_MULTIPLIER):
+    """Return the VAT-inclusive all-in buy price a lot must record."""
+    return (raw_price + transport_cost) * vat
+
+
+def _grid_intent(coordinator, raw_price, transport_cost=0.0, **analysis_overrides):
+    """Record the intent a commanded grid charge at ``raw_price`` would leave."""
+    coordinator._record_ledger_charge_intent(
+        {
+            "price_analysis": _price_analysis(
+                raw_price, transport_cost, **analysis_overrides
+            )
+        },
+        {"battery_grid_charging": True},
+        True,
+        set(),
+    )
+
+
+def _solar_intent(coordinator, allocated_w, grid_power=0.0):
+    """Record a solar intent; ``grid_power`` is the raw P1 sign convention."""
+    coordinator._record_ledger_charge_intent(
+        {"price_analysis": _price_analysis(0.10), "grid_power": grid_power},
+        {
+            "battery_grid_charging": False,
+            "power_allocation": {"solar_for_batteries": allocated_w},
+        },
+        False,
+        set(),
+    )
+
+
+def test_energy_ledger_first_observation_is_entirely_unknown(fake_hass, monkeypatch):
+    """A SOC reading proves quantity, never origin."""
+    _movable_time(monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc))
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+
+    assert coordinator.energy_ledger_initialized is True
+    assert coordinator.energy_ledger_status == "initialized"
+    assert _lot_tuples(coordinator) == [
+        (EnergyOrigin.UNKNOWN, pytest.approx(10.0), None)
+    ]
+    assert coordinator._energy_ledger_store.delayed_saves == 1
+
+
+@pytest.mark.parametrize(
+    "details",
+    [
+        # One configured battery stopped reporting.
+        _fleet(("sensor.battery_soc_1", 50, 10.0)),
+        # An unusable SOC.
+        _full_fleet(50, 150),
+        _full_fleet(50, None),
+        _full_fleet(50, "half"),
+        # An unusable capacity.
+        _fleet(
+            ("sensor.battery_soc_1", 50, 10.0),
+            ("sensor.battery_soc_2", 50, 0),
+        ),
+        # A duplicated entity.
+        _fleet(
+            ("sensor.battery_soc_1", 50, 10.0),
+            ("sensor.battery_soc_1", 50, 10.0),
+        ),
+        # Nothing usable at all.
+        [],
+        None,
+        "battery",
+        [None],
+    ],
+)
+def test_energy_ledger_never_mutates_on_incomplete_battery_data(
+    fake_hass, monkeypatch, details
+):
+    """A dropout must not look like a discharge and consume lots."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    _solar_intent(coordinator, 3000)
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(55)})
+    before = _lot_tuples(coordinator)
+    baseline = coordinator._ledger_last_energy_kwh
+    observed_at = coordinator._ledger_last_observed_at
+    saves = coordinator._energy_ledger_store.delayed_saves
+
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": details})
+
+    assert coordinator.energy_ledger_status == "battery_data_unavailable"
+    assert _lot_tuples(coordinator) == before
+    assert coordinator._ledger_last_energy_kwh == baseline
+    assert coordinator._ledger_last_observed_at == observed_at
+    assert coordinator._energy_ledger_store.delayed_saves == saves
+
+
+def test_energy_ledger_resets_when_battery_capacity_topology_changes(
+    fake_hass, monkeypatch
+):
+    """A different SOC-to-kWh mapping makes every existing lot meaningless."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    _grid_intent(coordinator, 0.10)
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(55)})
+    assert any(
+        lot.origin is EnergyOrigin.GRID for lot in coordinator.energy_ledger.lots
+    )
+
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger(
+        {"battery_details": _full_fleet(55, capacity=15.0)}
+    )
+
+    assert coordinator.energy_ledger_status == "inventory_changed"
+    assert _lot_tuples(coordinator) == [
+        (EnergyOrigin.UNKNOWN, pytest.approx(16.5), None)
+    ]
+    assert coordinator._ledger_charge_intent is None
+
+
+def test_energy_ledger_attributes_a_commanded_grid_charge_at_the_all_in_price(
+    fake_hass, monkeypatch
+):
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    _grid_intent(coordinator, 0.1234)
+
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(52)})
+
+    assert coordinator.energy_ledger_status == "charged_grid"
+    assert _lot_tuples(coordinator) == [
+        (EnergyOrigin.UNKNOWN, pytest.approx(10.0), None),
+        (EnergyOrigin.GRID, pytest.approx(0.4), pytest.approx(_all_in(0.1234))),
+    ]
+
+
+def test_energy_ledger_keeps_a_negative_all_in_purchase_price(fake_hass, monkeypatch):
+    """Paid-to-consume energy stays grid-attributed with its negative price."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    _grid_intent(coordinator, -0.043)
+
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(52)})
+
+    newest = coordinator.energy_ledger.lots[-1]
+    assert newest.origin is EnergyOrigin.GRID
+    assert newest.buy_cost_eur_per_kwh == pytest.approx(_all_in(-0.043))
+
+
+@pytest.mark.parametrize("price", [None, "0.10", float("nan"), True])
+def test_energy_ledger_does_not_price_a_grid_charge_without_a_trusted_price(
+    fake_hass, monkeypatch, price
+):
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    _grid_intent(coordinator, price)
+    assert coordinator._ledger_charge_intent is None
+
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(52)})
+
+    assert coordinator.energy_ledger_status == "charged_unattributed"
+    assert coordinator.energy_ledger.lots[-1].origin is EnergyOrigin.UNKNOWN
+
+
+def test_energy_ledger_credits_solar_only_up_to_the_planner_allocation(
+    fake_hass, monkeypatch
+):
+    """Mixed charging cannot be sold as solar beyond the proven allocation."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    _solar_intent(coordinator, 1000)
+
+    # Ten minutes later the fleet gained 1 kWh, far more than 1 kW could deliver.
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(55)})
+
+    assert coordinator.energy_ledger_status == "charged_solar_partial"
+    assert _lot_tuples(coordinator) == [
+        (EnergyOrigin.UNKNOWN, pytest.approx(10.0), None),
+        (EnergyOrigin.SOLAR, pytest.approx(1.25 / 6), None),
+        (EnergyOrigin.UNKNOWN, pytest.approx(1.0 - 1.25 / 6), None),
+    ]
+
+
+def test_energy_ledger_does_not_credit_solar_without_an_allocation(
+    fake_hass, monkeypatch
+):
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    _solar_intent(coordinator, 0)
+    assert coordinator._ledger_charge_intent is None
+
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(52)})
+
+    assert coordinator.energy_ledger.lots[-1].origin is EnergyOrigin.UNKNOWN
+
+
+def test_energy_ledger_does_not_attribute_a_manually_overridden_charge(
+    fake_hass, monkeypatch
+):
+    """A manual override bypasses the planner, so its energy has no proven origin."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    coordinator._record_ledger_charge_intent(
+        {"price_analysis": {"current_price": 0.10}},
+        {"power_allocation": {"solar_for_batteries": 3000}},
+        False,
+        {"battery_grid_charging"},
+    )
+    assert coordinator._ledger_charge_intent is None
+
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(52)})
+
+    assert coordinator.energy_ledger_status == "charged_unattributed"
+    assert coordinator.energy_ledger.lots[-1].origin is EnergyOrigin.UNKNOWN
+
+
+def test_energy_ledger_resets_every_lot_after_a_long_observation_gap(
+    fake_hass, monkeypatch
+):
+    """A stalled refresh can span several price intervals, sources and cycles."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    _grid_intent(coordinator, 0.05)
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(55)})
+    assert any(
+        lot.origin is EnergyOrigin.GRID for lot in coordinator.energy_ledger.lots
+    )
+    _grid_intent(coordinator, 0.05)
+
+    now_ref["value"] += timedelta(minutes=31)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(70)})
+
+    # Not merely the delta: the earlier grid lot may have been discharged and
+    # replaced several times over while nothing was observed.
+    assert coordinator.energy_ledger_status == "observation_gap"
+    assert _lot_tuples(coordinator) == [
+        (EnergyOrigin.UNKNOWN, pytest.approx(14.0), None)
+    ]
+    assert coordinator._ledger_charge_intent is None
+    assert coordinator._ledger_last_energy_kwh == pytest.approx(14.0)
+
+
+@pytest.mark.parametrize("soc,expected_total", [(50, 10.0), (40, 8.0), (70, 14.0)])
+def test_energy_ledger_gap_reset_precedes_steady_and_discharge_handling(
+    fake_hass, monkeypatch, soc, expected_total
+):
+    """No SOC direction may slip past the staleness reset."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    _solar_intent(coordinator, 3000)
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(55)})
+    assert any(
+        lot.origin is EnergyOrigin.SOLAR for lot in coordinator.energy_ledger.lots
+    )
+
+    # An unchanged, lower and higher SOC all arrive after the same long gap.
+    now_ref["value"] += timedelta(
+        seconds=coordinator_module._ENERGY_LEDGER_MAX_ATTRIBUTION_GAP_SECONDS + 1
+    )
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(soc)})
+
+    assert coordinator.energy_ledger_status == "observation_gap"
+    assert _lot_tuples(coordinator) == [
+        (EnergyOrigin.UNKNOWN, pytest.approx(expected_total), None)
+    ]
+
+
+def test_energy_ledger_keeps_attribution_across_a_watched_idle_period(
+    fake_hass, monkeypatch
+):
+    """Continuous observations of an idle battery are not staleness."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    _grid_intent(coordinator, 0.05)
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(55)})
+    lots_before = _lot_tuples(coordinator)
+
+    # Two hours of an untouched battery, observed every five minutes.
+    for _ in range(24):
+        now_ref["value"] += timedelta(minutes=5)
+        coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(55)})
+
+    assert coordinator.energy_ledger_status == "steady"
+    assert _lot_tuples(coordinator) == lots_before
+
+
+def _drift_then_charge(coordinator, now_ref, record_intent, drift_minutes=10):
+    """Accumulate sub-quantisation drift, then command a charge one minute later.
+
+    The baseline stays anchored at the first observation while the drift is
+    below the quantisation tolerance, so the interval since the baseline is far
+    longer than the command that is supposed to explain the next real movement.
+    """
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    for _ in range(drift_minutes):
+        now_ref["value"] += timedelta(minutes=1)
+        coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50.001)})
+    assert coordinator.energy_ledger_status == "steady"
+
+    record_intent()
+    now_ref["value"] += timedelta(minutes=1)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(55)})
+
+
+def test_energy_ledger_caps_solar_credit_by_the_age_of_the_command(
+    fake_hass, monkeypatch
+):
+    """Drift held before the command was issued is not solar the command made."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+
+    _drift_then_charge(coordinator, now_ref, lambda: _solar_intent(coordinator, 3000))
+
+    # 3 kW for the one minute the command existed, plus the jitter headroom.
+    expected = 3.0 * (60 / 3600) * coordinator_module._ENERGY_LEDGER_POWER_TOLERANCE
+    solar_kwh = sum(
+        lot.energy_kwh
+        for lot in coordinator.energy_ledger.lots
+        if lot.origin is EnergyOrigin.SOLAR
+    )
+    assert coordinator.energy_ledger_status == "charged_solar_partial"
+    assert solar_kwh == pytest.approx(expected)
+    # Without the cap the eleven-minute baseline interval would have credited
+    # more than ten times as much.
+    assert solar_kwh < 3.0 * (11 * 60 / 3600)
+
+
+def test_energy_ledger_caps_grid_credit_by_the_age_of_the_command(
+    fake_hass, monkeypatch
+):
+    """The same cap protects a priced grid lot from an over-credited interval."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    config = _base_config()
+    config["max_battery_power"] = 3000
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch, config)
+
+    _drift_then_charge(coordinator, now_ref, lambda: _grid_intent(coordinator, 0.05))
+
+    expected = 3.0 * (60 / 3600) * coordinator_module._ENERGY_LEDGER_POWER_TOLERANCE
+    grid_lots = [
+        lot for lot in coordinator.energy_ledger.lots if lot.origin is EnergyOrigin.GRID
+    ]
+    assert coordinator.energy_ledger_status == "charged_grid_partial"
+    assert sum(lot.energy_kwh for lot in grid_lots) == pytest.approx(expected)
+    # The unattributable remainder is stacked on top, where it blocks the
+    # priced energy underneath it.
+    assert coordinator.energy_ledger.lots[-1].origin is EnergyOrigin.UNKNOWN
+
+
+def test_energy_ledger_ignores_a_command_older_than_the_attribution_window(
+    fake_hass, monkeypatch
+):
+    """A command that predates the window explains nothing, even if watched."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    _solar_intent(coordinator, 3000)
+
+    # Observed all along (no staleness reset), but the command is long stale.
+    for _ in range(20):
+        now_ref["value"] += timedelta(minutes=1)
+        coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(55)})
+
+    assert coordinator.energy_ledger_status == "charged_unattributed"
+    assert _lot_tuples(coordinator) == [
+        (EnergyOrigin.UNKNOWN, pytest.approx(11.0), None)
+    ]
+
+
+def test_energy_ledger_ignores_a_baseline_older_than_the_attribution_window(
+    fake_hass, monkeypatch
+):
+    """A fresh command cannot explain a net movement measured over 20 minutes."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+
+    # Watched throughout, so no staleness reset, but nothing moved enough to
+    # re-anchor the energy baseline.
+    for _ in range(20):
+        now_ref["value"] += timedelta(minutes=1)
+        coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+
+    _solar_intent(coordinator, 3000)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(55)})
+
+    # The delta is the net of 20 minutes that may hide a charge and a
+    # discharge, so it stays unknown rather than being partly credited.
+    assert coordinator.energy_ledger_status == "charged_unattributed"
+    assert _lot_tuples(coordinator) == [
+        (EnergyOrigin.UNKNOWN, pytest.approx(11.0), None)
+    ]
+
+
+# --- attribution requires a real, VAT-inclusive charge authorisation --------
+
+
+def test_energy_ledger_records_the_vat_inclusive_all_in_buy_price(
+    fake_hass, monkeypatch
+):
+    """The lot price is what the kWh cost at the meter, VAT and transport included."""
+    _movable_time(monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc))
+    config = _base_config()
+    config[CONF_BUY_VAT_MULTIPLIER] = 1.21
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch, config)
+
+    analysis = _price_analysis(0.10, transport_cost=0.05)
+    coordinator._record_ledger_charge_intent(
+        {"price_analysis": analysis},
+        {"battery_grid_charging": True},
+        True,
+        set(),
+    )
+
+    intent = coordinator._ledger_charge_intent
+    assert intent["buy_cost"] == pytest.approx((0.10 + 0.05) * 1.21)
+    # The analysis' own current_price carries no VAT on this path; recording it
+    # would price the lot below what the energy actually cost.
+    assert intent["buy_cost"] > analysis["current_price"]
+
+
+def test_energy_ledger_applies_the_price_adjustment_and_vat_together(
+    fake_hass, monkeypatch
+):
+    _movable_time(monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc))
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+
+    coordinator._record_ledger_charge_intent(
+        {
+            "price_analysis": _price_analysis(
+                0.10,
+                transport_cost=0.04,
+                price_adjustment_multiplier=1.1,
+                price_adjustment_offset=0.01,
+            )
+        },
+        {"battery_grid_charging": True},
+        True,
+        set(),
+    )
+
+    expected = (0.10 * 1.1 + 0.01 + 0.04) * DEFAULT_BUY_VAT_MULTIPLIER
+    assert coordinator._ledger_charge_intent["buy_cost"] == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    "analysis",
+    [
+        {},
+        {"raw_current_price": None, "current_price": 0.12},
+        # A usable current price is not a usable *raw* price: without the raw
+        # value the VAT-inclusive cost cannot be rebuilt.
+        {"current_price": 0.12},
+        {"raw_current_price": float("nan")},
+        {"raw_current_price": 0.1, "price_adjustment_multiplier": "x"},
+        {"raw_current_price": 0.1, "transport_cost": float("inf")},
+    ],
+)
+def test_energy_ledger_refuses_a_grid_lot_it_cannot_price_all_in(
+    fake_hass, monkeypatch, analysis
+):
+    _movable_time(monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc))
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+
+    coordinator._record_ledger_charge_intent(
+        {"price_analysis": analysis},
+        {"battery_grid_charging": True},
+        True,
+        set(),
+    )
+
+    assert coordinator._ledger_charge_intent is None
+
+
+def test_energy_ledger_does_not_credit_solar_while_the_site_imports(
+    fake_hass, monkeypatch
+):
+    """Importing means solar is already short of the house; the battery is on grid."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+
+    # Raw P1 convention: negative is import.
+    _solar_intent(coordinator, 3000, grid_power=-3000)
+    assert coordinator._ledger_charge_intent is None
+
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(52)})
+
+    assert coordinator.energy_ledger_status == "charged_unattributed"
+    assert coordinator.energy_ledger.lots[-1].origin is EnergyOrigin.UNKNOWN
+
+
+def test_energy_ledger_credits_only_the_solar_the_site_is_not_importing(
+    fake_hass, monkeypatch
+):
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+
+    # 3 kW allocated while the site imports 1 kW proves only 2 kW of solar.
+    _solar_intent(coordinator, 3000, grid_power=-1000)
+    assert coordinator._ledger_charge_intent["power_w"] == pytest.approx(2000)
+
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(55)})
+
+    expected = 2.0 * (10 / 60) * coordinator_module._ENERGY_LEDGER_POWER_TOLERANCE
+    solar_kwh = sum(
+        lot.energy_kwh
+        for lot in coordinator.energy_ledger.lots
+        if lot.origin is EnergyOrigin.SOLAR
+    )
+    assert solar_kwh == pytest.approx(expected)
+
+
+def test_energy_ledger_exports_nothing_while_the_site_exports_and_charges(
+    fake_hass, monkeypatch
+):
+    """Exporting to the grid is the case solar credit is actually for."""
+    _movable_time(monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc))
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+
+    # Raw P1 convention: positive is export.
+    _solar_intent(coordinator, 3000, grid_power=2000)
+
+    assert coordinator._ledger_charge_intent["origin"] is EnergyOrigin.SOLAR
+    assert coordinator._ledger_charge_intent["power_w"] == pytest.approx(3000)
+
+
+@pytest.mark.parametrize("grid_power", [None, "unavailable", float("nan"), True])
+def test_energy_ledger_does_not_credit_solar_without_a_grid_reading(
+    fake_hass, monkeypatch, grid_power
+):
+    _movable_time(monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc))
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+
+    _solar_intent(coordinator, 3000, grid_power=grid_power)
+
+    assert coordinator._ledger_charge_intent is None
+
+
+def test_energy_ledger_does_not_credit_solar_during_paid_to_consume_import(
+    fake_hass, monkeypatch
+):
+    """Negative Arbitrage Buy fills the battery from the grid by construction."""
+    now = datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    _movable_time(monkeypatch, now)
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+
+    coordinator._record_ledger_charge_intent(
+        {
+            "price_analysis": _price_analysis(0.10),
+            "grid_power": 0.0,
+            "negative_buy_mode_active": True,
+        },
+        {
+            "battery_grid_charging": False,
+            "power_allocation": {"solar_for_batteries": 3000},
+        },
+        False,
+        set(),
+    )
+
+    assert coordinator._ledger_charge_intent is None
+
+
+@pytest.mark.parametrize(
+    "automatic,commanded",
+    [(True, False), (False, True)],
+)
+def test_energy_ledger_refuses_a_contradicted_charge_command(
+    fake_hass, monkeypatch, automatic, commanded
+):
+    """The applied command and the automatic decision must agree to prove anything."""
+    _movable_time(monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc))
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+
+    coordinator._record_ledger_charge_intent(
+        {"price_analysis": _price_analysis(0.10), "grid_power": 0.0},
+        {
+            "battery_grid_charging": commanded,
+            "power_allocation": {"solar_for_batteries": 3000},
+        },
+        automatic,
+        set(),
+    )
+
+    assert coordinator._ledger_charge_intent is None
+
+
+# --- bounded growth over a long run ---------------------------------------
+
+
+def test_energy_ledger_lot_count_stays_bounded_over_a_long_run(fake_hass, monkeypatch):
+    """Days of refreshes must not grow the ledger without limit."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    config = _base_config()
+    config["max_battery_power"] = 5000
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch, config)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+
+    soc = 50.0
+    for step in range(2000):
+        # Alternate a priced grid charge, an unattributable charge and a
+        # discharge, at a price that changes every "interval".
+        if step % 3 == 0:
+            _grid_intent(coordinator, 0.05 + (step % 96) / 1000)
+        elif step % 3 == 1:
+            coordinator._ledger_charge_intent = None
+        soc = min(95.0, soc + 0.2) if step % 3 != 2 else max(20.0, soc - 0.1)
+        now_ref["value"] += timedelta(minutes=1)
+        coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(soc)})
+
+    assert len(coordinator.energy_ledger.lots) <= energy_ledger_module.MAX_LOTS
+    # The ledger still accounts for exactly what the batteries hold.
+    assert coordinator.energy_ledger.total_kwh == pytest.approx(
+        20.0 * soc / 100, abs=coordinator_module._ENERGY_LEDGER_TOLERANCE_KWH
+    )
+
+
+@pytest.mark.asyncio
+async def test_energy_ledger_reloads_after_a_long_run(fake_hass, monkeypatch):
+    """Rounding a large, long-running ledger to disk must not discard it."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+
+    soc = 50.0
+    for step in range(600):
+        # Prices that never repeat, so every charge appends its own lot.
+        _grid_intent(coordinator, 0.05 + step / 100000)
+        soc = min(95.0, soc + 0.05) if step % 4 else max(20.0, soc - 0.02)
+        now_ref["value"] += timedelta(minutes=1)
+        coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(soc)})
+
+    payload = coordinator._energy_ledger_store.data
+    assert len(payload["ledger"]["lots"]) > 1
+
+    restored = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    restored._energy_ledger_store = _MemoryLedgerStore(payload)
+    await restored._async_load_energy_ledger()
+
+    assert restored.energy_ledger_status == "restored"
+    assert restored.energy_ledger_initialized is True
+    assert restored.energy_ledger.total_kwh == pytest.approx(
+        coordinator.energy_ledger.total_kwh, abs=1e-3
+    )
+
+
+@pytest.mark.asyncio
+async def test_energy_ledger_load_allows_only_the_rounding_it_can_explain(
+    fake_hass, monkeypatch
+):
+    """The rounding allowance is bounded by the lot count, not open-ended."""
+    lots = [{"origin": "solar", "energy_kwh": 0.5} for _ in range(200)]
+    allowance = (
+        coordinator_module._ENERGY_LEDGER_TOLERANCE_KWH
+        + 200 * energy_ledger_module.ENERGY_STORAGE_ROUNDING_KWH
+    )
+
+    def _payload(offset):
+        return {
+            "ledger": {"version": 1, "lots": lots},
+            "observed_energy_kwh": 100.0 + offset,
+            "observed_at": "2026-03-01T08:00:00+00:00",
+            "inventory": [["sensor.battery_soc_1", 10.0]],
+        }
+
+    accepted = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    accepted._energy_ledger_store = _MemoryLedgerStore(_payload(allowance * 0.9))
+    await accepted._async_load_energy_ledger()
+
+    rejected = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    rejected._energy_ledger_store = _MemoryLedgerStore(_payload(allowance * 2))
+    await rejected._async_load_energy_ledger()
+
+    assert accepted.energy_ledger_status == "restored"
+    assert rejected.energy_ledger_status == "invalid_storage"
+    assert rejected.energy_ledger_initialized is False
+
+
+def test_energy_ledger_discharge_consumes_the_newest_lots_first(fake_hass, monkeypatch):
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    _grid_intent(coordinator, 0.05)
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(55)})
+
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(52)})
+
+    assert coordinator.energy_ledger_status == "discharged"
+    assert _lot_tuples(coordinator) == [
+        (EnergyOrigin.UNKNOWN, pytest.approx(10.0), None),
+        (EnergyOrigin.GRID, pytest.approx(0.4), pytest.approx(_all_in(0.05))),
+    ]
+
+
+def test_energy_ledger_stays_pinned_to_the_observed_inventory(fake_hass, monkeypatch):
+    """Residual drift becomes unprovable energy, never sellable energy."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    # Simulate lost accounting: the ledger now under-reports the real battery.
+    coordinator.energy_ledger.discharge(4.0)
+    _solar_intent(coordinator, 3000)
+
+    # The next real movement re-pins the ledger to the observed inventory.
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(51)})
+
+    assert coordinator.energy_ledger.total_kwh == pytest.approx(10.2)
+    assert sum(
+        lot.energy_kwh
+        for lot in coordinator.energy_ledger.lots
+        if lot.origin is EnergyOrigin.UNKNOWN
+    ) == pytest.approx(10.0)
+
+
+def test_energy_ledger_writes_are_coalesced_and_never_immediate(fake_hass, monkeypatch):
+    """The ledger moves every refresh and must not write flash every refresh."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    store = coordinator._energy_ledger_store
+
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(51)})
+
+    assert store.immediate_saves == 0
+    assert store.delayed_saves == 2
+    assert store.last_delay == coordinator_module._ENERGY_LEDGER_SAVE_DELAY_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_energy_ledger_store_uses_atomic_writes(fake_hass, monkeypatch):
+    """A torn ledger file would be discarded and lose all attribution."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    created: list[dict] = []
+
+    class _RecordingStore:
+        def __init__(self, hass, version, key, **kwargs):
+            created.append({"key": key, **kwargs})
+
+        async def async_load(self):
+            return None
+
+    monkeypatch.setattr(coordinator_module, "Store", _RecordingStore)
+    monkeypatch.setattr(
+        coordinator_module.ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+
+    await coordinator.async_initialize_persistent_state()
+
+    ledger_store = next(
+        item for item in created if item["key"].endswith(".energy_ledger")
+    )
+    assert ledger_store["atomic_writes"] is True
+    assert all(
+        "atomic_writes" not in item
+        for item in created
+        if not item["key"].endswith(".energy_ledger")
+    )
+
+
+@pytest.mark.asyncio
+async def test_energy_ledger_survives_a_restart_without_replaying_the_intent(
+    fake_hass, monkeypatch
+):
+    """A restart must not attribute a downtime's charging to a stale source."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    _grid_intent(coordinator, 0.05)
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(52)})
+    payload = coordinator._energy_ledger_store.data
+
+    assert "charge_intent" not in payload
+    assert "grid_charge_cost" not in payload
+    assert "solar_charge_expected" not in payload
+
+    restored = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    restored._energy_ledger_store = _MemoryLedgerStore(payload)
+    await restored._async_load_energy_ledger()
+
+    assert restored.energy_ledger_initialized is True
+    assert restored.energy_ledger_status == "restored"
+    assert _lot_tuples(restored) == [
+        (EnergyOrigin.UNKNOWN, pytest.approx(10.0), None),
+        (EnergyOrigin.GRID, pytest.approx(0.4), pytest.approx(_all_in(0.05))),
+    ]
+    assert restored._ledger_charge_intent is None
+
+    # Energy that appeared while the process was down has no proven origin.
+    now_ref["value"] += timedelta(minutes=5)
+    restored._reconcile_energy_ledger({"battery_details": _full_fleet(60)})
+
+    assert restored.energy_ledger_status == "charged_unattributed"
+    assert restored.energy_ledger.lots[-1].origin is EnergyOrigin.UNKNOWN
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "corrupt",
+        [],
+        {},
+        {"ledger": None, "observed_energy_kwh": 1, "observed_at": None},
+        # Malformed lot.
+        {
+            "ledger": {"version": 1, "lots": [{"origin": "grid", "energy_kwh": 1}]},
+            "observed_energy_kwh": 1,
+            "observed_at": "2026-03-01T08:00:00+00:00",
+            "inventory": [["sensor.battery_soc_1", 10.0]],
+        },
+        # Lots no longer sum to the recorded observation.
+        {
+            "ledger": {
+                "version": 1,
+                "lots": [{"origin": "solar", "energy_kwh": 1}],
+            },
+            "observed_energy_kwh": 9.0,
+            "observed_at": "2026-03-01T08:00:00+00:00",
+            "inventory": [["sensor.battery_soc_1", 10.0]],
+        },
+        # Missing or unusable inventory fingerprint.
+        {
+            "ledger": {"version": 1, "lots": []},
+            "observed_energy_kwh": 0.0,
+            "observed_at": "2026-03-01T08:00:00+00:00",
+            "inventory": None,
+        },
+        {
+            "ledger": {"version": 1, "lots": []},
+            "observed_energy_kwh": 0.0,
+            "observed_at": "2026-03-01T08:00:00+00:00",
+            "inventory": [["sensor.battery_soc_1", 0]],
+        },
+        # Unusable observation.
+        {
+            "ledger": {"version": 1, "lots": []},
+            "observed_energy_kwh": -1,
+            "observed_at": "2026-03-01T08:00:00+00:00",
+            "inventory": [["sensor.battery_soc_1", 10.0]],
+        },
+        {
+            "ledger": {"version": 1, "lots": []},
+            "observed_energy_kwh": 0.0,
+            "observed_at": "not-a-timestamp",
+            "inventory": [["sensor.battery_soc_1", 10.0]],
+        },
+    ],
+)
+async def test_energy_ledger_untrusted_storage_starts_uninitialized(
+    fake_hass, monkeypatch, payload
+):
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    coordinator._energy_ledger_store = _MemoryLedgerStore(payload)
+
+    await coordinator._async_load_energy_ledger()
+
+    assert coordinator.energy_ledger_initialized is False
+    assert coordinator.energy_ledger.lots == ()
+    assert coordinator._ledger_charge_intent is None
+
+
+@pytest.mark.asyncio
+async def test_energy_ledger_load_failure_fails_closed(fake_hass, monkeypatch):
+    class _FailingStore:
+        async def async_load(self):
+            raise OSError("storage unavailable")
+
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    coordinator._energy_ledger = BatteryEnergyLedger([])
+    coordinator._energy_ledger_store = _FailingStore()
+
+    await coordinator._async_load_energy_ledger()
+
+    assert coordinator.energy_ledger_initialized is False
+
+
+def test_energy_ledger_diagnostics_expose_origins_and_intent(fake_hass, monkeypatch):
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    _grid_intent(coordinator, 0.07)
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(52)})
+
+    diagnostics = coordinator.energy_ledger_diagnostics()
+
+    assert diagnostics["initialized"] is True
+    assert diagnostics["status"] == "charged_grid"
+    assert diagnostics["lot_count"] == 2
+    assert diagnostics["energy_by_origin"] == {
+        "unknown": pytest.approx(10.0),
+        "grid": pytest.approx(0.4),
+    }
+    assert diagnostics["total_kwh"] == pytest.approx(10.4)
+    assert diagnostics["charge_intent"]["origin"] == "grid"
+    assert diagnostics["charge_intent"]["buy_cost_eur_per_kwh"] == pytest.approx(
+        _all_in(0.07)
+    )
+    assert diagnostics["inventory"] == [
+        ["sensor.battery_soc_1", 10.0],
+        ["sensor.battery_soc_2", 10.0],
+    ]
+
+
+# --- arbitrage export gated by the ledger ---------------------------------
+
+
+def _arbitrage_config():
+    config = _base_config()
+    config.update(
+        {
+            # A single-battery fleet: the plan fails closed unless every
+            # configured battery is reporting.
+            CONF_BATTERY_SOC_ENTITIES: ["sensor.battery_soc_1"],
+            CONF_ARBITRAGE_MODE_RESERVE_SOC: 20,
+            "feedin_adjustment_multiplier": 1.0,
+            "feedin_adjustment_offset": 0.0,
+            "feedin_price_threshold": 0.05,
+            "max_battery_power": 2000,
+            "max_grid_power": 6000,
+        }
+    )
+    return config
+
+
+def _arbitrage_data(base_time, soc, capacity=10.0, price=120.0, batteries=None):
+    current_window = [
+        _make_price_interval(base_time + timedelta(minutes=15 * slot), price)
+        for slot in range(2)
+    ]
+    later_window = [
+        _make_price_interval(base_time + timedelta(hours=2, minutes=15 * slot), 110.0)
+        for slot in range(4)
+    ]
+    return {
+        "battery_details": (
+            _fleet(("sensor.battery_soc_1", soc, capacity))
+            if batteries is None
+            else batteries
+        ),
+        "nordpool_prices_today": {"BE": current_window + later_window},
+        "nordpool_prices_tomorrow": None,
+    }
+
+
+def _enable_arbitrage(coordinator, base_time):
+    coordinator._arbitrage_mode_state = {
+        "value": True,
+        "reason": "Arbitrage",
+        "expires_at": None,
+        "set_at": base_time,
+    }
+
+
+def _install_ledger(coordinator, lots, total, inventory=None):
+    ledger = BatteryEnergyLedger()
+    for origin, energy, cost in lots:
+        ledger.add(origin, energy, cost)
+    coordinator._energy_ledger = ledger
+    coordinator._ledger_initialized = True
+    coordinator._ledger_last_energy_kwh = total
+    coordinator._ledger_last_observed_at = coordinator_module.dt_util.utcnow()
+    coordinator._ledger_baseline_at = coordinator._ledger_last_observed_at
+    coordinator._ledger_inventory = (
+        (("sensor.battery_soc_1", 10.0),) if inventory is None else inventory
+    )
+    coordinator._ledger_status = "installed"
+
+
+def test_arbitrage_export_is_blocked_before_the_ledger_is_initialized(
+    fake_hass, monkeypatch
+):
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    coordinator = _create_coordinator(fake_hass, _arbitrage_config(), monkeypatch)
+    _enable_arbitrage(coordinator, base_time)
+
+    plan = coordinator._calculate_arbitrage_mode_plan(_arbitrage_data(base_time, 40))
+
+    assert plan["active"] is False
+    assert plan["export_power"] == 0
+    assert plan["available_energy_kwh"] == 0.0
+    assert "no trusted battery observation yet" in plan["reason"]
+
+
+def test_arbitrage_export_never_sells_unknown_energy(fake_hass, monkeypatch):
+    """The whole inventory is unknown right after the first observation."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    coordinator = _create_coordinator(fake_hass, _arbitrage_config(), monkeypatch)
+    _enable_arbitrage(coordinator, base_time)
+    _install_ledger(coordinator, [(EnergyOrigin.UNKNOWN, 4.0, None)], 4.0)
+
+    plan = coordinator._calculate_arbitrage_mode_plan(_arbitrage_data(base_time, 40))
+
+    assert plan["available_energy_kwh"] == pytest.approx(2.0)
+    assert plan["ledger_eligible_stored_kwh"] == 0.0
+    assert plan["active"] is False
+    assert "no attributable battery energy above the reserve" in plan["reason"]
+
+
+def test_arbitrage_export_sells_grid_energy_above_its_break_even(
+    fake_hass, monkeypatch
+):
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    coordinator = _create_coordinator(fake_hass, _arbitrage_config(), monkeypatch)
+    _enable_arbitrage(coordinator, base_time)
+    # 2 kWh of unknown reserve energy below 2 kWh of cheap grid energy.
+    _install_ledger(
+        coordinator,
+        [(EnergyOrigin.UNKNOWN, 2.0, None), (EnergyOrigin.GRID, 2.0, 0.05)],
+        4.0,
+    )
+
+    plan = coordinator._calculate_arbitrage_mode_plan(_arbitrage_data(base_time, 40))
+
+    assert plan["current_slot_price"] == pytest.approx(0.12)
+    assert plan["ledger_reserve_kwh"] == pytest.approx(2.0)
+    assert plan["ledger_eligible_stored_kwh"] == pytest.approx(2.0)
+    # Only the round-trip share of stored energy is budgeted to the grid.
+    assert plan["ledger_exportable_kwh"] == pytest.approx(1.8)
+    assert plan["active"] is True
+    assert plan["export_power"] == 2000
+
+
+def test_arbitrage_export_refuses_grid_energy_below_its_break_even(
+    fake_hass, monkeypatch
+):
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    coordinator = _create_coordinator(fake_hass, _arbitrage_config(), monkeypatch)
+    _enable_arbitrage(coordinator, base_time)
+    # 0.15/0.9 + 0.02 = 0.187 €/kWh required, above the 0.12 €/kWh slot price.
+    _install_ledger(
+        coordinator,
+        [(EnergyOrigin.UNKNOWN, 2.0, None), (EnergyOrigin.GRID, 2.0, 0.15)],
+        4.0,
+    )
+
+    plan = coordinator._calculate_arbitrage_mode_plan(_arbitrage_data(base_time, 40))
+
+    assert plan["ledger_exportable_kwh"] == 0.0
+    assert plan["active"] is False
+    assert plan["export_power"] == 0
+
+
+def test_arbitrage_export_sells_energy_bought_at_a_negative_price(
+    fake_hass, monkeypatch
+):
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    config = _arbitrage_config()
+    # Well above the required -0.033 €/kWh, but a positive-cost lot at the same
+    # size would need 0.187 €/kWh and stay blocked.
+    config["feedin_price_threshold"] = 0.05
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    _enable_arbitrage(coordinator, base_time)
+    _install_ledger(
+        coordinator,
+        [(EnergyOrigin.UNKNOWN, 2.0, None), (EnergyOrigin.GRID, 2.0, -0.05)],
+        4.0,
+    )
+
+    plan = coordinator._calculate_arbitrage_mode_plan(_arbitrage_data(base_time, 40))
+
+    assert plan["active"] is True
+    assert plan["ledger_eligible_stored_kwh"] == pytest.approx(2.0)
+
+
+def test_arbitrage_export_power_is_capped_by_the_eligible_energy(
+    fake_hass, monkeypatch
+):
+    """A small eligible amount must not be dumped at the full inverter cap."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    coordinator = _create_coordinator(fake_hass, _arbitrage_config(), monkeypatch)
+    _enable_arbitrage(coordinator, base_time)
+    _install_ledger(
+        coordinator,
+        [(EnergyOrigin.UNKNOWN, 2.0, None), (EnergyOrigin.SOLAR, 0.05, None)],
+        2.05,
+    )
+
+    plan = coordinator._calculate_arbitrage_mode_plan(_arbitrage_data(base_time, 20.5))
+
+    assert plan["ledger_exportable_kwh"] == pytest.approx(0.045)
+    assert plan["active"] is True
+    assert plan["export_power"] == 1350
+
+
+def test_arbitrage_export_offers_no_more_than_the_ledger_accounts_for(
+    fake_hass, monkeypatch
+):
+    """SOC may claim more headroom than the ledger can attribute."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    coordinator = _create_coordinator(fake_hass, _arbitrage_config(), monkeypatch)
+    _enable_arbitrage(coordinator, base_time)
+    _install_ledger(
+        coordinator,
+        [(EnergyOrigin.UNKNOWN, 2.0, None), (EnergyOrigin.SOLAR, 0.5, None)],
+        2.5,
+    )
+
+    # SOC says 4 kWh sits above the 20% reserve; the ledger only knows 0.5 kWh.
+    plan = coordinator._calculate_arbitrage_mode_plan(_arbitrage_data(base_time, 60))
+
+    assert plan["available_energy_kwh"] == pytest.approx(0.5)
+    assert plan["ledger_eligible_stored_kwh"] == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    "setting,value",
+    [
+        ("arbitrage_round_trip_efficiency", 0),
+        ("arbitrage_round_trip_efficiency", 1.5),
+        ("arbitrage_round_trip_efficiency", "high"),
+        ("arbitrage_degradation_cost", -0.01),
+        ("arbitrage_minimum_profit", -0.01),
+    ],
+)
+def test_arbitrage_export_is_blocked_by_unusable_cost_settings(
+    fake_hass, monkeypatch, setting, value
+):
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    config = _arbitrage_config()
+    config[setting] = value
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+    _enable_arbitrage(coordinator, base_time)
+    _install_ledger(
+        coordinator,
+        [(EnergyOrigin.UNKNOWN, 2.0, None), (EnergyOrigin.SOLAR, 2.0, None)],
+        4.0,
+    )
+
+    plan = coordinator._calculate_arbitrage_mode_plan(_arbitrage_data(base_time, 40))
+
+    assert plan["active"] is False
+    assert "invalid arbitrage cost settings" in plan["reason"]
+
+
+def _two_battery_arbitrage_config():
+    config = _arbitrage_config()
+    config[CONF_BATTERY_SOC_ENTITIES] = [
+        "sensor.battery_soc_1",
+        "sensor.battery_soc_2",
+    ]
+    return config
+
+
+_TWO_BATTERY_INVENTORY = (
+    ("sensor.battery_soc_1", 10.0),
+    ("sensor.battery_soc_2", 10.0),
+)
+
+
+@pytest.mark.parametrize(
+    "batteries",
+    [
+        # One configured battery stopped reporting: its share of the reserve
+        # would silently disappear while the lots still account for it.
+        _fleet(("sensor.battery_soc_1", 40, 10.0)),
+        # An unusable SOC or capacity in the fleet.
+        _fleet(
+            ("sensor.battery_soc_1", 40, 10.0),
+            ("sensor.battery_soc_2", None, 10.0),
+        ),
+        _fleet(
+            ("sensor.battery_soc_1", 40, 10.0),
+            ("sensor.battery_soc_2", 140, 10.0),
+        ),
+        _fleet(
+            ("sensor.battery_soc_1", 40, 10.0),
+            ("sensor.battery_soc_2", 40, 0),
+        ),
+        # A battery that is not configured at all.
+        _fleet(
+            ("sensor.battery_soc_1", 40, 10.0),
+            ("sensor.battery_soc_3", 40, 10.0),
+        ),
+        [],
+    ],
+)
+def test_arbitrage_export_fails_closed_on_an_incomplete_fleet(
+    fake_hass, monkeypatch, batteries
+):
+    """A partial fleet computes a smaller reserve than the ledger accounts for."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    coordinator = _create_coordinator(
+        fake_hass, _two_battery_arbitrage_config(), monkeypatch
+    )
+    _enable_arbitrage(coordinator, base_time)
+    _install_ledger(
+        coordinator,
+        [(EnergyOrigin.UNKNOWN, 4.0, None), (EnergyOrigin.GRID, 4.0, _all_in(0.05))],
+        8.0,
+        inventory=_TWO_BATTERY_INVENTORY,
+    )
+
+    plan = coordinator._calculate_arbitrage_mode_plan(
+        _arbitrage_data(base_time, 40, batteries=batteries)
+    )
+
+    assert plan["active"] is False
+    assert plan["export_power"] == 0
+    assert plan["available_energy_kwh"] == 0.0
+    assert plan["ledger_reserve_kwh"] == 0.0
+    assert "battery data is incomplete" in plan["reason"]
+
+
+def test_arbitrage_reserve_covers_every_configured_battery(fake_hass, monkeypatch):
+    """The reserve floor is charged against the same fleet the ledger accounts for."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    coordinator = _create_coordinator(
+        fake_hass, _two_battery_arbitrage_config(), monkeypatch
+    )
+    _enable_arbitrage(coordinator, base_time)
+    _install_ledger(
+        coordinator,
+        [(EnergyOrigin.UNKNOWN, 4.0, None), (EnergyOrigin.GRID, 4.0, _all_in(0.05))],
+        8.0,
+        inventory=_TWO_BATTERY_INVENTORY,
+    )
+
+    plan = coordinator._calculate_arbitrage_mode_plan(
+        _arbitrage_data(
+            base_time,
+            40,
+            batteries=_fleet(
+                ("sensor.battery_soc_1", 40, 10.0),
+                ("sensor.battery_soc_2", 40, 10.0),
+            ),
+        )
+    )
+
+    # 20% of 20 kWh, not of the single battery that a partial fleet would see.
+    assert plan["ledger_reserve_kwh"] == pytest.approx(4.0)
+    assert plan["available_energy_kwh"] == pytest.approx(4.0)
+    assert plan["ledger_eligible_stored_kwh"] == pytest.approx(4.0)
+    assert plan["active"] is True
+
+
+def test_arbitrage_export_is_blocked_when_the_ledger_describes_another_fleet(
+    fake_hass, monkeypatch
+):
+    """Lots accounted against different batteries cannot price this one."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    coordinator = _create_coordinator(fake_hass, _arbitrage_config(), monkeypatch)
+    _enable_arbitrage(coordinator, base_time)
+    _install_ledger(
+        coordinator,
+        [(EnergyOrigin.UNKNOWN, 2.0, None), (EnergyOrigin.GRID, 2.0, _all_in(0.05))],
+        4.0,
+        inventory=(("sensor.battery_soc_1", 15.0),),
+    )
+
+    plan = coordinator._calculate_arbitrage_mode_plan(_arbitrage_data(base_time, 40))
+
+    assert plan["active"] is False
+    assert "accounted against a different battery fleet" in plan["reason"]
+
+
+def test_arbitrage_export_prices_grid_energy_with_vat_included(fake_hass, monkeypatch):
+    """A feed-in price between the ex-VAT and all-in break-even must not export."""
+    base_time = datetime(2025, 10, 14, 8, 0, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, base_time)
+    # 0.10 €/kWh ex-VAT breaks even at 0.131 €/kWh, all-in at 0.138 €/kWh.
+    slot_price = 135.0
+    coordinator = _create_coordinator(fake_hass, _arbitrage_config(), monkeypatch)
+    _enable_arbitrage(coordinator, base_time)
+    _install_ledger(
+        coordinator,
+        [(EnergyOrigin.UNKNOWN, 2.0, None), (EnergyOrigin.GRID, 2.0, _all_in(0.10))],
+        4.0,
+    )
+
+    plan = coordinator._calculate_arbitrage_mode_plan(
+        _arbitrage_data(base_time, 40, price=slot_price)
+    )
+
+    assert plan["current_slot_price"] == pytest.approx(0.135)
+    assert plan["ledger_exportable_kwh"] == 0.0
+    assert plan["active"] is False
+
+    # The same energy priced without VAT would have been sold at a loss.
+    ex_vat = _create_coordinator(fake_hass, _arbitrage_config(), monkeypatch)
+    _enable_arbitrage(ex_vat, base_time)
+    _install_ledger(
+        ex_vat,
+        [(EnergyOrigin.UNKNOWN, 2.0, None), (EnergyOrigin.GRID, 2.0, 0.10)],
+        4.0,
+    )
+
+    loss_making = ex_vat._calculate_arbitrage_mode_plan(
+        _arbitrage_data(base_time, 40, price=slot_price)
+    )
+
+    assert loss_making["active"] is True
+
+
+@pytest.mark.asyncio
+async def test_full_update_cycle_records_intent_then_attributes_the_next_delta(
+    fake_hass, monkeypatch
+):
+    """End to end: a commanded grid charge prices the energy it produces."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._check_data_availability = AsyncMock()
+    fleet = {"value": _full_fleet(50)}
+    coordinator._fetch_all_data = AsyncMock(
+        side_effect=lambda: {
+            "current_price": 0.11,
+            "battery_details": fleet["value"],
+        }
+    )
+    coordinator.decision_engine.evaluate_charging_decision = AsyncMock(
+        return_value={
+            "battery_grid_charging": True,
+            "price_analysis": _price_analysis(0.0875),
+        }
+    )
+
+    first = await coordinator._async_update_data()
+
+    # The first observation can only establish quantity.
+    assert first["energy_ledger"]["status"] == "initialized"
+    assert _lot_tuples(coordinator) == [
+        (EnergyOrigin.UNKNOWN, pytest.approx(10.0), None)
+    ]
+    assert coordinator._ledger_charge_intent["origin"] is EnergyOrigin.GRID
+    assert coordinator._ledger_charge_intent["buy_cost"] == pytest.approx(
+        _all_in(0.0875)
+    )
+
+    now_ref["value"] += timedelta(minutes=10)
+    fleet["value"] = _full_fleet(52)
+    second = await coordinator._async_update_data()
+
+    assert second["energy_ledger"]["status"] == "charged_grid"
+    assert _lot_tuples(coordinator) == [
+        (EnergyOrigin.UNKNOWN, pytest.approx(10.0), None),
+        (EnergyOrigin.GRID, pytest.approx(0.4), pytest.approx(_all_in(0.0875))),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "grid_power,expected_status",
+    [
+        # Exporting: the battery is demonstrably filling from surplus solar.
+        (1500.0, "charged_solar"),
+        # Importing more than the allocation: the energy came off the grid.
+        (-4000.0, "charged_unattributed"),
+        # No grid reading at all.
+        (None, "charged_unattributed"),
+    ],
+)
+async def test_full_update_cycle_credits_solar_only_against_the_grid_reading(
+    fake_hass, monkeypatch, grid_power, expected_status
+):
+    """End to end: a solar allocation alone never proves the battery's source."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._check_data_availability = AsyncMock()
+    fleet = {"value": _full_fleet(50)}
+    coordinator._fetch_all_data = AsyncMock(
+        side_effect=lambda: {
+            "current_price": 0.11,
+            "grid_power": grid_power,
+            "battery_details": fleet["value"],
+        }
+    )
+    coordinator.decision_engine.evaluate_charging_decision = AsyncMock(
+        return_value={
+            "battery_grid_charging": False,
+            "power_allocation": {"solar_for_batteries": 3000},
+            "price_analysis": _price_analysis(0.09),
+        }
+    )
+
+    await coordinator._async_update_data()
+
+    now_ref["value"] += timedelta(minutes=1)
+    fleet["value"] = _full_fleet(50.2)
+    result = await coordinator._async_update_data()
+
+    assert result["energy_ledger"]["status"] == expected_status
+
+
+@pytest.mark.asyncio
+async def test_full_update_cycle_does_not_attribute_a_manual_override_charge(
+    fake_hass, monkeypatch
+):
+    """A forced battery charge is not proof of a planner-chosen source."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._check_data_availability = AsyncMock()
+    fleet = {"value": _full_fleet(50)}
+    coordinator._fetch_all_data = AsyncMock(
+        side_effect=lambda: {
+            "current_price": 0.11,
+            "battery_details": fleet["value"],
+        }
+    )
+    coordinator.decision_engine.evaluate_charging_decision = AsyncMock(
+        return_value={
+            "battery_grid_charging": False,
+            "power_allocation": {"solar_for_batteries": 3000},
+            "price_analysis": _price_analysis(0.09),
+        }
+    )
+    coordinator._apply_manual_overrides = lambda decision: (
+        {**decision, "battery_grid_charging": True},
+        {"battery_grid_charging"},
+    )
+    coordinator.decision_engine.recalculate_after_override = (
+        lambda data, decision, targets: decision
+    )
+
+    await coordinator._async_update_data()
+    assert coordinator._ledger_charge_intent is None
+
+    now_ref["value"] += timedelta(minutes=10)
+    fleet["value"] = _full_fleet(52)
+    result = await coordinator._async_update_data()
+
+    assert result["energy_ledger"]["status"] == "charged_unattributed"
+    assert coordinator.energy_ledger.lots[-1].origin is EnergyOrigin.UNKNOWN
+
+
+def test_energy_ledger_steady_observation_does_not_schedule_a_write(
+    fake_hass, monkeypatch
+):
+    """SOC noise must not turn into a flash write, and must not drift the baseline."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50)})
+    store = coordinator._energy_ledger_store
+    saves = store.delayed_saves
+    baseline = coordinator._ledger_last_energy_kwh
+    baseline_at = coordinator._ledger_baseline_at
+
+    # 0.001% of 20 kWh is 0.0002 kWh, below the quantisation tolerance.
+    now_ref["value"] += timedelta(minutes=10)
+    coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(50.001)})
+
+    assert coordinator.energy_ledger_status == "steady"
+    assert store.delayed_saves == saves
+    assert coordinator._ledger_last_energy_kwh == baseline
+    assert coordinator._ledger_baseline_at == baseline_at
+    # The observation itself is accepted, so an idle battery never ages into
+    # the staleness reset while the planner is watching it.
+    assert coordinator._ledger_last_observed_at == now_ref["value"]
+
+
+def test_energy_ledger_persisted_lots_always_match_the_observation(
+    fake_hass, monkeypatch
+):
+    """The load-time consistency check must never reject our own writes."""
+    now_ref = _movable_time(
+        monkeypatch, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)
+    )
+    coordinator = _ledger_coordinator(fake_hass, monkeypatch)
+    store = coordinator._energy_ledger_store
+
+    for step, soc in enumerate([50, 55, 52, 52.0005, 61, 40]):
+        _grid_intent(coordinator, 0.05 + step / 100)
+        now_ref["value"] += timedelta(minutes=5)
+        coordinator._reconcile_energy_ledger({"battery_details": _full_fleet(soc)})
+        payload = store.data
+        total = sum(lot["energy_kwh"] for lot in payload["ledger"]["lots"])
+        assert total == pytest.approx(
+            payload["observed_energy_kwh"],
+            abs=coordinator_module._ENERGY_LEDGER_TOLERANCE_KWH,
+        )

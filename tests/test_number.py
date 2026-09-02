@@ -17,7 +17,9 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.electricity_planner import coordinator as coordinator_module
 from custom_components.electricity_planner.const import (
+    CONF_ARBITRAGE_MINIMUM_PROFIT,
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
+    CONF_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
     CONF_BATTERY_SOC_ENTITIES,
     CONF_CURRENT_PRICE_ENTITY,
     CONF_HIGHEST_PRICE_ENTITY,
@@ -35,6 +37,7 @@ from custom_components.electricity_planner.coordinator import (
     ElectricityPlannerCoordinator,
 )
 from custom_components.electricity_planner.number import (
+    ArbitrageCostNumber,
     ArbitrageModeDeadlineHourNumber,
     ArbitrageModeReserveSocNumber,
     ArbitrageModeReserveSocSunnyNumber,
@@ -141,7 +144,7 @@ async def test_number_setup_always_adds_standard_and_sunny_entities(
     entities = []
     await async_setup_entry(fake_hass, entry, entities.extend)
 
-    assert len(entities) == 8
+    assert len(entities) == 11
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
     assert isinstance(entities[2], MaxSocThresholdSolarNumber)
@@ -150,6 +153,7 @@ async def test_number_setup_always_adds_standard_and_sunny_entities(
     assert isinstance(entities[5], ArbitrageModeReserveSocSunnyNumber)
     assert isinstance(entities[6], ArbitrageModeDeadlineHourNumber)
     assert isinstance(entities[7], NegativeBuyThresholdNumber)
+    assert all(isinstance(entity, ArbitrageCostNumber) for entity in entities[8:])
 
 
 @pytest.mark.asyncio
@@ -173,7 +177,7 @@ async def test_number_setup_with_forecast_entity_keeps_same_three_entities(
     entities = []
     await async_setup_entry(fake_hass, entry, entities.extend)
 
-    assert len(entities) == 8
+    assert len(entities) == 11
     assert isinstance(entities[0], MaxSocThresholdNumber)
     assert isinstance(entities[1], MaxSocThresholdSunnyNumber)
     assert isinstance(entities[2], MaxSocThresholdSolarNumber)
@@ -182,6 +186,7 @@ async def test_number_setup_with_forecast_entity_keeps_same_three_entities(
     assert isinstance(entities[5], ArbitrageModeReserveSocSunnyNumber)
     assert isinstance(entities[6], ArbitrageModeDeadlineHourNumber)
     assert isinstance(entities[7], NegativeBuyThresholdNumber)
+    assert all(isinstance(entity, ArbitrageCostNumber) for entity in entities[8:])
 
 
 @pytest.mark.asyncio
@@ -518,3 +523,113 @@ async def test_number_service_wrapper_rejects_invalid_sunny_threshold(
 
     assert entry.options[CONF_MAX_SOC_THRESHOLD] == 70
     assert entry.options[CONF_MAX_SOC_THRESHOLD_SUNNY] == 35
+
+
+def _arbitrage_cost_entity(
+    fake_hass, monkeypatch, key, default, minimum=0.0, options=None
+):
+    """Build one arbitrage cost number wired to a live coordinator."""
+    entry = MockConfigEntry(domain=DOMAIN, data=_base_config(), options=options or {})
+    monkeypatch.setattr(
+        coordinator_module.ElectricityPlannerCoordinator,
+        "_setup_entity_listeners",
+        lambda self: None,
+    )
+    fake_hass.config_entries._entries[entry.entry_id] = entry
+    coordinator = ElectricityPlannerCoordinator(fake_hass, entry)
+    coordinator.decision_engine.refresh_settings = Mock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    entity = ArbitrageCostNumber(
+        coordinator,
+        entry,
+        key,
+        default,
+        "Minimum Export Profit",
+        minimum,
+        1.0,
+        "€/kWh",
+        "mdi:cash-plus",
+    )
+    entity.hass = fake_hass
+    return coordinator, entry, entity
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_cost_number_persists_in_options(fake_hass, monkeypatch):
+    coordinator, entry, entity = _arbitrage_cost_entity(
+        fake_hass, monkeypatch, CONF_ARBITRAGE_MINIMUM_PROFIT, 0.02
+    )
+
+    await entity.async_set_native_value(0.05)
+
+    assert entry.options[CONF_ARBITRAGE_MINIMUM_PROFIT] == 0.05
+    assert coordinator.config[CONF_ARBITRAGE_MINIMUM_PROFIT] == 0.05
+    assert entity.native_value == 0.05
+    coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [-0.01, 1.5, float("nan"), float("inf"), "cheap"])
+async def test_arbitrage_cost_number_rejects_out_of_range_values(
+    fake_hass, monkeypatch, value
+):
+    """An unusable cost term would silently change every break-even price."""
+    coordinator, entry, entity = _arbitrage_cost_entity(
+        fake_hass, monkeypatch, CONF_ARBITRAGE_MINIMUM_PROFIT, 0.02
+    )
+
+    with pytest.raises(HomeAssistantError):
+        await entity.async_set_native_value(value)
+
+    assert CONF_ARBITRAGE_MINIMUM_PROFIT not in entry.options
+    coordinator.async_request_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_round_trip_efficiency_rejects_zero(fake_hass, monkeypatch):
+    """Zero efficiency has no finite break-even price."""
+    _coordinator, _entry, entity = _arbitrage_cost_entity(
+        fake_hass,
+        monkeypatch,
+        CONF_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
+        0.9,
+        minimum=0.01,
+    )
+
+    with pytest.raises(HomeAssistantError):
+        await entity.async_set_native_value(0)
+
+
+def test_arbitrage_cost_number_falls_back_to_its_default(fake_hass, monkeypatch):
+    """A corrupted stored value must not leave the entity unavailable."""
+    coordinator, _entry, entity = _arbitrage_cost_entity(
+        fake_hass, monkeypatch, CONF_ARBITRAGE_MINIMUM_PROFIT, 0.02
+    )
+
+    coordinator.config[CONF_ARBITRAGE_MINIMUM_PROFIT] = "not-a-number"
+
+    assert entity.native_value == 0.02
+
+
+def test_arbitrage_cost_number_exposes_the_ledger_state(fake_hass, monkeypatch):
+    coordinator, _entry, entity = _arbitrage_cost_entity(
+        fake_hass, monkeypatch, CONF_ARBITRAGE_MINIMUM_PROFIT, 0.02
+    )
+    coordinator.data = {
+        "arbitrage_mode_plan": {
+            "ledger_status": "charged_grid",
+            "ledger_total_kwh": 10.0,
+            "ledger_reserve_kwh": 4.0,
+            "ledger_eligible_stored_kwh": 2.0,
+            "ledger_exportable_kwh": 1.8,
+        }
+    }
+
+    assert entity.extra_state_attributes == {
+        "ledger_status": "charged_grid",
+        "ledger_total_kwh": 10.0,
+        "ledger_reserve_kwh": 4.0,
+        "ledger_eligible_stored_kwh": 2.0,
+        "ledger_exportable_kwh": 1.8,
+    }

@@ -125,6 +125,11 @@ class RuntimeModeManager:
             "selected_slots": [],
             "selected_slots_count": 0,
             "export_power": 0,
+            "ledger_status": coordinator.energy_ledger_status,
+            "ledger_total_kwh": 0.0,
+            "ledger_reserve_kwh": 0.0,
+            "ledger_eligible_stored_kwh": 0.0,
+            "ledger_exportable_kwh": 0.0,
         }
 
         updated_data = dict(coordinator.data)

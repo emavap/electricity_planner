@@ -12,10 +12,13 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
 
 from .const import (
+    CONF_ARBITRAGE_DEGRADATION_COST,
+    CONF_ARBITRAGE_MINIMUM_PROFIT,
     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
     CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER,
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
+    CONF_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
     CONF_BASE_GRID_SETPOINT,
     CONF_BATTERY_CAPACITIES,
     CONF_BATTERY_PHASE_ASSIGNMENTS,
@@ -84,10 +87,13 @@ from .const import (
     CONF_USE_AVERAGE_THRESHOLD,
     CONF_USE_DYNAMIC_THRESHOLD,
     CONF_VERY_LOW_PRICE_THRESHOLD,
+    DEFAULT_ARBITRAGE_DEGRADATION_COST,
+    DEFAULT_ARBITRAGE_MINIMUM_PROFIT,
     DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
     DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER,
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
+    DEFAULT_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
@@ -797,6 +803,37 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=-1, max=1, step=0.01, unit_of_measurement="€/kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
+                    default=self.data.get(
+                        CONF_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
+                        DEFAULT_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0.01, max=1, step=0.01)
+                ),
+                vol.Optional(
+                    CONF_ARBITRAGE_DEGRADATION_COST,
+                    default=self.data.get(
+                        CONF_ARBITRAGE_DEGRADATION_COST,
+                        DEFAULT_ARBITRAGE_DEGRADATION_COST,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=1, step=0.01, unit_of_measurement="€/kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_ARBITRAGE_MINIMUM_PROFIT,
+                    default=self.data.get(
+                        CONF_ARBITRAGE_MINIMUM_PROFIT,
+                        DEFAULT_ARBITRAGE_MINIMUM_PROFIT,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=1, step=0.01, unit_of_measurement="€/kWh"
                     )
                 ),
                 vol.Optional(
@@ -1809,6 +1846,37 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=-1, max=1, step=0.01, unit_of_measurement="€/kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
+                    default=self.data.get(
+                        CONF_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
+                        DEFAULT_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0.01, max=1, step=0.01)
+                ),
+                vol.Optional(
+                    CONF_ARBITRAGE_DEGRADATION_COST,
+                    default=self.data.get(
+                        CONF_ARBITRAGE_DEGRADATION_COST,
+                        DEFAULT_ARBITRAGE_DEGRADATION_COST,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=1, step=0.01, unit_of_measurement="€/kWh"
+                    )
+                ),
+                vol.Optional(
+                    CONF_ARBITRAGE_MINIMUM_PROFIT,
+                    default=self.data.get(
+                        CONF_ARBITRAGE_MINIMUM_PROFIT,
+                        DEFAULT_ARBITRAGE_MINIMUM_PROFIT,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=1, step=0.01, unit_of_measurement="€/kWh"
                     )
                 ),
                 vol.Optional(

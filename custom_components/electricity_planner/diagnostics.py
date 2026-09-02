@@ -26,6 +26,8 @@ _EXPORT_KEYS = [
     "has_min_charging_window",
     "average_threshold",
     "transport_cost_status",
+    "arbitrage_mode_plan",
+    "energy_ledger",
 ]
 
 
@@ -41,6 +43,11 @@ async def async_get_config_entry_diagnostics(
     diagnostics = {
         _key: deepcopy(data.get(_key)) for _key in _EXPORT_KEYS if _key in data
     }
+    # The live ledger is authoritative: a refresh may have moved it after the
+    # last snapshot was written into coordinator.data.
+    ledger_diagnostics = getattr(coordinator, "energy_ledger_diagnostics", None)
+    if callable(ledger_diagnostics):
+        diagnostics["energy_ledger"] = ledger_diagnostics()
 
     return {
         "config_entry": {

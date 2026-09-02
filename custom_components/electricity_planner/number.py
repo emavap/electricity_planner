@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from math import isfinite
 from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberMode
@@ -16,9 +17,12 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
 
 from .const import (
+    CONF_ARBITRAGE_DEGRADATION_COST,
+    CONF_ARBITRAGE_MINIMUM_PROFIT,
     CONF_ARBITRAGE_MODE_DEADLINE_HOUR,
     CONF_ARBITRAGE_MODE_RESERVE_SOC,
     CONF_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
+    CONF_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MAX_SOC_THRESHOLD_SOLAR,
     CONF_MAX_SOC_THRESHOLD_SUNNY,
@@ -27,9 +31,12 @@ from .const import (
     CONF_SOLAR_FORECAST_START_HOUR,
     CONF_SOLAR_FORECAST_TODAY_ENTITY,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+    DEFAULT_ARBITRAGE_DEGRADATION_COST,
+    DEFAULT_ARBITRAGE_MINIMUM_PROFIT,
     DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR,
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC,
     DEFAULT_ARBITRAGE_MODE_RESERVE_SOC_SUNNY,
+    DEFAULT_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
     DEFAULT_MAX_SOC,
     DEFAULT_MAX_SOC_SOLAR,
     DEFAULT_MAX_SOC_SUNNY,
@@ -51,6 +58,9 @@ _LIVE_NUMBER_OPTION_KEYS = (
     CONF_MAX_SOC_THRESHOLD_SOLAR,
     CONF_NEGATIVE_BUY_THRESHOLD,
     CONF_SUNNY_FORECAST_THRESHOLD_KWH,
+    CONF_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
+    CONF_ARBITRAGE_DEGRADATION_COST,
+    CONF_ARBITRAGE_MINIMUM_PROFIT,
 )
 
 
@@ -163,9 +173,133 @@ async def async_setup_entry(
         ArbitrageModeReserveSocSunnyNumber(coordinator, entry),
         ArbitrageModeDeadlineHourNumber(coordinator, entry),
         NegativeBuyThresholdNumber(coordinator, entry),
+        ArbitrageCostNumber(
+            coordinator,
+            entry,
+            CONF_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
+            DEFAULT_ARBITRAGE_ROUND_TRIP_EFFICIENCY,
+            "Round Trip Efficiency",
+            0.01,
+            1.0,
+            "",
+            "mdi:sync",
+        ),
+        ArbitrageCostNumber(
+            coordinator,
+            entry,
+            CONF_ARBITRAGE_DEGRADATION_COST,
+            DEFAULT_ARBITRAGE_DEGRADATION_COST,
+            "Degradation Cost",
+            0.0,
+            1.0,
+            "€/kWh",
+            "mdi:battery-heart",
+        ),
+        ArbitrageCostNumber(
+            coordinator,
+            entry,
+            CONF_ARBITRAGE_MINIMUM_PROFIT,
+            DEFAULT_ARBITRAGE_MINIMUM_PROFIT,
+            "Minimum Export Profit",
+            0.0,
+            1.0,
+            "€/kWh",
+            "mdi:cash-plus",
+        ),
     ]
 
     async_add_entities(entities)
+
+
+class ArbitrageCostNumber(CoordinatorEntity, NumberEntity):
+    """Number entity for one term of the arbitrage export break-even price.
+
+    Arbitrage mode sells stored energy only when the feed-in price covers the
+    lot's recorded all-in buy price divided by the round-trip efficiency, plus
+    the degradation cost and the required profit. These three entities expose
+    those terms live, without an options-flow round trip.
+    """
+
+    def __init__(
+        self,
+        coordinator: ElectricityPlannerCoordinator,
+        entry: ConfigEntry,
+        key: str,
+        default: float,
+        label: str,
+        minimum: float,
+        maximum: float,
+        unit: str,
+        icon: str,
+    ) -> None:
+        """Initialize one arbitrage export cost number."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._key = key
+        self._default = default
+        self._attr_name = f"{entry.title} Arbitrage {label}"
+        self._attr_unique_id = f"{entry.entry_id}_{key}"
+        self.entity_id = f"number.{slugify(entry.title or 'electricity_planner')}_{key}"
+        self._attr_icon = icon
+        self._attr_native_unit_of_measurement = unit or None
+        self._attr_mode = NumberMode.BOX
+        self._attr_native_min_value = minimum
+        self._attr_native_max_value = maximum
+        self._attr_native_step = 0.01
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": entry.title,
+            "manufacturer": "Electricity Planner",
+            "model": "Smart Charging Controller",
+        }
+
+    @property
+    def native_value(self) -> float:
+        """Return the configured value, falling back to the safe default."""
+        value = _parse_state_as_float(self.coordinator.config.get(self._key))
+        if value is None or not isfinite(value):
+            return float(self._default)
+        return value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose why the current arbitrage export is or is not eligible."""
+        plan = (
+            self.coordinator.data.get("arbitrage_mode_plan", {})
+            if self.coordinator.data
+            else {}
+        )
+        return {
+            "ledger_status": plan.get("ledger_status"),
+            "ledger_total_kwh": plan.get("ledger_total_kwh"),
+            "ledger_reserve_kwh": plan.get("ledger_reserve_kwh"),
+            "ledger_eligible_stored_kwh": plan.get("ledger_eligible_stored_kwh"),
+            "ledger_exportable_kwh": plan.get("ledger_exportable_kwh"),
+        }
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Validate, persist and apply the value immediately."""
+        try:
+            new_value = round(float(value), 2)
+        except (TypeError, ValueError) as err:
+            raise HomeAssistantError(f"{self._attr_name} must be a number") from err
+        if (
+            not isfinite(new_value)
+            or not self._attr_native_min_value
+            <= new_value
+            <= self._attr_native_max_value
+        ):
+            raise HomeAssistantError(
+                f"{self._attr_name} must be between "
+                f"{self._attr_native_min_value} and {self._attr_native_max_value}"
+            )
+        self._entry, new_options = _build_updated_number_options(
+            self.hass, self._entry, self.coordinator, self._key, new_value
+        )
+        self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+        self.coordinator.config[self._key] = new_value
+        self.coordinator.decision_engine.refresh_settings(self.coordinator.config)
+        await self.coordinator.async_request_refresh()
 
 
 class MaxSocThresholdNumber(CoordinatorEntity, NumberEntity):

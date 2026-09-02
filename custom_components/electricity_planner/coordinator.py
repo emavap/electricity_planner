@@ -8,6 +8,7 @@ import json
 import logging
 from collections import deque
 from datetime import date, datetime, timedelta
+from math import isfinite
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -38,6 +39,7 @@ from .const import (
     CONF_HIGHEST_PRICE_ENTITY,
     CONF_HOUSE_CONSUMPTION_ENTITY,
     CONF_LOWEST_PRICE_ENTITY,
+    CONF_MAX_BATTERY_POWER,
     CONF_MAX_SOC_THRESHOLD,
     CONF_MIN_CAR_CHARGING_THRESHOLD,
     CONF_MIN_SOC_THRESHOLD,
@@ -63,6 +65,7 @@ from .const import (
     DEFAULT_BASE_GRID_SETPOINT,
     DEFAULT_BUY_VAT_MULTIPLIER,
     DEFAULT_CAR_PERMISSIVE_THRESHOLD_MULTIPLIER,
+    DEFAULT_MAX_BATTERY_POWER,
     DEFAULT_MAX_SOC,
     DEFAULT_MIN_CAR_CHARGING_THRESHOLD,
     DEFAULT_MIN_SOC,
@@ -84,6 +87,7 @@ from .const import (
     PRICE_TIMELINE_MAX_AGE_HOURS,
 )
 from .decision_engine import ChargingDecisionEngine
+from .energy_ledger import BatteryEnergyLedger, EnergyOrigin
 from .entity_status import EntityStatusReporter
 from .forecast_summary import ForecastSummaryCalculator
 from .grid_signs import sensor_grid_import_w
@@ -107,8 +111,46 @@ _MANUAL_OVERRIDE_STORE_VERSION = 1
 _CAR_PERMISSIVE_MODE_STORE_VERSION = 1
 _RUNTIME_MODE_STORE_VERSION = 1
 _BATTERY_CHARGING_STATE_STORE_VERSION = 1
+_ENERGY_LEDGER_STORE_VERSION = 1
+# Battery energy below this is noise from SOC quantisation, not a real movement.
+_ENERGY_LEDGER_TOLERANCE_KWH = 0.001
+# Longest gap between two accepted observations that the ledger may survive.
+# Beyond it (restart, downtime, stalled refresh) the battery may have charged
+# and discharged several times from several sources, so *no* existing lot can
+# still be trusted -- not just the newest delta.  The whole ledger is reset to
+# unknown energy, which can never be exported.
+_ENERGY_LEDGER_MAX_ATTRIBUTION_GAP_SECONDS = 900
+# Headroom on the commanded power when checking whether a source could have
+# delivered the observed delta, covering sensor timing jitter.
+_ENERGY_LEDGER_POWER_TOLERANCE = 1.25
+# Ledger writes are coalesced: the ledger moves every refresh and must not
+# translate into a flash write every refresh.
+_ENERGY_LEDGER_SAVE_DELAY_SECONDS = 300
 _INVERTER_DERATING_EXPORT_AVERAGE_WINDOW = timedelta(minutes=3)
 _GRID_TRACKING_AVERAGE_WINDOW = timedelta(minutes=3)
+
+
+def _coerce_ledger_inventory(
+    raw: object,
+) -> tuple[tuple[str, float], ...] | None:
+    """Return the persisted battery inventory fingerprint, or None if unusable."""
+    if not isinstance(raw, list):
+        return None
+    inventory: list[tuple[str, float]] = []
+    for item in raw:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            return None
+        entity_id, capacity = item
+        if (
+            not isinstance(entity_id, str)
+            or not isinstance(capacity, (int, float))
+            or isinstance(capacity, bool)
+            or not isfinite(capacity)
+            or capacity <= 0
+        ):
+            return None
+        inventory.append((entity_id, round(float(capacity), 6)))
+    return tuple(sorted(inventory))
 
 
 class ElectricityPlannerCoordinator(DataUpdateCoordinator):
@@ -191,6 +233,24 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._battery_grid_charging_changed_at: datetime | None = None
         self._battery_grid_charging_locked_threshold: float | None = None
         self._battery_charging_state_store: Store[dict[str, Any]] | None = None
+        # Virtual battery-energy ledger.  ``_ledger_initialized`` gates every
+        # read: an absent, empty or untrusted ledger must never let energy be
+        # exported.  The charge intent is deliberately *not* persisted, so a
+        # restart can never attribute an accumulated delta to a stale source.
+        self._energy_ledger_store: Store[dict[str, Any]] | None = None
+        self._energy_ledger = BatteryEnergyLedger()
+        self._ledger_initialized = False
+        self._ledger_last_energy_kwh: float | None = None
+        # Last accepted observation (advanced even when nothing moved) and the
+        # moment the energy baseline itself was last set.  They differ while
+        # sub-quantisation drift accumulates: the first bounds how stale the
+        # ledger is, the second bounds how much energy a source could have
+        # delivered since the baseline.
+        self._ledger_last_observed_at: datetime | None = None
+        self._ledger_baseline_at: datetime | None = None
+        self._ledger_inventory: tuple[tuple[str, float], ...] | None = None
+        self._ledger_charge_intent: dict[str, Any] | None = None
+        self._ledger_status: str = "uninitialized"
 
         # Price interval tracking for threshold stability
         self._current_price_interval_start: datetime | None = None
@@ -342,10 +402,554 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             _BATTERY_CHARGING_STATE_STORE_VERSION,
             f"{DOMAIN}.{self.entry.entry_id}.battery_charging_state",
         )
+        self._energy_ledger_store = Store(
+            self.hass,
+            _ENERGY_LEDGER_STORE_VERSION,
+            f"{DOMAIN}.{self.entry.entry_id}.energy_ledger",
+            atomic_writes=True,
+        )
         await self._async_load_car_permissive_mode()
         await self._async_load_runtime_modes()
         await self._async_load_manual_overrides()
         await self._async_load_battery_charging_state()
+        await self._async_load_energy_ledger()
+
+    @property
+    def energy_ledger(self) -> BatteryEnergyLedger:
+        """Return the virtual battery-energy ledger."""
+        return self._energy_ledger
+
+    @property
+    def energy_ledger_initialized(self) -> bool:
+        """Return True once a trusted battery observation has been recorded."""
+        return self._ledger_initialized
+
+    @property
+    def energy_ledger_status(self) -> str:
+        """Return the last ledger reconciliation outcome, for reasons and diagnostics."""
+        return self._ledger_status
+
+    def energy_ledger_diagnostics(self) -> dict[str, Any]:
+        """Return a compact ledger snapshot for diagnostics."""
+        diagnostics: dict[str, Any] = {
+            "initialized": self._ledger_initialized,
+            "status": self._ledger_status,
+            "observed_energy_kwh": (
+                None
+                if self._ledger_last_energy_kwh is None
+                else round(self._ledger_last_energy_kwh, 6)
+            ),
+            "observed_at": (
+                None
+                if self._ledger_last_observed_at is None
+                else self._ledger_last_observed_at.isoformat()
+            ),
+            "inventory": (
+                None
+                if self._ledger_inventory is None
+                else [list(item) for item in self._ledger_inventory]
+            ),
+            "charge_intent": None,
+        }
+        diagnostics.update(self._energy_ledger.summary())
+        intent = self._ledger_charge_intent
+        if intent is not None:
+            diagnostics["charge_intent"] = {
+                "origin": intent["origin"].value,
+                "at": intent["at"].isoformat(),
+                "buy_cost_eur_per_kwh": intent["buy_cost"],
+                "power_w": intent["power_w"],
+            }
+        return diagnostics
+
+    def _energy_ledger_payload(self) -> dict[str, Any]:
+        """Build the durable ledger payload.
+
+        The charge intent is intentionally absent: it describes a command that
+        this process issued moments ago, and replaying it after a restart would
+        attribute a whole downtime's worth of charging to one stale source.
+        """
+        return {
+            "ledger": self._energy_ledger.as_dict(),
+            "observed_energy_kwh": self._ledger_last_energy_kwh,
+            "observed_at": (
+                None
+                if self._ledger_last_observed_at is None
+                else self._ledger_last_observed_at.isoformat()
+            ),
+            "inventory": (
+                None
+                if self._ledger_inventory is None
+                else [
+                    [entity_id, capacity]
+                    for entity_id, capacity in self._ledger_inventory
+                ]
+            ),
+        }
+
+    def _reset_energy_ledger(self, status: str) -> None:
+        """Fail closed: forget the ledger until a trusted observation arrives."""
+        self._energy_ledger = BatteryEnergyLedger()
+        self._ledger_initialized = False
+        self._ledger_last_energy_kwh = None
+        self._ledger_last_observed_at = None
+        self._ledger_baseline_at = None
+        self._ledger_inventory = None
+        self._ledger_charge_intent = None
+        self._ledger_status = status
+
+    async def _async_load_energy_ledger(self) -> None:
+        """Restore virtual lots; anything untrusted starts fully uninitialized."""
+        self._reset_energy_ledger("uninitialized")
+        if self._energy_ledger_store is None:
+            return
+        try:
+            stored = await self._energy_ledger_store.async_load()
+        except Exception as err:
+            if isinstance(err, (KeyboardInterrupt, SystemExit)):
+                raise
+            _LOGGER.warning(
+                "Unable to load energy ledger for %s: %s", self.entry.entry_id, err
+            )
+            return
+        if stored is None:
+            return
+        if not isinstance(stored, dict):
+            _LOGGER.warning(
+                "Discarding malformed energy ledger for %s", self.entry.entry_id
+            )
+            self._ledger_status = "invalid_storage"
+            return
+
+        ledger = BatteryEnergyLedger.from_dict(stored.get("ledger"))
+        observed_energy = stored.get("observed_energy_kwh")
+        observed_at_raw = stored.get("observed_at")
+        inventory = _coerce_ledger_inventory(stored.get("inventory"))
+        observed_at = (
+            dt_util.parse_datetime(observed_at_raw)
+            if isinstance(observed_at_raw, str)
+            else None
+        )
+        if (
+            ledger is None
+            or inventory is None
+            or observed_at is None
+            or not isinstance(observed_energy, (int, float))
+            or isinstance(observed_energy, bool)
+            or not isfinite(observed_energy)
+            or observed_energy < 0
+            # A ledger whose lots no longer sum to the recorded observation is
+            # internally inconsistent and must not price an export.  The
+            # allowance covers the pinning tolerance plus the rounding every lot
+            # picked up on its way to disk, so writing a long-running ledger and
+            # reading it straight back can never fail this check.
+            or abs(ledger.total_kwh - float(observed_energy))
+            > _ENERGY_LEDGER_TOLERANCE_KWH + ledger.storage_rounding_tolerance_kwh
+        ):
+            _LOGGER.warning(
+                "Discarding untrusted energy ledger for %s", self.entry.entry_id
+            )
+            self._ledger_status = "invalid_storage"
+            return
+
+        self._energy_ledger = ledger
+        self._ledger_last_energy_kwh = float(observed_energy)
+        self._ledger_last_observed_at = dt_util.as_utc(observed_at)
+        self._ledger_baseline_at = self._ledger_last_observed_at
+        self._ledger_inventory = inventory
+        self._ledger_initialized = True
+        self._ledger_status = "restored"
+
+    def _schedule_energy_ledger_save(self) -> None:
+        """Queue a coalesced, atomic ledger write.
+
+        The ledger changes on nearly every refresh, so an immediate write per
+        cycle would hammer the flash storage.  ``async_delay_save`` keeps at
+        most one pending write per delay window and Home Assistant flushes it
+        on shutdown.
+        """
+        store = self._energy_ledger_store
+        if store is None:
+            return
+        try:
+            store.async_delay_save(
+                self._energy_ledger_payload, _ENERGY_LEDGER_SAVE_DELAY_SECONDS
+            )
+        except Exception as err:
+            if isinstance(err, (KeyboardInterrupt, SystemExit)):
+                raise
+            _LOGGER.warning(
+                "Unable to persist energy ledger for %s: %s", self.entry.entry_id, err
+            )
+
+    @property
+    def energy_ledger_inventory(self) -> tuple[tuple[str, float], ...] | None:
+        """Return the battery fingerprint the current lots were accounted against."""
+        return self._ledger_inventory
+
+    def resolve_battery_energy_inventory(
+        self, data: dict[str, Any]
+    ) -> tuple[tuple[tuple[str, float], ...], float] | None:
+        """Return the validated (inventory fingerprint, stored kWh) or None.
+
+        Every consumer that reasons about *whose* energy is in the battery --
+        the ledger and the arbitrage reserve floor -- must resolve the fleet
+        through this one method, so a battery that drops out cannot shrink the
+        reserve while the lots still account for the whole fleet.
+        """
+        return self._resolve_ledger_inventory(data)
+
+    def _resolve_ledger_inventory(
+        self, data: dict[str, Any]
+    ) -> tuple[tuple[tuple[str, float], ...], float] | None:
+        """Return the validated (inventory fingerprint, stored kWh) or None.
+
+        Every configured battery must report a usable SOC and capacity.  A
+        single dropout would otherwise look like an instantaneous discharge and
+        silently consume lots that are still in the battery.
+        """
+        configured = self.config.get(CONF_BATTERY_SOC_ENTITIES) or []
+        if not configured:
+            return None
+        details = data.get("battery_details")
+        if not isinstance(details, list) or not details:
+            return None
+
+        observed: dict[str, tuple[float, float]] = {}
+        for item in details:
+            if not isinstance(item, dict):
+                return None
+            entity_id = item.get("entity_id")
+            capacity = item.get("capacity")
+            soc = item.get("soc")
+            if (
+                not isinstance(entity_id, str)
+                or entity_id in observed
+                or not isinstance(capacity, (int, float))
+                or isinstance(capacity, bool)
+                or not isinstance(soc, (int, float))
+                or isinstance(soc, bool)
+                or not isfinite(capacity)
+                or not isfinite(soc)
+                or capacity <= 0
+                or not 0 <= soc <= 100
+            ):
+                return None
+            observed[entity_id] = (float(capacity), float(soc))
+
+        if set(observed) != set(configured):
+            return None
+
+        fingerprint = tuple(
+            sorted(
+                (entity_id, round(capacity, 6))
+                for entity_id, (capacity, _soc) in observed.items()
+            )
+        )
+        total = sum(capacity * soc / 100.0 for capacity, soc in observed.values())
+        return fingerprint, total
+
+    def _reconcile_energy_ledger(self, data: dict[str, Any]) -> None:
+        """Attribute observed battery movement to virtual marginal-energy lots."""
+        now = dt_util.utcnow()
+        inventory = self._resolve_ledger_inventory(data)
+        if inventory is None:
+            # Incomplete or invalid battery data: leave the ledger untouched so
+            # a sensor dropout can neither consume nor create lots.
+            self._ledger_status = "battery_data_unavailable"
+            return
+        fingerprint, total = inventory
+
+        if not self._ledger_initialized or fingerprint != self._ledger_inventory:
+            # First trusted observation, or the SOC-to-kWh mapping changed.
+            # Neither the existing lots nor the delta mean anything now.
+            status = (
+                "initialized" if not self._ledger_initialized else "inventory_changed"
+            )
+            self._energy_ledger.reset_to_unknown(total)
+            self._ledger_inventory = fingerprint
+            self._ledger_last_energy_kwh = total
+            self._ledger_last_observed_at = now
+            self._ledger_baseline_at = now
+            self._ledger_initialized = True
+            self._ledger_charge_intent = None
+            self._ledger_status = status
+            self._schedule_energy_ledger_save()
+            return
+
+        previous_observed_at = self._ledger_last_observed_at
+        gap_seconds = (
+            None
+            if previous_observed_at is None
+            else (now - previous_observed_at).total_seconds()
+        )
+        if (
+            gap_seconds is None
+            or gap_seconds < 0
+            or gap_seconds > _ENERGY_LEDGER_MAX_ATTRIBUTION_GAP_SECONDS
+        ):
+            # Nothing was observed for too long.  The battery may have been
+            # charged and discharged several times from several sources in the
+            # meantime, so no existing lot survives -- not merely the delta.
+            # Everything becomes unknown energy, which is never exported.
+            self._energy_ledger.reset_to_unknown(total)
+            self._ledger_last_energy_kwh = total
+            self._ledger_last_observed_at = now
+            self._ledger_baseline_at = now
+            self._ledger_charge_intent = None
+            self._ledger_status = "observation_gap"
+            self._schedule_energy_ledger_save()
+            return
+
+        previous_total = self._ledger_last_energy_kwh or 0.0
+        baseline_at = self._ledger_baseline_at
+        elapsed_seconds = (
+            None if baseline_at is None else (now - baseline_at).total_seconds()
+        )
+        delta = total - previous_total
+        if abs(delta) <= _ENERGY_LEDGER_TOLERANCE_KWH:
+            # Movement below SOC quantisation noise.  The energy baseline stays
+            # anchored so slow drift accumulates into a single real movement
+            # instead of triggering a write every refresh, but the observation
+            # itself is accepted: an idle battery is watched, not stale.
+            self._ledger_last_observed_at = now
+            self._ledger_status = "steady"
+            return
+
+        if delta > 0:
+            self._attribute_ledger_charge(delta, now, elapsed_seconds)
+        else:
+            self._energy_ledger.discharge(-delta)
+            self._ledger_status = "discharged"
+
+        # Keep the ledger pinned to the observed inventory.  Any residual drift
+        # is unprovable energy, never sellable energy.
+        drift = total - self._energy_ledger.total_kwh
+        if drift > _ENERGY_LEDGER_TOLERANCE_KWH:
+            self._energy_ledger.add(EnergyOrigin.UNKNOWN, drift)
+        elif drift < -_ENERGY_LEDGER_TOLERANCE_KWH:
+            self._energy_ledger.discharge(-drift)
+
+        self._ledger_last_energy_kwh = total
+        self._ledger_last_observed_at = now
+        self._ledger_baseline_at = now
+        self._schedule_energy_ledger_save()
+
+    def _attribute_ledger_charge(
+        self, delta_kwh: float, now: datetime, elapsed_seconds: float | None
+    ) -> None:
+        """Credit a charge delta to the recorded intent, capped by what it could deliver."""
+        intent = self._ledger_charge_intent
+        intent_age_seconds = (
+            None if intent is None else (now - intent["at"]).total_seconds()
+        )
+        if (
+            intent is None
+            or intent_age_seconds is None
+            or intent_age_seconds < 0
+            or intent_age_seconds > _ENERGY_LEDGER_MAX_ATTRIBUTION_GAP_SECONDS
+            or elapsed_seconds is None
+            or elapsed_seconds <= 0
+            or elapsed_seconds > _ENERGY_LEDGER_MAX_ATTRIBUTION_GAP_SECONDS
+        ):
+            # No trusted command covers this interval (restart, downtime or a
+            # skipped refresh), so the energy has no provable origin.
+            self._energy_ledger.add(EnergyOrigin.UNKNOWN, delta_kwh)
+            self._ledger_status = "charged_unattributed"
+            return
+
+        # A source can only be credited for the energy it could physically have
+        # delivered.  Two independent windows bound that: the time since the
+        # energy baseline was set, and the age of the command itself.  The
+        # command says nothing about what happened before it was issued, which
+        # matters whenever sub-quantisation drift held the baseline back across
+        # several refreshes.  Anything beyond the smaller window came from
+        # somewhere else and is stacked on top as unknown, where it blocks the
+        # attributed energy below it until it is discharged again.
+        attributable_seconds = min(elapsed_seconds, intent_age_seconds)
+        deliverable_kwh = (
+            intent["power_w"]
+            / 1000.0
+            * (attributable_seconds / 3600.0)
+            * _ENERGY_LEDGER_POWER_TOLERANCE
+        )
+        attributed = min(delta_kwh, max(0.0, deliverable_kwh))
+        if attributed <= _ENERGY_LEDGER_TOLERANCE_KWH:
+            self._energy_ledger.add(EnergyOrigin.UNKNOWN, delta_kwh)
+            self._ledger_status = "charged_unattributed"
+            return
+
+        self._energy_ledger.add(intent["origin"], attributed, intent["buy_cost"])
+        remainder = delta_kwh - attributed
+        if remainder > _ENERGY_LEDGER_TOLERANCE_KWH:
+            self._energy_ledger.add(EnergyOrigin.UNKNOWN, remainder)
+            self._ledger_status = f"charged_{intent['origin'].value}_partial"
+        else:
+            self._ledger_status = f"charged_{intent['origin'].value}"
+
+    def _ledger_all_in_buy_cost(self, price_analysis: dict[str, Any]) -> float | None:
+        """Return the all-in import price per kWh, VAT included, or None.
+
+        The lot price has to be what a kWh actually cost at the meter, because
+        the export decision compares it against the feed-in price.  It is
+        rebuilt from the raw price and the same adjustment, transport and VAT
+        terms the buy timeline uses, rather than read from ``current_price``:
+        that field carries VAT only on the interval-aware path, and a lot
+        priced ex-VAT would authorise exports below break-even.
+        """
+        raw_price = price_analysis.get("raw_current_price")
+        if (
+            not isinstance(raw_price, (int, float))
+            or isinstance(raw_price, bool)
+            or not isfinite(raw_price)
+        ):
+            return None
+
+        def _term(source: dict[str, Any], key: str, default: float) -> float | None:
+            value = source.get(key, default)
+            if value is None:
+                value = default
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not isfinite(value)
+            ):
+                return None
+            return float(value)
+
+        multiplier = _term(
+            price_analysis,
+            "price_adjustment_multiplier",
+            self.config.get(
+                CONF_PRICE_ADJUSTMENT_MULTIPLIER, DEFAULT_PRICE_ADJUSTMENT_MULTIPLIER
+            ),
+        )
+        offset = _term(
+            price_analysis,
+            "price_adjustment_offset",
+            self.config.get(
+                CONF_PRICE_ADJUSTMENT_OFFSET, DEFAULT_PRICE_ADJUSTMENT_OFFSET
+            ),
+        )
+        transport_cost = _term(price_analysis, "transport_cost", 0.0)
+        buy_vat_multiplier = _term(
+            self.config, CONF_BUY_VAT_MULTIPLIER, DEFAULT_BUY_VAT_MULTIPLIER
+        )
+        if (
+            multiplier is None
+            or offset is None
+            or transport_cost is None
+            or buy_vat_multiplier is None
+        ):
+            return None
+        all_in = (float(raw_price) * multiplier + offset + transport_cost) * (
+            buy_vat_multiplier
+        )
+        return all_in if isfinite(all_in) else None
+
+    def _record_ledger_charge_intent(
+        self,
+        data: dict[str, Any],
+        charging_decision: dict[str, Any],
+        automatic_battery_grid_charging: bool,
+        override_targets: set[str] | frozenset[str] | list[str],
+    ) -> None:
+        """Record what this cycle commanded, for the next observed SOC delta.
+
+        Only a planner-issued command counts as proof of origin.  A manual
+        battery override bypasses the planner entirely, so its energy stays
+        unattributed rather than being credited to solar.
+        """
+        if "battery_grid_charging" in (override_targets or ()):
+            self._ledger_charge_intent = None
+            return
+
+        now = dt_util.utcnow()
+        commanded_grid_charging = bool(
+            charging_decision.get("battery_grid_charging", False)
+        )
+        if automatic_battery_grid_charging or commanded_grid_charging:
+            if not (automatic_battery_grid_charging and commanded_grid_charging):
+                # The automatic decision and the command that will actually be
+                # applied disagree, so neither proves what the battery is being
+                # charged with.
+                self._ledger_charge_intent = None
+                return
+            buy_cost = self._ledger_all_in_buy_cost(data.get("price_analysis") or {})
+            if buy_cost is None:
+                # Without a trusted all-in price the lot cannot be priced, and
+                # an unpriced grid lot must never be sold.
+                self._ledger_charge_intent = None
+                return
+            self._ledger_charge_intent = {
+                "at": now,
+                "origin": EnergyOrigin.GRID,
+                # Negative all-in prices are kept with their sign.
+                "buy_cost": buy_cost,
+                "power_w": float(
+                    self.config.get(CONF_MAX_BATTERY_POWER, DEFAULT_MAX_BATTERY_POWER)
+                    or 0.0
+                ),
+            }
+            return
+
+        self._ledger_charge_intent = self._solar_charge_intent(
+            data, charging_decision, now
+        )
+
+    def _solar_charge_intent(
+        self,
+        data: dict[str, Any],
+        charging_decision: dict[str, Any],
+        now: datetime,
+    ) -> dict[str, Any] | None:
+        """Return a solar intent only when solar is provably charging the battery.
+
+        A solar allocation on its own is a plan, not a measurement: the planner
+        never commands solar charging, the inverter does it with whatever is
+        left after the house.  Solar is therefore credited only for the power
+        the site is demonstrably not importing, so a battery filled from the
+        grid can never be sold as solar.
+        """
+        if data.get("negative_buy_mode_active"):
+            # Paid-to-consume import is grid energy by construction.
+            return None
+
+        allocation = charging_decision.get("power_allocation") or {}
+        solar_for_batteries = allocation.get("solar_for_batteries")
+        if (
+            not isinstance(solar_for_batteries, (int, float))
+            or isinstance(solar_for_batteries, bool)
+            or not isfinite(solar_for_batteries)
+            or solar_for_batteries <= 0
+        ):
+            return None
+
+        grid_power = data.get("grid_power")
+        if (
+            not isinstance(grid_power, (int, float))
+            or isinstance(grid_power, bool)
+            or not isfinite(grid_power)
+        ):
+            # Without a grid reading the site could be importing everything the
+            # battery is absorbing.  Unprovable energy stays unknown.
+            return None
+
+        # Any import means solar is already short of the house load, so only the
+        # allocation the site is not importing can be solar.
+        provable_solar_w = float(solar_for_batteries) - sensor_grid_import_w(
+            float(grid_power)
+        )
+        if provable_solar_w <= 0:
+            return None
+        return {
+            "at": now,
+            "origin": EnergyOrigin.SOLAR,
+            "buy_cost": None,
+            # Solar credit is bounded by the allocation the planner actually
+            # proved, so mixed grid/solar charging cannot be sold as solar.
+            "power_w": provable_solar_w,
+        }
 
     async def _async_load_battery_charging_state(self) -> None:
         """Restore battery and EV-feedback anti-flap state across restarts."""
@@ -1237,6 +1841,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             # Update peak import limit state based on current grid power
             self._update_peak_limit_state(data)
 
+            self._reconcile_energy_ledger(data)
+            data["energy_ledger"] = self.energy_ledger_diagnostics()
+
             arbitrage_mode_plan = self._calculate_arbitrage_mode_plan(data)
             data["arbitrage_mode_plan"] = arbitrage_mode_plan
             data["arbitrage_mode_enabled"] = arbitrage_mode_plan.get("enabled", False)
@@ -1282,6 +1889,14 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                     charging_decision["grid_tracking_waiting_for_application"] = False
 
             data.update(charging_decision)
+            # Snapshot what this cycle actually commanded.  It is consumed by
+            # the next observed SOC delta and never persisted.
+            self._record_ledger_charge_intent(
+                data,
+                charging_decision,
+                automatic_battery_grid_charging,
+                override_targets,
+            )
             previous_grid_tracking_cap = self._grid_tracking_charger_limit
             previous_grid_tracking_adjustment = self._grid_tracking_last_adjustment
             previous_grid_tracking_waiting = self._grid_tracking_waiting_for_application

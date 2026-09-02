@@ -49,6 +49,9 @@ CONF_ARBITRAGE_MODE_RESERVE_SOC = "arbitrage_mode_reserve_soc"
 CONF_ARBITRAGE_MODE_RESERVE_SOC_SUNNY = "arbitrage_mode_reserve_soc_sunny"
 CONF_ARBITRAGE_MODE_DEADLINE_HOUR = "arbitrage_mode_deadline_hour"
 CONF_ARBITRAGE_MODE_MAX_EXPORT_POWER = "arbitrage_mode_max_export_power"
+CONF_ARBITRAGE_ROUND_TRIP_EFFICIENCY = "arbitrage_round_trip_efficiency"
+CONF_ARBITRAGE_DEGRADATION_COST = "arbitrage_degradation_cost"
+CONF_ARBITRAGE_MINIMUM_PROFIT = "arbitrage_minimum_profit"
 CONF_NEGATIVE_BUY_THRESHOLD = "negative_buy_threshold"
 CONF_PRICE_THRESHOLD = "price_threshold"
 CONF_EMERGENCY_SOC_THRESHOLD = "emergency_soc_threshold"
@@ -102,6 +105,9 @@ DEFAULT_ARBITRAGE_MODE_DEADLINE_HOUR = 12
 DEFAULT_ARBITRAGE_MODE_MAX_EXPORT_POWER = (
     0  # 0 = automatic cap based on battery/grid limits
 )
+DEFAULT_ARBITRAGE_ROUND_TRIP_EFFICIENCY = 0.90
+DEFAULT_ARBITRAGE_DEGRADATION_COST = 0.00
+DEFAULT_ARBITRAGE_MINIMUM_PROFIT = 0.02
 DEFAULT_NEGATIVE_BUY_THRESHOLD = (
     -0.05
 )  # €/kWh - only buy when net price ≤ this (truly paid-to-consume)
@@ -276,4 +282,4 @@ MAX_POWER_VALIDATION_W = (
 )
 MAX_CAR_POWER_VALIDATION_W = 22000  # Maximum reasonable car charging power
 
-INTEGRATION_VERSION = "6.7.8"
+INTEGRATION_VERSION = "6.7.9"
