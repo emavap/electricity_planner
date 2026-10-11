@@ -2036,14 +2036,27 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                         entity_id,
                         soc,
                     )
+                    battery_soc_values.append({"entity_id": entity_id, "soc": None})
                     continue
 
                 battery_soc_values.append({"entity_id": entity_id, "soc": soc})
             else:
+                # Emit a placeholder rather than dropping the battery outright.
+                # BatteryAnalysisCalculator can then substitute this battery's
+                # last valid reading for a short while, so a transient sensor
+                # dropout does not silently re-weight the fleet average onto the
+                # remaining batteries and flip charging decisions.
                 _LOGGER.warning(
-                    "Battery entity %s is unavailable - excluding from calculations",
+                    "Battery entity %s is unavailable - holding last known SOC if recent",
                     entity_id,
                 )
+                battery_soc_values.append({"entity_id": entity_id, "soc": None})
+
+        # Substitute recently-held readings for momentarily unavailable sensors so
+        # battery_details/phase_batteries and the decision engine agree on SOC.
+        battery_soc_values = self.decision_engine.resolve_held_battery_soc(
+            battery_soc_values
+        )
 
         data["battery_soc"] = battery_soc_values
         _LOGGER.debug("Final battery SOC data: %s", battery_soc_values)

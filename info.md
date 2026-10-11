@@ -1,9 +1,11 @@
 # Electricity Planner – Project Summary
 
-**Version 6.7.9** | **Config Schema Version 24** | **Home Assistant 2024.4+**
+**Version 6.7.10** | **Config Schema Version 24** | **Home Assistant 2024.4+**
 
 A Home Assistant custom integration that analyses live Nord Pool prices, battery SOC, and solar production to recommend when you should charge from the grid. It never controls hardware directly—instead it exposes boolean decisions, grid power limits, and human-readable reasons that you wire into your own automations.
 
+> Release note for v6.7.10: a battery whose SOC sensor briefly goes unavailable keeps contributing its last valid reading for up to three minutes instead of being dropped from the fleet average. This prevents a transient dropout from re-weighting the capacity-weighted average onto the remaining batteries and flipping charging decisions without any physical charge change. No config migration is required.
+>
 > Release note for v6.7.7: adds an opt-in live P1 feedback guard for installations whose meter reports grid import as a negative value. When the rolling three-minute import average exceeds the Planner grid target, the EV limit is reduced and then released gradually after recovery. Restored limits are never applied until a new post-restart average exists. The option is off by default; no config migration is required.
 >
 > Release note for v6.7.9: adds fail-closed, cost-aware battery export arbitrage. Grid-charged energy is exported only when the adjusted purchase cost, round-trip losses, degradation cost, and configured profit margin are covered; ambiguous energy is never exported. No config migration is required.

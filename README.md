@@ -1,9 +1,11 @@
 # Electricity Planner
 
-**Version 6.7.9** | **Config Schema Version 24** | **Home Assistant 2024.4+**
+**Version 6.7.10** | **Config Schema Version 24** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
+> Release note for v6.7.10: a battery whose SOC sensor briefly goes unavailable now keeps contributing its last valid reading for up to three minutes instead of being dropped from the fleet. Previously a transient dropout silently re-weighted the capacity-weighted average onto the remaining batteries, which could cross `max_soc_threshold` and flip charging decisions even though no charge had moved. Decision diagnostics report `soc_hold_active` and `soc_held_entity_ids` while a reading is held. No config migration is required.
+>
 > Release note for v6.7.7: adds an opt-in live P1 feedback guard for installations whose meter reports grid import as a negative value. When the rolling three-minute import average exceeds the Planner grid target, the EV limit is reduced and then released gradually after recovery. Restored limits are never applied until a new post-restart average exists. The option is off by default; no config migration is required.
 >
 > Release note for v6.7.9: adds fail-closed, cost-aware battery export arbitrage. Grid-charged energy is exported only when the adjusted purchase cost, round-trip losses, degradation cost, and configured profit margin are covered; ambiguous energy is never exported. No config migration is required.

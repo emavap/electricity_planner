@@ -998,9 +998,13 @@ class ChargingDecisionEngine:
         self._settings = EngineSettings.from_config(config, self.validator)
         self._inverter_derating = InverterDeratingCalculator(self._settings)
         self._feedin_decision = FeedInDecisionCalculator(self._settings)
+        # Carry the held-SOC cache over so a settings refresh during a sensor
+        # dropout does not reintroduce the re-weighting it exists to prevent.
+        previous_soc_hold = self._battery_analysis.soc_hold_state
         self._battery_analysis = BatteryAnalysisCalculator(
             self._settings, self.validator
         )
+        self._battery_analysis.restore_soc_hold_state(previous_soc_hold)
         self._price_analysis = PriceAnalysisCalculator(
             self._settings, self.price_calculator
         )
@@ -1417,6 +1421,18 @@ class ChargingDecisionEngine:
     ) -> dict[str, Any]:
         """Delegate to the battery analysis calculator collaborator."""
         return self._battery_analysis.analyze(battery_soc_data)
+
+    def resolve_held_battery_soc(
+        self, battery_soc_data: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Replace unavailable SOC readings with recently-held values.
+
+        Called by the coordinator before publishing battery data so diagnostics
+        and downstream consumers see the same SOC the decision engine uses.
+        Batteries with no usable reading are dropped, preserving the previous
+        contract that published entries always carry a numeric ``soc``.
+        """
+        return self._battery_analysis.resolve_for_publication(battery_soc_data)
 
     def _create_no_battery_result(self) -> dict[str, Any]:
         """Delegate to the battery analysis calculator collaborator."""

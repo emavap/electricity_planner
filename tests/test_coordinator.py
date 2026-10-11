@@ -5376,3 +5376,49 @@ def test_energy_ledger_persisted_lots_always_match_the_observation(
             payload["observed_energy_kwh"],
             abs=coordinator_module._ENERGY_LEDGER_TOLERANCE_KWH,
         )
+
+
+def test_unavailable_battery_is_emitted_as_placeholder(fake_hass, monkeypatch):
+    """_fetch_all_data must emit unavailable batteries, not omit them.
+
+    BatteryAnalysisCalculator keys its held-SOC cache by entity_id, so a battery
+    that is simply absent from the payload cannot be held. Omitting it silently
+    re-weights the capacity-weighted average onto the remaining batteries, which
+    is exactly the threshold flip this contract exists to prevent.
+    """
+    config = _base_config()
+    config[CONF_BATTERY_SOC_ENTITIES] = [
+        "sensor.battery_soc_1",
+        "sensor.battery_soc_2",
+    ]
+    config[CONF_BATTERY_CAPACITIES] = {
+        "sensor.battery_soc_1": 30.0,
+        "sensor.battery_soc_2": 10.0,
+    }
+    coordinator = _create_coordinator(fake_hass, config, monkeypatch)
+
+    socs = {"sensor.battery_soc_1": 47.0, "sensor.battery_soc_2": 8.0}
+
+    async def fake_state_value(entity_id):
+        return socs.get(entity_id)
+
+    monkeypatch.setattr(coordinator, "_get_state_value", fake_state_value)
+
+    # Prime the hold cache with both batteries present.
+    primed = asyncio.run(coordinator._fetch_all_data())
+    assert [b["soc"] for b in primed["battery_soc"]] == [47.0, 8.0]
+
+    # Now the small battery's sensor goes unavailable.
+    socs["sensor.battery_soc_2"] = None
+    held = asyncio.run(coordinator._fetch_all_data())
+
+    published = {b["entity_id"]: b["soc"] for b in held["battery_soc"]}
+    assert published == {
+        "sensor.battery_soc_1": 47.0,
+        "sensor.battery_soc_2": 8.0,
+    }, "unavailable battery must keep its held SOC instead of disappearing"
+
+    # battery_details feeds negative_buy.py, which coerces a missing SOC to 0.0.
+    details = {b["entity_id"]: b["soc"] for b in held["battery_details"]}
+    assert details["sensor.battery_soc_2"] == 8.0
+    assert all(v is not None for v in details.values())

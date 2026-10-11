@@ -224,6 +224,10 @@ BATTERY_SOC_DECIMAL_THRESHOLD = (
     1.0  # If SOC <= this, assume it's decimal (0-1) not percentage
 )
 PRICE_TIMELINE_MAX_AGE_HOURS = 1  # Maximum age of cached price timeline in hours
+BATTERY_SOC_HOLD_SECONDS = 180  # Reuse a battery's last valid SOC for this long while
+# its sensor is unavailable. Prevents a transient sensor dropout from silently
+# re-weighting the fleet average onto the remaining batteries, which can cross a
+# SOC threshold and flip charging decisions without any physical charge change.
 
 # Tolerance Constants
 POWER_ALLOCATION_TOLERANCE = 1.1  # 10% tolerance for power allocation validation
@@ -282,4 +286,4 @@ MAX_POWER_VALIDATION_W = (
 )
 MAX_CAR_POWER_VALIDATION_W = 22000  # Maximum reasonable car charging power
 
-INTEGRATION_VERSION = "6.7.9"
+INTEGRATION_VERSION = "6.7.10"
