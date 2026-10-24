@@ -1921,7 +1921,18 @@ class NordPoolPricesSensor(ElectricityPlannerSensorBase):
             if fallback_transport is not None:
                 transport_cost = fallback_transport
 
-        final_price = adjusted_price + transport_cost
+        # Apply buy VAT exactly like the decision engine's current price and
+        # the purchase timeline, so the chart compares like with like against
+        # the (VAT-inclusive) current price and battery thresholds.
+        buy_vat_multiplier = self.coordinator.config.get(
+            CONF_BUY_VAT_MULTIPLIER, DEFAULT_BUY_VAT_MULTIPLIER
+        )
+        try:
+            buy_vat_multiplier = float(buy_vat_multiplier)
+        except (TypeError, ValueError):
+            buy_vat_multiplier = DEFAULT_BUY_VAT_MULTIPLIER
+
+        final_price = (adjusted_price + transport_cost) * buy_vat_multiplier
 
         normalized = dict(interval)
         normalized["price"] = final_price

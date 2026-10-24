@@ -224,6 +224,14 @@ BATTERY_SOC_DECIMAL_THRESHOLD = (
     1.0  # If SOC <= this, assume it's decimal (0-1) not percentage
 )
 PRICE_TIMELINE_MAX_AGE_HOURS = 1  # Maximum age of cached price timeline in hours
+
+# Forward-looking battery charge deferral (bounded, conservative).
+# Grid charging is deferred only when a materially cheaper window is known to
+# start soon and lasts long enough to be useful; otherwise nothing changes.
+FORECAST_DEFERRAL_MIN_RELATIVE_DROP = 0.15  # later slot must be >=15% cheaper
+FORECAST_DEFERRAL_MIN_ABSOLUTE_DROP = 0.01  # ...and at least 0.01 EUR/kWh cheaper
+FORECAST_DEFERRAL_MAX_WAIT_HOURS = 6  # cheaper window must start within 6h
+FORECAST_DEFERRAL_MIN_CHEAP_HOURS = 1.0  # contiguous cheaper run of >=1h
 BATTERY_SOC_HOLD_SECONDS = 180  # Reuse a battery's last valid SOC for this long while
 # its sensor is unavailable. Prevents a transient sensor dropout from silently
 # re-weighting the fleet average onto the remaining batteries, which can cross a
@@ -286,4 +294,4 @@ MAX_POWER_VALIDATION_W = (
 )
 MAX_CAR_POWER_VALIDATION_W = 22000  # Maximum reasonable car charging power
 
-INTEGRATION_VERSION = "6.7.10"
+INTEGRATION_VERSION = "6.7.11"

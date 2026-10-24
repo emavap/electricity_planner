@@ -255,6 +255,7 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         # Price interval tracking for threshold stability
         self._current_price_interval_start: datetime | None = None
         self._battery_threshold_snapshot: float | None = None
+        self._battery_threshold_snapshot_source: str | None = None
         self._last_config_hash: int | None = (
             None  # Track config changes for threshold updates
         )
@@ -1726,9 +1727,16 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         self._nordpool_service.clean_expired_cache()
 
     def _update_battery_threshold_snapshot_if_needed(
-        self, price_threshold: float | None
+        self, price_threshold: float | None, source: str = "configured"
     ) -> None:
-        """Update battery threshold snapshot when entering a new price interval or config changes."""
+        """Update battery threshold snapshot when entering a new price interval or config changes.
+
+        The snapshot is also refreshed when the threshold *source* changes
+        (configured fallback <-> rolling average).  Otherwise a fallback value
+        captured while the average was briefly unavailable (e.g. the first
+        cycle after a restart) stays pinned for the rest of the interval even
+        though the decision-visible average threshold is already stricter.
+        """
         if price_threshold is None:
             return
 
@@ -1752,17 +1760,29 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             self._last_config_hash is not None and config_hash != self._last_config_hash
         )
 
+        source_changed = (
+            self._battery_threshold_snapshot_source is not None
+            and source != self._battery_threshold_snapshot_source
+        )
+
         if (
             self._current_price_interval_start is None
             or current_interval != self._current_price_interval_start
             or config_changed
+            or source_changed
         ):
 
             self._current_price_interval_start = current_interval
             self._battery_threshold_snapshot = price_threshold
+            self._battery_threshold_snapshot_source = source
             self._last_config_hash = config_hash
 
-            reason = "config changed" if config_changed else "new interval"
+            if config_changed:
+                reason = "config changed"
+            elif source_changed:
+                reason = f"threshold source changed to {source}"
+            else:
+                reason = "new interval"
             _LOGGER.debug(
                 "Battery threshold snapshot updated (%s) at %s: %.4f€/kWh",
                 reason,
@@ -1799,7 +1819,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
                 )
 
             # Update battery threshold snapshot if we've entered a new 15-min interval
-            self._update_battery_threshold_snapshot_if_needed(current_threshold)
+            self._update_battery_threshold_snapshot_if_needed(
+                current_threshold,
+                "average" if average_threshold_active else "configured",
+            )
 
             # Add previous car charging state for hysteresis logic
             data["previous_car_charging"] = self._previous_car_charging
@@ -2419,6 +2442,10 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             average_threshold,
         )
 
+        data["battery_forecast_prices"] = self._battery_forecast_prices(
+            data["forecast_summary"]
+        )
+
         # Entity status tracking for diagnostic visibility
         data["entity_status"] = self.get_all_entity_statuses()
 
@@ -2487,6 +2514,41 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             default=str,  # Handle datetime objects
         )
         return hashlib.md5(data_repr.encode()).hexdigest()
+
+    def _battery_forecast_prices(
+        self, forecast_summary: dict[str, Any] | None
+    ) -> list[tuple[datetime, datetime, float]]:
+        """Return fresh, future purchase-price segments for battery deferral.
+
+        Only exported when the forecast summary was built from current Nord
+        Pool data this cycle: summary available and not stale, timeline
+        generated within ``PRICE_TIMELINE_MAX_AGE_HOURS``, and the timeline
+        contains the interval covering *now* (rejects day-old data that still
+        hashes identically).  An empty list means "no usable forecast" and the
+        battery deferral guard then never defers.
+        """
+        if not isinstance(forecast_summary, dict):
+            return []
+        if not forecast_summary.get("available") or forecast_summary.get("stale"):
+            return []
+        timeline = self._last_price_timeline
+        generated_at = self._last_price_timeline_generated_at
+        if not timeline or generated_at is None:
+            return []
+        now = dt_util.utcnow()
+        age = now - generated_at
+        if age < timedelta(0) or age > self._price_timeline_max_age:
+            return []
+        if not any(
+            start is not None and end is not None and start <= now < end
+            for start, end, _price in timeline
+        ):
+            return []
+        return [
+            (start, end, float(price))
+            for start, end, price in timeline
+            if end is not None and end > now and price is not None
+        ]
 
     def _calculate_forecast_summary(
         self,

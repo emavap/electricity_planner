@@ -11,7 +11,7 @@ Strategies are ordered, composable decision policies. Each one inspects the snap
 1. `manual_overrides` — early read of user toggles (full overrides applied at the end as well).
 2. `negative_buy` — opportunistic charging when prices are very low or negative.
 3. `arbitrage_mode` — daily arbitrage based on the dynamic threshold and SOC headroom.
-4. `battery_charging` — grid-charging policy for top-up / sunny-day / peak-shaving cases.
+4. `battery_charging` — grid-charging policy for top-up / sunny-day / peak-shaving cases. After the `PriceThresholdGuard`, a `ForecastDeferralGuard` (conservative heuristic, not a reserve guarantee) may postpone a non-emergency charge when fresh, validated forecast data shows a contiguous ≥1h run of materially cheaper (≥15%, under threshold) slots starting within 6h, average SOC is above the predictive-charging reserve, and each battery alone can carry 2× the live house load above emergency SOC until then. Any missing or invalid input means no deferral.
 5. `car_charging` — EV gating against price, SOC, and solar headroom.
 6. `feedin_decision` — export gate (price floor, inverter derating, peak-export rules).
 7. `charger_limit` — final power allocation across PV / battery / grid sources.

@@ -601,6 +601,7 @@ def test_feedin_price_sensor_and_nordpool_price_helpers():
             "transport_cost_status": "fallback_current",
         },
         config={
+            "buy_vat_multiplier": 1.0,
             "feedin_adjustment_multiplier": 0.8,
             "feedin_adjustment_offset": -0.01,
             "feedin_price_threshold": 0.05,

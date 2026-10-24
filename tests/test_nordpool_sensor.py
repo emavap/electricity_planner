@@ -21,6 +21,7 @@ class FakeCoordinator:
     def __init__(self, data=None):
         self.data = data or {}
         self.config = {
+            "buy_vat_multiplier": 1.0,
             "price_adjustment_multiplier": 1.0,
             "price_adjustment_offset": 0.0,
         }
@@ -139,6 +140,7 @@ def test_normalize_price_interval_applies_adjustments(fake_coordinator, fake_ent
     """Test that _normalize_price_interval applies multiplier and offset."""
     # Configure adjustment: price × 1.21 + 0.05 (e.g., VAT + surcharge)
     fake_coordinator.config = {
+        "buy_vat_multiplier": 1.0,
         "price_adjustment_multiplier": 1.21,
         "price_adjustment_offset": 0.05,
     }
@@ -172,6 +174,7 @@ def test_normalize_price_interval_applies_transport_cost(
     monkeypatch.setattr(dt_util, "utcnow", lambda: frozen_now)
 
     fake_coordinator.config = {
+        "buy_vat_multiplier": 1.0,
         "price_adjustment_multiplier": 1.0,
         "price_adjustment_offset": 0.0,
     }
@@ -224,6 +227,7 @@ def test_normalize_price_interval_uses_local_time_zone(
     dt_util.set_default_time_zone(pytz.timezone("Europe/Rome"))
     try:
         fake_coordinator.config = {
+            "buy_vat_multiplier": 1.0,
             "price_adjustment_multiplier": 1.0,
             "price_adjustment_offset": 0.0,
         }
@@ -268,6 +272,7 @@ def test_normalize_price_interval_matches_future_transport_by_local_week(
     dt_util.set_default_time_zone(pytz.timezone("Europe/Brussels"))
     try:
         fake_coordinator.config = {
+            "buy_vat_multiplier": 1.0,
             "price_adjustment_multiplier": 1.0,
             "price_adjustment_offset": 0.0,
         }
@@ -770,3 +775,19 @@ def test_parse_datetime_cached_skips_redundant_parses(monkeypatch):
     # ``None`` short-circuits without invoking the parser.
     assert parse_datetime_cached(None) is None
     assert parse_calls["count"] == 1
+
+
+def test_normalize_price_interval_applies_buy_vat(fake_coordinator, fake_entry):
+    """Timeline prices must include buy VAT like the current price does."""
+    fake_coordinator.config = {
+        "price_adjustment_multiplier": 1.04,
+        "price_adjustment_offset": 0.005,
+        "buy_vat_multiplier": 1.06,
+    }
+    sensor = NordPoolPricesSensor(fake_coordinator, fake_entry, "_diagnostic")
+    interval = {"start": "2025-10-14T00:00:00+00:00", "value": 107.5}
+
+    result = sensor._normalize_price_interval(interval, transport_cost_lookup=None)
+
+    assert result["price"] == pytest.approx((0.1075 * 1.04 + 0.005) * 1.06)
+    assert result["adjusted_energy_price"] == pytest.approx(0.1075 * 1.04 + 0.005)

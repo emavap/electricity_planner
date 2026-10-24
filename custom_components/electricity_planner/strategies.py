@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import math
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .const import (
@@ -14,6 +16,10 @@ from .const import (
     DEFAULT_SOC_BUFFER_TARGET,
     DEFAULT_SOC_PRICE_MULTIPLIER_MAX,
     DEFAULT_VERY_LOW_PRICE_THRESHOLD,
+    FORECAST_DEFERRAL_MAX_WAIT_HOURS,
+    FORECAST_DEFERRAL_MIN_ABSOLUTE_DROP,
+    FORECAST_DEFERRAL_MIN_CHEAP_HOURS,
+    FORECAST_DEFERRAL_MIN_RELATIVE_DROP,
 )
 from .defaults import DEFAULT_ALGORITHM_THRESHOLDS, calculate_soc_price_multiplier
 from .dynamic_threshold import DynamicThresholdAnalyzer
@@ -449,6 +455,212 @@ class DynamicPriceStrategy(ChargingStrategy):
         return 5  # After solar, predictive, very low price, and SOC buffer
 
 
+# Extra relative drop required to *stop* a charge that is already running, so
+# the deferral cannot flap at the boundary (enter at 15%, interrupt at 20%).
+_FORECAST_DEFERRAL_INTERRUPT_EXTRA_DROP = 0.05
+# Headroom on the instantaneous load used to size the stored-energy bridge.
+_FORECAST_DEFERRAL_LOAD_SAFETY_FACTOR = 2.0
+
+
+def _finite(value: Any) -> float | None:
+    """Return ``value`` as a finite float, or ``None`` (NaN/inf/non-numeric)."""
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _finite_soc(value: Any) -> float | None:
+    soc = _finite(value)
+    return soc if soc is not None and 0.0 <= soc <= 100.0 else None
+
+
+def _sanitize_forecast(
+    segments: Any,
+) -> list[tuple[datetime, datetime, float]] | None:
+    """Validate forecast segments wholesale; any defect rejects the whole set.
+
+    Each segment must be ``(aware start, aware end, finite price)`` with
+    ``end > start``; once sorted, segments must not overlap.  Gaps are allowed
+    here but break contiguity when looking for a cheap window.
+    """
+    if not isinstance(segments, (list, tuple)) or not segments:
+        return None
+    cleaned: list[tuple[datetime, datetime, float]] = []
+    for segment in segments:
+        if not isinstance(segment, (list, tuple)) or len(segment) != 3:
+            return None
+        start, end, raw_price = segment
+        if not isinstance(start, datetime) or not isinstance(end, datetime):
+            return None
+        if start.utcoffset() is None or end.utcoffset() is None:
+            return None
+        price = _finite(raw_price)
+        if price is None or end <= start:
+            return None
+        cleaned.append((start, end, price))
+    cleaned.sort(key=lambda item: item[0])
+    for previous, current in zip(cleaned, cleaned[1:]):
+        if current[0] < previous[1]:
+            return None
+    return cleaned
+
+
+def evaluate_forecast_deferral(
+    context: dict[str, Any],
+    *,
+    current_price: float | None,
+    effective_threshold: float,
+    emergency_threshold: float,
+) -> str | None:
+    """Return a deferral reason when a clearly cheaper window is coming soon.
+
+    This is a conservative heuristic, not a reserve guarantee.  It returns
+    ``None`` (keep the normal decision) whenever any input needed to justify
+    waiting is missing, non-finite or out of range:
+
+    * forecast missing, stale or malformed (validated wholesale),
+    * no contiguous run of ``FORECAST_DEFERRAL_MIN_CHEAP_HOURS`` of slots at
+      or below the target price starting after now and within
+      ``FORECAST_DEFERRAL_MAX_WAIT_HOURS`` (gaps break the run),
+    * SOC unavailable, or any battery / the average at or below emergency SOC,
+      or the average at or below the predictive-charging reserve SOC,
+    * non-positive current price or a very-low-price interval,
+    * any single battery unable to carry the whole observed house load (×2)
+      until the window starts from its own energy above emergency SOC.  Pack
+      load sharing is not observable, so energy is never pooled.
+
+    Target slots must also be at or below the effective battery threshold, so
+    waiting cannot trade a charge now for no charge later.
+    """
+    price_now = _finite(current_price)
+    threshold = _finite(effective_threshold)
+    emergency = _finite(emergency_threshold)
+    if price_now is None or threshold is None or emergency is None:
+        return None
+    if price_now <= 0:
+        return None
+
+    price = context.get("price_analysis", {}) or {}
+    if price.get("very_low_price"):
+        return None
+
+    battery = context.get("battery_analysis", {}) or {}
+    average_soc = _finite_soc(battery.get("average_soc"))
+    if average_soc is None or average_soc <= emergency:
+        return None
+    if battery.get("min_soc") is not None:
+        min_soc = _finite_soc(battery.get("min_soc"))
+        if min_soc is None or min_soc <= emergency:
+            return None
+
+    settings = context.get("settings")
+    config = context.get("config", {}) or {}
+    reserve_soc = (
+        getattr(settings, "predictive_min_soc", None) if settings is not None else None
+    )
+    if reserve_soc is None:
+        reserve_soc = config.get(
+            "predictive_charging_min_soc", DEFAULT_PREDICTIVE_CHARGING_MIN_SOC
+        )
+    reserve_soc = _finite_soc(reserve_soc)
+    if reserve_soc is None or average_soc <= max(reserve_soc, emergency):
+        return None
+
+    segments = _sanitize_forecast(context.get("battery_forecast_prices"))
+    if segments is None:
+        return None
+
+    relative_drop = FORECAST_DEFERRAL_MIN_RELATIVE_DROP
+    if context.get("previous_battery_grid_charging"):
+        relative_drop += _FORECAST_DEFERRAL_INTERRUPT_EXTRA_DROP
+    target_price = min(
+        price_now * (1 - relative_drop),
+        price_now - FORECAST_DEFERRAL_MIN_ABSOLUTE_DROP,
+        threshold,
+    )
+
+    now = context.get("now") or datetime.now(timezone.utc)
+    if not isinstance(now, datetime) or now.utcoffset() is None:
+        return None
+    max_wait_end = now + timedelta(hours=FORECAST_DEFERRAL_MAX_WAIT_HOURS)
+    min_run = timedelta(hours=FORECAST_DEFERRAL_MIN_CHEAP_HOURS)
+
+    run_start: datetime | None = None
+    run_end: datetime | None = None
+    run_cheapest = 0.0
+    window: tuple[datetime, datetime, float] | None = None
+    for start, end, slot_price in segments:
+        # Slots covering "now" are the current interval, never a reason to
+        # wait; slots starting after the wait bound cannot start a run.
+        qualifies = start > now and slot_price <= target_price
+        if qualifies and run_end is not None and start == run_end:
+            run_end = end
+            run_cheapest = min(run_cheapest, slot_price)
+        elif qualifies and start <= max_wait_end:
+            run_start, run_end, run_cheapest = start, end, slot_price
+        else:
+            run_start = run_end = None
+        if run_start is not None and run_end - run_start >= min_run:
+            window = (run_start, run_end, run_cheapest)
+            break
+    if window is None:
+        return None
+
+    first_start, _, cheapest = window
+    wait_hours = (first_start - now).total_seconds() / 3600
+    bridge = _bridge_energy_check(context, wait_hours, emergency)
+    if bridge is None:
+        return None
+    weakest_kwh, needed_kwh = bridge
+    return (
+        f"Deferring grid charge - SOC {average_soc:.0f}% above {reserve_soc:.0f}% reserve; "
+        f"≥{FORECAST_DEFERRAL_MIN_CHEAP_HOURS:.1f}h at ≤{target_price:.3f}€/kWh starts in "
+        f"{wait_hours:.1f}h (cheapest {cheapest:.3f}€/kWh vs now {price_now:.3f}€/kWh); "
+        f"weakest battery {weakest_kwh:.1f}kWh above {emergency:.0f}% emergency "
+        f"≥ {needed_kwh:.1f}kWh bridge"
+    )
+
+
+def _bridge_energy_check(
+    context: dict[str, Any], wait_hours: float, emergency_threshold: float
+) -> tuple[float, float] | None:
+    """Return (weakest usable, needed) kWh when every pack alone bridges the wait.
+
+    Each battery must be able to supply the whole observed house load
+    (including any car draw) × ``_FORECAST_DEFERRAL_LOAD_SAFETY_FACTOR`` until
+    the cheap window starts, from its own energy above emergency SOC, using
+    explicitly configured capacities.  Any unknown input → ``None``.
+    """
+    readings = context.get("battery_soc_readings") or ()
+    capacities = context.get("battery_capacities") or {}
+    load_w = _finite((context.get("power_analysis", {}) or {}).get("house_consumption"))
+    # A 0 W reading is indistinguishable from a missing sensor here.
+    if not readings or not isinstance(capacities, dict) or load_w is None:
+        return None
+    if load_w <= 0 or wait_hours < 0:
+        return None
+
+    needed_kwh = load_w / 1000.0 * wait_hours * _FORECAST_DEFERRAL_LOAD_SAFETY_FACTOR
+    weakest_kwh: float | None = None
+    for reading in readings:
+        if not isinstance(reading, dict):
+            return None
+        capacity = _finite(capacities.get(reading.get("entity_id")))
+        soc = _finite_soc(reading.get("soc"))
+        if capacity is None or capacity <= 0 or soc is None:
+            return None
+        usable = capacity * max(0.0, soc - emergency_threshold) / 100.0
+        if weakest_kwh is None or usable < weakest_kwh:
+            weakest_kwh = usable
+    if weakest_kwh is None or weakest_kwh < needed_kwh:
+        return None
+    return weakest_kwh, needed_kwh
+
+
 class StrategyManager:
     """Manage and execute charging strategies."""
 
@@ -622,6 +834,24 @@ class StrategyManager:
         context["battery_is_low_price"] = (
             current_price is not None and current_price <= base_threshold
         )
+
+        deferral_reason = evaluate_forecast_deferral(
+            context,
+            current_price=current_price,
+            effective_threshold=effective_threshold,
+            emergency_threshold=emergency_threshold,
+        )
+        if deferral_reason:
+            trace.append(
+                {
+                    "strategy": "ForecastDeferralGuard",
+                    "priority": 0,
+                    "should_charge": False,
+                    "reason": deferral_reason,
+                }
+            )
+            self._last_trace = trace
+            return False, deferral_reason
 
         last_reason = ""
 

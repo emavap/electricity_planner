@@ -594,6 +594,7 @@ class CycleContext:
     battery_average_soc: float | None
     battery_soc: tuple[dict[str, Any], ...]
     battery_stable_threshold: float | None
+    battery_forecast_prices: tuple[tuple[datetime, datetime, float], ...]
     solar_production: float
     solar_surplus: float
     solar_forecast_production: float | None
@@ -800,6 +801,7 @@ class CycleContext:
             battery_average_soc=battery_average_soc,
             battery_soc=tuple(data.get("battery_soc", []) or []),
             battery_stable_threshold=battery_stable_threshold,
+            battery_forecast_prices=tuple(data.get("battery_forecast_prices") or ()),
             solar_production=float(
                 _safe_optional_float(
                     power_analysis.get("solar_production", data.get("solar_production"))

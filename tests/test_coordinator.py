@@ -5422,3 +5422,61 @@ def test_unavailable_battery_is_emitted_as_placeholder(fake_hass, monkeypatch):
     details = {b["entity_id"]: b["soc"] for b in held["battery_details"]}
     assert details["sensor.battery_soc_2"] == 8.0
     assert all(v is not None for v in details.values())
+
+
+def test_battery_threshold_snapshot_refreshes_when_source_changes(
+    fake_hass, monkeypatch
+):
+    """A fallback snapshot must not stay pinned once the average is available."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    _freeze_time(monkeypatch, datetime(2026, 10, 24, 16, 47, tzinfo=timezone.utc))
+
+    # First cycle after restart: average unavailable → configured 0.25 fallback.
+    coordinator._update_battery_threshold_snapshot_if_needed(0.25, "configured")
+    assert coordinator._battery_threshold_snapshot == 0.25
+
+    # Same interval, average now available: snapshot follows the stricter value.
+    _freeze_time(monkeypatch, datetime(2026, 10, 24, 16, 49, tzinfo=timezone.utc))
+    coordinator._update_battery_threshold_snapshot_if_needed(0.1584, "average")
+    assert coordinator._battery_threshold_snapshot == 0.1584
+
+    # Same source within the interval stays stable (anti-flap behaviour kept).
+    coordinator._update_battery_threshold_snapshot_if_needed(0.17, "average")
+    assert coordinator._battery_threshold_snapshot == 0.1584
+
+
+def test_battery_forecast_prices_only_exported_when_fresh(fake_hass, monkeypatch):
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    now = datetime(2026, 10, 24, 16, 50, tzinfo=timezone.utc)
+    _freeze_time(monkeypatch, now)
+    past = (now - timedelta(minutes=30), now - timedelta(minutes=15), 0.2)
+    current = (now - timedelta(minutes=5), now + timedelta(minutes=10), 0.25)
+    future = (now + timedelta(minutes=10), now + timedelta(minutes=25), 0.14)
+    coordinator._last_price_timeline = [past, current, future]
+    coordinator._last_price_timeline_generated_at = now - timedelta(minutes=2)
+
+    assert coordinator._battery_forecast_prices({"available": True}) == [
+        current,
+        future,
+    ]
+    assert (
+        coordinator._battery_forecast_prices({"available": True, "stale": True}) == []
+    )
+    assert coordinator._battery_forecast_prices({"available": False}) == []
+    assert coordinator._battery_forecast_prices(None) == []
+
+    # Timeline older than the max age, or with no generation time.
+    coordinator._last_price_timeline_generated_at = now - timedelta(hours=2)
+    assert coordinator._battery_forecast_prices({"available": True}) == []
+    coordinator._last_price_timeline_generated_at = None
+    assert coordinator._battery_forecast_prices({"available": True}) == []
+    # Generated "in the future" (clock skew) is not trusted either.
+    coordinator._last_price_timeline_generated_at = now + timedelta(minutes=5)
+    assert coordinator._battery_forecast_prices({"available": True}) == []
+
+    # Fresh build but no interval covers now (e.g. day-old data) → rejected.
+    coordinator._last_price_timeline_generated_at = now
+    coordinator._last_price_timeline = [past, future]
+    assert coordinator._battery_forecast_prices({"available": True}) == []
+    coordinator._last_price_timeline = None
+    assert coordinator._battery_forecast_prices({"available": True}) == []

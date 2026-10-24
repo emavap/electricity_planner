@@ -1,9 +1,11 @@
 # Electricity Planner
 
-**Version 6.7.10** | **Config Schema Version 24** | **Home Assistant 2024.4+**
+**Version 6.7.11** | **Config Schema Version 24** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
+> Release note for v6.7.11: the battery threshold snapshot now refreshes when the threshold source switches from the configured fallback to the rolling average; previously a post-restart fallback could stay pinned for a whole interval and allow grid charging near a price peak. A conservative forecast deferral heuristic (not a reserve guarantee) may also postpone non-emergency battery charging when fresh, validated Nord Pool data shows a contiguous ≥1h run of slots ≥15% (and 0.01€/kWh) cheaper and under the battery threshold starting within 6h, and every battery on its own holds enough energy above the emergency SOC to carry twice the live house load until then. Any missing, stale, malformed or non-finite input means no deferral; a 20% drop is needed to interrupt a running charge. The dashboard price timeline now includes buy VAT so it matches the current price. Car decisions are unchanged. No config migration is required.
+>
 > Release note for v6.7.10: a battery whose SOC sensor briefly goes unavailable now keeps contributing its last valid reading for up to three minutes instead of being dropped from the fleet. Previously a transient dropout silently re-weighted the capacity-weighted average onto the remaining batteries, which could cross `max_soc_threshold` and flip charging decisions even though no charge had moved. Decision diagnostics report `soc_hold_active` and `soc_held_entity_ids` while a reading is held. No config migration is required.
 >
 > Release note for v6.7.7: adds an opt-in live P1 feedback guard for installations whose meter reports grid import as a negative value. When the rolling three-minute import average exceeds the Planner grid target, the EV limit is reduced and then released gradually after recovery. Restored limits are never applied until a new post-restart average exists. The option is off by default; no config migration is required.
