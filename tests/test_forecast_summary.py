@@ -139,3 +139,46 @@ def test_find_best_window_returns_none_for_gap_shorter_than_duration():
         )
         is None
     )
+
+
+def test_forecast_cache_invalidated_by_tariff_or_config_change():
+    now = dt_util.utcnow()
+    coordinator = _Coordinator()
+    calculator = ForecastSummaryCalculator(coordinator)
+    coordinator._built_timeline = [(now, now + timedelta(hours=3), 0.10)]
+    args = dict(
+        prices_today={"raw_today": [1]},
+        prices_tomorrow=None,
+        transport_lookup=None,
+        current_transport_cost=0.05,
+        minimum_average_threshold=0.25,
+    )
+    assert calculator.calculate(**args)["cheapest_interval_price"] == 0.10
+    calculator.calculate(**args)
+    assert coordinator.build_calls == 1
+    coordinator._built_timeline = [(now, now + timedelta(hours=3), 0.20)]
+    args["current_transport_cost"] = 0.15
+    assert calculator.calculate(**args)["cheapest_interval_price"] == 0.20
+    assert coordinator.build_calls == 2
+    coordinator.config["buy_vat_multiplier"] = 1.21
+    calculator.calculate(**args)
+    assert coordinator.build_calls == 3
+
+
+def test_charging_window_and_summary_share_one_timeline_build():
+    from custom_components.electricity_planner.charging_window import (
+        ChargingWindowValidator,
+    )
+
+    now = dt_util.utcnow()
+    coordinator = _Coordinator()
+    coordinator._built_timeline = [
+        (now - timedelta(minutes=1), now + timedelta(hours=3), 0.10)
+    ]
+    coordinator._should_use_average_threshold = lambda threshold: threshold is not None
+    today = {"raw_today": [1]}
+    ChargingWindowValidator(coordinator).check(
+        today, None, None, 0.05, average_threshold=0.25
+    )
+    ForecastSummaryCalculator(coordinator).calculate(today, None, None, 0.05, 0.25)
+    assert coordinator.build_calls == 1

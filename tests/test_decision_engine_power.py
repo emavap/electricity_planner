@@ -2683,7 +2683,9 @@ def test_transport_cost_added_to_pricing():
         }
     )
 
-    assert analysis["current_price"] == pytest.approx(0.12)
+    assert analysis["current_price"] == pytest.approx(
+        0.12 * engine._settings.buy_vat_multiplier
+    )
     assert analysis["transport_cost"] == pytest.approx(0.02)
 
 
@@ -2887,7 +2889,9 @@ def test_price_adjustment_fallback_only_when_no_adjustment():
 
     # Without adjustments configured, raw prices are used normally
     assert price_analysis["data_available"] is True
-    assert price_analysis["current_price"] == 0.08
+    assert price_analysis["current_price"] == pytest.approx(
+        0.08 * engine._settings.buy_vat_multiplier
+    )
 
 
 @pytest.mark.asyncio

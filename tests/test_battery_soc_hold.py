@@ -346,3 +346,21 @@ def test_omitted_battery_cannot_be_held():
     # Nothing can be held, so the average re-weights and crosses the threshold.
     assert analysis["average_soc"] == pytest.approx(47.0)
     assert analysis["batteries_full"] is True
+
+
+def test_publication_analysis_round_trip_does_not_refresh_held_soc_age():
+    """Decision analysis must not re-cache a publication-substituted reading."""
+    calc = _calculator()
+    start = dt_util.utcnow()
+    calc.resolve_for_publication(_both_available(), _now=start)
+
+    for seconds in (30, 60, BATTERY_SOC_HOLD_SECONDS - 1):
+        now = start + timedelta(seconds=seconds)
+        published = calc.resolve_for_publication(_small_unavailable(), _now=now)
+        analysis = calc.analyze(published, _now=now)
+        assert analysis["soc_hold_active"] is True
+        assert calc.soc_hold_state[SMALL_BATTERY][1] == start
+
+    expired = start + timedelta(seconds=BATTERY_SOC_HOLD_SECONDS + 1)
+    published = calc.resolve_for_publication(_small_unavailable(), _now=expired)
+    assert [b["entity_id"] for b in published] == [LARGE_BATTERY]

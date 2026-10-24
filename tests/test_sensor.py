@@ -624,3 +624,25 @@ def test_feedin_price_sensor_and_nordpool_price_helpers():
     assert nordpool._compact_price_interval({"start": None, "price": 1}) is None
     assert nordpool._normalize_price_interval("bad") is None
     assert nordpool._normalize_price_interval({"start": "bad"}) is None
+
+
+def test_decision_diagnostics_exposes_effective_threshold_and_held_soc():
+    coordinator = SimpleNamespace(
+        data={
+            "battery_stable_threshold": 0.156,
+            "battery_effective_threshold": 0.157,
+            "battery_analysis": {
+                "soc_hold_active": True,
+                "soc_held_entity_ids": ["sensor.pack"],
+            },
+        },
+        config={},
+        async_add_listener=lambda update_callback, context=None: lambda: None,
+        last_update_success=True,
+    )
+    entry = MockConfigEntry(domain=DOMAIN, title="Planner", data={})
+    attrs = DecisionDiagnosticsSensor(coordinator, entry).extra_state_attributes
+    assert attrs["price_analysis"]["battery_stable_threshold"] == 0.156
+    assert attrs["price_analysis"]["battery_effective_threshold"] == 0.157
+    assert attrs["battery_analysis"]["soc_hold_active"] is True
+    assert attrs["battery_analysis"]["soc_held_entity_ids"] == ["sensor.pack"]

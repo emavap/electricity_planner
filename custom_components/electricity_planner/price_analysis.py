@@ -96,6 +96,16 @@ class PriceAnalysisCalculator:
                 },
                 transport_cost,
             )
+            # Thresholds and interval-aware overrides are VAT inclusive.
+            # Degraded interval data must not silently make buying cheaper.
+            adjusted_prices = {
+                key: (
+                    price * self._settings.buy_vat_multiplier
+                    if price is not None
+                    else None
+                )
+                for key, price in adjusted_prices.items()
+            }
             current_price = adjusted_prices["current_price"]
             highest_price = adjusted_prices["highest_price"]
             lowest_price = adjusted_prices["lowest_price"]

@@ -1017,6 +1017,12 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 ),
                 "price_threshold": price_analysis.get("price_threshold"),
                 "average_threshold": self.coordinator.data.get("average_threshold"),
+                "battery_stable_threshold": self.coordinator.data.get(
+                    "battery_stable_threshold"
+                ),
+                "battery_effective_threshold": self.coordinator.data.get(
+                    "battery_effective_threshold"
+                ),
                 "is_low_price": price_analysis.get("is_low_price", False),
                 "very_low_price": price_analysis.get("very_low_price", False),
                 "price_position": price_analysis.get("price_position"),
@@ -1035,6 +1041,8 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 "batteries_available": battery_analysis.get(
                     "batteries_available", True
                 ),
+                "soc_hold_active": battery_analysis.get("soc_hold_active", False),
+                "soc_held_entity_ids": battery_analysis.get("soc_held_entity_ids", []),
                 "min_soc_threshold": battery_analysis.get("min_soc_threshold"),
                 "max_soc_threshold": battery_analysis.get("max_soc_threshold"),
             },

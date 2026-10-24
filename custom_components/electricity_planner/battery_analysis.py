@@ -137,7 +137,10 @@ class BatteryAnalysisCalculator:
             entity_id = battery.get("entity_id")
             soc = battery.get("soc")
 
-            if soc is not None and 0 <= soc <= 100:
+            # Publication substitutes held readings before decision analysis.
+            # They must pass through the original cache/age check rather than
+            # being recorded as fresh telemetry on every refresh.
+            if not battery.get("soc_held") and soc is not None and 0 <= soc <= 100:
                 if entity_id:
                     self._soc_hold[entity_id] = (soc, now)
                 resolved.append(battery)

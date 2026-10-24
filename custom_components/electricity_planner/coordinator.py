@@ -794,9 +794,9 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
         The lot price has to be what a kWh actually cost at the meter, because
         the export decision compares it against the feed-in price.  It is
         rebuilt from the raw price and the same adjustment, transport and VAT
-        terms the buy timeline uses, rather than read from ``current_price``:
-        that field carries VAT only on the interval-aware path, and a lot
-        priced ex-VAT would authorise exports below break-even.
+        terms the buy timeline uses, rather than trusting an externally
+        supplied ``current_price``: a lot priced ex-VAT would authorise exports
+        below break-even. Both normal analysis paths are VAT-inclusive.
         """
         raw_price = price_analysis.get("raw_current_price")
         if (
@@ -2043,7 +2043,8 @@ class ElectricityPlannerCoordinator(DataUpdateCoordinator):
             )
             if soc is not None:
                 # Validate and normalize battery SOC
-                if 0 <= soc <= BATTERY_SOC_DECIMAL_THRESHOLD:
+                unit = getattr(state, "attributes", {}).get("unit_of_measurement")
+                if unit != "%" and 0 <= soc <= BATTERY_SOC_DECIMAL_THRESHOLD:
                     # SOC appears to be in decimal format (0-1), convert to percentage
                     _LOGGER.info(
                         "Battery SOC for %s appears to be decimal (%.3f), converting to percentage (%.1f%%)",

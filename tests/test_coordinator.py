@@ -5480,3 +5480,16 @@ def test_battery_forecast_prices_only_exported_when_fresh(fake_hass, monkeypatch
     assert coordinator._battery_forecast_prices({"available": True}) == []
     coordinator._last_price_timeline = None
     assert coordinator._battery_forecast_prices({"available": True}) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("soc", [0.5, 1.0])
+async def test_percentage_soc_below_one_is_not_scaled(fake_hass, monkeypatch, soc):
+    """Explicit percentage telemetry must not become 50/100% near empty."""
+    coordinator = _create_coordinator(fake_hass, _base_config(), monkeypatch)
+    fake_hass.states.set("sensor.battery_soc_1", str(soc))
+    fake_hass.states.get("sensor.battery_soc_1").attributes = {
+        "unit_of_measurement": "%"
+    }
+    data = await coordinator._fetch_all_data()
+    assert data["battery_soc"][0]["soc"] == soc

@@ -313,6 +313,7 @@ def _engine():
             CONF_MAX_BATTERY_POWER: 4000,
             CONF_MAX_CAR_POWER: 7000,
             CONF_PRICE_THRESHOLD: 0.25,
+            "buy_vat_multiplier": 1.0,  # Payload prices already all-in.
             CONF_BATTERY_CAPACITIES: {"sensor.battery_main": 10.0},
         },
     )

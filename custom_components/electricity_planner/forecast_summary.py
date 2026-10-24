@@ -7,6 +7,7 @@ underlying price-data hash changes or when the cache exceeds its max age.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -14,7 +15,10 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_BUY_VAT_MULTIPLIER,
     CONF_MIN_CAR_CHARGING_DURATION,
+    CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+    CONF_PRICE_ADJUSTMENT_OFFSET,
     DEFAULT_MIN_CAR_CHARGING_DURATION,
 )
 
@@ -22,6 +26,34 @@ if TYPE_CHECKING:
     from .coordinator import ElectricityPlannerCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def price_timeline_cache_key(
+    coordinator, prices_today, prices_tomorrow, transport_lookup, current_transport_cost
+) -> str:
+    """Key every input used to price the shared purchase timeline."""
+    return json.dumps(
+        (
+            coordinator._compute_price_data_hash(prices_today, prices_tomorrow),
+            json.dumps(
+                {
+                    "transport_lookup": transport_lookup,
+                    "current_transport_cost": current_transport_cost,
+                    "config": {
+                        key: coordinator.config.get(key)
+                        for key in (
+                            CONF_BUY_VAT_MULTIPLIER,
+                            CONF_PRICE_ADJUSTMENT_MULTIPLIER,
+                            CONF_PRICE_ADJUSTMENT_OFFSET,
+                        )
+                    },
+                },
+                sort_keys=True,
+                default=str,
+            ),
+        ),
+        default=str,
+    )
 
 
 class ForecastSummaryCalculator:
@@ -60,8 +92,12 @@ class ForecastSummaryCalculator:
             coordinator._last_price_timeline_data_hash = None
 
         # Compute hash of current price data to detect changes
-        current_price_hash = coordinator._compute_price_data_hash(
-            prices_today, prices_tomorrow
+        current_price_hash = price_timeline_cache_key(
+            coordinator,
+            prices_today,
+            prices_tomorrow,
+            transport_lookup,
+            current_transport_cost,
         )
 
         # Invalidate cache if price data has changed — but only when we

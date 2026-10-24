@@ -21,6 +21,7 @@ from .const import (
     DEFAULT_PRICE_THRESHOLD,
     PRICE_INTERVAL_GAP_TOLERANCE_SECONDS,
 )
+from .forecast_summary import price_timeline_cache_key
 
 if TYPE_CHECKING:
     from .coordinator import ElectricityPlannerCoordinator
@@ -86,8 +87,12 @@ class ChargingWindowValidator:
 
         coordinator._last_price_timeline = timeline
         coordinator._last_price_timeline_generated_at = now
-        coordinator._last_price_timeline_data_hash = (
-            coordinator._compute_price_data_hash(prices_today, prices_tomorrow)
+        coordinator._last_price_timeline_data_hash = price_timeline_cache_key(
+            coordinator,
+            prices_today,
+            prices_tomorrow,
+            transport_lookup,
+            current_transport_cost,
         )
 
         current_idx: int | None = None
