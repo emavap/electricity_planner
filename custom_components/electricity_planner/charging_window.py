@@ -21,6 +21,7 @@ from .const import (
     DEFAULT_PRICE_THRESHOLD,
     PRICE_INTERVAL_GAP_TOLERANCE_SECONDS,
 )
+from .defaults import relax_price_threshold
 from .forecast_summary import price_timeline_cache_key
 
 if TYPE_CHECKING:
@@ -71,7 +72,9 @@ class ChargingWindowValidator:
         effective_threshold = base_threshold
         permissive_window_enabled = False
         if permissive_mode_active and multiplier_value > 1.0:
-            effective_threshold = base_threshold * multiplier_value
+            effective_threshold = relax_price_threshold(
+                base_threshold, multiplier_value
+            )
             permissive_window_enabled = True
 
         timeline = coordinator._build_price_timeline(

@@ -10,6 +10,7 @@ keep working.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from homeassistant.util import dt as dt_util
@@ -123,8 +124,13 @@ class SolarForecastService:
 
         # No "today" entity configured/available → use cached value
         if coordinator._cached_solar_forecast is not None:
-            coordinator._solar_forecast_source = "overnight_cache"
-            return coordinator._cached_solar_forecast
+            # A tomorrow forecast recorded yesterday applies to today only.
+            # Sensor outages across multiple evenings must not preserve an
+            # old sunny-day SOC ceiling indefinitely.
+            if coordinator._solar_forecast_cache_date == today - timedelta(days=1):
+                coordinator._solar_forecast_source = "overnight_cache"
+                return coordinator._cached_solar_forecast
+            coordinator._cached_solar_forecast = None
         # No cache yet (first run / restart before start hour).
         # The live "tomorrow" entity now points to the *wrong* day
         # (it flipped at midnight), so using it would give incorrect

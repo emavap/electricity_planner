@@ -102,6 +102,7 @@ from .defaults import (
     DEFAULT_POWER_ESTIMATES,
     DEFAULT_SYSTEM_LIMITS,
     calculate_soc_price_multiplier,
+    relax_price_threshold,
 )
 from .feedin_decision import FeedInDecisionCalculator
 from .grid_setpoint import GridSetpointCalculator
@@ -683,8 +684,8 @@ class CycleContext:
             )
         else:
             soc_price_multiplier = 1.0
-        effective_battery_price_threshold = (
-            battery_threshold_floor * soc_price_multiplier
+        effective_battery_price_threshold = relax_price_threshold(
+            battery_threshold_floor, soc_price_multiplier
         )
 
         previous_car_charging = bool(data.get(_PREVIOUS_CAR_CHARGING_KEY))
@@ -712,8 +713,8 @@ class CycleContext:
                 PERMISSIVE_MULTIPLIER_MIN,
                 min(car_permissive_multiplier, PERMISSIVE_MULTIPLIER_MAX),
             )
-            effective_car_price_threshold = (
-                car_threshold_floor * effective_car_permissive_multiplier
+            effective_car_price_threshold = relax_price_threshold(
+                car_threshold_floor, effective_car_permissive_multiplier
             )
 
         battery_grid_charging = bool(data.get("battery_grid_charging", False))

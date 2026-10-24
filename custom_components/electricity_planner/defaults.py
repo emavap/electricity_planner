@@ -53,6 +53,18 @@ DEFAULT_ALGORITHM_THRESHOLDS = AlgorithmThresholds()
 DEFAULT_SYSTEM_LIMITS = SystemLimits()
 
 
+def relax_price_threshold(base_threshold: float, multiplier: float) -> float:
+    """Raise a price ceiling by a fraction of its magnitude, regardless of sign.
+
+    Positive thresholds retain multiplication semantics; negative thresholds
+    become less restrictive instead of more restrictive. Zero stays zero.
+    """
+    multiplier = max(1.0, multiplier)
+    if base_threshold >= 0:
+        return base_threshold * multiplier
+    return base_threshold + abs(base_threshold) * (multiplier - 1.0)
+
+
 def calculate_soc_price_multiplier(
     current_soc: float,
     emergency_soc: float,

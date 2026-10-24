@@ -21,7 +21,11 @@ from .const import (
     FORECAST_DEFERRAL_MIN_CHEAP_HOURS,
     FORECAST_DEFERRAL_MIN_RELATIVE_DROP,
 )
-from .defaults import DEFAULT_ALGORITHM_THRESHOLDS, calculate_soc_price_multiplier
+from .defaults import (
+    DEFAULT_ALGORITHM_THRESHOLDS,
+    calculate_soc_price_multiplier,
+    relax_price_threshold,
+)
 from .dynamic_threshold import DynamicThresholdAnalyzer
 
 _LOGGER = logging.getLogger(__name__)
@@ -776,7 +780,7 @@ class StrategyManager:
                 buffer_target_soc=soc_buffer_target,
                 max_multiplier=soc_multiplier_max,
             )
-            effective_threshold = base_threshold * soc_multiplier
+            effective_threshold = relax_price_threshold(base_threshold, soc_multiplier)
         else:
             # No SOC data - use base threshold without relaxation
             soc_multiplier = 1.0
@@ -805,7 +809,7 @@ class StrategyManager:
                 "should_charge": False,
                 "reason": (
                     f"Price {current_price:.3f}€/kWh exceeds maximum threshold "
-                    f"{effective_threshold:.3f}€/kWh (base {base_threshold:.3f} × {soc_multiplier:.2f} SOC multiplier)"
+                    f"{effective_threshold:.3f}€/kWh (base {base_threshold:.3f}, SOC multiplier {soc_multiplier:.2f})"
                 ),
             }
 
