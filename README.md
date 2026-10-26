@@ -1,9 +1,11 @@
 # Electricity Planner
 
-**Version 6.7.13** | **Config Schema Version 24** | **Home Assistant 2024.4+**
+**Version 6.7.14** | **Config Schema Version 24** | **Home Assistant 2024.4+**
 
 Electricity Planner is a Home Assistant custom integration that transforms Nord Pool market data and your home telemetry into actionable automation signals. It never controls hardware directly—instead, it delivers boolean charging decisions, recommended power limits, and comprehensive diagnostics that you wire into your battery inverter, EV charger, and home automation workflows.
 
+> Release note for v6.7.14: diagnostics now distinguish the actual decision evaluation time from the scheduled next evaluation. The configured fallback price sensor retains its value for compatibility, clearly labels its purpose, exposes resolved and battery-effective ceilings separately, and treats equality consistently with the inclusive price guard. Charging strategies, settings, control outputs and safety holds are unchanged. No config migration is required.
+>
 > Release note for v6.7.13: fixes inverted price relaxation when thresholds are negative: low-SOC battery charging and EV permissive mode now raise the accepted price ceiling instead of tightening it. Positive thresholds retain their existing behavior and zero stays zero. Overnight solar forecasts now reject caches that do not describe today, preventing stale sunny-day SOC limits after extended sensor outages. Emergency SOC behavior and existing safety limits are unchanged. No config migration is required.
 >
 > Release note for v6.7.12: fixes expiry of held battery SOC after a sensor dropout (publication no longer makes stale readings fresh), respects explicit percentage units at 0–1% SOC, includes buy VAT on fallback prices when interval data is missing, and refreshes the forecast cache when tariffs or pricing adjustments change. Diagnostics now expose the effective battery threshold and held-SOC status. Existing safety holds and forecast deferral bounds are unchanged. No config migration is required.

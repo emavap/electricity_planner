@@ -1279,6 +1279,7 @@ class ChargingDecisionEngine:
 
     def _initialize_decision_data(self) -> dict[str, Any]:
         """Initialize the decision data structure."""
+        evaluated_at = dt_util.utcnow()
         return {
             "battery_grid_charging": False,
             "car_grid_charging": False,
@@ -1306,7 +1307,8 @@ class ChargingDecisionEngine:
             "inverter_derating_alarm_reason": "No alarm",
             "feedin_solar": False,
             "feedin_solar_reason": "No decision made",
-            "next_evaluation": dt_util.utcnow()
+            "evaluated_at": evaluated_at,
+            "next_evaluation": evaluated_at
             + timedelta(minutes=DEFAULT_SYSTEM_LIMITS.evaluation_interval),
             "price_analysis": {},
             "power_analysis": {},

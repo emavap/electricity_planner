@@ -1151,7 +1151,8 @@ class DecisionDiagnosticsSensor(ElectricityPlannerSensorBase):
                 ),
             },
             # Last update
-            "last_evaluation": self.coordinator.data.get("next_evaluation", "unknown"),
+            "last_evaluation": self.coordinator.data.get("evaluated_at"),
+            "next_evaluation": self.coordinator.data.get("next_evaluation"),
         }
 
     def _check_emergency_override(self, battery_analysis: dict, config: dict) -> bool:
@@ -1253,10 +1254,23 @@ class PriceThresholdSensor(ElectricityPlannerSensorBase):
         threshold = self.native_value
 
         return {
-            "description": "Price below which grid charging is considered favorable",
+            "description": (
+                "Configured fallback price ceiling; resolved and battery-effective "
+                "ceilings are exposed separately and other charging guards still apply"
+            ),
+            "configured_threshold": threshold,
+            "resolved_price_threshold": self.coordinator.data.get(
+                "price_analysis", {}
+            ).get("price_threshold"),
+            "battery_stable_threshold": self.coordinator.data.get(
+                "battery_stable_threshold"
+            ),
+            "battery_effective_threshold": self.coordinator.data.get(
+                "battery_effective_threshold"
+            ),
             "current_price": current_price,
             "price_below_threshold": (
-                current_price < threshold if current_price is not None else None
+                current_price <= threshold if current_price is not None else None
             ),
             "margin": (
                 round(current_price - threshold, 3)
